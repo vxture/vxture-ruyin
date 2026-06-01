@@ -1,0 +1,39 @@
+{
+  "name": "@vxture/agent-server-ruyin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "description": "Ruyin Server",
+  "scripts": {
+    "build": "pnpm -w build:backend-deps && esbuild src/main.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/main.cjs --tsconfig=tsconfig.json",
+    "dev": "pnpm run build && node dist/main.cjs",
+    "start": "node dist/main.cjs",
+    "type-check": "tsc --noEmit",
+    "lint": "echo \"No lint yet\"",
+    "lint:fix": "echo \"No lint:fix yet\""
+  },
+  "dependencies": {
+    "@nestjs/jwt": "^11.0.0",
+    "@vxture/ai-gateway-client": "workspace:*",
+    "@vxture/shared": "workspace:*",
+    "@vxture/core-api": "workspace:*",
+    "@vxture/core-auth": "workspace:*",
+    "@vxture/core-tenant": "workspace:*",
+    "@vxture/core-config": "workspace:*",
+    "@vxture/service-billing": "workspace:*",
+    "@vxture/service-subscription": "workspace:*",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "bullmq": "^5.10.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.4",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

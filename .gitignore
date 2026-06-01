@@ -10,8 +10,11 @@ coverage/
 !.env.example
 !.env.*.example
 
-secrets/
+secrets/*
 !secrets/.gitkeep
+deploy/**/secrets/*
+!deploy/**/secrets/
+!deploy/**/secrets/.gitkeep
 
 *.log
 .DS_Store
