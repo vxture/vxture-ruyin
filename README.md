@@ -1,4 +1,4 @@
-# agentstudio-ruyin
+# Vxture Ruyin — AI Agent Workspace
 
 Ruyin 业务仓库。当前用于承接从 `vxture` 平台仓迁出的 Ruyin 代码，并作为后续业务仓库工作流模板的起点。
 
