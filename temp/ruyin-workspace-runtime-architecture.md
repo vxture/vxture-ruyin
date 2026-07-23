@@ -2,10 +2,12 @@
 
 > **Ruyin Workspace Runtime Architecture**
 >
-> 文档版本：v0.1\
+> 文档版本：v0.3\
 > 文档状态：架构设计基线\
 > 所属平台：Vxture Platform\
-> 产品：Ruyin（如影智能工作平台）
+> 产品：Ruyin（如影智能工作平台）\
+> 本版修订：Runtime / Harness 按作用域定界（Workspace 级长生命周期 / Task 级短生命周期）；Task 拆分为 Definition 与 Instance
+> 上版修订：确立统一运行时模型 —— 一份规范、两个实现（Cloud / Local），差异仅在数据面
 
 ------------------------------------------------------------------------
 
@@ -78,6 +80,29 @@ flowchart TB
     WR --> AI
     CTX --> ENV
 ```
+
+------------------------------------------------------------------------
+
+## 1.2 统一运行时：一份规范，两个实现
+
+"统一工作空间运行时"中的"统一"，指**规范统一**，而非部署统一。
+
+Workspace Runtime 首先是一份运行时规范（Runtime Specification），定义
+Workspace 生命周期、契约加载、上下文解析、能力解析、任务执行、验证、状态与同步的统一语义。
+
+该规范拥有两个对等实现：
+
+| 维度 | Vxture Cloud Runtime | Ruyin Local Runtime |
+|---|---|---|
+| 规范与契约 | 同一份 | 同一份 |
+| 业务产品与业务语义 | 同一个 / 一致 | 同一个 / 一致 |
+| AI 能力 | Vxture 云端 | Vxture 云端（当前阶段） |
+| 数据驻留 | 云端 | 本地，是否上云由用户控制 |
+
+> **同一个业务产品（如标书编写），既可以在云端完成，也可以在本地完成。
+> 两者的本质差异只有一个：用户数据是否上传。**
+
+详细模型见第 15 章《Unified Runtime Model》。
 
 ------------------------------------------------------------------------
 
@@ -451,36 +476,73 @@ Business Workspace
 保存业务状态
 ```
 
-核心组件：
+核心组件按**作用域（Scope）**分为两级——这是 Runtime 与 Harness 的定界维度：
+
+## 7.1 Workspace 作用域 —— 长生命周期
+
+跨任务持续存在，随 Workspace 创建与归档：
+
+``` text
+Workspace Runtime
+├── Workspace Lifecycle        创建 / 打开 / 归档 / 恢复
+├── Business State Store       业务状态，跨任务持续
+├── Context Runtime            数据源连接与解析（Cloud / Local / LAN / Private）
+├── Permission Policy          用户权限策略（Allow / Deny / Ask）
+├── Sync Control               同步策略执行
+├── Audit Log                  工作空间级审计存储
+└── Harness Factory            每次任务执行实例化一个 Harness
+```
+
+## 7.2 Task 作用域 —— 短生命周期
+
+随任务生灭，由 Business Runtime Harness 承载（详见第 8 章）：
+
+``` text
+Business Runtime Harness
+├── Task Instance
+├── Context Selection
+├── Tool Gate
+├── Capability Invocation
+├── Verification
+├── Human Checkpoint
+├── Execution State Machine
+└── Audit Emission
+```
+
+## 7.3 两级关系
 
 ``` mermaid
 flowchart TB
     WS["Business Workspace"]
 
-    BC["Business Context"]
-    BS["Business State"]
-    WF["Business Workflow"]
-    CC["Context Runtime"]
-    AC["AI Capability"]
-    TA["Tool Access"]
-    VP["Verification"]
-    AU["Audit"]
-    SY["Sync Control"]
+    subgraph WR["Workspace Runtime · 长生命周期"]
+        LC["Workspace Lifecycle"]
+        BS["Business State Store"]
+        CC["Context Runtime"]
+        PP["Permission Policy"]
+        SY["Sync Control"]
+        AU["Audit Log"]
+        HF["Harness Factory"]
+    end
 
-    WS --> BC
-    WS --> BS
-    WS --> WF
+    subgraph H["Business Runtime Harness · 任务作用域"]
+        TI["Task Instance"]
+        CS["Context Selection"]
+        TG["Tool Gate"]
+        CI["Capability Invocation"]
+        ES["Execution State Machine"]
+        AE["Audit Emission"]
+    end
 
-    BC --> CC
-    WF --> AC
-    WF --> TA
-
-    AC --> VP
-    TA --> VP
-
-    VP --> AU
-    AU --> SY
+    WS --> WR
+    HF -->|"实例化"| H
+    CS -->|"选择自"| CC
+    TG -->|"受约束于"| PP
+    ES -->|"状态写回"| BS
+    AE -->|"事件写入"| AU
 ```
+
+> **Workspace Runtime 管理空间，Harness 执行任务；Runtime 长存，Harness 随任务生灭。**
 
 ------------------------------------------------------------------------
 
@@ -519,11 +581,10 @@ Business Runtime Harness
 AI / Tools / Data
 ```
 
-## 8.2 Ruyin 的 Harness 定义
+## 8.2 Harness 的定位
 
-Ruyin 采用：
-
-> **Business Runtime Harness**
+> **Harness 是一次业务任务执行的受控沙箱：任务作用域、短生命周期，
+> 由 Workspace Runtime 的 Harness Factory 实例化，任务结束即销毁。**
 
 核心原则：
 
@@ -532,79 +593,156 @@ Ruyin 采用：
 AI 在边界内工作
 ```
 
+Harness 是统一运行时规范的一部分：
+Cloud Runtime 与 Local Runtime 各自实现 Harness，任务执行语义因此在两端一致。
+
+> **Runtime Conformance 的主要验证对象，就是 Harness 行为。**
+
 ## 8.3 Harness 核心能力
 
 ``` mermaid
 flowchart TB
-    TC["Task Contract<br/>任务契约"]
+    TI["Task Instance<br/>任务实例"]
     CX["Context Selection<br/>上下文选择"]
-    TL["Tool Access<br/>工具访问"]
-    AI["AI Capability<br/>AI 能力"]
-    ST["State<br/>状态"]
+    TG["Tool Gate<br/>工具门控"]
+    AI["Capability Invocation<br/>能力调用"]
     VR["Verification<br/>验证"]
-    HR["Human Review<br/>人工确认"]
-    AU["Audit<br/>审计"]
-    RC["Recovery<br/>恢复"]
+    HR["Human Checkpoint<br/>人工确认"]
+    ES["Execution State Machine<br/>执行状态机"]
+    AE["Audit Emission<br/>审计写入"]
 
-    TC --> CX
-    CX --> TL
-    TL --> AI
+    TI --> CX
+    CX --> TG
+    TG --> AI
     AI --> VR
     VR --> HR
-    HR --> ST
-    ST --> AU
-    VR --> RC
+    HR --> ES
+    ES --> AE
+```
+
+各能力的边界来源与 Workspace 级依赖：
+
+| Harness 能力 | 受什么约束 | 依赖的 Workspace 级组件 |
+|---|---|---|
+| Task Instance | Task Definition（契约声明） | — |
+| Context Selection | Context Contract + 最小化原则 | Context Runtime |
+| Tool Gate | Allowed Tools ∩ 用户权限策略 | Permission Policy |
+| Capability Invocation | Required Capabilities | Capability Resolver（当前均解析到云端 AI） |
+| Verification | 产品声明的验证规则 | — |
+| Human Checkpoint | 关键节点清单（高风险操作 / 对外发送 / 最终提交） | — |
+| Execution State Machine | 可恢复语义（Recovery 的落点） | Business State Store |
+| Audit Emission | 审计事件格式（含推理传输事件） | Audit Log |
+
+## 8.4 Harness 生命周期
+
+``` text
+用户启动业务任务
+    ↓
+Harness Factory 实例化 Harness
+    ↓
+Task Definition + 具体输入 → Task Instance
+    ↓
+Context Selection（最小上下文）
+    ↓
+执行（Tool Gate / Capability Invocation）
+    ↓
+Verification → Human Checkpoint
+    ↓
+业务状态写回 Business State Store
+    ↓
+审计事件写入 Audit Log
+    ↓
+Harness 销毁
+```
+
+失败与恢复：
+
+``` text
+执行中断
+    ↓
+Execution State Machine 保留断点
+    ↓
+恢复时重建 Harness
+    ↓
+从断点续跑或重放
 ```
 
 ------------------------------------------------------------------------
 
-# 9. Task Contract
+# 9. Task Definition 与 Task Instance
 
 AI 任务不能只依赖自然语言。
 
-一个业务任务应该具备：
+任务概念必须区分**静态声明**与**运行期实例**：
+
+| | Task Definition | Task Instance |
+|---|---|---|
+| 身份 | 静态声明（"类"） | 运行期对象（"实例"） |
+| 所在 | Runtime Contract，随产品发布 | Harness 持有，随任务生灭 |
+| 由谁产生 | 业务产品定义 | Harness 实例化 |
+
+## 9.1 Task Definition（任务定义）
 
 ``` text
-目标
-输入
-输出
-约束
-验收标准
+Task Definition
+    ├── Objective              目标
+    ├── Input Types            输入类型
+    ├── Output Types           输出类型
+    ├── Constraints            约束
+    ├── Required Capabilities  所需 AI 能力
+    ├── Allowed Tools          允许工具
+    └── Verification Rules     验证规则
 ```
 
-例如：
+> 术语统一：原"Acceptance Criteria（验收标准）"并入 Verification，全线只用 Verification 一词。
+
+## 9.2 Task Instance（任务实例）
 
 ``` text
-任务：
-生成技术方案第三章
+Task Instance
+    ├── Definition Ref         引用的任务定义
+    ├── Inputs                 具体输入
+    ├── Selected Context       选定的最小上下文
+    ├── Execution State        执行状态
+    ├── Result                 业务结果
+    └── Verification Outcome   验证结论
+```
 
-输入：
+## 9.3 示例
+
+Task Definition（产品声明）：
+
+``` text
+任务定义：生成技术方案章节
+
+输入类型：
 - 招标文件
 - 企业产品资料
 - 历史案例
 
-输出：
-- 技术方案第三章
+输出类型：
+- 技术方案章节
 
 约束：
 - 不得虚构企业能力
 - 必须基于已授权资料
 
-验收：
+验证规则：
 - 覆盖招标要求
 - 无明显矛盾
 - 满足模板结构
 ```
 
-抽象模型：
+Task Instance（运行期，Harness 持有）：
 
 ``` text
-Task Contract
-    ├── Objective
-    ├── Inputs
-    ├── Outputs
-    ├── Constraints
-    └── Acceptance Criteria
+任务实例：生成技术方案第三章
+    ├── 定义引用：生成技术方案章节
+    ├── 输入：某智慧水务项目招标文件 / 产品手册 2026
+    ├── 选定上下文：技术要求 37 条 + 相关案例 3 篇
+    ├── 执行状态：Verification
+    ├── 结果：第三章草稿
+    └── 验证结论：覆盖 35/37，待人工确认
 ```
 
 ------------------------------------------------------------------------
@@ -794,44 +932,120 @@ AI 执行
 
 ------------------------------------------------------------------------
 
-# 15. Cloud Runtime 与 Local Runtime
+# 15. Unified Runtime Model：Cloud Runtime 与 Local Runtime
 
-同一个 Business Product 可以拥有：
+"统一工作空间运行时"的准确含义：
 
-``` text
-Cloud Runtime
-```
+> **一份规范，一份契约，两个对等的运行时实现。**
 
-和：
-
-``` text
-Local Runtime
-```
+同一个 Business Product 基于同一份 Runtime Contract，运行在
+Workspace Runtime 规范的两个实现之上：
 
 ``` mermaid
 flowchart TB
-    BP["Business Product"]
+    BP["Business Product<br/>同一业务产品（如标书编写）"]
+    RC["Runtime Contract<br/>同一份契约"]
 
-    CR["Cloud Runtime"]
-    LR["Ruyin Local Runtime"]
+    CR["Vxture Cloud Runtime<br/>SaaS 侧实现"]
+    LR["Ruyin Local Runtime<br/>Ruyin 实现"]
 
-    BP --> CR
-    BP --> LR
+    AI["Vxture Cloud AI<br/>统一智能面"]
+
+    BP --> RC
+    RC --> CR
+    RC --> LR
+    CR --> AI
+    LR --> AI
 ```
 
-## Cloud-first
+实现归属：
+
+-   Workspace Runtime 规范：由 Ruyin 架构定义（02 / 03 文档）
+-   Cloud Runtime：由 Vxture SaaS 侧按规范实现
+-   Local Runtime：Ruyin 产品本体（Desktop Shell + Local Runtime）
+
+## 15.1 三个平面
+
+### 智能面 · Intelligence Plane —— 统一
+
+AI 能力（Model / Knowledge / Skill / Agent）当前一律由 Vxture 云端提供：
+
+``` text
+Cloud Runtime ──┐
+                ├──→ Vxture Cloud AI
+Local Runtime ──┘
+```
+
+Capability Resolver 是唯一解析入口。
+未来引入本地 / 私有智能能力时，只改变解析结果，不改变业务产品与契约。
+
+### 数据面 · Data Plane —— 唯一本质差异
+
+``` text
+Cloud Runtime
+    └── 上下文与数据驻留云端
+
+Ruyin Local Runtime
+    └── 上下文与数据驻留本地
+        └── 是否上云由用户控制
+```
+
+> **同一个业务产品，既可以在云端完成，也可以在本地完成。
+> 两者的本质差异只有一个：用户数据是否上传。**
+
+### 体验面 · Experience Plane —— 一致
+
+``` text
+Cloud Workspace（浏览器访问）
+Ruyin Local Workspace（Desktop Shell / Local Web）
+```
+
+同一业务产品在两个运行时中保持一致的业务体验与业务语义。
+
+## 15.2 推理传输 ≠ 数据存储
+
+当前模型统一调用云端，本地工作也需要将被选择的上下文传输至云端推理。
+必须严格区分两种数据流动：
+
+| 数据流动 | 性质 | 控制方式 |
+|---|---|---|
+| 推理传输 Inference Transmission | 临时、即用即弃、不持久化 | 上下文最小化选择 + 审计 |
+| 数据同步 Data Sync | 持久化存储到云端 | 用户显式控制，默认关闭 |
+
+核心原则：
+
+> **推理时的上下文传输是临时的、非持久的、可审计的；
+> 数据是否在云端存储，始终由用户的同步策略决定。**
+
+因此"仅本地"模式的准确语义：
+
+``` text
+本地资料
+    ↓
+最小化上下文选择
+    ↓
+云端推理（不持久化）
+    ↓
+本地生成物
+    ↓
+云端不存储任何业务资料与成果
+```
+
+## 15.3 两种运行模式
+
+### Cloud-first
 
 ``` text
 登录 Vxture
     ↓
 订阅业务产品
     ↓
-直接使用
+Cloud Runtime 中直接使用
 ```
 
 业务产品始终可用。
 
-## Local-capable
+### Local-capable
 
 ``` text
 启动 Ruyin
@@ -840,12 +1054,36 @@ flowchart TB
     ↓
 进入同一业务产品
     ↓
-使用本地数据 / 文件
+Local Runtime 中使用本地数据 / 文件
 ```
 
 本地使用不是 SaaS 的替代，而是：
 
-> **同一业务产品的另一种运行模式。**
+> **同一业务产品在统一运行时规范下的另一种数据驻留选择。**
+
+## 15.4 业务连续性机制
+
+云端 ↔ 本地的业务连续性由三层机制保证：
+
+``` text
+1. 同一份 Runtime Contract
+       └── 业务语义一致
+
+2. 同一套 Workspace Runtime 规范
+       └── 运行语义一致（Runtime Conformance）
+
+3. Workspace 级同步（用户控制）
+       └── 业务状态与数据可迁移
+```
+
+``` mermaid
+flowchart LR
+    CW["Cloud Workspace"]
+    SY["User-Controlled Sync<br/>Workspace State + Data"]
+    LW["Ruyin Local Workspace"]
+
+    CW <--> SY <--> LW
+```
 
 ------------------------------------------------------------------------
 
@@ -1204,9 +1442,17 @@ AI 是业务产品的智能层。
 
 用户控制数据。
 
-### Principle 5：Cloud and Local Are Equal Runtime Options
+### Principle 5：One Spec, Two Runtimes
 
-云端和本地是同一业务产品的不同运行环境。
+云端和本地是同一套 Workspace Runtime 规范的两个对等实现。
+
+``` text
+规范统一
+契约统一
+业务语义统一
+智能面统一（当前均为云端 AI）
+差异仅在数据面：用户数据是否上传
+```
 
 ### Principle 6：Workspace Is the Core Boundary
 
@@ -1318,11 +1564,14 @@ Ruyin Architecture
 ├── 03 Runtime Contract
 │   └── 业务产品运行时契约
 │
+├── 03-A Runtime Contract Schema
+│   └── 契约字段规范 / 校验规则 / 产品包与分发
+│
 ├── 04 Context Architecture
-│   └── 云端 / 本地 / 局域网 / 私有数据上下文
+│   └── 上下文来源与连接器 / 最小化选择 / 推理传输审计 / 同步与冲突 / 身份与访问
 │
 ├── 05 Business Runtime Harness
-│   └── 任务契约 / 工具 / 验证 / 审计 / 恢复
+│   └── Harness 执行状态机 / 恢复语义 / 审计事件格式 / 工具门控 / 人工确认节点
 │
 ├── 06 Technical Architecture
 │   └── 技术实现架构

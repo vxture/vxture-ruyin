@@ -2,10 +2,12 @@
 
 > **Ruyin Business Product Runtime Contract**
 >
-> 文档版本：v0.1  
+> 文档版本：v0.3  
 > 文档状态：架构设计基线  
 > 所属平台：Vxture Platform  
-> 关联文档：02 Workspace Runtime Architecture
+> 关联文档：02 Workspace Runtime Architecture  
+> 本版修订：任务契约明确为 Task Definition（静态声明）；运行期 Task Instance 由 Harness 实例化，不出现在契约中
+> 上版修订：契约面向统一运行时（Cloud / Local 两个实现），新增 Same Contract, Any Runtime 原则
 
 ---
 
@@ -34,16 +36,22 @@ Workspace Runtime
 ```text
 Vxture Business Product
         ↓
-Runtime Contract
+Runtime Contract（同一份契约）
         ↓
-Ruyin Workspace Runtime
+Workspace Runtime 规范
+   ├── Vxture Cloud Runtime
+   └── Ruyin Local Runtime
         ↓
 Business Workspace
 ```
 
 Runtime Contract 是：
 
-> **业务产品进入 Ruyin 的标准化描述与运行协议。**
+> **业务产品进入统一工作空间运行时（云端与本地）的标准化描述与运行协议。**
+
+同一个业务产品（如标书编写）既可以在 Cloud Runtime 中完成，
+也可以在 Ruyin Local Runtime 中完成。
+契约在两个运行时中语义一致，差异仅在数据面：用户数据是否上传。
 
 ---
 
@@ -506,6 +514,17 @@ Runtime Capability Resolver
 Available Model
 ```
 
+当前阶段的解析结果：
+
+```text
+Cloud Runtime ──┐
+                ├──→ Vxture 云端 AI 服务
+Local Runtime ──┘
+```
+
+> **智能面统一：无论运行在云端还是本地，AI 能力当前一律解析到 Vxture 云端。**
+> 未来引入本地 / 私有智能能力时，只改变解析结果，不改变契约。
+
 ---
 
 # 13. Capability Resolution
@@ -602,19 +621,31 @@ Execution
 
 ---
 
-# 16. Task Contract
+# 16. Task Definition Contract
+
+契约中声明的任务是 **Task Definition（任务定义）** —— 静态模板，随产品发布。
+
+运行期由 Harness 将其与具体输入实例化为 Task Instance（见 02 文档第 9 章）：
+
+```text
+Task Definition（契约声明，静态）
+        ↓
+Harness 实例化（绑定具体输入 + 选定上下文）
+        ↓
+Task Instance（运行期对象，随任务生灭）
+```
 
 业务产品声明：
 
 ```text
-Task
+Task Definition
     ├── Objective
-    ├── Inputs
-    ├── Outputs
+    ├── Input Types
+    ├── Output Types
     ├── Constraints
     ├── Required Capabilities
     ├── Allowed Tools
-    └── Verification
+    └── Verification Rules
 ```
 
 示例：
@@ -623,12 +654,14 @@ Task
 task:
   id: generate_proposal
   objective: generate technical proposal
-  inputs:
+  input_types:
     - tender_document
     - enterprise_capability
     - case_library
-  outputs:
+  output_types:
     - technical_proposal
+  capabilities:
+    - proposal_generation
   tools:
     - search_knowledge
     - read_file
@@ -637,6 +670,8 @@ task:
     - requirement_coverage
     - consistency_check
 ```
+
+> **契约只声明 Definition；Instance 是运行时对象，不出现在契约中。**
 
 ---
 
@@ -721,6 +756,14 @@ Sync
 但：
 
 > **产品可以声明同步能力，用户拥有最终控制权。**
+
+同步策略只约束数据的**持久化存储**位置。
+推理时的上下文传输（Inference Transmission）不属于同步范畴：
+它是临时、非持久、可审计的数据流动（详见 02 文档 §15.2）。
+
+```text
+推理传输 ≠ 数据存储
+```
 
 ---
 
@@ -920,23 +963,27 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant W as Workspace
+    participant W as Workspace Runtime
     participant H as Runtime Harness
     participant C as Context Runtime
     participant A as AI
     participant V as Verification
 
     U->>W: Start Business Task
-    W->>H: Create Task Contract
-    H->>C: Select Context
+    W->>H: Instantiate Harness<br/>(Task Definition + Inputs → Task Instance)
+    H->>C: Select Context (minimal)
     C-->>H: Relevant Context
-    H->>A: Execute Capability
+    H->>A: Invoke Capability
     A-->>H: Generated Result
     H->>V: Verify Result
-    V-->>H: Verification Result
-    H-->>W: Update Business State
+    V-->>H: Verification Outcome
+    H->>U: Human Checkpoint (critical nodes)
+    H-->>W: Update Business State + Audit Events
     W-->>U: Present Result
 ```
+
+任务结束后 Harness 销毁；执行中断时由 Execution State Machine
+保留断点，恢复时重建 Harness 续跑（见 02 文档 §8.4）。
 
 ---
 
@@ -1249,6 +1296,23 @@ Verification
 Review
 Provenance
 ```
+
+---
+
+## Principle 7：Same Contract, Any Runtime
+
+一份契约在所有运行时实现中必须语义一致：
+
+```text
+Runtime Contract
+    ├── Vxture Cloud Runtime
+    └── Ruyin Local Runtime
+```
+
+业务产品不感知运行时差异。
+
+运行时实现必须通过一致性验证（Runtime Conformance）。
+这是"云端 ↔ 本地业务连续性"的技术抓手。
 
 ---
 
