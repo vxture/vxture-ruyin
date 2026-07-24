@@ -286,6 +286,16 @@ async function handle(
       return;
     }
 
+    // GET /workspaces/:id/context/:type - binding item preview
+    if (
+      method === "GET" &&
+      segments.length === 4 &&
+      segments[2] === "context"
+    ) {
+      send(res, 200, await deps.runtime.discoverContext(wsId, segments[3]!));
+      return;
+    }
+
     // GET /workspaces/:id/audit
     if (method === "GET" && segments.length === 3 && segments[2] === "audit") {
       send(res, 200, await deps.runtime.listAuditEvents(wsId));
