@@ -27,25 +27,77 @@ export default function App() {
   return <Workbench api={new Api(token)} />;
 }
 
+function LogoBlock() {
+  return (
+    <div className="logo">
+      <span className="logo-mark" aria-hidden />
+      <span>
+        <span className="logo-cn">如影</span>{" "}
+        <span className="logo-en">RUYIN</span>
+      </span>
+    </div>
+  );
+}
+
 function TokenGate({ onSubmit }: { onSubmit: (t: string) => void }) {
   const [value, setValue] = useState("");
   return (
     <div className="token-gate">
-      <div className="brand">Ruyin</div>
+      <LogoBlock />
       <p className="muted">
-        粘贴 Runtime 会话 token（daemon 启动日志中打印）以连接本地运行时。
+        本地智能工作环境 · 粘贴 Runtime 会话 token（daemon 启动日志中打印）以连接。
       </p>
       <div className="row">
         <input
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="session token"
+          onKeyDown={(e) => e.key === "Enter" && value && onSubmit(value)}
         />
         <button className="primary" onClick={() => value && onSubmit(value)}>
           连接
         </button>
       </div>
     </div>
+  );
+}
+
+function TopBar({ crumb }: { crumb?: string }) {
+  const [health, setHealth] = useState<{ ok: boolean; version?: string }>({
+    ok: false,
+  });
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const res = await fetch("/health");
+        const data = (await res.json()) as { ok: boolean; version: string };
+        if (alive) setHealth({ ok: res.ok && data.ok, version: data.version });
+      } catch {
+        if (alive) setHealth({ ok: false });
+      }
+    };
+    void check();
+    const timer = setInterval(() => void check(), 5000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+  return (
+    <header className="topbar">
+      <LogoBlock />
+      <div className="topbar-crumb">
+        <span className="crumb-sep">/</span>
+        {crumb ? <b>{crumb}</b> : <span>工作空间</span>}
+      </div>
+      <div className="topbar-right">
+        <span className="conn">
+          <span className={`conn-dot${health.ok ? "" : " off"}`} />
+          {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
+        </span>
+      </div>
+    </header>
   );
 }
 
@@ -69,44 +121,50 @@ function Workbench({ api }: { api: Api }) {
     void refreshSidebar();
   }, [refreshSidebar]);
 
+  const current = workspaces.find((w) => w.id === currentId);
   return (
-    <div className="layout">
-      <aside className="sidebar">
-        <div className="brand">Ruyin</div>
-        <div className="brand-sub">本地智能工作环境</div>
-        <CreateWorkspace
-          api={api}
-          products={products}
-          onCreated={async (id) => {
-            await refreshSidebar();
-            setCurrentId(id);
-          }}
-          onError={setError}
-        />
-        <h2>工作空间</h2>
-        {workspaces.length === 0 && <div className="muted">（尚无）</div>}
-        {workspaces.map((w) => (
-          <div
-            key={w.id}
-            className={`card clickable${w.id === currentId ? " selected" : ""}`}
-            onClick={() => setCurrentId(w.id)}
-          >
-            <div style={{ fontWeight: 600 }}>{w.name}</div>
-            <div className="muted">
-              {w.productId} · {w.workspaceType}
+    <>
+      <TopBar crumb={current?.name} />
+      <div className="layout">
+        <aside className="sidebar">
+          <CreateWorkspace
+            api={api}
+            products={products}
+            onCreated={async (id) => {
+              await refreshSidebar();
+              setCurrentId(id);
+            }}
+            onError={setError}
+          />
+          <h2>工作空间</h2>
+          {workspaces.length === 0 && (
+            <div className="empty">尚无工作空间</div>
+          )}
+          {workspaces.map((w) => (
+            <div
+              key={w.id}
+              className={`card clickable${w.id === currentId ? " selected" : ""}`}
+              onClick={() => setCurrentId(w.id)}
+            >
+              <div className="ws-name">{w.name}</div>
+              <div className="ws-meta-line">
+                {w.productId} · {w.workspaceType}
+              </div>
             </div>
-          </div>
-        ))}
-        {error && <div className="error-box">{error}</div>}
-      </aside>
-      <main className="main">
-        {currentId ? (
-          <WorkspacePanel key={currentId} api={api} id={currentId} />
-        ) : (
-          <p className="muted">选择或创建一个工作空间。</p>
-        )}
-      </main>
-    </div>
+          ))}
+          {error && <div className="error-box">{error}</div>}
+        </aside>
+        <main className="main">
+          {currentId ? (
+            <WorkspacePanel key={currentId} api={api} id={currentId} />
+          ) : (
+            <div className="empty" style={{ marginTop: 40 }}>
+              选择或创建一个工作空间开始业务工作
+            </div>
+          )}
+        </main>
+      </div>
+    </>
   );
 }
 
@@ -264,14 +322,14 @@ function WorkspacePanel({ api, id }: { api: Api; id: string }) {
       ))}
 
       <h2>任务实例</h2>
-      {instances.length === 0 && <div className="muted">（尚无）</div>}
+      {instances.length === 0 && <div className="empty">尚无任务实例</div>}
       {[...instances].reverse().map((t) => (
         <InstanceCard key={t.id} instance={t} />
       ))}
 
-      <h2>审计（{audit.length} 条，哈希链）</h2>
-      <div className="card" style={{ maxHeight: 320, overflowY: "auto" }}>
-        <table>
+      <h2>审计轨迹 · {audit.length} 条 · 哈希链</h2>
+      <div className="card audit-scroll">
+        <table className="audit-table">
           <thead>
             <tr>
               <th>#</th>
@@ -286,7 +344,7 @@ function WorkspacePanel({ api, id }: { api: Api; id: string }) {
                 <td>{i + 1}</td>
                 <td>{e.kind}</td>
                 <td>{e.actor}</td>
-                <td className="mono">{JSON.stringify(e.payload)}</td>
+                <td>{JSON.stringify(e.payload)}</td>
               </tr>
             ))}
           </tbody>
