@@ -42,9 +42,15 @@ CREATE TABLE IF NOT EXISTS journal (
   data          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_journal_task ON journal (task_instance);
+CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5(
+  item_id UNINDEXED,
+  type UNINDEXED,
+  name,
+  content
+);
 `;
 
-class SqliteWorkspaceStore implements WorkspaceStore {
+export class SqliteWorkspaceStore implements WorkspaceStore {
   constructor(private readonly db: Database.Database) {}
 
   private kvGet(key: string): string | undefined {
@@ -75,6 +81,41 @@ class SqliteWorkspaceStore implements WorkspaceStore {
   }
   async getContract(): Promise<string | undefined> {
     return this.kvGet("contract");
+  }
+
+  async putGrants(grantsJson: string): Promise<void> {
+    this.kvPut("grants", grantsJson);
+  }
+  async getGrants(): Promise<string | undefined> {
+    return this.kvGet("grants");
+  }
+  async putBindings(bindingsJson: string): Promise<void> {
+    this.kvPut("bindings", bindingsJson);
+  }
+  async getBindings(): Promise<string | undefined> {
+    return this.kvGet("bindings");
+  }
+
+  // -- FTS index (host-specific surface, 04 section 5.1) --------------------
+
+  replaceIndexForType(
+    type: string,
+    rows: Array<{ id: string; name: string; content: string }>,
+  ): void {
+    this.db.prepare("DELETE FROM fts_index WHERE type = ?").run(type);
+    const insert = this.db.prepare(
+      "INSERT INTO fts_index (item_id, type, name, content) VALUES (?, ?, ?, ?)",
+    );
+    for (const row of rows) insert.run(row.id, type, row.name, row.content);
+  }
+
+  searchIndex(matchQuery: string, limit = 50): string[] {
+    const rows = this.db
+      .prepare(
+        "SELECT item_id FROM fts_index WHERE fts_index MATCH ? ORDER BY rank LIMIT ?",
+      )
+      .all(matchQuery, limit) as Array<{ item_id: string }>;
+    return rows.map((r) => r.item_id);
   }
 
   async setBusinessState(state: string): Promise<void> {
@@ -180,6 +221,14 @@ export class SqliteStoragePort implements StoragePort {
   async openWorkspaceStore(
     workspaceId: string,
   ): Promise<WorkspaceStore | undefined> {
+    if (!existsSync(join(this.wsDir(workspaceId), "workspace.db"))) {
+      return undefined;
+    }
+    return this.openDb(workspaceId);
+  }
+
+  /** Host-side access to the concrete store (FTS index surface). */
+  openHostStore(workspaceId: string): SqliteWorkspaceStore | undefined {
     if (!existsSync(join(this.wsDir(workspaceId), "workspace.db"))) {
       return undefined;
     }

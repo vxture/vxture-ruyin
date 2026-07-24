@@ -17,10 +17,24 @@ import { emitAudit } from "./audit.js";
 import { Harness, type TaskInstanceRecord } from "./harness.js";
 import type {
   AuditEvent,
+  Binding,
+  FolderGrant,
   RuntimePorts,
   WorkspaceMeta,
   WorkspaceStore,
 } from "./ports.js";
+
+function parseJsonArray<T>(raw: string | undefined): T[] {
+  return raw ? (JSON.parse(raw) as T[]) : [];
+}
+
+/** Normalized prefix containment; grants are folder roots (04 section 4.3). */
+export function isPathGranted(path: string, grants: FolderGrant[]): boolean {
+  const norm = (p: string) =>
+    p.replaceAll("\\", "/").toLowerCase().replace(/\/+$/, "") + "/";
+  const target = norm(path);
+  return grants.some((g) => target.startsWith(norm(g.path)));
+}
 
 export class ContractInvalidError extends Error {
   constructor(public readonly errors: ValidationError[]) {
@@ -134,6 +148,83 @@ export class WorkspaceRuntime {
     return to;
   }
 
+  // -- Context configuration (docs/30-design/40-context-architecture.md) ----
+
+  async listGrants(id: string): Promise<FolderGrant[]> {
+    const { store } = await this.load(id);
+    return parseJsonArray<FolderGrant>(await store.getGrants());
+  }
+
+  async addGrant(
+    id: string,
+    path: string,
+    mode: FolderGrant["mode"] = "read",
+  ): Promise<FolderGrant> {
+    const { store } = await this.load(id);
+    const grants = parseJsonArray<FolderGrant>(await store.getGrants());
+    const grant: FolderGrant = {
+      id: this.ports.id.newId("grant"),
+      path,
+      mode,
+      createdAt: this.ports.clock.now(),
+    };
+    grants.push(grant);
+    await store.putGrants(JSON.stringify(grants));
+    await this.audit(store, id, "grant.changed", "user", {
+      action: "added",
+      path,
+      mode,
+    });
+    return grant;
+  }
+
+  async listBindings(id: string): Promise<Binding[]> {
+    const { store } = await this.load(id);
+    return parseJsonArray<Binding>(await store.getBindings());
+  }
+
+  /**
+   * Bind a contract context type to a local root. Validated against the
+   * contract (type exists, allows the local source) and against the grants
+   * (root must be inside a granted folder - the runtime never touches paths
+   * the user did not grant, 04 section 4.3).
+   */
+  async setBinding(
+    id: string,
+    input: { type: string; root: string; connector?: string },
+  ): Promise<Binding> {
+    const { store, contract } = await this.load(id);
+    const ctxType = contract.context.types.find((t) => t.id === input.type);
+    if (!ctxType) {
+      throw new Error(`context type "${input.type}" is not declared in the contract`);
+    }
+    if (!ctxType.sources.includes("local")) {
+      throw new Error(`context type "${input.type}" does not allow the local source`);
+    }
+    const grants = parseJsonArray<FolderGrant>(await store.getGrants());
+    if (!isPathGranted(input.root, grants)) {
+      throw new Error(
+        `binding root is outside every granted folder: ${input.root}`,
+      );
+    }
+    const bindings = parseJsonArray<Binding>(await store.getBindings()).filter(
+      (b) => b.type !== input.type,
+    );
+    const binding: Binding = {
+      type: input.type,
+      source: "local",
+      connector: input.connector ?? "local-fs",
+      root: input.root,
+    };
+    bindings.push(binding);
+    await store.putBindings(JSON.stringify(bindings));
+    await this.audit(store, id, "binding.changed", "user", {
+      type: input.type,
+      root: input.root,
+    });
+    return binding;
+  }
+
   /** Harness factory (docs/30-design/50-harness.md section 2). */
   async createHarness(id: string): Promise<Harness> {
     const { store, contract } = await this.load(id);
@@ -145,6 +236,8 @@ export class WorkspaceRuntime {
       id: this.ports.id,
       crypto: this.ports.crypto,
       gateway: this.ports.gateway,
+      connectors: this.ports.connectors ?? new Map(),
+      ranker: this.ports.ranker,
     });
   }
 

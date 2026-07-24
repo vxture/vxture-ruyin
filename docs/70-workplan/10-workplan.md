@@ -41,7 +41,7 @@
 
 里程碑：**本地招标文件 → 需求矩阵 → 方案生成 → 人工确认 → 导出，全程审计可查。**
 
-- [ ] Context Runtime：local-fs 连接器 + Grant + FTS5 索引 + Selection 管线
+- [x] Context Runtime：local-fs 连接器（Grant 域内、深度/数量/大小限额）+ Grant/Binding 模型（绑定校验 + 选择期 Grant 复核）+ FTS5 索引与相关性排序（CJK 分词粗糙已注记）+ Selection 管线（候选→排序→每类型限额）+ **context_confirm 门**（高敏上下文执行前人工确认）+ **transmission.inference 审计事件**（哈希不落内容，04 §7.3 落地）
 - [ ] AI Gateway 真实对接（**前置：liaison L3 平台侧就绪**）+ Transmission Gate + 审计哈希链
 - [ ] Checkpoint UI + 验证编排 + 修订轮 + 恢复语义
 - [ ] `packages/product-sdk`：桥 API 面冻结（40-implementation/10 §6.2 基线）
