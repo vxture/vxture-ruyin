@@ -18,6 +18,9 @@ extraResources:
   # Self-contained daemon produced by `pnpm deploy --legacy` (scripts/release/pack.mjs).
   - from: out/daemon
     to: daemon
+  # Built Workspace UI, served by the daemon at /.
+  - from: ../ui-workspace/dist
+    to: ui
   # Built-in products (transitional, TD-006). Contracts only - no source.
   - from: ../../products
     to: products
