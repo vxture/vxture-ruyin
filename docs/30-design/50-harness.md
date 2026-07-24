@@ -354,7 +354,7 @@ payload: {}                  # 按 kind 定义
 | 验证 | verification.run / verification.result | 规则 + 结论 + 轮次 |
 | 确认 | checkpoint.raised / checkpoint.decided | kind + subject 摘要 + 决策 |
 | 状态 | state.writeback | 业务状态变更 |
-| 授权 | grant.changed | 文件夹 Grant 变更（04 §4.3） |
+| 授权 | grant.changed / binding.changed | 文件夹 Grant 与上下文绑定变更（04 §3 / §4.3） |
 | 同步 | sync.push / sync.pull / sync.conflict / sync.resolved | 同步单元 + 判定（04 §8） |
 
 ## 9.3 完整性与存储

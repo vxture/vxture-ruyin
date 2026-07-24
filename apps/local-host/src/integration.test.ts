@@ -11,7 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -24,6 +24,8 @@ import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { loadProducts } from "./products.js";
 import { createLocalApi } from "./server.js";
+import { LocalFsConnector } from "./connector-fs.js";
+import { FtsRanker, reindexBinding } from "./fts.js";
 
 // Compiled test runs from dist/, so ../../../ is the repo root.
 const productsDir = new URL("../../../products", import.meta.url).pathname
@@ -42,6 +44,8 @@ function makePorts(dataDir: string): {
       id: nodeId,
       crypto: nodeCrypto,
       gateway: new MockAIGateway(),
+      connectors: new Map([["local-fs", new LocalFsConnector()]]),
+      ranker: new FtsRanker(storage),
     },
     storage,
   };
@@ -103,6 +107,8 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     products: scan.loaded,
     token,
     version: "test",
+    reindex: (wsId, binding) =>
+      reindexBinding(storage, wsId, binding, new LocalFsConnector()),
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const { port } = server.address() as AddressInfo;
@@ -180,5 +186,77 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     await new Promise<void>((ok) => server.close(() => ok()));
     storage.closeAll();
     rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("selection over real files: grant -> bind (indexes) -> gate -> complete", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-sel-"));
+  const filesDir = mkdtempSync(join(tmpdir(), "ruyin-files-"));
+  const { ports, storage } = makePorts(dataDir);
+  const runtime = new WorkspaceRuntime(ports);
+  try {
+    // Two tender files on disk; the newer/matching one should rank first.
+    mkdirSync(join(filesDir, "sub"));
+    writeFileSync(
+      join(filesDir, "tender-water.md"),
+      "智慧水务项目招标文件 technical requirements coverage matrix",
+      "utf8",
+    );
+    writeFileSync(join(filesDir, "sub", "old-notes.txt"), "misc notes", "utf8");
+
+    const scan = loadProducts(productsDir);
+    const bid = scan.loaded.find((p) => p.id === "vxture.bid");
+    assert.ok(bid);
+    const meta = await runtime.createWorkspace(bid.contract, "sel-ws");
+
+    // Grant, then bind (binding outside the grant is refused).
+    await runtime.addGrant(meta.id, filesDir);
+    await assert.rejects(
+      runtime.setBinding(meta.id, { type: "tender_document", root: tmpdir() }),
+      /outside every granted folder/,
+    );
+    const binding = await runtime.setBinding(meta.id, {
+      type: "tender_document",
+      root: filesDir,
+    });
+    const indexed = await reindexBinding(
+      storage,
+      meta.id,
+      binding,
+      new LocalFsConnector(),
+    );
+    assert.equal(indexed, 2);
+
+    // Selection path: no inputs. tender_document is high sensitivity =>
+    // context_confirm gate BEFORE any capability invocation.
+    const harness = await runtime.createHarness(meta.id);
+    const instance = await harness.startTask("analyze_tender");
+    assert.equal(instance.state, "waiting_human");
+    assert.equal(instance.checkpoint?.kind, "context_confirm");
+    assert.ok((instance.contextSet?.length ?? 0) >= 1);
+    assert.deepEqual(instance.capabilityOutputs, {});
+
+    const afterContext = await harness.decideCheckpoint(instance.id, true);
+    assert.equal(afterContext.checkpoint?.kind, "verification_review");
+    const done = await harness.decideCheckpoint(instance.id, true);
+    assert.equal(done.state, "completed");
+
+    // Transmission audit carries hashes, not content; chain verifies.
+    const events = await runtime.listAuditEvents(meta.id);
+    const tx = events.find((e) => e.kind === "transmission.inference");
+    assert.ok(tx);
+    const payload = tx.payload as {
+      context_items: Array<{ content_hash: string }>;
+      confirmed_by: string;
+      persistence: string;
+    };
+    assert.equal(payload.confirmed_by, "user");
+    assert.equal(payload.persistence, "none");
+    assert.match(payload.context_items[0]!.content_hash, /^sha256:[0-9a-f]{64}$/);
+    assert.ok(verifyAuditChain(nodeCrypto, meta.id, events));
+  } finally {
+    storage.closeAll();
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(filesDir, { recursive: true, force: true });
   }
 });

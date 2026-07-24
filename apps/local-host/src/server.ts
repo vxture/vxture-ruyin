@@ -11,6 +11,7 @@ import {
   HarnessError,
   NeedsHumanConfirmationError,
   WorkspaceNotFoundError,
+  type Binding,
   type WorkspaceRuntime,
 } from "@vxture/ruyin-core";
 import type { LoadedProduct } from "./products.js";
@@ -21,6 +22,8 @@ export interface LocalApiDeps {
   products: LoadedProduct[];
   token: string;
   version: string;
+  /** Rebuild the FTS index rows for one binding; returns indexed count. */
+  reindex: (workspaceId: string, binding: Binding) => Promise<number>;
 }
 
 function send(res: ServerResponse, status: number, body: unknown): void {
@@ -59,6 +62,13 @@ function errorStatus(cause: unknown): { status: number; body: unknown } {
   const message = cause instanceof Error ? cause.message : String(cause);
   if (/illegal state transition/.test(message)) {
     return { status: 409, body: { error: "illegal_transition", message } };
+  }
+  if (
+    /outside every granted folder|not declared in the contract|does not allow the local source/.test(
+      message,
+    )
+  ) {
+    return { status: 400, body: { error: "binding_invalid", message } };
   }
   return { status: 500, body: { error: "internal", message } };
 }
@@ -170,13 +180,52 @@ async function handle(
       return;
     }
 
-    // POST /workspaces/:id/tasks  { task, inputs }
+    // GET/POST /workspaces/:id/grants  { path, mode? }
+    if (segments.length === 3 && segments[2] === "grants") {
+      if (method === "GET") {
+        send(res, 200, await deps.runtime.listGrants(wsId));
+        return;
+      }
+      if (method === "POST") {
+        const body = await readJson(req);
+        const grant = await deps.runtime.addGrant(
+          wsId,
+          String(body["path"] ?? ""),
+          body["mode"] === "readwrite" ? "readwrite" : "read",
+        );
+        send(res, 201, grant);
+        return;
+      }
+    }
+
+    // GET/POST /workspaces/:id/bindings  { type, root }
+    if (segments.length === 3 && segments[2] === "bindings") {
+      if (method === "GET") {
+        send(res, 200, await deps.runtime.listBindings(wsId));
+        return;
+      }
+      if (method === "POST") {
+        const body = await readJson(req);
+        const binding = await deps.runtime.setBinding(wsId, {
+          type: String(body["type"] ?? ""),
+          root: String(body["root"] ?? ""),
+        });
+        // Index the newly bound content right away (04 section 5.1).
+        const indexed = await deps.reindex(wsId, binding);
+        send(res, 201, { ...binding, indexed });
+        return;
+      }
+    }
+
+    // POST /workspaces/:id/tasks  { task, inputs? }  (inputs absent => selection)
     if (method === "POST" && segments.length === 3 && segments[2] === "tasks") {
       const body = await readJson(req);
       const harness = await deps.runtime.createHarness(wsId);
       const instance = await harness.startTask(
         String(body["task"] ?? ""),
-        (body["inputs"] as Record<string, unknown> | undefined) ?? {},
+        body["inputs"] === undefined
+          ? undefined
+          : (body["inputs"] as Record<string, unknown>),
       );
       send(res, 201, instance);
       return;

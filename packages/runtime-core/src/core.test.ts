@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { parseContract } from "@vxture/ruyin-contract-schema";
 import {
+  MemoryConnector,
   MemoryStoragePort,
   WorkspaceRuntime,
   verifyAuditChain,
@@ -151,6 +152,113 @@ test("harness: unknown task id throws", async () => {
   const meta = await runtime.createWorkspace(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   await assert.rejects(harness.startTask("nope", {}));
+});
+
+function makeSelectionFixture(): {
+  ports: RuntimePorts;
+  runtime: WorkspaceRuntime;
+  connector: MemoryConnector;
+} {
+  const ports = makePorts();
+  const connector = new MemoryConnector();
+  ports.connectors = new Map([["memory", connector]]);
+  return { ports, runtime: new WorkspaceRuntime(ports), connector };
+}
+
+async function bindTender(
+  runtime: WorkspaceRuntime,
+  connector: MemoryConnector,
+  wsId: string,
+): Promise<void> {
+  await runtime.addGrant(wsId, "/granted/tenders");
+  connector.register("/granted/tenders", [
+    {
+      id: "itm_tender_v2",
+      type: "tender_document",
+      ref: "/granted/tenders/tender-v2.md",
+      name: "tender-v2.md",
+      bytes: 2048,
+      modifiedAt: "2026-07-20T00:00:00Z",
+      content: "智慧水务项目招标：技术要求37条……",
+    },
+    {
+      id: "itm_tender_v1",
+      type: "tender_document",
+      ref: "/granted/tenders/tender-v1.md",
+      name: "tender-v1.md",
+      bytes: 1024,
+      modifiedAt: "2026-07-01T00:00:00Z",
+      content: "旧版招标草案",
+    },
+  ]);
+  // Binding validation rejects roots outside grants first.
+  await assert.rejects(
+    runtime.setBinding(wsId, { type: "tender_document", root: "/elsewhere" }),
+    /outside every granted folder/,
+  );
+  await runtime.setBinding(wsId, {
+    type: "tender_document",
+    root: "/granted/tenders",
+    connector: "memory",
+  });
+}
+
+test("selection pipeline: high sensitivity gates on context_confirm, then completes", async () => {
+  const { ports, runtime, connector } = makeSelectionFixture();
+  const meta = await runtime.createWorkspace(bidContract, "ws");
+  await bindTender(runtime, connector, meta.id);
+
+  const harness = await runtime.createHarness(meta.id);
+  const instance = await harness.startTask("analyze_tender"); // no inputs => selection
+  assert.equal(instance.state, "waiting_human");
+  assert.equal(instance.checkpoint?.kind, "context_confirm");
+  assert.equal(instance.contextSet?.length, 2);
+  // Nothing was transmitted or invoked before the user confirmed.
+  assert.deepEqual(instance.capabilityOutputs, {});
+
+  const resumed = await runtime.createHarness(meta.id);
+  const done = await resumed.decideCheckpoint(instance.id, true);
+  // analyze_tender still ends at its human verification rule.
+  assert.equal(done.state, "waiting_human");
+  assert.equal(done.checkpoint?.kind, "verification_review");
+  const final = await resumed.decideCheckpoint(instance.id, true);
+  assert.equal(final.state, "completed");
+  assert.deepEqual(final.result?.sources, ["itm_tender_v2", "itm_tender_v1"]);
+
+  // Transmission audit: hashes + confirmed_by user, never content.
+  const events = await runtime.listAuditEvents(meta.id);
+  const tx = events.find((e) => e.kind === "transmission.inference");
+  assert.ok(tx);
+  const payload = tx.payload as {
+    context_items: Array<{ id: string; content_hash: string }>;
+    persistence: string;
+    confirmed_by: string;
+  };
+  assert.equal(payload.persistence, "none");
+  assert.equal(payload.confirmed_by, "user");
+  assert.match(payload.context_items[0]!.content_hash, /^sha256:[0-9a-f]{64}$/);
+  assert.ok(verifyAuditChain(ports.crypto, meta.id, events));
+});
+
+test("selection pipeline: declining the context stops the task", async () => {
+  const { runtime, connector } = makeSelectionFixture();
+  const meta = await runtime.createWorkspace(bidContract, "ws");
+  await bindTender(runtime, connector, meta.id);
+  const harness = await runtime.createHarness(meta.id);
+  const instance = await harness.startTask("analyze_tender");
+  const declined = await harness.decideCheckpoint(instance.id, false);
+  assert.equal(declined.state, "failed");
+  assert.match(declined.error ?? "", /declined the selected context/);
+  assert.deepEqual(declined.capabilityOutputs, {});
+});
+
+test("selection pipeline: required type without binding fails startability", async () => {
+  const { runtime } = makeSelectionFixture();
+  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const harness = await runtime.createHarness(meta.id);
+  const instance = await harness.startTask("analyze_tender");
+  assert.equal(instance.state, "failed");
+  assert.match(instance.error ?? "", /required context "tender_document" has no binding/);
 });
 
 test("audit chain verifies end-to-end and detects tamper", async () => {

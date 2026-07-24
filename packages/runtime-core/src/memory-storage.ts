@@ -34,6 +34,21 @@ class MemoryWorkspaceStore implements WorkspaceStore {
     return this.contract;
   }
 
+  private grants: string | undefined;
+  private bindings: string | undefined;
+  async putGrants(grantsJson: string): Promise<void> {
+    this.grants = grantsJson;
+  }
+  async getGrants(): Promise<string | undefined> {
+    return this.grants;
+  }
+  async putBindings(bindingsJson: string): Promise<void> {
+    this.bindings = bindingsJson;
+  }
+  async getBindings(): Promise<string | undefined> {
+    return this.bindings;
+  }
+
   async setBusinessState(state: string): Promise<void> {
     this.businessState = state;
   }

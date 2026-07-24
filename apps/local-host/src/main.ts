@@ -12,11 +12,13 @@
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { WorkspaceRuntime } from "@vxture/ruyin-core";
+import { WorkspaceRuntime, type ConnectorPort } from "@vxture/ruyin-core";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { loadProducts } from "./products.js";
 import { createLocalApi } from "./server.js";
+import { LocalFsConnector } from "./connector-fs.js";
+import { FtsRanker, reindexBinding } from "./fts.js";
 
 const VERSION = "0.1.0";
 
@@ -35,12 +37,18 @@ for (const failure of scan.failed) {
   }
 }
 
+const storage = new SqliteStoragePort(dataDir);
+const localFs = new LocalFsConnector();
+const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
+
 const runtime = new WorkspaceRuntime({
-  storage: new SqliteStoragePort(dataDir),
+  storage,
   clock: nodeClock,
   id: nodeId,
   crypto: nodeCrypto,
   gateway: new MockAIGateway(),
+  connectors,
+  ranker: new FtsRanker(storage),
 });
 
 const server = createLocalApi({
@@ -48,6 +56,7 @@ const server = createLocalApi({
   products: scan.loaded,
   token,
   version: VERSION,
+  reindex: (wsId, binding) => reindexBinding(storage, wsId, binding, localFs),
 });
 
 server.listen(port, "127.0.0.1", () => {

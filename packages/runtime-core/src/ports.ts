@@ -41,10 +41,54 @@ export interface AIGatewayPort {
   invoke(request: CapabilityInvocation): Promise<CapabilityResult>;
 }
 
-/** Declared for later phases (04 section 4); unused in Phase A. */
+// ---------------------------------------------------------------------------
+// Context (docs/30-design/40-context-architecture.md)
+// ---------------------------------------------------------------------------
+
+/** Workspace-scoped folder access grant (04 section 4.3). */
+export interface FolderGrant {
+  id: string;
+  path: string;
+  mode: "read" | "readwrite";
+  createdAt: string;
+}
+
+/** Binding of a contract context type to an actual source (04 section 3). */
+export interface Binding {
+  type: string;
+  source: "local";
+  connector: string;
+  root: string;
+}
+
+export interface ContextItemMeta {
+  id: string;
+  type: string;
+  source: string;
+  /** Connector-understood reference (local-fs: absolute path). */
+  ref: string;
+  name: string;
+  bytes: number;
+  modifiedAt: string;
+}
+
+export interface ContextItem extends ContextItemMeta {
+  content: string;
+}
+
+/** Context source access (04 section 4). */
 export interface ConnectorPort {
-  discover(binding: unknown): Promise<unknown[]>;
-  read(item: unknown): Promise<unknown>;
+  discover(binding: Binding): Promise<ContextItemMeta[]>;
+  read(item: ContextItemMeta): Promise<ContextItem>;
+}
+
+/** Relevance ranking over candidates (local host: FTS5; 04 section 6.1). */
+export interface RankerPort {
+  rank(
+    workspaceId: string,
+    query: string,
+    candidates: ContextItemMeta[],
+  ): Promise<ContextItemMeta[]>;
 }
 
 /** Declared for later phases (04 section 9); unused in Phase A. */
@@ -98,6 +142,11 @@ export interface WorkspaceStore {
   putContract(contractJson: string): Promise<void>;
   getContract(): Promise<string | undefined>;
 
+  putGrants(grantsJson: string): Promise<void>;
+  getGrants(): Promise<string | undefined>;
+  putBindings(bindingsJson: string): Promise<void>;
+  getBindings(): Promise<string | undefined>;
+
   setBusinessState(state: string): Promise<void>;
   getBusinessState(): Promise<string | undefined>;
 
@@ -126,4 +175,7 @@ export interface RuntimePorts {
   id: IdPort;
   crypto: CryptoPort;
   gateway: AIGatewayPort;
+  /** Connector registry by connector id (e.g. "local-fs"). */
+  connectors?: Map<string, ConnectorPort>;
+  ranker?: RankerPort;
 }

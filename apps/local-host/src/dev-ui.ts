@@ -106,6 +106,8 @@ async function render() {
   var ws = current;
   var instances = await api("/workspaces/" + ws.meta.id + "/tasks");
   var audit = await api("/workspaces/" + ws.meta.id + "/audit");
+  var grants = await api("/workspaces/" + ws.meta.id + "/grants");
+  var bindings = await api("/workspaces/" + ws.meta.id + "/bindings");
   var html = "<h1>" + esc(ws.meta.name)
     + ' <span class="state">' + esc(ws.businessState) + "</span></h1>"
     + '<div class="muted">' + esc(ws.product.id) + "@" + esc(ws.product.version)
@@ -116,12 +118,26 @@ async function render() {
     + '<label><input type="checkbox" id="stConfirm"> 人工确认</label> '
     + '<button onclick="transition()">转换</button></div>';
 
+  html += "<h2>文件授权（Grants）</h2>"
+    + grants.map(function (g) {
+        return '<div class="card"><code>' + esc(g.path) + "</code> <span class='muted'>" + esc(g.mode) + "</span></div>";
+      }).join("")
+    + '<div><input id="grantPath" placeholder="文件夹绝对路径" size="40"> '
+    + '<button onclick="addGrant()">授权</button></div>';
+
+  html += "<h2>上下文绑定（Bindings）</h2>"
+    + bindings.map(function (b) {
+        return '<div class="card"><b>' + esc(b.type) + "</b> ← <code>" + esc(b.root) + "</code></div>";
+      }).join("")
+    + '<div><input id="bindType" placeholder="context type" size="18"> '
+    + '<input id="bindRoot" placeholder="已授权文件夹内路径" size="34"> '
+    + '<button onclick="addBinding()">绑定并索引</button></div>';
+
   html += "<h2>任务定义</h2>";
   ws.tasks.forEach(function (t, i) {
-    var skeleton = {};
-    t.input_types.forEach(function (k) { skeleton[k] = { ref: "dev" }; });
     html += '<div class="card"><b>' + esc(t.id) + "</b> — " + esc(t.objective)
-      + '<textarea id="in' + i + '" rows="2">' + esc(JSON.stringify(skeleton)) + "</textarea>"
+      + '<div class="muted">输入类型: ' + esc(t.input_types.join(", ") || "（无）") + "</div>"
+      + '<textarea id="in' + i + '" rows="2" placeholder="留空 = 自动选择上下文（经绑定 + 最小化 + 敏感确认）；或填 JSON 手动提供"></textarea>'
       + '<button onclick="runTask(\\'' + esc(t.id) + '\\', ' + i + ')">启动任务</button></div>';
   });
 
@@ -158,8 +174,28 @@ async function transition() {
 async function runTask(taskId, i) {
   clearErr();
   try {
-    var inputs = JSON.parse(document.getElementById("in" + i).value || "{}");
-    await api("/workspaces/" + current.meta.id + "/tasks", "POST", { task: taskId, inputs: inputs });
+    var raw = document.getElementById("in" + i).value.trim();
+    var body = { task: taskId };
+    if (raw.length > 0) body.inputs = JSON.parse(raw);
+    await api("/workspaces/" + current.meta.id + "/tasks", "POST", body);
+    await openWs(current.meta.id);
+  } catch (e) { fail(e); }
+}
+async function addGrant() {
+  clearErr();
+  try {
+    await api("/workspaces/" + current.meta.id + "/grants", "POST",
+      { path: document.getElementById("grantPath").value });
+    await openWs(current.meta.id);
+  } catch (e) { fail(e); }
+}
+async function addBinding() {
+  clearErr();
+  try {
+    await api("/workspaces/" + current.meta.id + "/bindings", "POST", {
+      type: document.getElementById("bindType").value,
+      root: document.getElementById("bindRoot").value
+    });
     await openWs(current.meta.id);
   } catch (e) { fail(e); }
 }
