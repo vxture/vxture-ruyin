@@ -83,9 +83,20 @@ async function waitForHealth(timeoutMs = 15_000): Promise<void> {
 
 function openWindow(): void {
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1280,
+    height: 840,
+    minWidth: 960,
+    minHeight: 600,
     title: "Ruyin",
+    // Modern chrome: hide the native frame, float the Windows caption
+    // buttons over the app's own top bar (which declares a drag region).
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: "#10151d",
+      symbolColor: "#9fb0c3",
+      height: 46,
+    },
+    backgroundColor: "#0b0f14",
     webPreferences: {
       // The window is a pure web client of the Local API - no Node access,
       // no preload. The contract boundary stays at the HTTP surface.
