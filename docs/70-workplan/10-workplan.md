@@ -39,6 +39,8 @@
 
 ## W3 · Phase B：Bid 单产品可用
 
+- [x] SQLCipher 静态加密（TD-009 回收）：workspace.db 加密 + 每空间密钥 + 主密钥 DPAPI（win）
+
 里程碑：**本地招标文件 → 需求矩阵 → 方案生成 → 人工确认 → 导出，全程审计可查。**
 
 - [x] Context Runtime：local-fs 连接器（Grant 域内、深度/数量/大小限额）+ Grant/Binding 模型（绑定校验 + 选择期 Grant 复核）+ FTS5 索引与相关性排序（CJK 分词粗糙已注记）+ Selection 管线（候选→排序→每类型限额）+ **context_confirm 门**（高敏上下文执行前人工确认）+ **transmission.inference 审计事件**（哈希不落内容，04 §7.3 落地）

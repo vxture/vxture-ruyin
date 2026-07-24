@@ -58,6 +58,12 @@ first (one-time per shell, or persist it in your user env):
 export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
 ```
 
+The better-sqlite3-multiple-ciphers prebuilt binding also downloads from
+GitHub releases. If install falls back to node-gyp and fails, fetch the
+prebuild through a GitHub proxy (e.g. ghfast.top) and extract it into the
+package dir - see docs/60-operations/ notes; CI runners need neither
+workaround.
+
 Run the desktop shell (spawns the runtime daemon, opens the dev console;
 the same console is reachable from any browser at the printed URL):
 

@@ -9,9 +9,10 @@
  * kv (meta/contract/business state), task_instances, audit_events, journal.
  */
 
-import Database from "better-sqlite3";
+import Database from "better-sqlite3-multiple-ciphers";
 import { mkdirSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import type { KeyManager } from "./keys.js";
 import type {
   AuditEvent,
   JournalEntry,
@@ -184,7 +185,10 @@ export class SqliteStoragePort implements StoragePort {
     { store: SqliteWorkspaceStore; db: Database.Database }
   >();
 
-  constructor(private readonly dataDir: string) {
+  constructor(
+    private readonly dataDir: string,
+    private readonly keys: KeyManager,
+  ) {
     mkdirSync(join(dataDir, "workspaces"), { recursive: true });
   }
 
@@ -201,7 +205,21 @@ export class SqliteStoragePort implements StoragePort {
   private openDb(workspaceId: string): SqliteWorkspaceStore {
     const cached = this.open.get(workspaceId);
     if (cached) return cached.store;
-    const db = new Database(join(this.wsDir(workspaceId), "workspace.db"));
+    const dir = this.wsDir(workspaceId);
+    const db = new Database(join(dir, "workspace.db"));
+    // At-rest encryption (TD-009): SQLCipher-compatible scheme, raw hex key
+    // per workspace. Cipher selection must precede the key pragma, both
+    // before any other statement.
+    db.pragma(`cipher='sqlcipher'`);
+    db.pragma(`key="x'${this.keys.workspaceKeyHex(dir)}'"`);
+    try {
+      db.pragma("user_version");
+    } catch (cause) {
+      db.close();
+      throw new Error(
+        `workspace "${workspaceId}" database cannot be unlocked - wrong key or a pre-encryption dev database (delete the dev data dir to reset): ${cause instanceof Error ? cause.message : cause}`,
+      );
+    }
     db.pragma("journal_mode = WAL");
     db.exec(DDL);
     const store = new SqliteWorkspaceStore(db);
