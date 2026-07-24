@@ -1,0 +1,109 @@
+name: release
+
+# Tag-to-channel artifact release (docs/30-design/70-repo-organization.md
+# section 7): beta-* -> beta channel (no gate), v*.*.* -> stable channel
+# (production Environment required-reviewer gate). Merging never releases;
+# only tag pushes do, and quality gates are NOT re-run here - a tag ships
+# what main already verified.
+#
+# Publish target is a placeholder until liaison L2 lands the dl host: the
+# gated publish job stages artifacts on the workflow run. The rsync step
+# (tailnet-ssh-connect + staging, org CD idiom) drops in without touching
+# the build job.
+
+on:
+  push:
+    tags:
+      - "beta-*"
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-installer:
+    name: build-installer
+    runs-on: windows-latest
+    timeout-minutes: 45
+    outputs:
+      channel: ${{ steps.meta.outputs.channel }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Derive channel and version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
+          fi
+          # Installer version comes from the shell package (W5 decides the
+          # tag<->version discipline, workplan OQ-2).
+          echo "version=$(node -p "require('./apps/shell/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Build installer
+        run: node scripts/release/pack.mjs
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Generate manifest + checksums
+        shell: bash
+        run: node scripts/release/make-manifest.mjs "${{ steps.meta.outputs.channel }}" "${{ steps.meta.outputs.version }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruyin-${{ steps.meta.outputs.channel }}-${{ steps.meta.outputs.version }}
+          if-no-files-found: error
+          path: |
+            apps/shell/release/*.exe
+            apps/shell/release/*.blockmap
+            apps/shell/release/latest.yml
+            apps/shell/release/manifest.json
+            apps/shell/release/SHA256SUMS
+
+  publish:
+    name: publish
+    needs: build-installer
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # v* tags pause here for the owner's approval; beta-* passes straight
+    # through (org standard: production writes go through a human gate).
+    environment: ${{ startsWith(github.ref_name, 'v') && 'production' || 'beta' }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ruyin-${{ needs.build-installer.outputs.channel }}-${{ needs.build-installer.outputs.version }}
+          path: staged
+
+      - name: Publish (placeholder until liaison L2 lands the dl host)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "channel: ${{ needs.build-installer.outputs.channel }}"
+          echo "version: ${{ needs.build-installer.outputs.version }}"
+          ls -la staged/
+          echo "dl host pending (liaison L2) - artifacts staged on this run."
+          echo "When L2 lands: tailnet-ssh-connect + rsync staging/ to"
+          echo "dl.vxture.com/ruyin/<channel>/ with atomic switch (70 s7.2)."

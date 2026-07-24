@@ -56,6 +56,16 @@ first (one-time per shell, or persist it in your user env):
 
 ```bash
 export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+```
+
+Build the installer locally (NSIS + update feed + manifest under
+apps/shell/release/):
+
+```bash
+node scripts/release/pack.mjs          # or --dir for the unpacked smoke tree
+node scripts/release/make-manifest.mjs beta 0.1.0
+./apps/shell/release/win-unpacked/Ruyin.exe --smoke   # packaged smoke check
 ```
 
 The better-sqlite3-multiple-ciphers prebuilt binding also downloads from

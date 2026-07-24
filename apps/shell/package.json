@@ -17,6 +17,8 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "electron": "^39.8.5",
-    "typescript": "^5.7.2"
-  }
+    "typescript": "^5.7.2",
+    "electron-builder": "^25.1.8"
+  },
+  "author": "Vxture"
 }
