@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Api, type ProductInfo, type WorkspaceMeta } from "./api";
 import { WorkspacePanel } from "./workspace";
+import { HomePage } from "./home";
 
 export default function App() {
   const fromQuery = new URLSearchParams(location.search).get("token");
@@ -111,22 +112,31 @@ function Workbench({ api }: { api: Api }) {
   }, [refreshSidebar]);
 
   const current = workspaces.find((w) => w.id === currentId);
+  const openWorkspace = useCallback(
+    async (id: string) => {
+      await refreshSidebar();
+      setCurrentId(id);
+    },
+    [refreshSidebar],
+  );
   return (
     <>
       <TopBar crumb={current?.name} />
       <div className="layout">
         <aside className="sidebar">
-          <CreateWorkspace
-            api={api}
-            products={products}
-            onCreated={async (id) => {
-              await refreshSidebar();
-              setCurrentId(id);
-            }}
-            onError={setError}
-          />
+          <div
+            className={`card clickable nav-home${currentId === null ? " selected" : ""}`}
+            onClick={() => setCurrentId(null)}
+          >
+            <span className="nav-home-icon" aria-hidden>
+              ⌂
+            </span>
+            首页
+          </div>
           <h2>工作空间</h2>
-          {workspaces.length === 0 && <div className="empty">尚无工作空间</div>}
+          {workspaces.length === 0 && (
+            <div className="empty">从首页的产品入口创建</div>
+          )}
           {workspaces.map((w) => (
             <div
               key={w.id}
@@ -145,61 +155,16 @@ function Workbench({ api }: { api: Api }) {
           {currentId ? (
             <WorkspacePanel key={currentId} api={api} id={currentId} />
           ) : (
-            <div className="empty" style={{ marginTop: 40 }}>
-              选择或创建一个工作空间开始业务工作
-            </div>
+            <HomePage
+              api={api}
+              products={products}
+              workspaces={workspaces}
+              onOpen={setCurrentId}
+              onCreated={openWorkspace}
+              onError={setError}
+            />
           )}
         </main>
-      </div>
-    </>
-  );
-}
-
-function CreateWorkspace({
-  api,
-  products,
-  onCreated,
-  onError,
-}: {
-  api: Api;
-  products: ProductInfo[];
-  onCreated: (id: string) => void | Promise<void>;
-  onError: (msg: string) => void;
-}) {
-  const [product, setProduct] = useState("");
-  const [name, setName] = useState("");
-  const effective = product || products[0]?.id || "";
-  return (
-    <>
-      <h2>新建工作空间</h2>
-      <select value={effective} onChange={(e) => setProduct(e.target.value)}>
-        {products.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}（{p.id}）
-          </option>
-        ))}
-      </select>
-      <div className="row">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="名称"
-        />
-        <button
-          className="primary"
-          disabled={!effective}
-          onClick={async () => {
-            try {
-              const meta = await api.createWorkspace(effective, name || effective);
-              setName("");
-              await onCreated(meta.id);
-            } catch (e) {
-              onError(String((e as Error).message));
-            }
-          }}
-        >
-          创建
-        </button>
       </div>
     </>
   );
