@@ -26,6 +26,11 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # CI only type-checks/builds the shell's TS - it never launches Electron,
+  # so skip the ~100MB binary download on every install.
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
 jobs:
   # -- Audit (SCA hard gate) --------------------------------------------------
   # osv-scanner scans pnpm-lock.yaml's full dependency tree against the OSV

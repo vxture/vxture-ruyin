@@ -14,6 +14,7 @@ import {
   type WorkspaceRuntime,
 } from "@vxture/ruyin-core";
 import type { LoadedProduct } from "./products.js";
+import { DEV_UI_HTML } from "./dev-ui.js";
 
 export interface LocalApiDeps {
   runtime: WorkspaceRuntime;
@@ -80,6 +81,14 @@ async function handle(
   const method = req.method ?? "GET";
   const path = url.pathname.replace(/\/+$/, "") || "/";
 
+  // Dev console page - static shell, token arrives via ?token= and is only
+  // used by the page's own API calls (which stay token-gated below).
+  if (method === "GET" && path === "/") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(DEV_UI_HTML);
+    return;
+  }
+
   if (method === "GET" && path === "/health") {
     send(res, 200, { ok: true, version: deps.version });
     return;
@@ -135,7 +144,18 @@ async function handle(
         meta: view.meta,
         businessState: view.businessState,
         product: view.contract.product,
+        tasks: view.contract.tasks.map((t) => ({
+          id: t.id,
+          objective: t.objective,
+          input_types: t.input_types,
+        })),
       });
+      return;
+    }
+
+    // GET /workspaces/:id/tasks - task instances
+    if (method === "GET" && segments.length === 3 && segments[2] === "tasks") {
+      send(res, 200, await deps.runtime.listTaskInstances(wsId));
       return;
     }
 

@@ -45,8 +45,24 @@ scripts/    guardrails and release tooling
 
 ```bash
 pnpm install
-pnpm type-check:all
+pnpm build
+pnpm test
+pnpm lint:contract
 pnpm lint:docs-numbering
+```
+
+Electron binary downloads are slow/stalled behind the GFW - set the mirror
+first (one-time per shell, or persist it in your user env):
+
+```bash
+export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+```
+
+Run the desktop shell (spawns the runtime daemon, opens the dev console;
+the same console is reachable from any browser at the printed URL):
+
+```bash
+pnpm --filter @vxture/ruyin-shell start
 ```
 
 Wire the local secret-scan hook once per clone:

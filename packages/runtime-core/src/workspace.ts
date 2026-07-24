@@ -14,7 +14,7 @@ import {
   type ValidationError,
 } from "@vxture/ruyin-contract-schema";
 import { emitAudit } from "./audit.js";
-import { Harness } from "./harness.js";
+import { Harness, type TaskInstanceRecord } from "./harness.js";
 import type {
   AuditEvent,
   RuntimePorts,
@@ -151,6 +151,12 @@ export class WorkspaceRuntime {
   async listAuditEvents(id: string): Promise<AuditEvent[]> {
     const { store } = await this.load(id);
     return store.listAuditEvents();
+  }
+
+  async listTaskInstances(id: string): Promise<TaskInstanceRecord[]> {
+    const { store } = await this.load(id);
+    const raw = await store.listTaskInstances();
+    return raw.map((r) => JSON.parse(r) as TaskInstanceRecord);
   }
 
   // -------------------------------------------------------------------------

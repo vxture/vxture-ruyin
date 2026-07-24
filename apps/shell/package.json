@@ -1,0 +1,22 @@
+{
+  "name": "@vxture/ruyin-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ruyin Desktop Shell (Electron): launches the Runtime daemon and opens the workspace surface. Shell is the host, Runtime is the core, Web is the access mode (docs/30-design/60-technical-architecture.md section 4).",
+  "type": "module",
+  "main": "dist/main.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "start": "electron .",
+    "smoke": "electron . --smoke"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "electron": "^35.0.0",
+    "typescript": "^5.7.2"
+  }
+}
