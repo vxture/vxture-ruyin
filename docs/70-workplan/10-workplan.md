@@ -19,7 +19,7 @@
 - [x] 推 main → 五个 required context 全绿（fcca640，2026-07-24）
 - [x] apply ruleset：ruleset id 19652673 `main-protection` active（TD-002 已回收）
 - [x] secret scanning + push protection 已开启（API PATCH，2026-07-24）
-- [ ] 确认 org 级 NODE_AUTH_TOKEN 已共享到本仓（owner 在 org Settings 核实；W2 引入 @vxture 依赖前必须就位）
+- [x] org 级 NODE_AUTH_TOKEN 已确认（visibility=all，org 全仓可见，2026-07-24 核实）
 - [x] 本地 hook 接线（本机已配；新 clone 仍需 `git config core.hooksPath .husky`）
 
 ## W2 · Phase A：骨架贯通（下一批，无外部依赖）
