@@ -1,0 +1,43 @@
+# Ruyin installer build (docs/30-design/70-repo-organization.md section 7.2).
+#
+# Signing is intentionally absent until the Authenticode cert lands (TD-001);
+# electron-builder skips signing when no cert is configured.
+appId: com.vxture.ruyin
+productName: Ruyin
+# The shell has zero runtime npm dependencies (the daemon travels as a
+# self-contained extraResources tree), so electron-builder's dependency
+# install/rebuild steps are disabled - they fight pnpm workspaces.
+npmRebuild: false
+nodeGypRebuild: false
+directories:
+  output: release
+files:
+  - dist/**
+  - package.json
+extraResources:
+  # Self-contained daemon produced by `pnpm deploy --legacy` (scripts/release/pack.mjs).
+  - from: out/daemon
+    to: daemon
+  # Built-in products (transitional, TD-006). Contracts only - no source.
+  - from: ../../products
+    to: products
+    filter:
+      - "**/ruyin.product.yaml"
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # Skips the winCodeSign toolchain (symlink extraction needs elevation on
+  # dev machines; also no cert yet, TD-001). Flip back on when signing lands
+  # in CI - elevated runners are unaffected by the symlink issue.
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: Ruyin-Setup-${version}.${ext}
+# Generic provider => electron-updater feed (latest.yml) is emitted alongside
+# the installer. Channel URL is finalized when L2 (dl host) lands; release.yml
+# rewrites it per channel at publish time.
+publish:
+  provider: generic
+  url: https://dl.vxture.com/ruyin/stable

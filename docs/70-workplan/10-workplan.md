@@ -52,10 +52,10 @@
 
 里程碑：**推 `beta-*` tag 自动产出安装包并发布到 dl 主机，网站可下载。**
 
-- [ ] release.yml：electron-builder（win32-x64）→ 构件 + latest.yml + manifest.json + SHA256SUMS
-- [ ] 签名步（**前置：TD-001 证书采购**；beta 内测期可暂缺）
-- [ ] dl 主机 + `dl.vxture.com` vhost（**前置：liaison L2**）+ tailnet-ssh-connect 上载 + staging 原子切换
-- [ ] production Environment + Required reviewers（stable 渠道审批门）
+- [x] release.yml + 打包链（2026-07-24）：`pack.mjs`（pnpm deploy --legacy 自包含 daemon → electron-builder NSIS）→ exe + blockmap + latest.yml + manifest.json + SHA256SUMS；本地实测产出 **123MB 安装包**，打包版 `Ruyin.exe --smoke` 通过（daemon 从 resources 启动、DPAPI 生效）
+- [x] beta / production Environment 已建，production 必审人已配（tag→渠道审批拓扑就位）
+- [ ] 签名步（**前置：TD-001 证书采购**；electron-builder 侧 `signAndEditExecutable` 待回开）
+- [ ] dl 主机上载（**前置：liaison L2**）——publish job 已留占位，L2 落地后换 tailnet-ssh-connect + rsync 原子切换
 - [ ] products/ 静态清单目录（流 C 的 MVP Registry）
 
 ## W5 · npm 发布流

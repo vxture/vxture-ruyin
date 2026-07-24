@@ -17,16 +17,27 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+app.setName("Ruyin"); // userData path derives from this, not productName
+
 const SMOKE = process.argv.includes("--smoke");
 const PORT = Number(process.env["RUYIN_PORT"] ?? (SMOKE ? 17420 : 7420));
 const TOKEN = randomBytes(24).toString("hex");
 
-// dist/main.js -> repo root is four levels up (dist -> shell -> apps -> root).
+// Packaged: daemon + products travel in resources/ (electron-builder
+// extraResources) and data lives under userData. Dev: repo-relative paths
+// (dist/main.js -> repo root is four levels up) and ~/.ruyin/dev.
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
-const daemonEntry = join(repoRoot, "apps", "local-host", "dist", "main.js");
-const productsDir = join(repoRoot, "products");
+const daemonEntry = app.isPackaged
+  ? join(process.resourcesPath, "daemon", "dist", "main.js")
+  : join(repoRoot, "apps", "local-host", "dist", "main.js");
+const productsDir = app.isPackaged
+  ? join(process.resourcesPath, "products")
+  : join(repoRoot, "products");
 const dataDir =
-  process.env["RUYIN_DATA_DIR"] ?? join(homedir(), ".ruyin", "dev");
+  process.env["RUYIN_DATA_DIR"] ??
+  (app.isPackaged
+    ? join(app.getPath("userData"), "data")
+    : join(homedir(), ".ruyin", "dev"));
 
 let daemon: Electron.UtilityProcess | undefined;
 
