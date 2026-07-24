@@ -1,0 +1,27 @@
+{
+  "name": "@vxture/ruyin-local-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ruyin Local Runtime daemon: SQLite storage host + loopback Local API (design authority: docs/30-design/60-technical-architecture.md sections 4, 7, 8). Ships inside the installer, never published.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test dist/integration.test.js",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@vxture/ruyin-contract-schema": "workspace:*",
+    "@vxture/ruyin-core": "workspace:*",
+    "better-sqlite3": "^12.0.0",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}
