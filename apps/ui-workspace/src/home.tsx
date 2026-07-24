@@ -93,17 +93,21 @@ export function HomePage({
       </div>
 
       <h2>为你推荐</h2>
-      <div className="home-grid compact">
+      <div className="home-grid">
         {RECOMMENDED.map((r) => (
-          <div key={r.id} className="product-card compact">
-            <div className="product-icon dim small">{r.name.slice(5, 6) || r.name.slice(0, 1)}</div>
-            <div style={{ minWidth: 0 }}>
-              <div className="ws-name">{r.name}</div>
-              <div className="muted ellipsis">{r.blurb}</div>
+          <div key={r.id} className="product-card rec">
+            <div className="product-head">
+              <div className="product-icon dim small">
+                {r.name.slice(5, 6) || r.name.slice(0, 1)}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div className="ws-name">{r.name}</div>
+              </div>
+              <span className="pill" style={{ marginLeft: "auto", flexShrink: 0 }}>
+                敬请期待
+              </span>
             </div>
-            <span className="pill" style={{ marginLeft: "auto", flexShrink: 0 }}>
-              敬请期待
-            </span>
+            <div className="muted product-blurb">{r.blurb}</div>
           </div>
         ))}
       </div>
