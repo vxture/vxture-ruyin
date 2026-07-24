@@ -11,3 +11,8 @@ packages:
   - "packages/*"
   - "apps/*"
   - "products/*"
+
+# Native modules allowed to run their build scripts (pnpm blocks postinstall
+# by default). better-sqlite3 downloads/builds its prebuilt binding here.
+allowBuilds:
+  better-sqlite3: true

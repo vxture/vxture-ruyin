@@ -28,9 +28,10 @@
 
 - [x] `packages/contract-schema`：TS 类型 + JSON Schema + ajv 校验器 + R1–R11（23 用例：Bid 通过 + 逐规则违规变异）
 - [x] `packages/cli`：`ruyin lint`（文件 / 产品目录 / 产品集目录三种输入）
-- [ ] `packages/runtime-core`：ports 接口（60 §6.2）+ Workspace 生命周期 + Harness 状态机骨架（AI 用 mock）
-- [ ] `apps/local-host`：SQLite 存储（每 Workspace 一库）+ Local API 最小面
-- [ ] `apps/shell`：启动 Runtime + 加载一个未打包产品目录（开发模式，跳签名）
+- [x] `packages/runtime-core`：ports + Workspace 生命周期 + 业务状态机（confirm:human 强制）+ Harness 状态机（waiting_human 挂起 / rebuild-on-resume）+ 审计哈希链 + 内存参照存储；9 单测
+- [x] `apps/local-host`：SQLite 存储（每 Workspace 一库，WAL）+ Local API（127.0.0.1 + token）+ 开发模式产品加载；2 集成测试
+- [x] **Phase A 里程碑达成**：Bid 契约真实校验 → 加载 → 创建 Workspace → 任务跑到人工确认 → 重启后恢复决策 → 审计链校验通过（integration.test.ts）
+- [ ] `apps/shell`：启动 Runtime + 加载一个未打包产品目录（开发模式，跳签名）——W2 收尾项
 - [x] `products/bid`：`ruyin.product.yaml`（30-contract-schema §16 落地，同时是测试主 fixture）
 - [x] CI 转实（部分）：contract-lint job 接入 quality-gate（TD-004 已回收）；build/test-coverage 已有真实工作（TD-003 待 runtime-core 单测后关闭）
 

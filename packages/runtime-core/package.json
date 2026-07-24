@@ -1,0 +1,35 @@
+{
+  "name": "@vxture/ruyin-core",
+  "version": "0.1.0",
+  "description": "Ruyin Workspace Runtime isomorphic kernel: ports, workspace lifecycle, harness state machine, hash-chained audit (design authority: docs/30-design/10-workspace-runtime.md, 50-harness.md, 60-technical-architecture.md section 6).",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test dist/core.test.js"
+  },
+  "dependencies": {
+    "@vxture/ruyin-contract-schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

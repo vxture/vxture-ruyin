@@ -1,0 +1,185 @@
+/**
+ * Workspace Runtime - workspace-scoped, long-lived kernel surface.
+ * Design authority: docs/30-design/10-workspace-runtime.md section 7.
+ *
+ * Owns workspace lifecycle (create/open/list), the business state machine
+ * (contract-declared, human-confirm transitions enforced), and acts as the
+ * Harness factory. Contract validation is re-run on create: the kernel is the
+ * last line of defense regardless of what the host already checked.
+ */
+
+import {
+  validateContract,
+  type RuyinContract,
+  type ValidationError,
+} from "@vxture/ruyin-contract-schema";
+import { emitAudit } from "./audit.js";
+import { Harness } from "./harness.js";
+import type {
+  AuditEvent,
+  RuntimePorts,
+  WorkspaceMeta,
+  WorkspaceStore,
+} from "./ports.js";
+
+export class ContractInvalidError extends Error {
+  constructor(public readonly errors: ValidationError[]) {
+    super(
+      `contract failed validation: ${errors
+        .map((e) => `${e.rule} ${e.path}`)
+        .join("; ")}`,
+    );
+  }
+}
+
+export class WorkspaceNotFoundError extends Error {
+  constructor(id: string) {
+    super(`workspace "${id}" not found`);
+  }
+}
+
+export class NeedsHumanConfirmationError extends Error {
+  constructor(from: string, to: string) {
+    super(
+      `state transition ${from} -> ${to} is declared confirm: human and requires humanConfirmed: true`,
+    );
+  }
+}
+
+export interface WorkspaceView {
+  meta: WorkspaceMeta;
+  businessState: string;
+  contract: RuyinContract;
+}
+
+export class WorkspaceRuntime {
+  constructor(private readonly ports: RuntimePorts) {}
+
+  async createWorkspace(
+    rawContract: unknown,
+    name: string,
+  ): Promise<WorkspaceMeta> {
+    const validation = validateContract(rawContract);
+    if (!validation.ok) {
+      throw new ContractInvalidError(validation.errors);
+    }
+    const contract = rawContract as RuyinContract;
+    const id = this.ports.id.newId("ws");
+    const store = await this.ports.storage.createWorkspaceStore(id);
+    const meta: WorkspaceMeta = {
+      id,
+      productId: contract.product.id,
+      productVersion: contract.product.version,
+      contractVersion: contract.contract,
+      name,
+      workspaceType: contract.workspace.type,
+      createdAt: this.ports.clock.now(),
+    };
+    await store.putMeta(meta);
+    await store.putContract(JSON.stringify(contract));
+    await store.setBusinessState(contract.states.initial);
+    await this.audit(store, id, "workspace.created", "user", {
+      product: contract.product.id,
+      productVersion: contract.product.version,
+      name,
+      initialState: contract.states.initial,
+    });
+    return meta;
+  }
+
+  async openWorkspace(id: string): Promise<WorkspaceView> {
+    const { store, meta, contract } = await this.load(id);
+    const businessState =
+      (await store.getBusinessState()) ?? contract.states.initial;
+    return { meta, businessState, contract };
+  }
+
+  async listWorkspaces(): Promise<WorkspaceMeta[]> {
+    const out: WorkspaceMeta[] = [];
+    for (const id of await this.ports.storage.listWorkspaceIds()) {
+      const store = await this.ports.storage.openWorkspaceStore(id);
+      const meta = await store?.getMeta();
+      if (meta) out.push(meta);
+    }
+    return out;
+  }
+
+  /**
+   * Business state transition per the contract's state machine
+   * (docs/30-design/30-contract-schema.md section 8). Transitions declared
+   * `confirm: human` refuse to run unless humanConfirmed is set.
+   */
+  async transitionBusinessState(
+    id: string,
+    to: string,
+    options?: { humanConfirmed?: boolean },
+  ): Promise<string> {
+    const { store, contract } = await this.load(id);
+    const current =
+      (await store.getBusinessState()) ?? contract.states.initial;
+    const item = contract.states.items.find((s) => s.name === current);
+    const transition = item?.transitions.find((t) => t.to === to);
+    if (!transition) {
+      throw new Error(`illegal state transition ${current} -> ${to}`);
+    }
+    if (transition.confirm === "human" && !options?.humanConfirmed) {
+      throw new NeedsHumanConfirmationError(current, to);
+    }
+    await store.setBusinessState(to);
+    await this.audit(store, id, "state.writeback", "user", {
+      from: current,
+      to,
+      humanConfirmed: transition.confirm === "human",
+    });
+    return to;
+  }
+
+  /** Harness factory (docs/30-design/50-harness.md section 2). */
+  async createHarness(id: string): Promise<Harness> {
+    const { store, contract } = await this.load(id);
+    return new Harness({
+      store,
+      contract,
+      workspaceId: id,
+      clock: this.ports.clock,
+      id: this.ports.id,
+      crypto: this.ports.crypto,
+      gateway: this.ports.gateway,
+    });
+  }
+
+  async listAuditEvents(id: string): Promise<AuditEvent[]> {
+    const { store } = await this.load(id);
+    return store.listAuditEvents();
+  }
+
+  // -------------------------------------------------------------------------
+
+  private async load(id: string): Promise<{
+    store: WorkspaceStore;
+    meta: WorkspaceMeta;
+    contract: RuyinContract;
+  }> {
+    const store = await this.ports.storage.openWorkspaceStore(id);
+    if (!store) throw new WorkspaceNotFoundError(id);
+    const meta = await store.getMeta();
+    const contractJson = await store.getContract();
+    if (!meta || !contractJson) throw new WorkspaceNotFoundError(id);
+    return { store, meta, contract: JSON.parse(contractJson) as RuyinContract };
+  }
+
+  private audit(
+    store: WorkspaceStore,
+    workspace: string,
+    kind: string,
+    actor: "harness" | "user" | "system",
+    payload: unknown,
+  ): Promise<unknown> {
+    return emitAudit(store, this.ports.crypto, this.ports.clock, this.ports.id, {
+      workspace,
+      kind,
+      actor,
+      payload,
+    });
+  }
+}
