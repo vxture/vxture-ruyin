@@ -13,4 +13,4 @@
 | TD-006 | products/bid 与 Runtime 同仓（过渡态） | MVP 期同仓联调最快；契约/SDK 未稳定不宜拆 | 契约 + product-sdk 冻结后迁出为独立产品仓，走 03-A 分发通道 | open |
 | TD-007 | 平台侧无"桌面分发型仓库 profile"标准，本仓剖面替换暂以 30-design/70 自述 | 模板家族只覆盖 Web 全栈仓（product_240 §0.3 裁定 ruyin 不适用） | liaison L1：平台确认过渡态 / 沉淀 profile 标准后，10-standards 薄索引指向之 | open |
 | TD-008 | macOS / Linux（含信创）构建缺位，仅出 win32-x64 | MVP 范围裁定（08 OQ-4；信创路线见 30-design/60 §11） | 平台矩阵专项：真实国产化合同或 mac 需求触发 | standing |
-| TD-009 | Workspace SQLite 库未加密（Phase A 明文） | SQLCipher 绑定与密钥托管（OS 凭据库）属独立工作量（30-design/60 §7.3） | W3 期间落 SQLCipher（或等价静态加密）+ 每空间独立密钥 + OS 凭据库封装；公开发布前必须回收 | open |
+| TD-009 | Workspace SQLite 库未加密（Phase A 明文） | SQLCipher 绑定与密钥托管（OS 凭据库）属独立工作量（30-design/60 §7.3） | 已回收（2026-07-24）：better-sqlite3-multiple-ciphers（SQLCipher 方案）+ 每空间独立密钥 AES-GCM 封装 + 主密钥 Windows DPAPI 保护（非 Windows 开发环境明文回退并告警，生产目标 win32 已覆盖）；files/ 区尚无内容，文件存储落地时并入同一密钥体系 | closed |

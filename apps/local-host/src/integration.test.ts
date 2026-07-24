@@ -11,7 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -26,17 +26,19 @@ import { loadProducts } from "./products.js";
 import { createLocalApi } from "./server.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { FtsRanker, reindexBinding } from "./fts.js";
+import { KeyManager } from "./keys.js";
 
 // Compiled test runs from dist/, so ../../../ is the repo root.
 const productsDir = new URL("../../../products", import.meta.url).pathname
   // Windows pathname of a file URL starts with a slash before the drive letter.
   .replace(/^\/([A-Za-z]:)/, "$1");
 
-function makePorts(dataDir: string): {
+async function makePorts(dataDir: string): Promise<{
   ports: RuntimePorts;
   storage: SqliteStoragePort;
-} {
-  const storage = new SqliteStoragePort(dataDir);
+}> {
+  const keys = await KeyManager.open(dataDir);
+  const storage = new SqliteStoragePort(dataDir, keys);
   return {
     ports: {
       storage,
@@ -53,8 +55,8 @@ function makePorts(dataDir: string): {
 
 test("milestone: bid contract loads, workspace created, task runs over SQLite", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-it-"));
-  const first = makePorts(dataDir);
-  let second: ReturnType<typeof makePorts> | undefined;
+  const first = await makePorts(dataDir);
+  let second: Awaited<ReturnType<typeof makePorts>> | undefined;
   try {
     const scan = loadProducts(productsDir);
     assert.deepEqual(scan.failed, []);
@@ -76,7 +78,7 @@ test("milestone: bid contract loads, workspace created, task runs over SQLite", 
     // Simulate a daemon restart: close every handle, then brand-new ports
     // over the SAME data dir.
     first.storage.closeAll();
-    second = makePorts(dataDir);
+    second = await makePorts(dataDir);
     const reopened = new WorkspaceRuntime(second.ports);
     const view = await reopened.openWorkspace(meta.id);
     assert.equal(view.meta.name, "投标项目 A");
@@ -100,7 +102,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-api-"));
   const token = "test-token";
   const scan = loadProducts(productsDir);
-  const { ports, storage } = makePorts(dataDir);
+  const { ports, storage } = await makePorts(dataDir);
   const runtime = new WorkspaceRuntime(ports);
   const server = createLocalApi({
     runtime,
@@ -192,7 +194,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
 test("selection over real files: grant -> bind (indexes) -> gate -> complete", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-sel-"));
   const filesDir = mkdtempSync(join(tmpdir(), "ruyin-files-"));
-  const { ports, storage } = makePorts(dataDir);
+  const { ports, storage } = await makePorts(dataDir);
   const runtime = new WorkspaceRuntime(ports);
   try {
     // Two tender files on disk; the newer/matching one should rank first.
@@ -258,5 +260,42 @@ test("selection over real files: grant -> bind (indexes) -> gate -> complete", a
     storage.closeAll();
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(filesDir, { recursive: true, force: true });
+  }
+});
+
+test("workspace database is encrypted at rest (TD-009)", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-enc-"));
+  const { ports, storage } = await makePorts(dataDir);
+  const runtime = new WorkspaceRuntime(ports);
+  try {
+    const scan = loadProducts(productsDir);
+    const bid = scan.loaded.find((p) => p.id === "vxture.bid");
+    assert.ok(bid);
+    const meta = await runtime.createWorkspace(bid.contract, "enc-ws");
+    storage.closeAll();
+
+    // A plaintext SQLite file starts with "SQLite format 3\0"; an encrypted
+    // one must not.
+    const dbPath = join(dataDir, "workspaces", meta.id, "workspace.db");
+    const header = readFileSync(dbPath).subarray(0, 16).toString("latin1");
+    assert.ok(
+      !header.startsWith("SQLite format 3"),
+      "db file must not have a plaintext SQLite header",
+    );
+
+    // The per-workspace key blob exists and reopening with the key works.
+    assert.ok(existsSync(join(dataDir, "workspaces", meta.id, "key.enc")));
+    const reopened = await makePorts(dataDir);
+    try {
+      const view = await new WorkspaceRuntime(reopened.ports).openWorkspace(
+        meta.id,
+      );
+      assert.equal(view.meta.name, "enc-ws");
+    } finally {
+      reopened.storage.closeAll();
+    }
+  } finally {
+    storage.closeAll();
+    rmSync(dataDir, { recursive: true, force: true });
   }
 });

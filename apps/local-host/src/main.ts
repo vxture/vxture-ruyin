@@ -19,6 +19,7 @@ import { loadProducts } from "./products.js";
 import { createLocalApi } from "./server.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { FtsRanker, reindexBinding } from "./fts.js";
+import { KeyManager } from "./keys.js";
 
 const VERSION = "0.1.0";
 
@@ -37,7 +38,9 @@ for (const failure of scan.failed) {
   }
 }
 
-const storage = new SqliteStoragePort(dataDir);
+const keys = await KeyManager.open(dataDir);
+const storage = new SqliteStoragePort(dataDir, keys);
+console.log(`[ruyin] master key protection: ${keys.protection}`);
 const localFs = new LocalFsConnector();
 const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
 
