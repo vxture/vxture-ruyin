@@ -1,0 +1,13 @@
+# pnpm workspace roots (docs/30-design/70-repo-organization.md section 4):
+#   packages/  - libraries published to GitHub Packages, consumed outside this
+#                repo (contract-schema / runtime-core / product-sdk / cli)
+#   apps/      - not published; shipped only inside the installer
+#                (local-host / shell / ui-workspace)
+#   products/  - transitional in-repo business products (bid), to be moved out
+#                once the contract + SDK stabilize (TD-006)
+# The skeleton ships no workspace packages yet; Phase A (workplan W2) adds the
+# first ones. Keep this file present so the repo is a pnpm workspace from day one.
+packages:
+  - "packages/*"
+  - "apps/*"
+  - "products/*"

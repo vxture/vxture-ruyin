@@ -1,21 +1,62 @@
-node_modules/
-.next/
-dist/
-build/
-coverage/
-*.tsbuildinfo
-
+# Environment - never commit real secrets
 .env
+*.env
 .env.*
 !.env.example
-!.env.*.example
+.env.bak.*
+.npmrc
+# The .npmrc only declares the @vxture GitHub Packages registry and references
+# ${NODE_AUTH_TOKEN} (no literal secret). It MUST stay committed so CI
+# `pnpm install` can resolve @vxture/* packages. Ignored-then-negated to guard
+# against a local `npm login` writing a literal token into it.
+!.npmrc
 
+# Runtime data and generated artifacts
+data/
+backup/
+private/
+generated/
 secrets/*
 !secrets/.gitkeep
-deploy/**/secrets/*
-!deploy/**/secrets/
-!deploy/**/secrets/.gitkeep
 
+# TLS / certificates / signing
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# Logs
 *.log
+logs/
+
+# Node / pnpm / build outputs
+node_modules/
+.pnpm-store/
+.npm-cache/
+out/
+build/
+dist/
+release/
+*.tsbuildinfo
+.vite/
+
+# Electron packaging outputs
+*.exe
+*.blockmap
+*.ruyinpkg
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# OS / editor
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+.claude/

@@ -1,0 +1,172 @@
+name: ci
+
+# Trunk-based CI: runs on PRs to main and on push:main (the squash commit that
+# lands on main is a new SHA, so it gets its own gate run). Does NOT publish.
+#
+# Produces four of the five required status checks named in
+# docs/50-deployment/rebuild/main-ruleset.json: `quality-gate` / `build` /
+# `test-coverage` / `audit` (the fifth, `gitleaks`, is in secret-scan.yml). Job
+# names are a stable contract - renaming one breaks branch protection. In the
+# governance-shell batch `build` and `test-coverage` are green placeholders
+# (no workspace packages yet, TD-003); workplan W2 replaces them with real work
+# while keeping the context names stable.
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('push-{0}', github.ref_name) }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # -- Audit (SCA hard gate) --------------------------------------------------
+  # osv-scanner scans pnpm-lock.yaml's full dependency tree against the OSV
+  # vulnerability database and hard-blocks on any new finding. Runs the pinned,
+  # sha256-verified binary directly (no third-party action). The baseline is
+  # empty (.osv-scanner.toml); new advisories must be fixed, not suppressed.
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Single point of upgrade (see https://github.com/google/osv-scanner/releases).
+      # Bump both the version and the sha256 below together.
+      OSV_SCANNER_VERSION: "2.4.0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache osv-scanner binary
+        id: osv-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/osv-bin
+          key: osv-scanner-${{ env.OSV_SCANNER_VERSION }}-linux-amd64
+
+      - name: Download osv-scanner (cache miss only)
+        if: ${{ steps.osv-cache.outputs.cache-hit != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256=15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0
+          url="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          mkdir -p /tmp/osv-bin
+          curl -fsSL "$url" -o /tmp/osv-bin/osv-scanner
+          echo "${sha256}  /tmp/osv-bin/osv-scanner" | sha256sum -c -
+
+      - name: OSV dependency scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x /tmp/osv-bin/osv-scanner
+          # Must pass --config explicitly: when scanning a --lockfile,
+          # osv-scanner does not auto-discover the repo-root config, so the
+          # ignore baseline would silently not apply.
+          # --allow-no-lockfiles: the governance-shell batch has zero runtime
+          # dependencies, so the lockfile lists 0 packages; without this flag
+          # osv-scanner exits 128 ("no package sources"). Once W2 adds real
+          # dependencies the flag is a no-op and this becomes a real scan.
+          /tmp/osv-bin/osv-scanner scan -L pnpm-lock.yaml --config .osv-scanner.toml --allow-no-lockfiles
+
+  # -- Static checks (feed quality-gate) --------------------------------------
+  # Pure-node, zero-dependency checks that run without a pnpm install. W2 adds
+  # the contract-lint guardrail (R1-R11 over products/*/ruyin.product.yaml,
+  # TD-004) here as it becomes real.
+  static-checks:
+    name: static-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Whitespace and conflict-marker check
+        run: git diff --check
+
+      - name: Docs numbering guardrail (strict)
+        run: node scripts/guardrails/check-docs-numbering.mjs --strict
+
+  # -- Quality gate (aggregator; stable required-check name) ------------------
+  quality-gate:
+    name: quality-gate
+    runs-on: ubuntu-latest
+    needs: [static-checks]
+    steps:
+      - name: Aggregate
+        run: |
+          echo "quality gate: all aggregated checks passed"
+
+  # -- Build (required check) -------------------------------------------------
+  # Installs the pnpm workspace and runs recursive type-check + build. With no
+  # workspace packages yet both recurse over nothing and pass (TD-003); W2 makes
+  # them real automatically as packages land - the job needs no rewrite.
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+        env:
+          # @vxture/* resolves from GitHub Packages once such deps exist (org
+          # secret; empty string is fine while the workspace has none).
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Type-check (all workspaces)
+        run: pnpm type-check:all
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Build (all workspaces)
+        run: pnpm build
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+  # -- Test coverage (required check) -----------------------------------------
+  # Runs recursive `test` across the workspace. With no packages yet this is a
+  # green no-op occupying the required context (TD-003); runtime-core unit
+  # tests (state machine / tool gate / contract validator) make it real in W2.
+  test-coverage:
+    name: test-coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Run tests
+        run: pnpm test
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}

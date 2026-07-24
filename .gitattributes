@@ -1,0 +1,26 @@
+# Force LF for all text files; scripts must not have CRLF on Linux CI runners
+* text=auto eol=lf
+
+# Explicitly mark scripts and configs as LF
+*.sh        text eol=lf
+*.mjs       text eol=lf
+*.py        text eol=lf
+*.conf      text eol=lf
+*.template  text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.example   text eol=lf
+.gitignore  text eol=lf
+Makefile    text eol=lf
+
+# Binary files; no conversion
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.exe  binary
+*.dll  binary
+*.node binary

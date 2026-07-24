@@ -1,0 +1,17 @@
+{
+  "name": "vxture-ruyin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Ruyin - Business Workspace Runtime for Vxture AI-native business products (desktop distribution repo).",
+  "packageManager": "pnpm@11.1.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --recursive --if-present build",
+    "type-check:all": "pnpm --recursive --if-present type-check",
+    "test": "pnpm --recursive --if-present test",
+    "lint": "pnpm --recursive --if-present lint",
+    "lint:docs-numbering": "node scripts/guardrails/check-docs-numbering.mjs --strict"
+  }
+}

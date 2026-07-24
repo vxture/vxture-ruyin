@@ -1,11 +1,66 @@
-# Vxture Ruyin — AI Agent Workspace
+# vxture-ruyin
 
-Ruyin 业务仓库。当前用于承接从 `vxture` 平台仓迁出的 Ruyin 代码，并作为后续业务仓库工作流模板的起点。
+Ruyin - the Business Workspace Runtime for Vxture AI-native business products.
+This repo builds the local (desktop) runtime: an Electron shell plus an
+independent Node.js runtime daemon sharing an isomorphic TypeScript kernel
+(runtime-core) with the future Cloud Runtime.
 
-分支规划：
+This is a DESKTOP-DISTRIBUTION repository, not a deployed web service. It
+inherits the org governance base (trunk-based main, five required CI checks,
+four-layer secret hygiene, SCA gate, docs numbering) and replaces the
+deployment profile with a release model: tag-to-channel artifact publishing
+(installer + update feed to the website download host, npm packages to GitHub
+Packages, .ruyinpkg product packages to a static registry directory).
 
-- `develop`：迁移与日常集成
-- `beta`：预发布验证
-- `main`：生产发布
+## Design documentation
 
-当前迁移策略：先保留原目录结构和代码形态，不在初始迁移中做依赖重构、部署重写或业务验证。
+The full design baseline lives under `docs/` (org taxonomy). Start at
+`docs/00-meta/00-index.md` for the map and the legacy document-number
+(01..08) cross-reference table. Key documents:
+
+| Doc | Path |
+|-----|------|
+| Product strategy | docs/20-specs/10-product-strategy.md |
+| Workspace runtime architecture | docs/30-design/10-workspace-runtime.md |
+| Runtime contract + schema | docs/30-design/20-runtime-contract.md, 30-contract-schema.md |
+| Context architecture | docs/30-design/40-context-architecture.md |
+| Harness (task execution kernel) | docs/30-design/50-harness.md |
+| Technical architecture | docs/30-design/60-technical-architecture.md |
+| Repo organization and release model | docs/30-design/70-repo-organization.md |
+| Product integration guide | docs/40-implementation/10-product-integration-guide.md |
+
+## Layout
+
+```
+packages/   published libraries (@vxture scope): contract-schema, runtime-core,
+            product-sdk, cli
+apps/       installer-only applications: local-host (runtime daemon),
+            shell (Electron), ui-workspace (React)
+products/   transitional in-repo business products (bid)
+docs/       org-taxonomy documentation
+scripts/    guardrails and release tooling
+```
+
+## Local development
+
+```bash
+pnpm install
+pnpm type-check:all
+pnpm lint:docs-numbering
+```
+
+Wire the local secret-scan hook once per clone:
+
+```bash
+git config core.hooksPath .husky
+```
+
+A `NODE_AUTH_TOKEN` with read access to GitHub Packages is needed once
+@vxture-scoped dependencies appear (see `.npmrc`).
+
+## Working agreement
+
+See [CLAUDE.md](CLAUDE.md): branch model, tag-to-channel release flow, the five
+required CI checks, secret hygiene, the client-zero-secrets rule, and the
+engineering hard rules from the design baseline. Current work queue:
+`docs/70-workplan/10-workplan.md`. Known debt: `docs/60-operations/10-tech-debt.md`.
