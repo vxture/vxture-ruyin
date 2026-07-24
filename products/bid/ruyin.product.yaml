@@ -1,0 +1,192 @@
+# Bid product runtime contract - the canonical example from
+# docs/30-design/30-contract-schema.md section 16. Passes rules R1-R11;
+# the contract-schema test suite uses this file as its primary fixture.
+contract: "0.1"
+
+product:
+  id: vxture.bid
+  name: 标书编写
+  version: 1.0.0
+  publisher: vxture
+  runtime:
+    minimum: 0.1.0
+
+workspace:
+  type: project
+  lifecycle: finite
+  operations: [create, open, archive, restore]
+
+objects:
+  - id: bid_project
+    name: 投标项目
+    primary: true
+    relations:
+      - { to: requirement, kind: contains }
+      - { to: proposal, kind: contains }
+      - { to: deliverable, kind: contains }
+  - id: requirement
+    name: 需求条目
+  - id: proposal
+    name: 技术方案
+    relations:
+      - { to: requirement, kind: references }
+  - id: deliverable
+    name: 投标成果
+
+states:
+  object: bid_project
+  initial: draft
+  items:
+    - name: draft
+      transitions: [{ to: planning }]
+    - name: planning
+      transitions: [{ to: writing }]
+    - name: writing
+      transitions: [{ to: review }]
+    - name: review
+      transitions:
+        - { to: writing }
+        - { to: submitted, confirm: human }
+    - name: submitted
+      transitions: [{ to: archived, confirm: human }]
+    - name: archived
+      transitions: []
+
+context:
+  types:
+    - id: tender_document
+      name: 招标文件
+      required: true
+      sources: [local]
+      class: source
+      sensitivity: high
+    - id: enterprise_capability
+      name: 企业能力资料
+      required: false
+      sources: [local, cloud]
+      class: source
+      sensitivity: high
+    - id: enterprise_knowledge
+      name: 企业知识库
+      required: false
+      sources: [cloud]
+      class: core
+      sensitivity: medium
+    - id: case_library
+      name: 案例库
+      required: false
+      sources: [cloud, local]
+      class: core
+      sensitivity: medium
+    - id: requirement_matrix
+      name: 需求矩阵
+      required: false
+      sources: [workspace]
+      class: derived
+      sensitivity: medium
+    - id: technical_proposal
+      name: 技术方案文档
+      required: false
+      sources: [workspace]
+      class: generated
+      sensitivity: high
+    - id: coverage_report
+      name: 需求覆盖报告
+      required: false
+      sources: [workspace]
+      class: derived
+      sensitivity: medium
+    - id: deliverable_package
+      name: 投标成果包
+      required: false
+      sources: [workspace]
+      class: generated
+      sensitivity: high
+
+capabilities:
+  - id: requirement_analysis
+    kind: analysis
+    description: 从招标文件中提取并结构化需求条目
+  - id: knowledge_retrieval
+    kind: retrieval
+    description: 从企业知识库与案例库检索相关内容
+  - id: proposal_generation
+    kind: generation
+    description: 基于需求与企业能力生成技术方案内容
+  - id: coverage_verification
+    kind: verification
+    description: 校验方案对需求条目的覆盖情况
+  - id: consistency_analysis
+    kind: verification
+    description: 校验方案内部与资料间的一致性
+
+tools:
+  - { id: read_file,        category: local_read,  risk: low,    default: allow }
+  - { id: write_document,   category: local_write, risk: medium, default: ask }
+  - { id: search_knowledge, category: query,       risk: low,    default: allow }
+  - { id: export_result,    category: export,      risk: high,   default: ask }
+
+tasks:
+  - id: analyze_tender
+    objective: 解析招标文件，生成需求矩阵
+    input_types: [tender_document]
+    output_types: [requirement_matrix]
+    constraints:
+      - 需求条目必须可回溯到招标原文
+    capabilities: [requirement_analysis]
+    tools: [read_file, write_document]
+    verification:
+      - { id: source_traceability, kind: automated }
+      - { id: matrix_review,       kind: human }
+
+  - id: generate_proposal
+    objective: 基于需求矩阵与企业能力生成技术方案
+    input_types: [requirement_matrix, enterprise_capability, case_library, enterprise_knowledge]
+    output_types: [technical_proposal]
+    constraints:
+      - 不得虚构企业能力
+      - 必须基于已授权资料
+    capabilities: [knowledge_retrieval, proposal_generation]
+    tools: [search_knowledge, read_file, write_document]
+    verification:
+      - { id: requirement_coverage, kind: ai_assisted }
+      - { id: consistency_check,    kind: ai_assisted }
+      - { id: proposal_review,      kind: human }
+
+  - id: validate_coverage
+    objective: 校验技术方案对需求矩阵的覆盖情况
+    input_types: [requirement_matrix, technical_proposal]
+    output_types: [coverage_report]
+    constraints:
+      - 逐条对照，不得抽样
+    capabilities: [coverage_verification, consistency_analysis]
+    tools: [read_file, write_document]
+    verification:
+      - { id: coverage_complete, kind: automated }
+
+  - id: export_deliverable
+    objective: 汇总并导出最终投标成果包
+    input_types: [technical_proposal, coverage_report]
+    output_types: [deliverable_package]
+    constraints:
+      - 导出前必须通过覆盖校验
+    capabilities: []
+    tools: [read_file, export_result]
+    verification:
+      - { id: final_confirmation, kind: human }
+
+permissions:
+  local_read: allow
+  local_write: ask
+  delete: ask
+  external_send: ask
+  sync_to_cloud: ask
+
+sync:
+  default: local_only
+  classes:
+    - { class: source,    policy: local_only }
+    - { class: core,      policy: selective }
+    - { class: generated, policy: manual }
+    - { class: derived,   policy: local_only }
+    - { class: temporary, policy: local_only }

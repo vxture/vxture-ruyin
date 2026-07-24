@@ -26,13 +26,13 @@
 
 里程碑：**03-A §16 的 Bid 示例契约被真实校验、加载并创建 Workspace。**
 
-- [ ] `packages/contract-schema`：TS 类型 + JSON Schema + ajv 校验器 + R1–R11
-- [ ] `packages/cli`：`ruyin lint`（首个通过用例 = Bid 示例；一组故意违规的失败用例）
+- [x] `packages/contract-schema`：TS 类型 + JSON Schema + ajv 校验器 + R1–R11（23 用例：Bid 通过 + 逐规则违规变异）
+- [x] `packages/cli`：`ruyin lint`（文件 / 产品目录 / 产品集目录三种输入）
 - [ ] `packages/runtime-core`：ports 接口（60 §6.2）+ Workspace 生命周期 + Harness 状态机骨架（AI 用 mock）
 - [ ] `apps/local-host`：SQLite 存储（每 Workspace 一库）+ Local API 最小面
 - [ ] `apps/shell`：启动 Runtime + 加载一个未打包产品目录（开发模式，跳签名）
-- [ ] `products/bid`：`ruyin.product.yaml`（从 30-contract-schema §16 落地）
-- [ ] CI 转实：quality-gate 接入 `lint:contract`（清 TD-004）；build/test-coverage 有真实工作（清 TD-003）
+- [x] `products/bid`：`ruyin.product.yaml`（30-contract-schema §16 落地，同时是测试主 fixture）
+- [x] CI 转实（部分）：contract-lint job 接入 quality-gate（TD-004 已回收）；build/test-coverage 已有真实工作（TD-003 待 runtime-core 单测后关闭）
 
 ## W3 · Phase B：Bid 单产品可用
 
