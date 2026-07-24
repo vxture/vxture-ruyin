@@ -160,13 +160,17 @@ jobs:
           # secret; empty string is fine while the workspace has none).
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
-      - name: Type-check (all workspaces)
-        run: pnpm type-check:all
+      # Build BEFORE type-check: pnpm -r build is topological, so a package's
+      # workspace dependencies have their dist/ (and .d.ts) in place before
+      # dependents compile; bare type-check on a fresh checkout would fail to
+      # resolve @vxture/* workspace deps that ship built types.
+      - name: Build (all workspaces)
+        run: pnpm build
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
-      - name: Build (all workspaces)
-        run: pnpm build
+      - name: Type-check (all workspaces)
+        run: pnpm type-check:all
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
