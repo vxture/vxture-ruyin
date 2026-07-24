@@ -252,6 +252,16 @@ test("selection pipeline: declining the context stops the task", async () => {
   assert.deepEqual(declined.capabilityOutputs, {});
 });
 
+test("discoverContext previews bound items; empty without a binding", async () => {
+  const { runtime, connector } = makeSelectionFixture();
+  const meta = await runtime.createWorkspace(bidContract, "ws");
+  assert.deepEqual(await runtime.discoverContext(meta.id, "tender_document"), []);
+  await bindTender(runtime, connector, meta.id);
+  const items = await runtime.discoverContext(meta.id, "tender_document");
+  assert.equal(items.length, 2);
+  assert.ok(items.every((i) => i.type === "tender_document"));
+});
+
 test("selection pipeline: required type without binding fails startability", async () => {
   const { runtime } = makeSelectionFixture();
   const meta = await runtime.createWorkspace(bidContract, "ws");

@@ -18,6 +18,7 @@ import { Harness, type TaskInstanceRecord } from "./harness.js";
 import type {
   AuditEvent,
   Binding,
+  ContextItemMeta,
   FolderGrant,
   RuntimePorts,
   WorkspaceMeta,
@@ -223,6 +224,32 @@ export class WorkspaceRuntime {
       root: input.root,
     });
     return binding;
+  }
+
+  /**
+   * Preview the items a binding currently resolves to (04 section 6.2
+   * transparency: what the AI could see, the user can see - before any task
+   * runs). Empty when the type has no binding.
+   */
+  async discoverContext(
+    id: string,
+    type: string,
+  ): Promise<ContextItemMeta[]> {
+    const { store } = await this.load(id);
+    const bindings = parseJsonArray<Binding>(await store.getBindings());
+    const binding = bindings.find((b) => b.type === type);
+    if (!binding) return [];
+    const grants = parseJsonArray<FolderGrant>(await store.getGrants());
+    if (!isPathGranted(binding.root, grants)) {
+      throw new Error(
+        `binding for "${type}" points outside the granted folders (grant revoked?)`,
+      );
+    }
+    const connector = this.ports.connectors?.get(binding.connector);
+    if (!connector) {
+      throw new Error(`connector "${binding.connector}" is not available`);
+    }
+    return connector.discover(binding);
   }
 
   /** Harness factory (docs/30-design/50-harness.md section 2). */

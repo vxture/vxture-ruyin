@@ -82,10 +82,13 @@ export interface Binding {
 
 export interface AuditEvent {
   event_id: string;
+  workspace: string;
   kind: string;
   actor: string;
   timestamp: string;
   task_instance?: string;
+  prev_hash: string;
+  hash: string;
   payload: unknown;
 }
 
@@ -155,4 +158,6 @@ export class Api {
       { type, root },
     );
   audit = (id: string) => this.call<AuditEvent[]>(`/workspaces/${id}/audit`);
+  contextItems = (id: string, type: string) =>
+    this.call<ContextItemMeta[]>(`/workspaces/${id}/context/${type}`);
 }
