@@ -92,11 +92,11 @@ function openWindow(): void {
     // buttons over the app's own top bar (which declares a drag region).
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      color: "#10151d",
-      symbolColor: "#9fb0c3",
+      color: "#fbfcfe",
+      symbolColor: "#52627a",
       height: 46,
     },
-    backgroundColor: "#0b0f14",
+    backgroundColor: "#f4f7fa",
     webPreferences: {
       // The window is a pure web client of the Local API - no Node access,
       // no preload. The contract boundary stays at the HTTP surface.
