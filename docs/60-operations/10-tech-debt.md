@@ -6,7 +6,7 @@
 | ID | 条目 | 原因 | 回收条件 | 状态 |
 |---|---|---|---|---|
 | TD-001 | Windows 代码签名证书未采购，release 签名步缺位 | 采购未启动（08 OQ-1）；未签名 = SmartScreen 拦阻 | 证书就位 → release.yml 启用签名步；stable 渠道公开发布前必须回收 | open |
-| TD-002 | main ruleset 未 apply，直推 main 仍可行 | bootstrap 顺序要求先让五个 CI context 在 main 产生一次 | main 首次全绿后 `gh api` apply `docs/50-deployment/rebuild/main-ruleset.json`，此后只走 PR | open |
+| TD-002 | main ruleset 未 apply，直推 main 仍可行 | bootstrap 顺序要求先让五个 CI context 在 main 产生一次 | 已回收（2026-07-24）：fcca640 全绿后 apply，ruleset id 19652673 active，此后只走 PR | closed |
 | TD-003 | CI build / test-coverage 为绿色占位（workspace 无包，recursive 空跑） | W1 治理批先行，Phase A 代码未落 | W2 落 contract-schema + runtime-core 单测后自动转实，验证 job 有真实工作量 | open |
 | TD-004 | `lint:contract`（R1–R11 契约护栏）未接入 quality-gate | 校验器与 CLI 属 W2 产物 | W2 CLI 落地 → package.json 加脚本 + ci.yml static-checks 加步骤 | open |
 | TD-005 | 契约 schema 禁入 `execute_script` 类工具（设计约束，非缺陷） | 无 OS 级执行沙箱（30-design/60 §13；同类产品 Cowork/WorkBuddy 均以 VM/容器兜底） | 执行沙箱专项立项并落地后解禁；在此之前 R 规则层面拒绝该类工具 | standing |
