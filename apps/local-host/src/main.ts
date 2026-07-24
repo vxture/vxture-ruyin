@@ -7,11 +7,15 @@
  *   RUYIN_PRODUCTS_DIR  unpacked products dir (default: ./products)
  *   RUYIN_PORT          listen port on 127.0.0.1 (default: 7420)
  *   RUYIN_TOKEN         session token override (default: random per launch)
+ *   RUYIN_UI_DIR        built Workspace UI dir (default: sibling
+ *                       ui-workspace/dist when it exists; dev console at /dev)
  */
 
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WorkspaceRuntime, type ConnectorPort } from "@vxture/ruyin-core";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
@@ -54,12 +58,20 @@ const runtime = new WorkspaceRuntime({
   ranker: new FtsRanker(storage),
 });
 
+const defaultUiDir = resolve(
+  fileURLToPath(new URL("../../ui-workspace/dist", import.meta.url)),
+);
+const uiDir =
+  process.env["RUYIN_UI_DIR"] ??
+  (existsSync(defaultUiDir) ? defaultUiDir : undefined);
+
 const server = createLocalApi({
   runtime,
   products: scan.loaded,
   token,
   version: VERSION,
   reindex: (wsId, binding) => reindexBinding(storage, wsId, binding, localFs),
+  uiDir,
 });
 
 server.listen(port, "127.0.0.1", () => {

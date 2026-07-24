@@ -263,6 +263,50 @@ test("selection over real files: grant -> bind (indexes) -> gate -> complete", a
   }
 });
 
+test("daemon serves the built workspace ui with traversal guard", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-ui-"));
+  const uiDir = mkdtempSync(join(tmpdir(), "ruyin-uidist-"));
+  const { ports, storage } = await makePorts(dataDir);
+  const server = createLocalApi({
+    runtime: new WorkspaceRuntime(ports),
+    products: [],
+    token: "t",
+    version: "test",
+    reindex: async () => 0,
+    uiDir,
+  });
+  try {
+    writeFileSync(join(uiDir, "index.html"), "<!doctype html><title>ui</title>");
+    mkdirSync(join(uiDir, "assets"));
+    writeFileSync(join(uiDir, "assets", "a.js"), "//js");
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const { port } = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${port}`;
+
+    const index = await fetch(`${base}/`);
+    assert.equal(index.status, 200);
+    assert.match(await index.text(), /<title>ui<\/title>/);
+
+    const asset = await fetch(`${base}/assets/a.js`);
+    assert.equal(asset.status, 200);
+    assert.match(asset.headers.get("content-type") ?? "", /javascript/);
+
+    // Traversal collapses via URL normalization and lands on token-gated
+    // API space; a raw-path probe hits the static guard. Either way: no file.
+    const probe = await fetch(`${base}/assets/%2e%2e/%2e%2e/package.json`);
+    assert.notEqual(probe.status, 200);
+
+    // Dev console stays reachable.
+    const dev = await fetch(`${base}/dev`);
+    assert.match(await dev.text(), /Ruyin Dev Console/);
+  } finally {
+    await new Promise<void>((ok) => server.close(() => ok()));
+    storage.closeAll();
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(uiDir, { recursive: true, force: true });
+  }
+});
+
 test("workspace database is encrypted at rest (TD-009)", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-enc-"));
   const { ports, storage } = await makePorts(dataDir);

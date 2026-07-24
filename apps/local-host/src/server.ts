@@ -6,6 +6,8 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import {
   ContractInvalidError,
   HarnessError,
@@ -24,6 +26,31 @@ export interface LocalApiDeps {
   version: string;
   /** Rebuild the FTS index rows for one binding; returns indexed count. */
   reindex: (workspaceId: string, binding: Binding) => Promise<number>;
+  /** Built Workspace UI directory; when set, served at / (dev console moves to /dev). */
+  uiDir?: string;
+}
+
+const STATIC_MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".map": "application/json",
+  ".ico": "image/x-icon",
+};
+
+function serveStatic(res: ServerResponse, root: string, rel: string): void {
+  // Normalize and refuse traversal outside the UI root.
+  const full = resolvePath(root, rel);
+  if (!full.startsWith(resolvePath(root)) || !existsSync(full)) {
+    send(res, 404, { error: "not_found" });
+    return;
+  }
+  const ext = full.slice(full.lastIndexOf("."));
+  res.writeHead(200, {
+    "content-type": STATIC_MIME[ext] ?? "application/octet-stream",
+  });
+  res.end(readFileSync(full));
 }
 
 function send(res: ServerResponse, status: number, body: unknown): void {
@@ -91,11 +118,21 @@ async function handle(
   const method = req.method ?? "GET";
   const path = url.pathname.replace(/\/+$/, "") || "/";
 
-  // Dev console page - static shell, token arrives via ?token= and is only
-  // used by the page's own API calls (which stay token-gated below).
-  if (method === "GET" && path === "/") {
+  // Workspace UI (built React app) at /, when present; the plain dev console
+  // stays reachable at /dev. Both are static shells - the token arrives via
+  // ?token= and is only used by the page's own API calls (token-gated below).
+  if (method === "GET" && (path === "/" || path === "/dev")) {
+    if (path === "/" && deps.uiDir) {
+      serveStatic(res, deps.uiDir, "index.html");
+      return;
+    }
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(DEV_UI_HTML);
+    return;
+  }
+  // UI asset files (vite emits under assets/).
+  if (method === "GET" && deps.uiDir && path.startsWith("/assets/")) {
+    serveStatic(res, deps.uiDir, path.slice(1));
     return;
   }
 
@@ -159,6 +196,7 @@ async function handle(
           objective: t.objective,
           input_types: t.input_types,
         })),
+        states: view.contract.states,
       });
       return;
     }

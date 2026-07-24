@@ -50,6 +50,11 @@ function startDaemon(): Electron.UtilityProcess {
       RUYIN_TOKEN: TOKEN,
       RUYIN_DATA_DIR: dataDir,
       RUYIN_PRODUCTS_DIR: productsDir,
+      // Packaged: built Workspace UI travels in resources/ui. Dev: unset -
+      // the daemon falls back to apps/ui-workspace/dist when built.
+      ...(app.isPackaged
+        ? { RUYIN_UI_DIR: join(process.resourcesPath, "ui") }
+        : {}),
     },
   });
   child.stdout?.on("data", (d: Buffer) => process.stdout.write(d));
