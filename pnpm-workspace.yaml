@@ -16,9 +16,13 @@ packages:
 # by default). better-sqlite3 downloads/builds its prebuilt binding here.
 allowBuilds:
   better-sqlite3: true
+  electron: true
 
 # SCA remediation floors (governance 140 s9: pure transitive deps get root
 # overrides). ini < 1.3.6: GHSA-qqgx-2p2h-9c37 prototype pollution, pulled in
 # via better-sqlite3 -> prebuild-install -> rc.
 overrides:
   "ini@<1.3.6": ">=1.3.6"
+  # semver < 6.3.1: GHSA-c2qf-rxjj-qqgw ReDoS, transitive via electron's
+  # download tooling.
+  "semver@<6.3.1": ">=6.3.1"
