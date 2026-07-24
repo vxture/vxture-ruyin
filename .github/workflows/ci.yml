@@ -94,11 +94,40 @@ jobs:
       - name: Docs numbering guardrail (strict)
         run: node scripts/guardrails/check-docs-numbering.mjs --strict
 
+  # -- Contract lint (feed quality-gate) --------------------------------------
+  # Runs rules R1-R11 over every products/*/ruyin.product.yaml via the ruyin
+  # CLI (design authority: docs/30-design/30-contract-schema.md section 15).
+  contract-lint:
+    name: contract-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Contract lint (R1-R11)
+        run: pnpm lint:contract
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
   # -- Quality gate (aggregator; stable required-check name) ------------------
   quality-gate:
     name: quality-gate
     runs-on: ubuntu-latest
-    needs: [static-checks]
+    needs: [static-checks, contract-lint]
     steps:
       - name: Aggregate
         run: |
@@ -131,13 +160,17 @@ jobs:
           # secret; empty string is fine while the workspace has none).
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
-      - name: Type-check (all workspaces)
-        run: pnpm type-check:all
+      # Build BEFORE type-check: pnpm -r build is topological, so a package's
+      # workspace dependencies have their dist/ (and .d.ts) in place before
+      # dependents compile; bare type-check on a fresh checkout would fail to
+      # resolve @vxture/* workspace deps that ship built types.
+      - name: Build (all workspaces)
+        run: pnpm build
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
-      - name: Build (all workspaces)
-        run: pnpm build
+      - name: Type-check (all workspaces)
+        run: pnpm type-check:all
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 

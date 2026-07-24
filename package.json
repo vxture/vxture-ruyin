@@ -12,6 +12,7 @@
     "type-check:all": "pnpm --recursive --if-present type-check",
     "test": "pnpm --recursive --if-present test",
     "lint": "pnpm --recursive --if-present lint",
-    "lint:docs-numbering": "node scripts/guardrails/check-docs-numbering.mjs --strict"
+    "lint:docs-numbering": "node scripts/guardrails/check-docs-numbering.mjs --strict",
+    "lint:contract": "pnpm --recursive build && node packages/cli/dist/main.js lint products"
   }
 }

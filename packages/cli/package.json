@@ -1,0 +1,29 @@
+{
+  "name": "@vxture/ruyin-cli",
+  "version": "0.1.0",
+  "description": "Ruyin developer CLI: contract lint (dev/pack land in later batches, see docs/40-implementation/10-product-integration-guide.md).",
+  "type": "module",
+  "bin": {
+    "ruyin": "dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@vxture/ruyin-contract-schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

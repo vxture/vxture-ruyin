@@ -322,7 +322,7 @@ sync:
 | R2 | workspace type / lifecycle 组合合法 | L1 |
 | R3 | relations.to 引用已声明对象；恰好一个 primary 对象 | L2 |
 | R4 | states.object 为 primary 对象；initial 与所有 transitions.to 均在 items 中；无不可达状态 | L2 |
-| R5 | context.types id 唯一；required 类型的 sources 非空 | L1 / L2 |
+| R5 | 全部集合 id 唯一（objects / context.types / capabilities / tools / tasks / states.items）；required 类型的 sources 非空 | L2 |
 | R6 | capabilities 不得出现模型 / Provider 绑定键 | L1 |
 | R7 | risk=high 工具 default≠allow；external_send 类工具 default=ask | L1 |
 | R8 | task 的 input_types / output_types / capabilities / tools 全部可解析；output_types 的 class ∈ {generated, derived} | L2 |
