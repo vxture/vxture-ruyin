@@ -14,10 +14,25 @@
 # version is still surfaced. Never widen the gate (no continue-on-error, never
 # removed from the required set).
 #
-# Example (commented out - this repo has no accepted residuals):
+# Example (commented out):
 # [[PackageOverrides]]
 # name = "some-pkg"
 # version = "1.2.3"
 # ecosystem = "npm"
 # ignore = true
 # reason = "dev-only transitive; not shipped in the installer; upstream pins it"
+
+# GHSA-7g7r-gx96-252g: fix requires electron-builder 26, whose 26.15.x line
+# has a confirmed packaging-breaking @electron/get resolution bug under pnpm
+# (hit on 26.15.3, documented in apps/shell; we pinned back to 25.x). Build-
+# time-only tool, never shipped in the installer; runtime-facing electron-
+# builder transitives (tar/ejs/builder-util-runtime/brace-expansion) are
+# floored via pnpm-workspace.yaml overrides instead. Revisit: retry the
+# electron-builder 26 upgrade when a release fixes the resolution bug, then
+# remove this entry.
+[[PackageOverrides]]
+name = "app-builder-lib"
+version = "25.1.8"
+ecosystem = "npm"
+ignore = true
+reason = "fix needs electron-builder 26 which breaks packaging under pnpm; dev-only build tool, not shipped"
