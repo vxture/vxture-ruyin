@@ -549,6 +549,83 @@ tr:last-child td { border-bottom: none; }
 }
 .nav-home-icon { font-size: 15px; opacity: 0.8; }
 
+/* ---------- Settings ---------- */
+
+.icon-btn {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon-btn:hover { color: var(--text); }
+.icon-btn.active { color: var(--accent); border-color: var(--accent); }
+
+.settings { display: flex; gap: 26px; margin-top: 22px; align-items: flex-start; }
+.settings-nav {
+  width: 168px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-nav-item {
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 9px 14px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.settings-nav-item:hover { background: var(--pill-bg); color: var(--text); box-shadow: none; }
+.settings-nav-item.active {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 650;
+}
+.settings-content { flex: 1; max-width: 760px; min-width: 0; }
+.settings-content .card { padding: 6px 22px; }
+
+.setting-row {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-label { width: 170px; flex-shrink: 0; font-weight: 600; font-size: 13px; padding-top: 4px; }
+.setting-hint { font-weight: 400; margin-top: 4px; line-height: 1.5; }
+.setting-control { flex: 1; min-width: 0; padding-top: 4px; word-break: break-all; }
+
+.choice-group { display: inline-flex; gap: 0; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+.choice-group .choice {
+  border: none;
+  border-radius: 0;
+  background: var(--panel);
+  padding: 6px 16px;
+  color: var(--muted);
+}
+.choice-group .choice + .choice { border-left: 1px solid var(--border); }
+.choice-group .choice:hover { color: var(--text); box-shadow: none; }
+.choice-group .choice.active {
+  background: var(--grad);
+  color: var(--on-grad);
+  font-weight: 650;
+}
+
+.account-empty { text-align: center; padding: 26px 10px; }
+.account-empty p { line-height: 1.7; }
+
 /* ---------- Token gate ---------- */
 
 .token-gate {

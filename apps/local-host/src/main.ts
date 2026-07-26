@@ -72,6 +72,15 @@ const server = createLocalApi({
   version: VERSION,
   reindex: (wsId, binding) => reindexBinding(storage, wsId, binding, localFs),
   uiDir,
+  systemInfo: {
+    version: VERSION,
+    platform: process.platform,
+    arch: process.arch,
+    dataDir,
+    productsDir,
+    keyProtection: keys.protection,
+    startedAt: new Date().toISOString(),
+  },
 });
 
 server.listen(port, "127.0.0.1", () => {

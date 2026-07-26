@@ -53,6 +53,16 @@ async function makePorts(dataDir: string): Promise<{
   };
 }
 
+const testSystemInfo = {
+  version: "test",
+  platform: process.platform,
+  arch: process.arch,
+  dataDir: "(test)",
+  productsDir: "(test)",
+  keyProtection: "plaintext" as const,
+  startedAt: new Date().toISOString(),
+};
+
 test("milestone: bid contract loads, workspace created, task runs over SQLite", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-it-"));
   const first = await makePorts(dataDir);
@@ -109,6 +119,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     products: scan.loaded,
     token,
     version: "test",
+    systemInfo: testSystemInfo,
     reindex: (wsId, binding) =>
       reindexBinding(storage, wsId, binding, new LocalFsConnector()),
   });
@@ -129,6 +140,12 @@ test("local api: token gate, product listing, workspace + task flow", async () =
       await fetch(`${base}/products`, { headers: authed })
     ).json()) as Array<{ id: string }>;
     assert.ok(products.some((p) => p.id === "vxture.bid"));
+
+    // System transparency surface for the settings panel.
+    const system = await fetch(`${base}/system`, { headers: authed });
+    assert.equal(system.status, 200);
+    const sysInfo = (await system.json()) as { keyProtection: string };
+    assert.ok(["dpapi", "plaintext"].includes(sysInfo.keyProtection));
 
     const created = await fetch(`${base}/workspaces`, {
       method: "POST",
@@ -272,6 +289,7 @@ test("daemon serves the built workspace ui with traversal guard", async () => {
     products: [],
     token: "t",
     version: "test",
+    systemInfo: testSystemInfo,
     reindex: async () => 0,
     uiDir,
   });

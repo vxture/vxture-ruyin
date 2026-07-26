@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Api, type ProductInfo, type WorkspaceMeta } from "./api";
 import { WorkspacePanel } from "./workspace";
 import { HomePage } from "./home";
+import { SettingsView } from "./settings";
 
 export default function App() {
   const fromQuery = new URLSearchParams(location.search).get("token");
@@ -52,7 +53,15 @@ function TokenGate({ onSubmit }: { onSubmit: (t: string) => void }) {
   );
 }
 
-function TopBar({ crumb }: { crumb?: string }) {
+function TopBar({
+  crumb,
+  onSettings,
+  settingsActive,
+}: {
+  crumb?: string;
+  onSettings: () => void;
+  settingsActive: boolean;
+}) {
   const [health, setHealth] = useState<{ ok: boolean; version?: string }>({
     ok: false,
   });
@@ -86,6 +95,13 @@ function TopBar({ crumb }: { crumb?: string }) {
           <span className={`conn-dot${health.ok ? "" : " off"}`} />
           {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
         </span>
+        <button
+          className={`icon-btn${settingsActive ? " active" : ""}`}
+          title="设置"
+          onClick={onSettings}
+        >
+          ⚙
+        </button>
       </div>
     </header>
   );
@@ -111,22 +127,31 @@ function Workbench({ api }: { api: Api }) {
     void refreshSidebar();
   }, [refreshSidebar]);
 
+  const [showSettings, setShowSettings] = useState(false);
   const current = workspaces.find((w) => w.id === currentId);
   const openWorkspace = useCallback(
     async (id: string) => {
       await refreshSidebar();
       setCurrentId(id);
+      setShowSettings(false);
     },
     [refreshSidebar],
   );
   return (
     <>
-      <TopBar crumb={current?.name} />
+      <TopBar
+        crumb={showSettings ? "设置" : current?.name}
+        settingsActive={showSettings}
+        onSettings={() => setShowSettings(!showSettings)}
+      />
       <div className="layout">
         <aside className="sidebar">
           <div
-            className={`card clickable nav-home${currentId === null ? " selected" : ""}`}
-            onClick={() => setCurrentId(null)}
+            className={`card clickable nav-home${currentId === null && !showSettings ? " selected" : ""}`}
+            onClick={() => {
+              setCurrentId(null);
+              setShowSettings(false);
+            }}
           >
             <span className="nav-home-icon" aria-hidden>
               ⌂
@@ -140,8 +165,11 @@ function Workbench({ api }: { api: Api }) {
           {workspaces.map((w) => (
             <div
               key={w.id}
-              className={`card clickable${w.id === currentId ? " selected" : ""}`}
-              onClick={() => setCurrentId(w.id)}
+              className={`card clickable${w.id === currentId && !showSettings ? " selected" : ""}`}
+              onClick={() => {
+                setCurrentId(w.id);
+                setShowSettings(false);
+              }}
             >
               <div className="ws-name">{w.name}</div>
               <div className="ws-meta-line">
@@ -152,14 +180,19 @@ function Workbench({ api }: { api: Api }) {
           {error && <div className="error-box">{error}</div>}
         </aside>
         <main className="main">
-          {currentId ? (
+          {showSettings ? (
+            <SettingsView api={api} />
+          ) : currentId ? (
             <WorkspacePanel key={currentId} api={api} id={currentId} />
           ) : (
             <HomePage
               api={api}
               products={products}
               workspaces={workspaces}
-              onOpen={setCurrentId}
+              onOpen={(id) => {
+                setCurrentId(id);
+                setShowSettings(false);
+              }}
               onCreated={openWorkspace}
               onError={setError}
             />

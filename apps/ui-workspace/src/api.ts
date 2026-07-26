@@ -92,6 +92,16 @@ export interface AuditEvent {
   payload: unknown;
 }
 
+export interface SystemInfo {
+  version: string;
+  platform: string;
+  arch: string;
+  dataDir: string;
+  productsDir: string;
+  keyProtection: "dpapi" | "plaintext";
+  startedAt: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -160,4 +170,5 @@ export class Api {
   audit = (id: string) => this.call<AuditEvent[]>(`/workspaces/${id}/audit`);
   contextItems = (id: string, type: string) =>
     this.call<ContextItemMeta[]>(`/workspaces/${id}/context/${type}`);
+  system = () => this.call<SystemInfo>("/system");
 }
