@@ -28,6 +28,16 @@ export interface LocalApiDeps {
   reindex: (workspaceId: string, binding: Binding) => Promise<number>;
   /** Built Workspace UI directory; when set, served at / (dev console moves to /dev). */
   uiDir?: string;
+  /** Runtime transparency surface for the settings panel (GET /system). */
+  systemInfo: {
+    version: string;
+    platform: string;
+    arch: string;
+    dataDir: string;
+    productsDir: string;
+    keyProtection: "dpapi" | "plaintext";
+    startedAt: string;
+  };
 }
 
 const STATIC_MIME: Record<string, string> = {
@@ -148,6 +158,12 @@ async function handle(
   }
 
   const segments = path.split("/").filter((s) => s.length > 0);
+
+  // GET /system - runtime transparency for the settings panel
+  if (method === "GET" && path === "/system") {
+    send(res, 200, deps.systemInfo);
+    return;
+  }
 
   // GET /products
   if (method === "GET" && path === "/products") {
