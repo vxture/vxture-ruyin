@@ -8,6 +8,7 @@ import { Api, type ProductInfo, type WorkspaceMeta } from "./api";
 import { WorkspacePanel } from "./workspace";
 import { HomePage } from "./home";
 import { SettingsView } from "./settings";
+import { UserSlot } from "./user";
 
 export default function App() {
   const fromQuery = new URLSearchParams(location.search).get("token");
@@ -146,38 +147,41 @@ function Workbench({ api }: { api: Api }) {
       />
       <div className="layout">
         <aside className="sidebar">
-          <div
-            className={`card clickable nav-home${currentId === null && !showSettings ? " selected" : ""}`}
-            onClick={() => {
-              setCurrentId(null);
-              setShowSettings(false);
-            }}
-          >
-            <span className="nav-home-icon" aria-hidden>
-              ⌂
-            </span>
-            首页
-          </div>
-          <h2>工作空间</h2>
-          {workspaces.length === 0 && (
-            <div className="empty">从首页的产品入口创建</div>
-          )}
-          {workspaces.map((w) => (
+          <div className="sidebar-scroll">
             <div
-              key={w.id}
-              className={`card clickable${w.id === currentId && !showSettings ? " selected" : ""}`}
+              className={`card clickable nav-home${currentId === null && !showSettings ? " selected" : ""}`}
               onClick={() => {
-                setCurrentId(w.id);
+                setCurrentId(null);
                 setShowSettings(false);
               }}
             >
-              <div className="ws-name">{w.name}</div>
-              <div className="ws-meta-line">
-                {w.productId} · {w.workspaceType}
-              </div>
+              <span className="nav-home-icon" aria-hidden>
+                ⌂
+              </span>
+              首页
             </div>
-          ))}
-          {error && <div className="error-box">{error}</div>}
+            <h2>工作空间</h2>
+            {workspaces.length === 0 && (
+              <div className="empty">从首页的产品入口创建</div>
+            )}
+            {workspaces.map((w) => (
+              <div
+                key={w.id}
+                className={`card clickable${w.id === currentId && !showSettings ? " selected" : ""}`}
+                onClick={() => {
+                  setCurrentId(w.id);
+                  setShowSettings(false);
+                }}
+              >
+                <div className="ws-name">{w.name}</div>
+                <div className="ws-meta-line">
+                  {w.productId} · {w.workspaceType}
+                </div>
+              </div>
+            ))}
+            {error && <div className="error-box">{error}</div>}
+          </div>
+          <UserSlot api={api} onOpenSettings={() => setShowSettings(true)} />
         </aside>
         <main className="main">
           {showSettings ? (
