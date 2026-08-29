@@ -6,8 +6,13 @@
  * come with the platform integration, product_200 section 3.2).
  */
 
-import { useState } from "react";
-import { Api, type ProductInfo, type WorkspaceMeta } from "./api";
+import { useEffect, useState } from "react";
+import {
+  Api,
+  type ProductInfo,
+  type SessionInfo,
+  type WorkspaceMeta,
+} from "./api";
 
 const BLURBS: Record<string, string> = {
   "vxture.bid": "招标解析 · 需求矩阵 · 方案生成 · 覆盖校验",
@@ -50,6 +55,22 @@ export function HomePage({
     (p) => !installedIds.has(p.id),
   ).slice(0, Math.max(0, GRID_TARGET - products.length));
 
+  // Console base for subscribe deep links (from the daemon session summary;
+  // deep links open only on an explicit click, never automatically).
+  const [session, setSession] = useState<SessionInfo | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .session()
+      .then((s) => alive && setSession(s))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [api]);
+  const subscribeUrl = (productId: string) =>
+    `${session?.consoleBase ?? "https://vxture.com"}/subscribe?product=${encodeURIComponent(productId)}&intent=subscribe`;
+
   return (
     <>
       <div className="home-hero">
@@ -86,7 +107,11 @@ export function HomePage({
             </div>
             <div className="muted product-blurb">{p.blurb}</div>
             <div className="row" style={{ marginTop: "auto" }}>
-              <button disabled>开通后可用</button>
+              <button
+                onClick={() => window.open(subscribeUrl(p.id), "_blank", "noopener")}
+              >
+                去开通 ↗
+              </button>
             </div>
           </div>
         ))}

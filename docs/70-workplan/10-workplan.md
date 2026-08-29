@@ -71,6 +71,11 @@
 - [ ] Cloud Runtime 宿主接入 runtime-core（平台侧协同）
 - [ ] Sync Engine：三向对比 + 冲突 UI + 离线队列
 - [ ] 身份完整链：PKCE / 设备绑定 / 宽限期（**前置：liaison L3**）
+  - [x] C1 客户端侧先行落地（2026-08-30）：daemon PKCE public client（S256 +
+    loopback 回调 + RS256 验签拒 none/HS* + refresh 续票 + 会话 DPAPI 密封 +
+    吊销退出）+ C2 权益客户端（45s TTL 不落库，`RUYIN_PLATFORM_API_BASE` 注入）
+    + 账户弹层/开通深链 UI + 壳外链走系统浏览器；8 项鉴权单测。
+    **闭环待平台侧登记回调 / ruyin-beta / 权益基址**（80-liaison/40，附实测）
 - [ ] Conformance 测试套件（50-harness §10 C1–C7）
 
 ## Liaison（平台侧依赖，函件在 80-liaison/）

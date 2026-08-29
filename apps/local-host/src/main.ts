@@ -9,6 +9,10 @@
  *   RUYIN_TOKEN         session token override (default: random per launch)
  *   RUYIN_UI_DIR        built Workspace UI dir (default: sibling
  *                       ui-workspace/dist when it exists; dev console at /dev)
+ *   RUYIN_ACCOUNTS_ISSUER    OIDC issuer (default https://accounts.vxture.com)
+ *   RUYIN_OIDC_CLIENT_ID     public client id (default ruyin; beta: ruyin-beta)
+ *   RUYIN_PLATFORM_API_BASE  entitlements API base (unset = C2 disabled)
+ *   RUYIN_CONSOLE_BASE       console deep-link base (default https://vxture.com)
  */
 
 import { randomBytes } from "node:crypto";
@@ -24,6 +28,7 @@ import { createLocalApi } from "./server.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { FtsRanker, reindexBinding } from "./fts.js";
 import { KeyManager } from "./keys.js";
+import { PlatformService, platformConfigFromEnv } from "./platform.js";
 
 const VERSION = "0.1.0";
 
@@ -80,6 +85,15 @@ const uiDir =
   process.env["RUYIN_UI_DIR"] ??
   (existsSync(defaultUiDir) ? defaultUiDir : undefined);
 
+const platform = new PlatformService(platformConfigFromEnv(port), keys, dataDir);
+// Config values are env-derived - keep them out of logs (issuer/client are
+// inspectable via GET /auth/session); log only readiness facts.
+console.log(
+  `[ruyin] platform: oidc client ready, entitlements api ${
+    platform.config.platformApiBase ? "configured" : "NOT configured"
+  }`,
+);
+
 const server = createLocalApi({
   runtime,
   products: scan.loaded,
@@ -87,6 +101,7 @@ const server = createLocalApi({
   version: VERSION,
   reindex: (wsId, binding) => reindexBinding(storage, wsId, binding, localFs),
   uiDir,
+  platform,
   systemInfo: {
     version: VERSION,
     platform: process.platform,
