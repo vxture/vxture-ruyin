@@ -47,8 +47,8 @@ body {
 .row > input { flex: 1; }
 
 .mono {
-  font-family: var(--text-code-md-font-family, ui-monospace, monospace);
-  font-size: var(--text-code-sm-font-size, 12px);
+  font-family: var(--code-md-font-family, ui-monospace, monospace);
+  font-size: var(--code-sm-font-size, 12px);
   word-break: break-all;
 }
 
@@ -70,15 +70,15 @@ body {
   border-radius: var(--radius-md);
   padding: var(--spacing-xs) var(--spacing-sm);
   margin: var(--spacing-xs) 0;
-  font-size: var(--text-body-sm-font-size);
+  font-size: var(--body-sm-font-size);
   word-break: break-all;
 }
 
 .ws-name { font-weight: 600; }
 .ws-meta-line {
   color: var(--muted-foreground);
-  font-size: var(--text-body-sm-font-size);
-  font-family: var(--text-code-sm-font-family, ui-monospace, monospace);
+  font-size: var(--body-sm-font-size);
+  font-family: var(--code-sm-font-family, ui-monospace, monospace);
   word-break: break-all;
 }
 
@@ -108,11 +108,11 @@ body {
 }
 .step.done .step-dot { background: var(--success, var(--primary)); border-color: transparent; }
 .step.current .step-dot { background: var(--primary); border-color: transparent; }
-.step-label { font-size: var(--text-body-sm-font-size); color: var(--muted-foreground); }
+.step-label { font-size: var(--body-sm-font-size); color: var(--muted-foreground); }
 .step.current .step-label { color: var(--foreground); font-weight: 600; }
 
 .audit-scroll { max-height: 420px; overflow: auto; }
-.audit-table { font-size: var(--text-code-sm-font-size, 12px); }
+.audit-table { font-size: var(--code-sm-font-size, 12px); }
 .audit-table td { word-break: break-all; }
 
 /* NativeSelect wrapper widths (width lives on the wrapper, per DS contract). */
@@ -148,13 +148,13 @@ body {
 .setting-hint {
   font-weight: 400;
   color: var(--muted-foreground);
-  font-size: var(--text-body-sm-font-size);
+  font-size: var(--body-sm-font-size);
   margin-top: 2px;
 }
 .setting-control { min-width: 0; }
 
 .about-block { text-align: center; padding: var(--spacing-lg) 0; }
-.logo-cn { font-weight: 700; font-size: var(--text-title-xl-font-size, 20px); }
+.logo-cn { font-weight: 700; font-size: var(--title-xl-font-size, 20px); }
 .logo-en { color: var(--muted-foreground); letter-spacing: 0.18em; }
 
 /* ---------- sidebar footer identity strip ---------- */
@@ -178,29 +178,25 @@ body {
   border: 2px solid var(--background);
 }
 .user-chip-dot.off { background: var(--muted-foreground); }
-.user-chip-text {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  min-width: 0;
-  line-height: 1.3;
-}
+/* Single line, clear hierarchy: name carries weight+color, the status word
+   drops a size (body-sm) and a color step (muted). Name truncates first. */
 .user-chip-name {
   font-weight: 600;
-  max-width: 140px;
+  color: var(--foreground);
+  min-width: 0;
+  max-width: 128px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .user-chip-sub {
   color: var(--muted-foreground);
-  font-size: var(--text-body-sm-font-size);
+  font-size: var(--body-sm-font-size);
   font-weight: 400;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  flex-shrink: 0;
 }
+.user-chip-sub::before { content: "· "; }
 .agent-dock {
   display: flex;
   flex-direction: column;
