@@ -166,28 +166,29 @@ function Workbench({ api }: { api: Api }) {
     };
   }, [navigate]);
 
-  const sections: ShellNavSection[] = useMemo(
-    () => [
+  // One dimension per band: brand lives in the header, the sidebar's domain
+  // row says 工作台, sections navigate surfaces only. 设置 is a utility
+  // (header gear + account menu), not a sibling of navigation.
+  const sections: ShellNavSection[] = useMemo(() => {
+    const list: ShellNavSection[] = [
       {
-        title: "如影 · 工作台",
-        items: [
-          { href: "#home", label: "首页", icon: "home" },
-          { href: "#settings", label: "设置", icon: "settings" },
-        ],
+        title: "总览",
+        items: [{ href: "#home", label: "首页", icon: "home" }],
       },
-      {
+    ];
+    if (workspaces.length > 0) {
+      list.push({
         title: "工作空间",
         dividerBefore: true,
         items: workspaces.map((w) => ({
           href: `#ws/${w.id}`,
           label: w.name,
           icon: "cube" as const,
-          subLabel: w.productId,
         })),
-      },
-    ],
-    [workspaces],
-  );
+      });
+    }
+    return list;
+  }, [workspaces]);
 
   const searchGroups: ShellSearchGroup[] = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -298,7 +299,7 @@ function Workbench({ api }: { api: Api }) {
 
   const sidebar = (
     <ShellSidebarNav
-      domainName="如影 · RUYIN"
+      domainName="工作台"
       sections={sections}
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed(!collapsed)}

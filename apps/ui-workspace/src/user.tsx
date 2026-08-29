@@ -1,17 +1,24 @@
 /**
- * User slot - the sidebar-footer account menu, assembled from the DS
- * ShellUserMenu + ShellPanel grammar. Identity is live (C1: PKCE via the
- * system browser, tokens stay in the daemon; the UI only ever sees the
- * session summary). The subscription row reads the C2 envelope for the
- * installed products when the entitlements API is configured.
+ * User slot - the sidebar-footer identity strip. Built from the DS ShellPanel
+ * loose parts (the docs' "散件" path): a full-width identity chip triggers a
+ * ShellPanelContent popover carrying identity, runtime facts, subscription
+ * and account actions. Identity is live (C1: PKCE via the system browser,
+ * tokens stay in the daemon; the UI only ever sees the session summary).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Avatar,
+  AvatarFallback,
   Button,
+  Icon,
+  Popover,
+  PopoverTrigger,
+  ShellPanelContent,
+  ShellPanelHeader,
   ShellPanelRow,
   ShellPanelSection,
-  ShellUserMenu,
+  StatusBadge,
 } from "@vxture/design-system";
 import {
   Api,
@@ -139,6 +146,11 @@ export function UserSlot({
   const displayName = signedIn
     ? session?.profile?.name ?? session?.profile?.email ?? "Vxture 用户"
     : "本地用户";
+  const subLine = signedIn
+    ? session?.profile?.email ?? session?.org?.name ?? "已登录"
+    : online
+      ? "本地模式 · 运行中"
+      : "未连接";
 
   const subscriptionLine = () => {
     if (!signedIn) return "登录后同步";
@@ -155,98 +167,122 @@ export function UserSlot({
   };
 
   return (
-    <div className={`user-slot-wrap${collapsed ? " is-collapsed" : ""}`}>
-      <ShellUserMenu
-        online={online}
-        openLabel="账户"
-        user={{
-          displayName,
-          uniqueLine: signedIn
-            ? session?.profile?.email ?? session?.org?.name ?? "已登录"
-            : "未登录 Vxture 账号",
-          avatarFallback: displayName.slice(0, 1),
-          meta: signedIn ? session?.workspace?.name : "本地模式",
-          statusTag: signedIn
-            ? { label: "已登录", verified: true }
-            : { label: "本地模式" },
-        }}
-        extras={
-          <>
-            <ShellPanelSection divided={false}>
-              <ShellPanelRow
-                icon="cpu"
-                label="Runtime"
-                value={online ? `运行中 · ${system?.version ?? ""}` : "未连接"}
-              />
-              <ShellPanelRow
-                icon="shield-check"
-                label="数据保护"
-                value={
-                  system
-                    ? system.keyProtection === "dpapi"
-                      ? "DPAPI + 全库加密"
-                      : "开发态（明文主密钥）"
-                    : "…"
-                }
-              />
-              <ShellPanelRow icon="certificate" label="订阅" value={subscriptionLine()} />
-            </ShellPanelSection>
-            {!signedIn && (
-              <ShellPanelSection>
-                <Button
-                  className="w-full"
-                  disabled={busy || !online}
-                  onClick={() => void startLogin()}
-                >
-                  {busy ? "正在打开浏览器…" : "登录 Vxture 账号"}
-                </Button>
-                {pendingUrl && (
-                  <div className="text-body-sm text-muted-foreground text-center pt-2xs">
-                    在浏览器中完成登录后自动返回…{" "}
-                    <a
-                      className="text-primary-text underline"
-                      href={pendingUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      未打开？点此继续 ↗
-                    </a>
-                  </div>
-                )}
-              </ShellPanelSection>
+    <div className="user-slot-wrap">
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            aria-label={`账户 · ${displayName}`}
+            className={`user-chip h-auto w-full px-xs py-2xs ${
+              collapsed ? "justify-center" : "justify-start"
+            }`}
+          >
+            <span className="user-chip-avatar">
+              <Avatar>
+                <AvatarFallback>{displayName.slice(0, 1)}</AvatarFallback>
+              </Avatar>
+              <span className={`user-chip-dot${online ? "" : " off"}`} />
+            </span>
+            {!collapsed && (
+              <>
+                <span className="user-chip-text">
+                  <span className="user-chip-name">{displayName}</span>
+                  <span className="user-chip-sub">{subLine}</span>
+                </span>
+                <Icon
+                  name="caret-up-down"
+                  size="sm"
+                  className="ml-auto shrink-0 text-muted-foreground"
+                />
+              </>
             )}
-          </>
-        }
-        links={[
-          {
-            key: "console",
-            label: "账户中心",
-            href: session?.consoleBase ?? "https://vxture.com",
-            icon: "cloud",
-            newTab: true,
-          },
-        ]}
-        actions={[
-          {
-            key: "settings",
-            label: "设置",
-            icon: "settings",
-            onClick: onOpenSettings,
-          },
-          ...(signedIn
-            ? [
-                {
-                  key: "logout",
-                  label: "退出登录",
-                  icon: "sign-out" as const,
-                  danger: true,
-                  onClick: () => void doLogout(),
-                },
-              ]
-            : []),
-        ]}
-        triggerClassName="w-full"
-      />
+          </Button>
+        </PopoverTrigger>
+        <ShellPanelContent side="top" align="start" sideOffset={10}>
+          <ShellPanelHeader
+            avatarFallback={displayName.slice(0, 1)}
+            title={displayName}
+            titleAside={
+              <StatusBadge tone={signedIn ? "success" : "neutral"} dot>
+                {signedIn ? "已登录" : "本地模式"}
+              </StatusBadge>
+            }
+            metaRows={[
+              { key: "line", content: subLine },
+              ...(signedIn && session?.workspace?.name
+                ? [
+                    {
+                      key: "ws",
+                      icon: "buildings" as const,
+                      content: session.workspace.name,
+                    },
+                  ]
+                : []),
+            ]}
+          />
+          <ShellPanelSection>
+            <ShellPanelRow
+              icon="cpu"
+              label="Runtime"
+              value={online ? `运行中 · ${system?.version ?? ""}` : "未连接"}
+            />
+            <ShellPanelRow
+              icon="shield-check"
+              label="数据保护"
+              value={
+                system
+                  ? system.keyProtection === "dpapi"
+                    ? "DPAPI + 全库加密"
+                    : "开发态"
+                  : "…"
+              }
+            />
+            <ShellPanelRow icon="certificate" label="订阅" value={subscriptionLine()} />
+          </ShellPanelSection>
+          {!signedIn && (
+            <ShellPanelSection>
+              <Button
+                className="w-full"
+                disabled={busy || !online}
+                onClick={() => void startLogin()}
+              >
+                {busy ? "正在打开浏览器…" : "登录 Vxture 账号"}
+              </Button>
+              {pendingUrl && (
+                <div className="text-body-sm text-muted-foreground text-center pt-2xs">
+                  在浏览器中完成登录后自动返回…{" "}
+                  <a
+                    className="text-primary-text underline"
+                    href={pendingUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    未打开？点此继续 ↗
+                  </a>
+                </div>
+              )}
+            </ShellPanelSection>
+          )}
+          <ShellPanelSection>
+            <ShellPanelRow
+              icon="cloud"
+              label="账户中心"
+              href={session?.consoleBase ?? "https://vxture.com"}
+              newTab
+              trailingIcon="external-link"
+            />
+            <ShellPanelRow icon="settings" label="设置" onClick={onOpenSettings} />
+            {signedIn && (
+              <ShellPanelRow
+                icon="sign-out"
+                label="退出登录"
+                danger
+                onClick={() => void doLogout()}
+              />
+            )}
+          </ShellPanelSection>
+        </ShellPanelContent>
+      </Popover>
     </div>
   );
 }
