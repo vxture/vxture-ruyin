@@ -5,6 +5,8 @@
  *   pnpm -r build
  *     -> pnpm deploy --legacy the daemon (self-contained node_modules incl.
  *        native modules and workspace packages) into apps/shell/out/daemon
+ *     -> scripts/native/sqlite-electron-binding.mjs: electron-ABI prebuilt of
+ *        better-sqlite3-multiple-ciphers into that tree (TD-010)
  *     -> electron-builder (nsis, or --dir for an unpacked smoke build)
  *
  * Usage: node scripts/release/pack.mjs [--dir]
@@ -61,6 +63,23 @@ run(
 // effect, stripping devDependencies (including electron-builder). Restore
 // them before packaging.
 run("pnpm", ["install", "--prefer-offline"], repoRoot);
+
+// TD-010: the daemon runs inside Electron's bundled Node (utilityProcess),
+// whose ABI differs from the host Node that `pnpm deploy` fetched the
+// better-sqlite3-multiple-ciphers prebuilt for. Fetch the electron-ABI
+// prebuilt (for the electron version installed under apps/shell - the same
+// one electron-builder packages) into the deployed tree, next to the host
+// binding; storage.ts selects it at runtime. Runs after the restore so the
+// electron package is resolvable again.
+run(
+  "node",
+  [
+    join(repoRoot, "scripts", "native", "sqlite-electron-binding.mjs"),
+    "--module-dir",
+    daemonOut,
+  ],
+  repoRoot,
+);
 
 run(
   "pnpm",

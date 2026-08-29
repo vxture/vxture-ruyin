@@ -40,6 +40,13 @@ const dataDir =
     : join(homedir(), ".ruyin", "dev"));
 
 let daemon: Electron.UtilityProcess | undefined;
+let stopping = false;
+
+function stopDaemon(): void {
+  stopping = true;
+  daemon?.kill();
+  daemon = undefined;
+}
 
 function startDaemon(): Electron.UtilityProcess {
   const child = utilityProcess.fork(daemonEntry, [], {
@@ -60,9 +67,13 @@ function startDaemon(): Electron.UtilityProcess {
   child.stdout?.on("data", (d: Buffer) => process.stdout.write(d));
   child.stderr?.on("data", (d: Buffer) => process.stderr.write(d));
   child.on("exit", (code) => {
-    console.error(`[shell] runtime daemon exited (code ${code})`);
     daemon = undefined;
-    if (!app.isPackaged || code !== 0) app.quit();
+    if (stopping) return; // we asked for it (smoke done / quitting)
+    console.error(`[shell] runtime daemon exited unexpectedly (code ${code})`);
+    // A crashed daemon must surface as a non-zero shell exit - the smoke
+    // check (and anyone scripting the shell) relies on it (TD-010).
+    if (code !== 0) app.exit(1);
+    else if (!app.isPackaged) app.quit();
   });
   return child;
 }
@@ -114,14 +125,14 @@ app.whenReady().then(async () => {
     await waitForHealth();
     if (SMOKE) {
       console.log("[shell-smoke] OK: daemon healthy, shell wiring verified");
-      daemon.kill();
+      stopDaemon();
       app.exit(0);
       return;
     }
     openWindow();
   } catch (cause) {
     console.error(`[shell] startup failed: ${cause instanceof Error ? cause.message : cause}`);
-    daemon?.kill();
+    stopDaemon();
     app.exit(1);
   }
 });
@@ -131,5 +142,5 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
-  daemon?.kill();
+  stopDaemon();
 });
