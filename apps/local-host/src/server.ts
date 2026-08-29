@@ -172,10 +172,17 @@ async function handle(
     const err = url.searchParams.get("error");
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
+    // Everything interpolated below can carry request-controlled text (query
+    // params, upstream error strings) - escape it all; reflected XSS on a
+    // loopback page is still XSS.
+    const esc = (s: string) =>
+      s.replace(/[&<>"']/g, (ch) =>
+        ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === '"' ? "&quot;" : "&#39;",
+      );
     const page = (title: string, detail: string) =>
-      `<!doctype html><meta charset="utf-8"><title>${title}</title>` +
+      `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title>` +
       `<body style="font:15px system-ui;display:grid;place-items:center;height:96vh;margin:0">` +
-      `<div style="text-align:center"><h2>${title}</h2><p style="color:#666">${detail}</p></div>`;
+      `<div style="text-align:center"><h2>${esc(title)}</h2><p style="color:#666">${esc(detail)}</p></div>`;
     const html = (status: number, body: string) => {
       res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
       res.end(body);

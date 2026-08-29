@@ -86,11 +86,12 @@ const uiDir =
   (existsSync(defaultUiDir) ? defaultUiDir : undefined);
 
 const platform = new PlatformService(platformConfigFromEnv(port), keys, dataDir);
+// Config values are env-derived - keep them out of logs (issuer/client are
+// inspectable via GET /auth/session); log only readiness facts.
 console.log(
-  `[ruyin] platform: issuer ${platform.config.issuer}, client ${platform.config.clientId}` +
-    (platform.config.platformApiBase
-      ? `, api ${platform.config.platformApiBase}`
-      : ", entitlements api NOT configured"),
+  `[ruyin] platform: oidc client ready, entitlements api ${
+    platform.config.platformApiBase ? "configured" : "NOT configured"
+  }`,
 );
 
 const server = createLocalApi({
