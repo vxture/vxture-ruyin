@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { Button, Input } from "@vxture/design-system";
 import { Api, type ProductInfo, type WorkspaceMeta } from "./api";
 import { WorkspacePanel } from "./workspace";
 import { HomePage } from "./home";
@@ -40,15 +41,13 @@ function TokenGate({ onSubmit }: { onSubmit: (t: string) => void }) {
         本地智能工作环境 · 粘贴 Runtime 会话 token（daemon 启动日志中打印）以连接。
       </p>
       <div className="row">
-        <input
+        <Input
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="session token"
           onKeyDown={(e) => e.key === "Enter" && value && onSubmit(value)}
         />
-        <button className="primary" onClick={() => value && onSubmit(value)}>
-          连接
-        </button>
+        <Button onClick={() => value && onSubmit(value)}>连接</Button>
       </div>
     </div>
   );

@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { Button, Input } from "@vxture/design-system";
 import {
   Api,
   type ProductInfo,
@@ -107,11 +108,12 @@ export function HomePage({
             </div>
             <div className="muted product-blurb">{p.blurb}</div>
             <div className="row" style={{ marginTop: "auto" }}>
-              <button
+              <Button
+                variant="outline"
                 onClick={() => window.open(subscribeUrl(p.id), "_blank", "noopener")}
               >
                 去开通 ↗
-              </button>
+              </Button>
             </div>
           </div>
         ))}
@@ -187,15 +189,14 @@ function SubscribedCard({
 
       {creating ? (
         <div className="row" style={{ marginTop: "auto" }}>
-          <input
+          <Input
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="工作空间名称"
             onKeyDown={(e) => e.key === "Escape" && setCreating(false)}
           />
-          <button
-            className="primary"
+          <Button
             onClick={async () => {
               try {
                 const meta = await api.createWorkspace(
@@ -211,13 +212,11 @@ function SubscribedCard({
             }}
           >
             创建
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="row" style={{ marginTop: "auto" }}>
-          <button className="primary" onClick={() => setCreating(true)}>
-            新建工作空间
-          </button>
+          <Button onClick={() => setCreating(true)}>新建工作空间</Button>
           {workspaces.length === 0 && (
             <span className="muted">从这里开始第一个项目</span>
           )}

@@ -12,13 +12,19 @@
     "type-check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
+    "@vxture/design-system": "^10.0.0",
+    "next-themes": "^0.4.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.3.3",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.7.2",
     "vite": "^6.0.0"
   }

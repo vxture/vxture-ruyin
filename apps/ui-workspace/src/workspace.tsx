@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button, Input, NativeSelect, Textarea } from "@vxture/design-system";
 import {
   Api,
   type AuditEvent,
@@ -217,7 +218,8 @@ function StateStepper({
         <div className="row">
           <span className="muted">推进：</span>
           {transitions.map((t) => (
-            <button
+            <Button
+              variant="outline"
               key={t.to}
               onClick={() => {
                 if (t.confirm === "human") {
@@ -235,7 +237,7 @@ function StateStepper({
             >
               → {t.to}
               {t.confirm === "human" ? "（需确认）" : ""}
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -284,13 +286,12 @@ function ContextTab({
         </div>
       ))}
       <div className="row">
-        <input
+        <Input
           value={grantPath}
           onChange={(e) => setGrantPath(e.target.value)}
           placeholder="文件夹绝对路径"
         />
-        <button
-          className="primary"
+        <Button
           disabled={!grantPath}
           onClick={() => {
             onAddGrant(grantPath);
@@ -298,7 +299,7 @@ function ContextTab({
           }}
         >
           授权
-        </button>
+        </Button>
       </div>
 
       <h2>类型绑定 · Bindings</h2>
@@ -306,23 +307,24 @@ function ContextTab({
         <BindingCard key={b.type} api={api} wsId={wsId} binding={b} />
       ))}
       <div className="row">
-        <select
+        <NativeSelect
           value={effectiveType}
           onChange={(e) => setBindType(e.target.value)}
-          style={{ maxWidth: 220 }}
+          wrapperClassName="sel-narrow"
         >
           {contextTypes.map((t) => (
             <option key={t} value={t}>
               {t}
             </option>
           ))}
-        </select>
-        <input
+        </NativeSelect>
+        <Input
           value={bindRoot}
           onChange={(e) => setBindRoot(e.target.value)}
           placeholder="已授权文件夹内的路径"
         />
-        <button
+        <Button
+          variant="outline"
           disabled={!effectiveType || !bindRoot}
           onClick={() => {
             onBind(effectiveType, bindRoot);
@@ -330,7 +332,7 @@ function ContextTab({
           }}
         >
           绑定并索引
-        </button>
+        </Button>
       </div>
     </>
   );
@@ -435,18 +437,19 @@ function TaskLauncher({
         {def.objective} · 输入类型: {def.input_types.join(", ") || "（无）"}
       </div>
       <div className="row" style={{ marginTop: 6 }}>
-        <button className="primary" onClick={() => onLaunch(undefined)}>
+        <Button onClick={() => onLaunch(undefined)}>
           启动（自动选择上下文）
-        </button>
-        <button onClick={() => setManual(!manual)}>
+        </Button>
+        <Button variant="outline" onClick={() => setManual(!manual)}>
           {manual ? "收起手动模式" : "手动提供输入"}
-        </button>
+        </Button>
       </div>
       {manual && (
         <>
-          <textarea rows={3} value={json} onChange={(e) => setJson(e.target.value)} />
+          <Textarea rows={3} value={json} onChange={(e) => setJson(e.target.value)} />
           {jsonError && <div className="error-box">{jsonError}</div>}
-          <button
+          <Button
+            variant="outline"
             onClick={() => {
               try {
                 onLaunch(JSON.parse(json) as Record<string, unknown>);
@@ -457,7 +460,7 @@ function TaskLauncher({
             }}
           >
             以手动输入启动
-          </button>
+          </Button>
         </>
       )}
     </div>
@@ -570,12 +573,14 @@ function CheckpointCard({
         </table>
       )}
       <div className="row" style={{ marginTop: 8 }}>
-        <button className="primary" onClick={() => onDecide(true)}>
-          批准
-        </button>
-        <button className="danger" onClick={() => onDecide(false)}>
+        <Button onClick={() => onDecide(true)}>批准</Button>
+        <Button
+          variant="destructive"
+          confirmExempt="Checkpoint 决策本身就是人工确认步骤（50-harness §6），无需二次弹窗"
+          onClick={() => onDecide(false)}
+        >
           拒绝
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -611,10 +616,10 @@ function AuditTab({
         </span>
       </h2>
       <div className="row">
-        <select
+        <NativeSelect
           value={kindFilter}
           onChange={(e) => setKindFilter(e.target.value)}
-          style={{ maxWidth: 260 }}
+          wrapperClassName="sel-audit"
         >
           <option value="">全部事件（{audit.length}）</option>
           {kinds.map((k) => (
@@ -622,7 +627,7 @@ function AuditTab({
               {k}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       <div className="card audit-scroll">
         <table className="audit-table">
