@@ -36,17 +36,3 @@ version = "25.1.8"
 ecosystem = "npm"
 ignore = true
 reason = "fix needs electron-builder 26 which breaks packaging under pnpm; dev-only build tool, not shipped"
-
-# GHSA-jmr9-qjv8-65gv (extract-zip <= 2.0.1, symlink path traversal): upstream
-# extract-zip has no patched release; electron replaced it with
-# @electron-internal/extract-zip only in 40.10.3 / 41.7.2 / 42.4.0 / 43+, never
-# in the 39.x line apps/shell pins. Used solely by electron's install-time
-# binary unzip (devDependency of apps/shell), never in the shipped installer.
-# Revisit: drops out on its own when electron is bumped to >= 40.10.3; remove
-# this entry then.
-[[PackageOverrides]]
-name = "extract-zip"
-version = "2.0.1"
-ecosystem = "npm"
-ignore = true
-reason = "no upstream fix; electron 39.x install-time unzip only, dev-only, not shipped; goes away with electron >= 40.10.3"
