@@ -1,21 +1,23 @@
 /**
- * Settings panel (Claude-Desktop-style: left section nav, right content).
- * Live today: theme switching, runtime transparency (data dir, master-key
- * protection, versions). Explicit placeholders: Vxture account (liaison
- * L3(a) PKCE), transmission policy enforcement (policy engine), update
- * channel + check (W4 release infra / dl host).
+ * Settings - runtime transparency and preferences. DS-native: ghost-button
+ * section nav, SegmentedControl pickers over the ThemeProvider's three axes
+ * (mode / density / font size - the user-preference axis of the DS sizing
+ * model), StatusBadge for protection states.
  */
 
 import { useEffect, useState } from "react";
 import {
   Button,
+  EmptyState,
   NativeSelect,
+  SectionHeader,
   SegmentedControl,
+  StatusBadge,
   useTheme,
 } from "@vxture/design-system";
 import { Api, type SystemInfo } from "./api";
 
-const UI_VERSION = "0.1.0";
+const UI_VERSION = "0.2.0";
 
 type SectionId = "account" | "general" | "privacy" | "updates" | "about";
 
@@ -40,19 +42,20 @@ export function SettingsView({ api }: { api: Api }) {
   }, [api]);
 
   return (
-    <>
-      <h1>设置</h1>
+    <div className="flex flex-col gap-lg">
+      <SectionHeader level={1} icon="settings" title="设置" />
       {error && <div className="error-box">{error}</div>}
       <div className="settings">
-        <nav className="settings-nav">
+        <nav className="settings-nav" aria-label="设置分区">
           {SECTIONS.map((s) => (
-            <button
+            <Button
               key={s.id}
-              className={`settings-nav-item${section === s.id ? " active" : ""}`}
+              variant={section === s.id ? "secondary" : "ghost"}
+              className="w-full justify-start"
               onClick={() => setSection(s.id)}
             >
               {s.label}
-            </button>
+            </Button>
           ))}
         </nav>
         <div className="settings-content">
@@ -63,7 +66,7 @@ export function SettingsView({ api }: { api: Api }) {
           {section === "about" && <AboutSection system={system} />}
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -80,7 +83,7 @@ function SettingRow({
     <div className="setting-row">
       <div className="setting-label">
         {label}
-        {hint && <div className="muted setting-hint">{hint}</div>}
+        {hint && <div className="setting-hint">{hint}</div>}
       </div>
       <div className="setting-control">{children}</div>
     </div>
@@ -92,18 +95,11 @@ function SettingRow({
 function AccountSection() {
   return (
     <div className="card">
-      <div className="account-empty">
-        <div className="product-icon dim" style={{ margin: "0 auto 10px" }}>
-          ？
-        </div>
-        <div className="ws-name">未登录</div>
-        <p className="muted">
-          登录 Vxture 账号后可同步订阅、调用云端 AI 能力并管理设备。
-          <br />
-          桌面端登录（PKCE）随平台对接上线。
-        </p>
-        <Button disabled>登录 Vxture 账号（即将开放）</Button>
-      </div>
+      <EmptyState
+        icon="user-circle"
+        title="账户由左下角的账户菜单管理"
+        description="在侧栏底部登录 Vxture 账号：同步订阅权益、调用云端 AI 能力、管理设备。登录走系统浏览器（PKCE），凭证只存于本机凭据库。"
+      />
     </div>
   );
 }
@@ -111,19 +107,44 @@ function AccountSection() {
 /* ---------------- 通用 ---------------- */
 
 function GeneralSection() {
-  const { theme, setTheme } = useTheme();
+  const { mode, setMode, density, setDensity, fontSize, setFontSize } =
+    useTheme();
   return (
     <div className="card">
-      <SettingRow label="主题" hint="深色模式下窗口按钮颜色随后续版本同步">
+      <SettingRow label="主题" hint="深色为默认基调；窗口按钮颜色随后续版本同步">
         <SegmentedControl
           ariaLabel="主题"
           items={[
-            { value: "light", label: "浅色" },
             { value: "dark", label: "深色" },
+            { value: "light", label: "浅色" },
             { value: "system", label: "跟随系统" },
           ]}
-          value={theme ?? "light"}
-          onChange={(v) => setTheme(v)}
+          value={mode}
+          onChange={setMode}
+        />
+      </SettingRow>
+      <SettingRow label="密度" hint="同一套语义间距的三组取值，控件高度不变">
+        <SegmentedControl
+          ariaLabel="密度"
+          items={[
+            { value: "compact", label: "紧凑" },
+            { value: "default", label: "默认" },
+            { value: "comfortable", label: "宽松" },
+          ]}
+          value={density}
+          onChange={setDensity}
+        />
+      </SettingRow>
+      <SettingRow label="字号" hint="整套排版角色一起挪档，层级关系不变">
+        <SegmentedControl
+          ariaLabel="字号"
+          items={[
+            { value: "small", label: "小" },
+            { value: "default", label: "标准" },
+            { value: "large", label: "大" },
+          ]}
+          value={fontSize}
+          onChange={setFontSize}
         />
       </SettingRow>
       <SettingRow label="语言">
@@ -148,7 +169,7 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
   return (
     <>
       <div className="card">
-        <SettingRow label="数据目录" hint="全部业务数据保存在本机，是否上云由你决定">
+        <SettingRow label="数据目录" hint="全部业务数据在本机，此目录之外不落任何内容">
           <span className="mono">{system?.dataDir ?? "…"}</span>
         </SettingRow>
         <SettingRow label="产品目录">
@@ -157,9 +178,9 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
         <SettingRow label="静态加密" hint="每个工作空间独立密钥，SQLCipher 加密">
           {system ? (
             system.keyProtection === "dpapi" ? (
-              <span className="pill completed">主密钥由 Windows DPAPI 保护</span>
+              <StatusBadge tone="success">主密钥由 Windows DPAPI 保护</StatusBadge>
             ) : (
-              <span className="pill waiting_human">开发态：主密钥明文存储</span>
+              <StatusBadge tone="warning">开发态：主密钥明文存储</StatusBadge>
             )
           ) : (
             "…"
@@ -181,8 +202,13 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
             onChange={pickPolicy}
           />
         </SettingRow>
-        <SettingRow label="审计" hint="每次传输与执行都有哈希链审计，可在工作空间的「审计」板块查看与本地校验">
-          <span className="muted">推理传输 ≠ 数据存储：传输临时、不持久化</span>
+        <SettingRow
+          label="审计"
+          hint="每次传输与执行都有哈希链审计，可在工作空间的「审计」板块查看与本地校验"
+        >
+          <span className="text-body-sm text-muted-foreground">
+            推理传输 ≠ 数据存储：传输临时、不持久化
+          </span>
         </SettingRow>
       </div>
     </>
@@ -234,7 +260,10 @@ function UpdatesSection({ system }: { system: SystemInfo | null }) {
             检查更新
           </Button>
           {checked && (
-            <div className="muted" style={{ marginTop: 6 }}>
+            <div
+              className="text-body-sm text-muted-foreground"
+              style={{ marginTop: 6 }}
+            >
               {checked}
             </div>
           )}
@@ -249,24 +278,21 @@ function UpdatesSection({ system }: { system: SystemInfo | null }) {
 function AboutSection({ system }: { system: SystemInfo | null }) {
   return (
     <div className="card">
-      <div className="account-empty">
-        <div className="logo" style={{ justifyContent: "center", fontSize: 18 }}>
-          <span className="logo-mark" aria-hidden />
-          <span>
-            <span className="logo-cn">如影</span>{" "}
-            <span className="logo-en">RUYIN</span>
-          </span>
-        </div>
-        <p className="muted" style={{ marginTop: 10 }}>
+      <div className="about-block">
+        <p>
+          <span className="logo-cn">如影</span>{" "}
+          <span className="logo-en">RUYIN</span>
+        </p>
+        <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
           Vxture AI 原生业务产品的本地智能工作环境
           <br />
           业务工作空间运行时 · Business Workspace Runtime
         </p>
-        <div className="mono muted">
+        <div className="mono text-muted-foreground">
           Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
           {system?.arch ?? ""}
         </div>
-        <p className="muted" style={{ marginTop: 12 }}>
+        <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
           © 2026 Vxture · 保留所有权利
         </p>
       </div>

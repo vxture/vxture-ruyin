@@ -1,13 +1,21 @@
 /**
- * Home - the work entry point. Subscribed products fill a 3-column grid
- * (installed products are live; the rest are subscription placeholders
- * until entitlement lands, liaison L3(b)). A compact recommended rail sits
- * below without competing with the main grid (catalog/subscribe deep links
- * come with the platform integration, product_200 section 3.2).
+ * Home - the work entry point, tech-console style: a metric band (runtime /
+ * spaces / protection / AI channel), the subscribed-product grid (installed
+ * products are live ListCards; the rest are EntryCard deep links into the
+ * console subscribe flow, explicit click only), and a recommended rail.
  */
 
 import { useEffect, useState } from "react";
-import { Button, Input } from "@vxture/design-system";
+import {
+  Button,
+  EntryCard,
+  Input,
+  ListCard,
+  MetricGrid,
+  Section,
+  SectionHeader,
+  StatusBadge,
+} from "@vxture/design-system";
 import {
   Api,
   type ProductInfo,
@@ -40,6 +48,7 @@ export function HomePage({
   api,
   products,
   workspaces,
+  health,
   onOpen,
   onCreated,
   onError,
@@ -47,6 +56,7 @@ export function HomePage({
   api: Api;
   products: ProductInfo[];
   workspaces: WorkspaceMeta[];
+  health: { ok: boolean; version?: string };
   onOpen: (wsId: string) => void;
   onCreated: (wsId: string) => void | Promise<void>;
   onError: (msg: string) => void;
@@ -56,93 +66,126 @@ export function HomePage({
     (p) => !installedIds.has(p.id),
   ).slice(0, Math.max(0, GRID_TARGET - products.length));
 
-  // Console base for subscribe deep links (from the daemon session summary;
-  // deep links open only on an explicit click, never automatically).
   const [session, setSession] = useState<SessionInfo | null>(null);
+  const [system, setSystem] = useState<{ keyProtection: string } | null>(null);
   useEffect(() => {
     let alive = true;
     api
       .session()
       .then((s) => alive && setSession(s))
       .catch(() => {});
+    api
+      .system()
+      .then((s) => alive && setSystem(s))
+      .catch(() => {});
     return () => {
       alive = false;
     };
   }, [api]);
+
+  // Console deep links open only on an explicit click, never automatically.
   const subscribeUrl = (productId: string) =>
     `${session?.consoleBase ?? "https://vxture.com"}/subscribe?product=${encodeURIComponent(productId)}&intent=subscribe`;
 
   return (
-    <>
-      <div className="home-hero">
-        <h1>开始工作</h1>
-        <p className="muted">
-          从已订阅的产品进入业务工作空间；本地数据不出设备，是否上云由你决定。
-        </p>
-      </div>
+    <div className="home">
+      <SectionHeader
+        level={1}
+        icon="squares-four"
+        title="开始工作"
+        description="从已订阅的产品进入业务工作空间；本地数据不出设备，是否上云由你决定。"
+      />
 
-      <h2>已订阅产品</h2>
-      <div className="home-grid">
-        {products.map((p) => (
-          <SubscribedCard
-            key={p.id}
-            api={api}
-            product={p}
-            workspaces={workspaces.filter((w) => w.productId === p.id)}
-            onOpen={onOpen}
-            onCreated={onCreated}
-            onError={onError}
-          />
-        ))}
-        {placeholders.map((p) => (
-          <div key={p.id} className="product-card placeholder">
-            <div className="product-head">
-              <div className="product-icon dim">{p.name.slice(0, 1)}</div>
-              <div style={{ minWidth: 0 }}>
-                <div className="ws-name">{p.name}</div>
-                <div className="ws-meta-line">{p.id}</div>
-              </div>
-              <span className="pill" style={{ marginLeft: "auto" }}>
-                待开通
-              </span>
-            </div>
-            <div className="muted product-blurb">{p.blurb}</div>
-            <div className="row" style={{ marginTop: "auto" }}>
-              <Button
-                variant="outline"
-                onClick={() => window.open(subscribeUrl(p.id), "_blank", "noopener")}
-              >
-                去开通 ↗
-              </Button>
-            </div>
-          </div>
-        ))}
-      </div>
+      <MetricGrid
+        aria-label="运行时概况"
+        columns={4}
+        items={[
+          {
+            id: "runtime",
+            label: "Runtime",
+            value: health.ok ? "运行中" : "未连接",
+            description: health.ok ? `本地守护进程 ${health.version ?? ""}` : "等待守护进程",
+            icon: "cpu",
+            trend: health.ok ? "在线" : "离线",
+            trendTone: health.ok ? "success" : "danger",
+          },
+          {
+            id: "spaces",
+            label: "工作空间",
+            value: String(workspaces.length),
+            description: "本地业务空间",
+            icon: "cube",
+          },
+          {
+            id: "protection",
+            label: "数据保护",
+            value: system?.keyProtection === "dpapi" ? "已加密" : "开发态",
+            description:
+              system?.keyProtection === "dpapi"
+                ? "DPAPI + 全库加密"
+                : "明文主密钥（仅开发）",
+            icon: "shield-check",
+            trendTone: system?.keyProtection === "dpapi" ? "success" : "warning",
+            trend: system?.keyProtection === "dpapi" ? "DPAPI" : "DEV",
+          },
+          {
+            id: "ai",
+            label: "智能通道",
+            value: "待接通",
+            description: "AI Gateway · liaison L3-c",
+            icon: "sparkles",
+          },
+        ]}
+      />
 
-      <h2>为你推荐</h2>
-      <div className="home-grid">
-        {RECOMMENDED.map((r) => (
-          <div key={r.id} className="product-card rec">
-            <div className="product-head">
-              <div className="product-icon dim small">
-                {r.name.slice(5, 6) || r.name.slice(0, 1)}
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div className="ws-name">{r.name}</div>
-              </div>
-              <span className="pill" style={{ marginLeft: "auto", flexShrink: 0 }}>
-                敬请期待
-              </span>
-            </div>
-            <div className="muted product-blurb">{r.blurb}</div>
-          </div>
-        ))}
-      </div>
-    </>
+      <Section title="已订阅产品" icon="package" level={2}>
+        <div className="grid gap-md md:grid-cols-2 xl:grid-cols-3">
+          {products.map((p) => (
+            <InstalledProductCard
+              key={p.id}
+              api={api}
+              product={p}
+              workspaces={workspaces.filter((w) => w.productId === p.id)}
+              onOpen={onOpen}
+              onCreated={onCreated}
+              onError={onError}
+            />
+          ))}
+          {placeholders.map((p) => (
+            <EntryCard
+              key={p.id}
+              icon="package"
+              title={p.name}
+              meta={<StatusBadge tone="neutral">待开通</StatusBadge>}
+              description={`${p.blurb} · ${p.id}`}
+              href={subscribeUrl(p.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+            />
+          ))}
+        </div>
+      </Section>
+
+      <Section title="为你推荐" icon="rocket" level={2}>
+        <div className="grid gap-md md:grid-cols-3">
+          {RECOMMENDED.map((r) => (
+            <EntryCard
+              key={r.id}
+              icon="lightning"
+              title={r.name}
+              meta={<StatusBadge tone="brand">敬请期待</StatusBadge>}
+              description={r.blurb}
+              aria-disabled="true"
+              onClick={(e) => e.preventDefault()}
+            />
+          ))}
+        </div>
+      </Section>
+    </div>
   );
 }
 
-function SubscribedCard({
+function InstalledProductCard({
   api,
   product,
   workspaces,
@@ -160,68 +203,73 @@ function SubscribedCard({
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   return (
-    <div className="product-card">
-      <div className="product-head">
-        <div className="product-icon">{product.name.slice(0, 1)}</div>
-        <div style={{ minWidth: 0 }}>
-          <div className="ws-name">{product.name}</div>
-          <div className="ws-meta-line">
+    <ListCard
+      icon="cube"
+      title={product.name}
+      description={BLURBS[product.id] ?? "AI 原生业务产品"}
+      status={<StatusBadge tone="success">已安装</StatusBadge>}
+      meta={
+        <div className="flex flex-col gap-xs">
+          <span className="ws-meta-line">
             {product.id}@{product.version}
-          </div>
-        </div>
-      </div>
-      <div className="muted product-blurb">
-        {BLURBS[product.id] ?? "AI 原生业务产品"}
-      </div>
-
-      {workspaces.length > 0 && (
-        <div className="product-ws-list">
-          {workspaces.slice(0, 3).map((w) => (
-            <button key={w.id} className="ws-chip" onClick={() => onOpen(w.id)}>
-              {w.name}
-            </button>
-          ))}
-          {workspaces.length > 3 && (
-            <span className="muted">等 {workspaces.length} 个</span>
+          </span>
+          {workspaces.length > 0 && (
+            <div className="flex flex-wrap items-center gap-xs">
+              {workspaces.slice(0, 3).map((w) => (
+                <Button
+                  key={w.id}
+                  variant="secondary"
+                  onClick={() => onOpen(w.id)}
+                >
+                  {w.name}
+                </Button>
+              ))}
+              {workspaces.length > 3 && (
+                <span className="text-body-sm text-muted-foreground">
+                  等 {workspaces.length} 个
+                </span>
+              )}
+            </div>
+          )}
+          {creating ? (
+            <div className="flex items-center gap-xs">
+              <Input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="工作空间名称"
+                onKeyDown={(e) => e.key === "Escape" && setCreating(false)}
+              />
+              <Button
+                onClick={async () => {
+                  try {
+                    const meta = await api.createWorkspace(
+                      product.id,
+                      name || product.name,
+                    );
+                    setCreating(false);
+                    setName("");
+                    await onCreated(meta.id);
+                  } catch (e) {
+                    onError(String((e as Error).message));
+                  }
+                }}
+              >
+                创建
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-xs">
+              <Button onClick={() => setCreating(true)}>新建工作空间</Button>
+              {workspaces.length === 0 && (
+                <span className="text-body-sm text-muted-foreground">
+                  从这里开始第一个项目
+                </span>
+              )}
+            </div>
           )}
         </div>
-      )}
-
-      {creating ? (
-        <div className="row" style={{ marginTop: "auto" }}>
-          <Input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="工作空间名称"
-            onKeyDown={(e) => e.key === "Escape" && setCreating(false)}
-          />
-          <Button
-            onClick={async () => {
-              try {
-                const meta = await api.createWorkspace(
-                  product.id,
-                  name || product.name,
-                );
-                setCreating(false);
-                setName("");
-                await onCreated(meta.id);
-              } catch (e) {
-                onError(String((e as Error).message));
-              }
-            }}
-          >
-            创建
-          </Button>
-        </div>
-      ) : (
-        <div className="row" style={{ marginTop: "auto" }}>
-          <Button onClick={() => setCreating(true)}>新建工作空间</Button>
-          {workspaces.length === 0 && (
-            <span className="muted">从这里开始第一个项目</span>
-          )}
-        </div>
-      )}
-    </div>
+      }
+    />
   );
 }
