@@ -11,8 +11,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.json --noEmit",
-    "start": "electron .",
-    "smoke": "electron . --smoke"
+    "native:electron": "node ../../scripts/native/sqlite-electron-binding.mjs",
+    "start": "pnpm run native:electron && electron .",
+    "smoke": "pnpm run native:electron && electron . --smoke"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

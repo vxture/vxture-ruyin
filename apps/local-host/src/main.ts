@@ -45,6 +45,21 @@ for (const failure of scan.failed) {
 const keys = await KeyManager.open(dataDir);
 const storage = new SqliteStoragePort(dataDir, keys);
 console.log(`[ruyin] master key protection: ${keys.protection}`);
+// Native binding self-check (TD-010): fail fast if the SQLite binding does
+// not load in this runtime (Electron utilityProcess vs host Node ABI).
+try {
+  const sqlite = storage.selfCheck();
+  console.log(`[ruyin] sqlite binding: ${sqlite.binding} (SQLite ${sqlite.sqliteVersion})`);
+} catch (cause) {
+  // stdio is a pipe under the shell's utilityProcess: flush before exiting,
+  // or the message is lost with the process.
+  process.stderr.write(
+    `[ruyin] FATAL: sqlite native binding failed to load: ${cause instanceof Error ? cause.message : cause}
+`,
+    () => process.exit(1),
+  );
+  await new Promise(() => {}); // never resolves - exit happens in the callback
+}
 const localFs = new LocalFsConnector();
 const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
 

@@ -11,7 +11,8 @@
 
 import Database from "better-sqlite3-multiple-ciphers";
 import { mkdirSync, existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import type { KeyManager } from "./keys.js";
 import type {
   AuditEvent,
@@ -50,6 +51,40 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5(
   content
 );
 `;
+
+const require = createRequire(import.meta.url);
+
+/**
+ * Native binding selection (TD-010).
+ *
+ * Under plain Node the package's own binding is used (build/Release, fetched
+ * for the host ABI at install time; what `node --test` and `node dist/main.js`
+ * run). Under Electron the daemon runs in the shell's utilityProcess, i.e. in
+ * Electron's bundled Node with its *own* ABI, so the host binding cannot load;
+ * scripts/native/sqlite-electron-binding.mjs drops the matching electron
+ * prebuilt next to it and this picks it by the running ABI. Returns the
+ * binding path for Electron, undefined for the package default.
+ */
+export function resolveNativeBinding(): string | undefined {
+  if (!process.versions["electron"]) return undefined;
+  const pkgDir = dirname(
+    require.resolve("better-sqlite3-multiple-ciphers/package.json"),
+  );
+  const label = `electron-v${process.versions.modules}-${process.platform}-${process.arch}`;
+  const binding = join(pkgDir, "build", label, "better_sqlite3.node");
+  if (!existsSync(binding)) {
+    throw new Error(
+      `SQLite native binding for ${label} not found at ${binding} - run "pnpm native:electron" ` +
+        `(apps/shell start/smoke run it automatically; the installer pack chain runs it in scripts/release/pack.mjs)`,
+    );
+  }
+  return binding;
+}
+
+function openDatabase(file: string): Database.Database {
+  const nativeBinding = resolveNativeBinding();
+  return nativeBinding ? new Database(file, { nativeBinding }) : new Database(file);
+}
 
 export class SqliteWorkspaceStore implements WorkspaceStore {
   constructor(private readonly db: Database.Database) {}
@@ -192,6 +227,26 @@ export class SqliteStoragePort implements StoragePort {
     mkdirSync(join(dataDir, "workspaces"), { recursive: true });
   }
 
+  /**
+   * Prove the native binding loads in THIS runtime by opening and querying a
+   * throwaway in-memory database (TD-010). Called once at daemon startup so
+   * an ABI mismatch fails the process (and the shell smoke) immediately
+   * instead of on the first workspace open.
+   */
+  selfCheck(): { binding: string; sqliteVersion: string } {
+    const nativeBinding = resolveNativeBinding();
+    const db = openDatabase(":memory:");
+    try {
+      const row = db.prepare("SELECT sqlite_version() AS v").get() as { v: string };
+      return {
+        binding: nativeBinding ?? `package default (node ABI ${process.versions.modules})`,
+        sqliteVersion: row.v,
+      };
+    } finally {
+      db.close();
+    }
+  }
+
   /** Close every open database handle (daemon shutdown / test cleanup). */
   closeAll(): void {
     for (const { db } of this.open.values()) db.close();
@@ -206,7 +261,7 @@ export class SqliteStoragePort implements StoragePort {
     const cached = this.open.get(workspaceId);
     if (cached) return cached.store;
     const dir = this.wsDir(workspaceId);
-    const db = new Database(join(dir, "workspace.db"));
+    const db = openDatabase(join(dir, "workspace.db"));
     // At-rest encryption (TD-009): SQLCipher-compatible scheme, raw hex key
     // per workspace. Cipher selection must precede the key pragma, both
     // before any other statement.
