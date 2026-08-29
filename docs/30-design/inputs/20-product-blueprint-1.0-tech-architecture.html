@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Ruyin 如影 产品蓝图 1.0 技术架构版</title>
+<style>
+body{margin:0;background:#f4f7fb;color:#172033;font-family:"Microsoft YaHei",Arial}
+.wrap{max-width:1200px;margin:auto;padding:40px}
+.hero{background:linear-gradient(135deg,#0f172a,#2563eb);color:white;padding:50px;border-radius:28px}
+.card{background:white;margin-top:25px;padding:30px;border-radius:24px;box-shadow:0 10px 30px #0002}
+.layer{padding:25px;margin:15px;border-radius:20px;text-align:center}
+.cloud{background:#dbeafe}.runtime{background:#ede9fe}.security{background:#fee2e2}.local{background:#dcfce7}
+.item{display:inline-block;background:white;padding:8px 15px;margin:6px;border-radius:20px}
+.arrow{text-align:center;font-size:35px;color:#2563eb}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.box{background:#f8fafc;padding:20px;border-radius:18px}
+pre{background:#111827;color:#dbeafe;padding:25px;border-radius:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="hero">
+<h1>Ruyin 如影</h1>
+<h2>AI Work Companion 技术架构蓝图 1.0</h2>
+<p>Local AI Runtime · 云端智能 · 本地安全</p>
+</div>
+
+<div class="card">
+<h2>技术定位</h2>
+<p>Ruyin 不是传统桌面软件，而是运行在用户本地环境中的 AI Runtime。UI 可以是 Local Web，也可以封装为 Desktop Shell。</p>
+</div>
+
+<div class="card">
+<h2>总体架构</h2>
+
+<div class="layer cloud">
+<h2>Vxture Cloud</h2>
+<span class="item">Identity</span><span class="item">Tenant</span><span class="item">Agent Platform</span><span class="item">Model Gateway</span>
+</div>
+
+<div class="arrow">↓</div>
+
+<div class="layer runtime">
+<h2>Ruyin Local Runtime</h2>
+<span class="item">Agent Engine</span><span class="item">Memory</span><span class="item">Knowledge</span><span class="item">Tools</span>
+</div>
+
+<div class="arrow">↓</div>
+
+<div class="layer security">
+<h2>Security Policy Layer</h2>
+<span class="item">Capability</span><span class="item">Sandbox</span><span class="item">Audit</span>
+</div>
+
+<div class="arrow">↓</div>
+
+<div class="layer local">
+<h2>Local Workspace</h2>
+<span class="item">Files</span><span class="item">Projects</span><span class="item">Knowledge</span><span class="item">Vault</span>
+</div>
+
+</div>
+
+<div class="card">
+<h2>运行模式</h2>
+<div class="grid">
+<div class="box"><h3>Local Web</h3><p>localhost访问，本地Runtime提供能力。</p></div>
+<div class="box"><h3>Desktop Shell</h3><p>Tauri封装，提供原生体验。</p></div>
+<div class="box"><h3>Enterprise Runtime</h3><p>企业内网部署，数据留域。</p></div>
+</div>
+</div>
+
+<div class="card">
+<h2>Agent 权限模型</h2>
+<pre>
+Agent
+ ↓
+Skill Capability
+ ↓
+Policy Engine
+ ↓
+Runtime Permission
+ ↓
+File / Knowledge / Application
+</pre>
+<p>Agent 不直接拥有操作系统权限，通过能力和策略控制执行。</p>
+</div>
+
+<div class="card">
+<h2>核心原则</h2>
+<ul>
+<li>数据属于用户，智能属于云端。</li>
+<li>Runtime 与 UI 解耦。</li>
+<li>Agent 是受治理的智能进程。</li>
+<li>能力通过 Package 扩展。</li>
+</ul>
+</div>
+
+</div>
+</body>
+</html>

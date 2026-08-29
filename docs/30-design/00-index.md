@@ -12,3 +12,4 @@
 | `60-technical-architecture.md` | 06 | 技术选型 T1–T13、共享内核、存储、安全、分阶段实施 |
 | `70-repo-organization.md` | 08 | 本仓组织方式、tag→渠道发布模式、三条构件流 |
 | `decisions/` | — | ADR 寄存器（append-only） |
+| `inputs/` | — | owner 原始输入稿留档（产品战略 v0.1 md/docx、技术架构蓝图 1.0 html）+ 吸纳对账清单；非权威，见其 `00-index.md` |
