@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@vxture/design-system";
 import {
   Api,
   type EntitlementsBatch,
@@ -259,13 +260,13 @@ export function UserSlot({
           </div>
 
           {!signedIn && (
-            <button
-              className="primary user-login-btn"
+            <Button
+              className="user-login-btn"
               disabled={busy || !online}
               onClick={() => void startLogin()}
             >
               {busy ? "正在打开浏览器…" : "登录 Vxture 账号"}
-            </button>
+            </Button>
           )}
           {!signedIn && pendingUrl && (
             <div className="muted" style={{ textAlign: "center", padding: "4px 0" }}>

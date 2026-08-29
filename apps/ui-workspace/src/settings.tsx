@@ -7,8 +7,13 @@
  */
 
 import { useEffect, useState } from "react";
+import {
+  Button,
+  NativeSelect,
+  SegmentedControl,
+  useTheme,
+} from "@vxture/design-system";
 import { Api, type SystemInfo } from "./api";
-import { getThemePref, setThemePref, type ThemePref } from "./theme";
 
 const UI_VERSION = "0.1.0";
 
@@ -97,7 +102,7 @@ function AccountSection() {
           <br />
           桌面端登录（PKCE）随平台对接上线。
         </p>
-        <button disabled>登录 Vxture 账号（即将开放）</button>
+        <Button disabled>登录 Vxture 账号（即将开放）</Button>
       </div>
     </div>
   );
@@ -106,36 +111,25 @@ function AccountSection() {
 /* ---------------- 通用 ---------------- */
 
 function GeneralSection() {
-  const [theme, setTheme] = useState<ThemePref>(getThemePref());
-  const pick = (t: ThemePref) => {
-    setThemePref(t);
-    setTheme(t);
-  };
+  const { theme, setTheme } = useTheme();
   return (
     <div className="card">
       <SettingRow label="主题" hint="深色模式下窗口按钮颜色随后续版本同步">
-        <div className="choice-group">
-          {(
-            [
-              ["light", "浅色"],
-              ["dark", "深色"],
-              ["system", "跟随系统"],
-            ] as Array<[ThemePref, string]>
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              className={`choice${theme === value ? " active" : ""}`}
-              onClick={() => pick(value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          ariaLabel="主题"
+          items={[
+            { value: "light", label: "浅色" },
+            { value: "dark", label: "深色" },
+            { value: "system", label: "跟随系统" },
+          ]}
+          value={theme ?? "light"}
+          onChange={(v) => setTheme(v)}
+        />
       </SettingRow>
       <SettingRow label="语言">
-        <select disabled style={{ maxWidth: 200 }}>
+        <NativeSelect disabled wrapperClassName="sel-lang">
           <option>简体中文</option>
-        </select>
+        </NativeSelect>
       </SettingRow>
     </div>
   );
@@ -177,22 +171,15 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
           label="推理传输策略"
           hint="上下文送云端推理前的确认粒度；策略引擎接入后生效（当前高敏感内容始终需确认）"
         >
-          <div className="choice-group">
-            {(
-              [
-                ["sensitivity", "按敏感度（推荐）"],
-                ["always", "全部需确认"],
-              ] as Array<[string, string]>
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                className={`choice${policy === value ? " active" : ""}`}
-                onClick={() => pickPolicy(value)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            ariaLabel="推理传输策略"
+            items={[
+              { value: "sensitivity", label: "按敏感度（推荐）" },
+              { value: "always", label: "全部需确认" },
+            ]}
+            value={policy}
+            onChange={pickPolicy}
+          />
         </SettingRow>
         <SettingRow label="审计" hint="每次传输与执行都有哈希链审计，可在工作空间的「审计」板块查看与本地校验">
           <span className="muted">推理传输 ≠ 数据存储：传输临时、不持久化</span>
@@ -224,26 +211,20 @@ function UpdatesSection({ system }: { system: SystemInfo | null }) {
         <span className="mono">{system?.startedAt ?? "…"}</span>
       </SettingRow>
       <SettingRow label="更新渠道" hint="stable 稳定 / beta 尝鲜；自动更新随发布服务上线">
-        <div className="choice-group">
-          {(
-            [
-              ["stable", "稳定版"],
-              ["beta", "Beta"],
-            ] as Array<[string, string]>
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              className={`choice${channel === value ? " active" : ""}`}
-              onClick={() => pickChannel(value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          ariaLabel="更新渠道"
+          items={[
+            { value: "stable", label: "稳定版" },
+            { value: "beta", label: "Beta" },
+          ]}
+          value={channel}
+          onChange={pickChannel}
+        />
       </SettingRow>
       <SettingRow label="检查更新">
         <div>
-          <button
+          <Button
+            variant="outline"
             onClick={() =>
               setChecked(
                 `当前已是最新（${new Date().toLocaleTimeString()}）· 在线更新随发布服务上线后启用`,
@@ -251,7 +232,7 @@ function UpdatesSection({ system }: { system: SystemInfo | null }) {
             }
           >
             检查更新
-          </button>
+          </Button>
           {checked && (
             <div className="muted" style={{ marginTop: 6 }}>
               {checked}
