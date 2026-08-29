@@ -18,6 +18,11 @@ import {
 } from "@vxture/ruyin-core";
 import type { LoadedProduct } from "./products.js";
 import { DEV_UI_HTML } from "./dev-ui.js";
+import {
+  NotSignedInError,
+  PlatformNotConfiguredError,
+  type PlatformService,
+} from "./platform.js";
 
 export interface LocalApiDeps {
   runtime: WorkspaceRuntime;
@@ -28,6 +33,9 @@ export interface LocalApiDeps {
   reindex: (workspaceId: string, binding: Binding) => Promise<number>;
   /** Built Workspace UI directory; when set, served at / (dev console moves to /dev). */
   uiDir?: string;
+  /** Vxture platform integration (C1 identity + C2 entitlements); absent in
+   *  tests that exercise the runtime surface only. */
+  platform?: PlatformService;
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -96,6 +104,12 @@ function errorStatus(cause: unknown): { status: number; body: unknown } {
   if (cause instanceof SyntaxError) {
     return { status: 400, body: { error: "bad_json", message: cause.message } };
   }
+  if (cause instanceof NotSignedInError) {
+    return { status: 401, body: { error: "not_signed_in", message: cause.message } };
+  }
+  if (cause instanceof PlatformNotConfiguredError) {
+    return { status: 503, body: { error: "platform_not_configured", message: cause.message } };
+  }
   const message = cause instanceof Error ? cause.message : String(cause);
   if (/illegal state transition/.test(message)) {
     return { status: 409, body: { error: "illegal_transition", message } };
@@ -151,6 +165,41 @@ async function handle(
     return;
   }
 
+  // OAuth loopback callback (RFC 8252): hit by the SYSTEM browser, so it sits
+  // deliberately outside the bearer gate - the one-shot state value is what
+  // ties the request to a flow this daemon itself started.
+  if (method === "GET" && path === "/oauth/callback" && deps.platform) {
+    const err = url.searchParams.get("error");
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const page = (title: string, detail: string) =>
+      `<!doctype html><meta charset="utf-8"><title>${title}</title>` +
+      `<body style="font:15px system-ui;display:grid;place-items:center;height:96vh;margin:0">` +
+      `<div style="text-align:center"><h2>${title}</h2><p style="color:#666">${detail}</p></div>`;
+    const html = (status: number, body: string) => {
+      res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
+      res.end(body);
+    };
+    if (err) {
+      html(200, page("登录未完成", `${err} - 可关闭此页,回到如影重试。`));
+      return;
+    }
+    if (!code || !state) {
+      html(400, page("请求不完整", "缺少 code / state 参数。"));
+      return;
+    }
+    try {
+      await deps.platform.completeLogin(code, state);
+      html(200, page("登录成功", "可以关闭此页,回到如影继续。"));
+    } catch (cause) {
+      html(
+        400,
+        page("登录失败", cause instanceof Error ? cause.message : String(cause)),
+      );
+    }
+    return;
+  }
+
   const auth = req.headers.authorization ?? "";
   if (auth !== `Bearer ${deps.token}`) {
     send(res, 401, { error: "unauthorized" });
@@ -163,6 +212,40 @@ async function handle(
   if (method === "GET" && path === "/system") {
     send(res, 200, deps.systemInfo);
     return;
+  }
+
+  // --- Vxture platform: C1 identity + C2 entitlements (liaison L3) ---
+  if (deps.platform) {
+    if (method === "GET" && path === "/auth/session") {
+      send(res, 200, deps.platform.session());
+      return;
+    }
+    if (method === "POST" && path === "/auth/login") {
+      send(res, 200, { authorizeUrl: await deps.platform.beginLogin() });
+      return;
+    }
+    if (method === "POST" && path === "/auth/logout") {
+      await deps.platform.logout();
+      send(res, 200, { ok: true });
+      return;
+    }
+    // GET /entitlements?products=a,b - daemon-proxied C2 envelope read; the
+    // UI never sees platform tokens, only the envelope.
+    if (method === "GET" && path === "/entitlements") {
+      const products = (url.searchParams.get("products") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (products.length === 0) {
+        send(res, 400, {
+          error: "bad_request",
+          message: "products query parameter required",
+        });
+        return;
+      }
+      send(res, 200, await deps.platform.entitlements(products));
+      return;
+    }
   }
 
   // GET /products

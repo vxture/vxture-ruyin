@@ -181,7 +181,11 @@ function Workbench({ api }: { api: Api }) {
             ))}
             {error && <div className="error-box">{error}</div>}
           </div>
-          <UserSlot api={api} onOpenSettings={() => setShowSettings(true)} />
+          <UserSlot
+            api={api}
+            productIds={products.map((p) => p.id)}
+            onOpenSettings={() => setShowSettings(true)}
+          />
         </aside>
         <main className="main">
           {showSettings ? (

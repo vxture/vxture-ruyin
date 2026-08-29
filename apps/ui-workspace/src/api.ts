@@ -92,6 +92,39 @@ export interface AuditEvent {
   payload: unknown;
 }
 
+export interface SessionInfo {
+  signedIn: boolean;
+  profile?: { sub: string; name?: string; email?: string; picture?: string };
+  org?: { id?: string; name?: string };
+  workspace?: { id?: string; name?: string };
+  issuer: string;
+  consoleBase: string;
+  entitlementsConfigured: boolean;
+}
+
+/** C2 envelope (integration spec; consumed read-only, never persisted). */
+export interface EntitlementEnvelope {
+  status: string | null;
+  trial_ends_at: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  data_retention_until: string | null;
+  tier: string | null;
+  bundled: boolean;
+  limits: Record<string, number>;
+  quota_pools: Array<{
+    metric: string;
+    limit: number;
+    remaining: number;
+    priority: number;
+  }>;
+}
+
+export interface EntitlementsBatch {
+  workspace_id: string;
+  entitlements: Record<string, EntitlementEnvelope>;
+}
+
 export interface SystemInfo {
   version: string;
   platform: string;
@@ -171,4 +204,11 @@ export class Api {
   contextItems = (id: string, type: string) =>
     this.call<ContextItemMeta[]>(`/workspaces/${id}/context/${type}`);
   system = () => this.call<SystemInfo>("/system");
+  session = () => this.call<SessionInfo>("/auth/session");
+  login = () => this.call<{ authorizeUrl: string }>("/auth/login", "POST");
+  logout = () => this.call<{ ok: boolean }>("/auth/logout", "POST");
+  entitlements = (products: string[]) =>
+    this.call<EntitlementsBatch>(
+      `/entitlements?products=${encodeURIComponent(products.join(","))}`,
+    );
 }

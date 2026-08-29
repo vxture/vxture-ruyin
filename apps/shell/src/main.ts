@@ -11,7 +11,7 @@
  * the shell's launch verification (no GUI interaction needed).
  */
 
-import { app, BrowserWindow, utilityProcess } from "electron";
+import { app, BrowserWindow, shell, utilityProcess } from "electron";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -115,6 +115,16 @@ function openWindow(): void {
       nodeIntegration: false,
       sandbox: true,
     },
+  });
+  // External targets (OIDC login, console deep links) go to the SYSTEM
+  // browser - the shell never hosts third-party origins (60 section 4.2),
+  // and the PKCE loopback flow requires a real browser session anyway.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url) && !url.startsWith(`http://127.0.0.1:${PORT}`)) {
+      void shell.openExternal(url);
+      return { action: "deny" };
+    }
+    return { action: "allow" };
   });
   void win.loadURL(`http://127.0.0.1:${PORT}/?token=${TOKEN}`);
 }

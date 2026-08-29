@@ -102,25 +102,32 @@ export class KeyManager {
     return new KeyManager(master, "plaintext");
   }
 
+  /** Seal an arbitrary blob under the master key (iv | tag | ciphertext). */
+  seal(data: Buffer): Buffer {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", this.masterKey, iv);
+    const ciphertext = Buffer.concat([cipher.update(data), cipher.final()]);
+    return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]);
+  }
+
+  /** Open a blob produced by seal(); throws on tampering or wrong key. */
+  open(blob: Buffer): Buffer {
+    const iv = blob.subarray(0, 12);
+    const tag = blob.subarray(12, 28);
+    const ciphertext = blob.subarray(28);
+    const decipher = createDecipheriv("aes-256-gcm", this.masterKey, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  }
+
   /** Load or create the per-workspace data key; returns 64-char hex. */
   workspaceKeyHex(wsDir: string): string {
     const path = join(wsDir, "key.enc");
     if (existsSync(path)) {
-      const blob = readFileSync(path);
-      const iv = blob.subarray(0, 12);
-      const tag = blob.subarray(12, 28);
-      const ciphertext = blob.subarray(28);
-      const decipher = createDecipheriv("aes-256-gcm", this.masterKey, iv);
-      decipher.setAuthTag(tag);
-      return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString(
-        "hex",
-      );
+      return this.open(readFileSync(path)).toString("hex");
     }
     const key = randomBytes(32);
-    const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", this.masterKey, iv);
-    const ciphertext = Buffer.concat([cipher.update(key), cipher.final()]);
-    writeFileSync(path, Buffer.concat([iv, cipher.getAuthTag(), ciphertext]));
+    writeFileSync(path, this.seal(key));
     return key.toString("hex");
   }
 }
