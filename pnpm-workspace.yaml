@@ -19,6 +19,10 @@ confirmModulesPurge: false
 
 # Native modules allowed to run their build scripts (pnpm blocks postinstall
 # by default). better-sqlite3 downloads/builds its prebuilt binding here.
+# electron: since 42.0 the npm package has NO postinstall - the binary is
+# fetched on the first `electron` run (or `pnpm exec install-electron`),
+# honouring ELECTRON_MIRROR. The entry is kept so an older/newer line that
+# reintroduces a script is not silently blocked.
 allowBuilds:
   better-sqlite3-multiple-ciphers: true
   electron: true
