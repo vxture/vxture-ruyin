@@ -10,7 +10,7 @@
 | `00-meta` | 本地图、术语 |
 | `10-standards` | 薄索引，指向 platform org 标准（不复制正文） |
 | `20-specs` | 产品定义（产品战略） |
-| `30-design` | 架构设计文档族 + `decisions/`（ADR，append-only） |
+| `30-design` | 架构设计文档族 + `decisions/`（ADR，append-only）+ `inputs/`（owner 原稿留档，非权威） |
 | `40-implementation` | 实施面（产品接入指南等） |
 | `50-deployment` | 发布与 bootstrap（`rebuild/main-ruleset.json`） |
 | `60-operations` | 技术债登记（`10-tech-debt.md`，TD-NNN） |

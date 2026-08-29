@@ -24,3 +24,4 @@ Makefile    text eol=lf
 *.exe  binary
 *.dll  binary
 *.node binary
+*.docx binary
