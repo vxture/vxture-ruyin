@@ -55,7 +55,14 @@ const STATIC_MIME: Record<string, string> = {
   ".svg": "image/svg+xml",
   ".map": "application/json",
   ".ico": "image/x-icon",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
 };
+
+/** Root-level UI files the daemon serves besides index.html (PWA identity:
+ *  manifest enables the installed-app window with Window Controls Overlay,
+ *  collapsing the browser title bar so the app header is THE title bar -
+ *  the same single-bar contract as the Electron shell). */
+const UI_ROOT_FILES = new Set(["manifest.webmanifest", "icon.svg", "favicon.ico"]);
 
 function serveStatic(res: ServerResponse, root: string, rel: string): void {
   // Normalize and refuse traversal outside the UI root.
@@ -156,6 +163,11 @@ async function handle(
   }
   // UI asset files (vite emits under assets/).
   if (method === "GET" && deps.uiDir && path.startsWith("/assets/")) {
+    serveStatic(res, deps.uiDir, path.slice(1));
+    return;
+  }
+  // Whitelisted UI root files (PWA manifest + icons).
+  if (method === "GET" && deps.uiDir && UI_ROOT_FILES.has(path.slice(1))) {
     serveStatic(res, deps.uiDir, path.slice(1));
     return;
   }

@@ -22,19 +22,83 @@ body {
    inside opts out. The spacer clears the Windows caption-button overlay
    (shell titleBarOverlay, 48px high) so trailing controls never sit under
    the native buttons. */
-.titlebar { -webkit-app-region: drag; }
-.titlebar .no-drag { -webkit-app-region: no-drag; }
+.titlebar { -webkit-app-region: drag; app-region: drag; }
+.titlebar .no-drag { -webkit-app-region: no-drag; app-region: no-drag; }
 .caption-spacer { width: 138px; height: 1px; flex-shrink: 0; }
+/* 安装为 PWA（Window Controls Overlay）：浏览器收起自带标题栏，header 铺进
+   标题栏区，按 env(titlebar-area-*) 避让系统窗口按钮 —— 与 Electron 无边框壳
+   同一「单条标题栏」契约。普通浏览器窗口（.app-topbar 无 .titlebar）则是纯
+   工具条，不拖拽不避让。 */
+.titlebar-wco {
+  padding-left: env(titlebar-area-x, 0px);
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+}
 
-/* ---------- token gate (browser access without ?token=) ---------- */
-.token-gate {
-  max-width: 480px;
-  margin: 18vh auto 0;
+/* ---------- login screen (first surface) + splash ---------- */
+.splash {
+  height: 100%;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  background: var(--background);
+}
+.splash-mark { width: 88px; height: 88px; opacity: 0.9; }
+
+.login-screen {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+}
+.login-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: var(--spacing-md);
   padding: 0 var(--spacing-lg);
+  text-align: center;
 }
+.login-mark {
+  width: 120px;
+  height: 120px;
+  margin-bottom: var(--spacing-xs);
+}
+.login-title {
+  font-size: var(--text-heading-2-font-size, 24px);
+  font-weight: 700;
+}
+.login-sub {
+  color: var(--muted-foreground);
+  font-size: var(--body-md-font-size);
+  max-width: 30em;
+}
+.login-btn {
+  min-width: 220px;
+  margin-top: var(--spacing-sm);
+}
+.login-hint { margin-top: var(--spacing-2xs); }
+.login-local {
+  margin-top: var(--spacing-sm);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+}
+.login-local:hover { color: var(--foreground); }
+.login-foot {
+  display: flex;
+  justify-content: center;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-lg) 0;
+  font-size: var(--body-sm-font-size);
+}
+.login-foot a { color: var(--muted-foreground); text-decoration: none; }
+.login-foot a:hover { color: var(--foreground); }
 
 /* ---------- shared assembly ---------- */
 .row {
