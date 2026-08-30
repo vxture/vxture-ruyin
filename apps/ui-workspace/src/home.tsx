@@ -1,14 +1,19 @@
 /**
- * Home - the work entry point, tech-console style: a metric band (runtime /
- * spaces / protection / AI channel), the subscribed-product grid (installed
- * products are live ListCards; the rest are EntryCard deep links into the
- * console subscribe flow, explicit click only), and a recommended rail.
+ * Home - the work entry point of a CLIENT WORK RUNTIME (20-specs/10 §1.1/§5.2).
+ *
+ * 产品主体在平台：平台订阅了 → 本地可用；平台 0 订阅 → 本地无可用产品，但运行
+ * 环境仍在，并据此引导用户到平台订阅（console 深链）。因此本页的产品列表由
+ * **订阅状态 + 本地已装运行时产品**共同决定，绝不硬编码产品或推荐——编造的产品
+ * 会让用户以为自己拥有并不存在的订阅。
+ *
+ * 订阅数据面（C2 entitlements）尚无桌面可达端点（liaison L3-b）：未接通时诚实
+ * 降级——展示本地运行时已装的产品，并标明订阅状态未接通，而不是虚构一份清单。
  */
 
 import { useEffect, useState } from "react";
 import {
   Button,
-  EntryCard,
+  EmptyState,
   Input,
   ListCard,
   MetricGrid,
@@ -18,6 +23,7 @@ import {
 } from "@vxture/design-system";
 import {
   Api,
+  type EntitlementsBatch,
   type ProductInfo,
   type SessionInfo,
   type WorkspaceMeta,
@@ -27,27 +33,10 @@ const BLURBS: Record<string, string> = {
   "vxture.bid": "招标解析 · 需求矩阵 · 方案生成 · 覆盖校验",
 };
 
-/** Subscription placeholders (design-doc product family, 20-specs/10). */
-const SUBSCRIBED_PLACEHOLDERS: Array<{ id: string; name: string; blurb: string }> = [
-  { id: "vxture.crm", name: "客户销售", blurb: "客户生命周期 · 拜访跟进 · 商机与签约" },
-  { id: "vxture.document", name: "文档编写", blurb: "长文档 · 企业模板 · 版本与审核流程" },
-  { id: "vxture.analysis", name: "经营分析", blurb: "经营数据 · 指标洞察 · 决策支持" },
-  { id: "vxture.knowledge", name: "知识库管理", blurb: "企业知识沉淀 · 案例库 · 资产复用" },
-  { id: "vxture.project", name: "项目管理", blurb: "项目计划 · 进度协同 · 复盘归档" },
-];
-
-const RECOMMENDED: Array<{ id: string; name: string; blurb: string }> = [
-  { id: "vxture.energy", name: "如影 · 能源", blurb: "行业版 · 投标与经营" },
-  { id: "vxture.water", name: "如影 · 水务", blurb: "行业版 · 水情与应急" },
-  { id: "vxture.emergency", name: "如影 · 应急", blurb: "行业版 · 事件与指挥" },
-];
-
-const GRID_TARGET = 6;
-
 /**
  * 产品标识行（vxture.bid@1.0.0 一类）。作为 description 的第二行传入，天然落在
  * DS 卡片「标题列」内、左缘对齐标题；display:block 让它在单行 description 里另
- * 起一行；颜色比描述再淡一档。三种产品卡统一用它。
+ * 起一行；颜色比描述再淡一档。
  */
 function ProductIdent({ code, inset }: { code: string; inset?: boolean }) {
   return (
@@ -74,13 +63,9 @@ export function HomePage({
   onCreated: (wsId: string) => void | Promise<void>;
   onError: (msg: string) => void;
 }) {
-  const installedIds = new Set(products.map((p) => p.id));
-  const placeholders = SUBSCRIBED_PLACEHOLDERS.filter(
-    (p) => !installedIds.has(p.id),
-  ).slice(0, Math.max(0, GRID_TARGET - products.length));
-
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [system, setSystem] = useState<{ keyProtection: string } | null>(null);
+
   useEffect(() => {
     let alive = true;
     api
@@ -96,9 +81,17 @@ export function HomePage({
     };
   }, [api]);
 
-  // Console deep links open only on an explicit click, never automatically.
-  const subscribeUrl = (productId: string) =>
-    `${session?.consoleBase ?? "https://vxture.com"}/subscribe?product=${encodeURIComponent(productId)}&intent=subscribe`;
+  const consoleBase = session?.consoleBase ?? "https://vxture.com";
+  // 主体在平台：订阅动作一律回 console，仅显式点击触发。
+  const subscribeUrl = (productId?: string) =>
+    productId
+      ? `${consoleBase}/subscribe?product=${encodeURIComponent(productId)}&intent=subscribe`
+      : `${consoleBase}/subscribe`;
+
+  // 可用性由 runtime 判定（daemon 的 ProductRegistry，§18.5）——UI 不重算规则。
+  const usable = products.filter((p) => p.availability === "available");
+  const blocked = products.filter((p) => p.availability !== "available");
+  const subscriptionKnown = products.some((p) => p.entitled !== null);
 
   return (
     <div className="home">
@@ -106,7 +99,7 @@ export function HomePage({
         level={1}
         icon="squares-four"
         title="开始工作"
-        description="从已订阅的产品进入业务工作空间；本地数据不出设备，是否上云由你决定。"
+        description="业务产品由 Vxture 平台订阅提供，如影负责把它们放进你的本地工作环境；本地数据不出设备。"
       />
 
       <MetricGrid
@@ -115,12 +108,21 @@ export function HomePage({
         items={[
           {
             id: "runtime",
-            label: "Runtime",
-            value: health.ok ? "运行中" : "未连接",
-            description: health.ok ? `本地守护进程 ${health.version ?? ""}` : "等待守护进程",
+            label: "运行环境",
+            value: health.ok ? "就绪" : "未连接",
+            description: health.ok
+              ? `本地守护进程 ${health.version ?? ""}`
+              : "等待守护进程",
             icon: "cpu",
             trend: health.ok ? "在线" : "离线",
             trendTone: health.ok ? "success" : "danger",
+          },
+          {
+            id: "products",
+            label: "可用产品",
+            value: String(usable.length),
+            description: subscriptionKnown ? "按平台订阅" : "订阅状态未接通",
+            icon: "package",
           },
           {
             id: "spaces",
@@ -141,69 +143,105 @@ export function HomePage({
             trendTone: system?.keyProtection === "dpapi" ? "success" : "warning",
             trend: system?.keyProtection === "dpapi" ? "DPAPI" : "DEV",
           },
-          {
-            id: "ai",
-            label: "AI 通道",
-            value: "待接通",
-            description: "业务任务经 AI Gateway 执行 · L3-c",
-            icon: "plugs-connected",
-          },
         ]}
       />
 
-      <Section title="已订阅产品" icon="package" level={2}>
-        <div className="grid gap-md md:grid-cols-2 xl:grid-cols-3">
-          {products.map((p) => (
-            <InstalledProductCard
-              key={p.id}
-              api={api}
-              product={p}
-              workspaces={workspaces.filter((w) => w.productId === p.id)}
-              onOpen={onOpen}
-              onCreated={onCreated}
-              onError={onError}
-            />
-          ))}
-          {placeholders.map((p) => (
-            <EntryCard
-              key={p.id}
-              icon="package"
-              title={p.name}
-              meta={<StatusBadge tone="neutral">待开通</StatusBadge>}
-              description={
-                <>
-                  {p.blurb}
-                  <ProductIdent code={p.id} />
-                </>
-              }
-              href={subscribeUrl(p.id)}
-              target="_blank"
-              rel="noopener noreferrer"
-            />
-          ))}
-        </div>
+      <Section title="业务产品" icon="package" level={2}>
+        {usable.length === 0 ? (
+          // 0 订阅：环境仍在，引导到平台订阅（主体在平台）。
+          <EmptyState
+            icon="package"
+            title={
+              session?.signedIn
+                ? "当前账号没有可用的业务产品"
+                : "登录后同步你的业务产品"
+            }
+            description={
+              session?.signedIn
+                ? "运行环境已就绪。业务产品由 Vxture 平台订阅提供——在平台订阅后即可在这里使用。"
+                : "运行环境已就绪。登录 Vxture 账号后，你订阅的业务产品会出现在这里。"
+            }
+            action={
+              <Button
+                onClick={() =>
+                  window.open(subscribeUrl(), "_blank", "noopener")
+                }
+              >
+                到 Vxture 平台订阅 ↗
+              </Button>
+            }
+          />
+        ) : (
+          <>
+            {!subscriptionKnown && (
+              <p className="text-body-sm text-muted-foreground">
+                订阅状态尚未接通，以下为本地运行时已安装的产品。
+              </p>
+            )}
+            <div className="grid gap-md md:grid-cols-2 xl:grid-cols-3">
+              {usable.map((p) => (
+                <InstalledProductCard
+                  key={p.id}
+                  api={api}
+                  product={p}
+                  workspaces={workspaces.filter((w) => w.productId === p.id)}
+                  onOpen={onOpen}
+                  onCreated={onCreated}
+                  onError={onError}
+                />
+              ))}
+            </div>
+            <div className="row">
+              <Button
+                variant="outline"
+                onClick={() => window.open(subscribeUrl(), "_blank", "noopener")}
+              >
+                在平台管理订阅 ↗
+              </Button>
+            </div>
+          </>
+        )}
       </Section>
 
-      <Section title="为你推荐" icon="rocket" level={2}>
-        <div className="grid gap-md md:grid-cols-3">
-          {RECOMMENDED.map((r) => (
-            <EntryCard
-              key={r.id}
-              icon="lightning"
-              title={r.name}
-              meta={<StatusBadge tone="brand">敬请期待</StatusBadge>}
-              description={
-                <>
-                  {r.blurb}
-                  <ProductIdent code={r.id} />
-                </>
-              }
-              aria-disabled="true"
-              onClick={(e) => e.preventDefault()}
-            />
-          ))}
-        </div>
-      </Section>
+      {/* §18.5：退订/停用的产品不可打开，但仍列出——本地数据可访问、可导出。 */}
+      {blocked.length > 0 && (
+        <Section title="不可用的产品" icon="lock" level={2}>
+          <div className="grid gap-md md:grid-cols-2 xl:grid-cols-3">
+            {blocked.map((p) => (
+              <ListCard
+                key={p.id}
+                icon="lock"
+                title={p.name}
+                description={p.reason ?? "当前不可打开"}
+                status={
+                  <StatusBadge
+                    tone={p.availability === "not_entitled" ? "warning" : "neutral"}
+                  >
+                    {p.availability === "not_entitled" ? "未订阅" : "已停用"}
+                  </StatusBadge>
+                }
+                meta={
+                  <div className="flex flex-col gap-xs">
+                    <ProductIdent code={`${p.id}@${p.version}`} inset />
+                    {p.availability === "not_entitled" && (
+                      <div className="flex items-center gap-xs">
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            window.open(subscribeUrl(p.id), "_blank", "noopener")
+                          }
+                        >
+                          去平台订阅 ↗
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                }
+              />
+            ))}
+          </div>
+        </Section>
+      )}
     </div>
   );
 }
@@ -229,11 +267,16 @@ function InstalledProductCard({
     <ListCard
       icon="cube"
       title={product.name}
-      description={BLURBS[product.id] ?? "AI 原生业务产品"}
-      status={<StatusBadge tone="success">已安装</StatusBadge>}
+      description={BLURBS[product.id] ?? "Vxture 业务产品"}
+      status={
+        product.entitled === true ? (
+          <StatusBadge tone="success">已订阅</StatusBadge>
+        ) : (
+          <StatusBadge tone="neutral">本地已装</StatusBadge>
+        )
+      }
       meta={
         <div className="flex flex-col gap-xs">
-          {/* ListCard 的 description 是单行，标识改放 meta 区、缩进对齐标题 */}
           <ProductIdent code={`${product.id}@${product.version}`} inset />
           {workspaces.length > 0 && (
             <div className="flex flex-wrap items-center gap-xs">

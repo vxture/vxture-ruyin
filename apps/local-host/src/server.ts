@@ -16,8 +16,8 @@ import {
   type Binding,
   type WorkspaceRuntime,
 } from "@vxture/ruyin-core";
-import type { LoadedProduct } from "./products.js";
 import { DEV_UI_HTML } from "./dev-ui.js";
+import type { ProductRegistry } from "./product-registry.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -26,7 +26,8 @@ import {
 
 export interface LocalApiDeps {
   runtime: WorkspaceRuntime;
-  products: LoadedProduct[];
+  /** 受管产品资产（安装 / 启用 / 订阅可用性，30-contract-schema §18）。 */
+  registry: ProductRegistry;
   token: string;
   version: string;
   /** Rebuild the FTS index rows for one binding; returns indexed count. */
@@ -267,22 +268,44 @@ async function handle(
     }
   }
 
-  // GET /products
+  // GET /products - 受管资产视图：已装 + 启用态 + 订阅可用性（§18.5）
   if (method === "GET" && path === "/products") {
-    send(
-      res,
-      200,
-      deps.products.map((p) => ({ id: p.id, name: p.name, version: p.version })),
-    );
+    send(res, 200, deps.registry.list());
+    return;
+  }
+
+  // POST /products/:id/enable|disable - 本机启用/停用（不卸载，数据不动）
+  if (
+    method === "POST" &&
+    segments[0] === "products" &&
+    segments.length === 3 &&
+    (segments[2] === "enable" || segments[2] === "disable")
+  ) {
+    try {
+      deps.registry.setEnabled(segments[1]!, segments[2] === "enable");
+    } catch (cause) {
+      send(res, 404, {
+        error: "product_not_found",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+      return;
+    }
+    send(res, 200, deps.registry.list().find((p) => p.id === segments[1]));
     return;
   }
 
   // POST /workspaces  { product, name }
   if (method === "POST" && path === "/workspaces") {
     const body = await readJson(req);
-    const product = deps.products.find((p) => p.id === body["product"]);
+    const product = deps.registry.find(String(body["product"] ?? ""));
     if (!product) {
       send(res, 404, { error: "product_not_found", product: body["product"] });
+      return;
+    }
+    // §18.5：退订 / 停用的产品不可打开；已有工作空间的数据仍可读可导出。
+    const blocked = deps.registry.blockedReason(product.id);
+    if (blocked) {
+      send(res, 403, { error: "product_unavailable", message: blocked });
       return;
     }
     const name = typeof body["name"] === "string" && body["name"].length > 0

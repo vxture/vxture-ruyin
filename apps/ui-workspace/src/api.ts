@@ -3,10 +3,20 @@
  * ?token= (shell) or is pasted once (browser access) and is held in memory.
  */
 
+/**
+ * 受管产品资产（daemon /products）。已安装 ≠ 可用：
+ * availability = installed ∧ enabled ∧ entitled ≠ false（30-contract-schema §18.5）。
+ * entitled 为 null 表示未知（未登录或订阅数据面未接通），此时按可用处理。
+ */
 export interface ProductInfo {
   id: string;
   name: string;
   version: string;
+  installed: boolean;
+  enabled: boolean;
+  entitled: boolean | null;
+  availability: "available" | "disabled" | "not_entitled";
+  reason?: string;
 }
 
 export interface WorkspaceMeta {
