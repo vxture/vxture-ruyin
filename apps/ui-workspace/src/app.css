@@ -82,6 +82,28 @@ body {
   word-break: break-all;
 }
 
+/* Product identifier line under a card title (vxture.bid@1.0.0). Block so it
+   drops below the single-line description while inheriting the title column's
+   indent; one shade fainter than the description; mono, truncates on overflow. */
+.product-ident {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--code-sm-font-family, ui-monospace, monospace);
+  font-size: var(--code-sm-font-size, 12px);
+  color: var(--muted-foreground);
+  opacity: 0.68;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* ListCard 变体：description 单行装不下第二行，标识落 meta 区，左缩进
+   = ListCard 的 icon 列宽 + gap（固定），把标识左缘对齐标题左缘。 */
+.product-ident--inset {
+  margin-top: 0;
+  margin-left: 26px;
+}
+
 /* ---------- home ---------- */
 .home {
   display: flex;

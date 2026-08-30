@@ -44,6 +44,19 @@ const RECOMMENDED: Array<{ id: string; name: string; blurb: string }> = [
 
 const GRID_TARGET = 6;
 
+/**
+ * 产品标识行（vxture.bid@1.0.0 一类）。作为 description 的第二行传入，天然落在
+ * DS 卡片「标题列」内、左缘对齐标题；display:block 让它在单行 description 里另
+ * 起一行；颜色比描述再淡一档。三种产品卡统一用它。
+ */
+function ProductIdent({ code, inset }: { code: string; inset?: boolean }) {
+  return (
+    <span className={`product-ident${inset ? " product-ident--inset" : ""}`}>
+      {code}
+    </span>
+  );
+}
+
 export function HomePage({
   api,
   products,
@@ -157,7 +170,12 @@ export function HomePage({
               icon="package"
               title={p.name}
               meta={<StatusBadge tone="neutral">待开通</StatusBadge>}
-              description={`${p.blurb} · ${p.id}`}
+              description={
+                <>
+                  {p.blurb}
+                  <ProductIdent code={p.id} />
+                </>
+              }
               href={subscribeUrl(p.id)}
               target="_blank"
               rel="noopener noreferrer"
@@ -174,7 +192,12 @@ export function HomePage({
               icon="lightning"
               title={r.name}
               meta={<StatusBadge tone="brand">敬请期待</StatusBadge>}
-              description={r.blurb}
+              description={
+                <>
+                  {r.blurb}
+                  <ProductIdent code={r.id} />
+                </>
+              }
               aria-disabled="true"
               onClick={(e) => e.preventDefault()}
             />
@@ -210,9 +233,8 @@ function InstalledProductCard({
       status={<StatusBadge tone="success">已安装</StatusBadge>}
       meta={
         <div className="flex flex-col gap-xs">
-          <span className="ws-meta-line">
-            {product.id}@{product.version}
-          </span>
+          {/* ListCard 的 description 是单行，标识改放 meta 区、缩进对齐标题 */}
+          <ProductIdent code={`${product.id}@${product.version}`} inset />
           {workspaces.length > 0 && (
             <div className="flex flex-wrap items-center gap-xs">
               {workspaces.slice(0, 3).map((w) => (
