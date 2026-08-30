@@ -180,6 +180,10 @@ export class PlatformService {
       const saved = JSON.parse(raw.toString("utf8")) as PersistedSession;
       this.refreshToken = saved.refresh_token;
       this.claims = saved.claims;
+      // 恢复的 claims 是上次 id_token 的，可能缺 access_token 的上下文
+      // （active_org / active_workspace / name / email）。后台刷新一次补全身份，
+      // 不阻塞启动；失败（refresh 被吊销）则由 ensureAccessToken 自行登出。
+      void this.ensureAccessToken().catch(() => {});
     } catch (cause) {
       console.warn(
         `[ruyin] platform session restore failed (dropping it): ${
@@ -275,6 +279,7 @@ export class PlatformService {
       audience: this.config.clientId,
     });
     this.applyTokens(body);
+    await this.mergeAccessClaims();
     this.persist();
   }
 
@@ -285,6 +290,26 @@ export class PlatformService {
     this.accessToken = { value: access, expiresAt: Date.now() + expiresIn * 1000 };
     if (typeof body["refresh_token"] === "string") {
       this.refreshToken = body["refresh_token"];
+    }
+  }
+
+  /**
+   * access_token 也是 RS256 JWT，其上下文 claims（active_org / active_workspace /
+   * name / preferred_username / email / roles，见 140-ruyin-contract §8）不在
+   * id_token 里。验签后合并进会话身份 —— 否则 org/workspace 恒空、权益查不到 key。
+   */
+  private async mergeAccessClaims(): Promise<void> {
+    const at = this.accessToken?.value;
+    if (!at) return;
+    try {
+      const ac = verifyJwt(at, await this.fetchJwks(), {
+        issuer: this.config.issuer,
+        audience: this.config.clientId,
+      });
+      // id_token 打底（稳定 sub/sid），access_token 覆盖补充上下文。
+      this.claims = { ...(this.claims ?? ({ sub: ac.sub } as IdClaims)), ...ac };
+    } catch {
+      // access token 非可验签 JWT：保守，仅保留 id_token claims。
     }
   }
 
@@ -323,6 +348,7 @@ export class PlatformService {
         // keep previous claims; access token is what matters here
       }
     }
+    await this.mergeAccessClaims();
     this.persist();
     return this.accessToken!.value;
   }
