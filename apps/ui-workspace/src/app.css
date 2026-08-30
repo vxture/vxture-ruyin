@@ -45,6 +45,15 @@ body {
   background: var(--background);
 }
 .splash-mark { width: 88px; height: 88px; opacity: 0.9; }
+/* 单条标题栏模式下无 header 页面（登录/加载）的不可见拖拽带。 */
+.dragstrip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  z-index: 40;
+}
 
 .login-screen {
   height: 100%;

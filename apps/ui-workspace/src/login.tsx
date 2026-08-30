@@ -10,7 +10,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@vxture/design-system";
 import { Api, type SessionInfo } from "./api";
-import { Workbench } from "./workbench";
+import { Workbench, useHostChrome } from "./workbench";
+
+/**
+ * 单条标题栏模式（Electron 无边框 / PWA-WCO）下，登录页与加载页没有 header，
+ * 窗口顶端归应用——需要一条不可见的拖拽带，否则窗口拖不动。普通浏览器下不渲染。
+ */
+function DragStrip() {
+  const chrome = useHostChrome();
+  if (chrome === "browser") return null;
+  return <div className={`dragstrip titlebar titlebar-${chrome}`} aria-hidden />;
+}
 
 const LOGIN_POLL_MS = 2000;
 const LOGIN_POLL_MAX_MS = 5 * 60 * 1000;
@@ -44,6 +54,7 @@ export function SessionGate({ api }: { api: Api }) {
   if (session === "loading") {
     return (
       <div className="splash">
+        <DragStrip />
         <img className="splash-mark" src="/icon.svg" alt="" aria-hidden />
         <div className="text-body-md text-muted-foreground">正在连接运行时…</div>
       </div>
@@ -118,6 +129,7 @@ function LoginScreen({
 
   return (
     <div className="login-screen">
+      <DragStrip />
       <div className="login-center">
         <img className="login-mark" src="/icon.svg" alt="如影 Ruyin" />
         <h1 className="login-title">

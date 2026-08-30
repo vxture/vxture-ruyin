@@ -42,13 +42,13 @@ const IS_ELECTRON = navigator.userAgent.includes("Electron");
  *  - browser：普通浏览器窗口/标签页自带标题栏，header 退化为应用工具条，
  *    不再假装标题栏（无拖拽、无避让），避免双标题栏。
  */
-type HostChrome = "electron" | "wco" | "browser";
+export type HostChrome = "electron" | "wco" | "browser";
 
 interface WindowControlsOverlay extends EventTarget {
   visible: boolean;
 }
 
-function useHostChrome(): HostChrome {
+export function useHostChrome(): HostChrome {
   const wcoApi = (
     navigator as Navigator & { windowControlsOverlay?: WindowControlsOverlay }
   ).windowControlsOverlay;
