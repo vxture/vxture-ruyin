@@ -30,6 +30,7 @@ import { WorkspacePanel } from "./workspace";
 import { HomePage } from "./home";
 import { SettingsView } from "./settings";
 import { UserSlot } from "./user";
+import { useInstallPrompt } from "./install";
 
 /** Caption-overlay clearance only applies inside the Electron shell. */
 const IS_ELECTRON = navigator.userAgent.includes("Electron");
@@ -105,6 +106,7 @@ export function Workbench({ api }: { api: Api }) {
   const [error, setError] = useState<string | null>(null);
   const health = useRuntimeHealth();
   const chrome = useHostChrome();
+  const { canInstall, install } = useInstallPrompt();
 
   const refreshSidebar = useCallback(async () => {
     try {
@@ -267,6 +269,13 @@ export function Workbench({ api }: { api: Api }) {
           <StatusBadge tone={health.ok ? "success" : "danger"} dot>
             {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
           </StatusBadge>
+          {chrome === "browser" && canInstall && (
+            <ShellIconButton
+              icon="desktop"
+              label="安装桌面应用（单条标题栏）"
+              onClick={() => void install()}
+            />
+          )}
           <ShellIconButton
             icon="settings"
             label="设置"

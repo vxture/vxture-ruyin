@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@vxture/design-system";
 import { Api, type SessionInfo } from "./api";
 import { Workbench, useHostChrome } from "./workbench";
+import { useInstallPrompt } from "./install";
 
 /**
  * 单条标题栏模式（Electron 无边框 / PWA-WCO）下，登录页与加载页没有 header，
@@ -87,6 +88,8 @@ function LoginScreen({
   const [busy, setBusy] = useState(false);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
   const pollRef = useRef<number | undefined>(undefined);
+  const chrome = useHostChrome();
+  const { canInstall, install } = useInstallPrompt();
 
   useEffect(
     () => () => {
@@ -157,6 +160,15 @@ function LoginScreen({
               未打开？点此继续 ↗
             </a>
           </div>
+        )}
+        {chrome === "browser" && canInstall && (
+          <Button
+            variant="outline"
+            className="login-btn"
+            onClick={() => void install()}
+          >
+            安装桌面应用
+          </Button>
         )}
         <button className="login-local" onClick={onLocal}>
           暂不登录，先本地使用 →
