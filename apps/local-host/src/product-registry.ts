@@ -23,6 +23,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { RuyinContract } from "@vxture/ruyin-contract-schema";
 import { loadProducts, type LoadedProduct, type ProductScan } from "./products.js";
+import { compareVersions, listStored } from "./installer.js";
 
 /** 平台订阅对某产品的判定；null = 未知（未登录 / 订阅面未接通）。 */
 export type Entitled = boolean | null;
@@ -39,6 +40,10 @@ export interface ProductView {
   availability: Availability;
   /** 不可用时的人可读原因；可用时缺省。 */
   reason?: string;
+  /** 库中并存的全部版本（§18.4 保留旧版本用于回滚）；内置产品为单版本。 */
+  versions: string[];
+  /** true = 来自受管产品库（.ruyinpkg 安装）；false = 内置/开发目录。 */
+  managed: boolean;
 }
 
 /** 解析某产品的订阅状态。抛错或返回 null 一律按「未知」处理。 */
@@ -52,6 +57,8 @@ export type EntitlementResolver = (
 interface PersistedState {
   /** productId -> enabled；缺省视为 true（装了就启用）。 */
   disabled?: string[];
+  /** productId -> 当前生效版本；缺省取库中最高版本（§18.4 切换 / 回滚）。 */
+  active?: Record<string, string>;
 }
 
 const STATE_FILE = "products.state.json";
@@ -75,9 +82,14 @@ export function availabilityOf(
 
 export class ProductRegistry {
   private scan: ProductScan;
+  /** productId -> 库中全部已装版本（升序）。 */
+  private storeVersions = new Map<string, string[]>();
   private disabled: Set<string>;
+  private active: Record<string, string>;
   private entitlements = new Map<string, boolean>();
   private readonly statePath: string;
+  /** 受管产品库根目录：<dataDir>/products。 */
+  readonly storeDir: string;
 
   constructor(
     private readonly productsDir: string,
@@ -86,8 +98,12 @@ export class ProductRegistry {
     const dir = join(dataDir, "runtime");
     mkdirSync(dir, { recursive: true });
     this.statePath = join(dir, STATE_FILE);
-    this.scan = loadProducts(productsDir);
-    this.disabled = new Set(this.restore().disabled ?? []);
+    this.storeDir = join(dataDir, "products");
+    const state = this.restore();
+    this.disabled = new Set(state.disabled ?? []);
+    this.active = state.active ?? {};
+    this.scan = { loaded: [], failed: [] };
+    this.rescan();
   }
 
   private restore(): PersistedState {
@@ -102,13 +118,71 @@ export class ProductRegistry {
   private persist(): void {
     writeFileSync(
       this.statePath,
-      JSON.stringify({ disabled: [...this.disabled] }, null, 2),
+      JSON.stringify(
+        { disabled: [...this.disabled], active: this.active },
+        null,
+        2,
+      ),
+      "utf8",
     );
   }
 
-  /** 重新扫描本地产品目录（安装/卸载后调用）。 */
+  /**
+   * 重新扫描：受管库（.ruyinpkg 安装，版本化）优先于内置/开发目录 —— 用户装的
+   * 版本应当盖过随包内置的示例。安装/卸载/切版本后调用。
+   */
   rescan(): void {
-    this.scan = loadProducts(this.productsDir);
+    const dev = loadProducts(this.productsDir);
+    this.storeVersions.clear();
+
+    const stored = listStored(this.storeDir);
+    for (const s of stored) {
+      const list = this.storeVersions.get(s.productId) ?? [];
+      list.push(s.version);
+      this.storeVersions.set(s.productId, list);
+    }
+    for (const list of this.storeVersions.values()) list.sort(compareVersions);
+
+    const managed: LoadedProduct[] = [];
+    const failed = [...dev.failed];
+    for (const [productId, versions] of this.storeVersions) {
+      const chosen = this.activeVersionOf(productId, versions);
+      const dir = join(this.storeDir, productId, chosen);
+      // 复用同一套解析 + R1-R12 校验：库里的产品与开发目录同等对待。
+      const one = loadProducts(join(dir, ".."));
+      const hit = one.loaded.find(
+        (p) => p.id === productId && p.version === chosen,
+      );
+      if (hit) managed.push(hit);
+      else failed.push(...one.failed);
+    }
+
+    const managedIds = new Set(managed.map((p) => p.id));
+    this.scan = {
+      loaded: [...managed, ...dev.loaded.filter((p) => !managedIds.has(p.id))],
+      failed,
+    };
+  }
+
+  private activeVersionOf(productId: string, versions: string[]): string {
+    const pinned = this.active[productId];
+    if (pinned && versions.includes(pinned)) return pinned;
+    return versions[versions.length - 1]!; // 缺省取最高版本
+  }
+
+  /** 切换生效版本（§18.4：回滚 = 切回保留的旧版本）。 */
+  activate(productId: string, version: string): void {
+    const versions = this.storeVersions.get(productId);
+    if (!versions?.includes(version)) {
+      throw new Error(`${productId}@${version} is not installed`);
+    }
+    this.active[productId] = version;
+    this.persist();
+    this.rescan();
+  }
+
+  versionsOf(productId: string): string[] {
+    return this.storeVersions.get(productId) ?? [];
   }
 
   /** 契约校验失败的产品（启动日志与运维面用）。 */
@@ -141,6 +215,7 @@ export class ProductRegistry {
       const enabled = !this.disabled.has(p.id);
       const entitled = this.entitledOf(p.id);
       const { availability, reason } = availabilityOf(enabled, entitled);
+      const versions = this.storeVersions.get(p.id);
       return {
         id: p.id,
         name: p.name,
@@ -150,6 +225,8 @@ export class ProductRegistry {
         entitled,
         availability,
         ...(reason ? { reason } : {}),
+        versions: versions ?? [p.version],
+        managed: versions !== undefined,
       };
     });
   }

@@ -18,6 +18,7 @@ import {
 } from "@vxture/ruyin-core";
 import { DEV_UI_HTML } from "./dev-ui.js";
 import type { ProductRegistry } from "./product-registry.js";
+import { installPackage } from "./installer.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -37,6 +38,11 @@ export interface LocalApiDeps {
   /** Vxture platform integration (C1 identity + C2 entitlements); absent in
    *  tests that exercise the runtime surface only. */
   platform?: PlatformService;
+  /**
+   * 是否要求安装包经 Vxture Registry 副署（§18.2）。缺省 true（安全默认）；
+   * 仅开发模式显式置 false 才允许装未签名包。
+   */
+  requireSignedPackages?: boolean;
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -271,6 +277,53 @@ async function handle(
   // GET /products - 受管资产视图：已装 + 启用态 + 订阅可用性（§18.5）
   if (method === "GET" && path === "/products") {
     send(res, 200, deps.registry.list());
+    return;
+  }
+
+  // POST /products/install - 安装 .ruyinpkg（请求体为包字节；管线见 installer.ts）
+  if (method === "POST" && path === "/products/install") {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    try {
+      const result = installPackage(Buffer.concat(chunks), {
+        storeDir: deps.registry.storeDir,
+        runtimeVersion: deps.version,
+        // 无 Registry 根证书前，生产口径由宿主注入；缺省要求签名（安全默认）。
+        requireSignature: deps.requireSignedPackages !== false,
+      });
+      deps.registry.rescan();
+      send(res, 201, {
+        productId: result.productId,
+        version: result.version,
+        signed: result.signed,
+      });
+    } catch (cause) {
+      send(res, 400, {
+        error: "install_rejected",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+    return;
+  }
+
+  // POST /products/:id/activate  { version } - 切换生效版本（§18.4 回滚）
+  if (
+    method === "POST" &&
+    segments[0] === "products" &&
+    segments.length === 3 &&
+    segments[2] === "activate"
+  ) {
+    const body = await readJson(req);
+    try {
+      deps.registry.activate(segments[1]!, String(body["version"] ?? ""));
+    } catch (cause) {
+      send(res, 404, {
+        error: "version_not_installed",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+      return;
+    }
+    send(res, 200, deps.registry.list().find((p) => p.id === segments[1]));
     return;
   }
 

@@ -103,6 +103,8 @@ const server = createLocalApi({
   reindex: (wsId, binding) => reindexBinding(storage, wsId, binding, localFs),
   uiDir,
   platform,
+  // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
+  requireSignedPackages: process.env["RUYIN_ALLOW_UNSIGNED_PACKAGES"] !== "1",
   systemInfo: {
     version: VERSION,
     platform: process.platform,
