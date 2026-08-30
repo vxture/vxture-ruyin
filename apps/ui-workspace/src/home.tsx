@@ -143,10 +143,10 @@ export function HomePage({
           },
           {
             id: "ai",
-            label: "智能通道",
+            label: "AI 通道",
             value: "待接通",
-            description: "AI Gateway · liaison L3-c",
-            icon: "sparkles",
+            description: "业务任务经 AI Gateway 执行 · L3-c",
+            icon: "plugs-connected",
           },
         ]}
       />

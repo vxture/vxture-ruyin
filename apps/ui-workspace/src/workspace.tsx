@@ -447,7 +447,9 @@ function TasksTab({
 }) {
   return (
     <>
-      <SectionHeader level={2} title="任务定义" icon="rocket" />
+      {/* 智能在这里：业务契约声明的 AI 任务（Harness 执行 + 人工检查点），
+          不是壳级助手（20-specs/10 §1.3 定位）。 */}
+      <SectionHeader level={2} title="任务定义" icon="sparkles" />
       {view.tasks.map((t) => (
         <TaskLauncher key={t.id} def={t} onLaunch={(inputs) => onLaunch(t.id, inputs)} />
       ))}

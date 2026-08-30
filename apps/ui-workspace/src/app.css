@@ -219,19 +219,5 @@ body {
   flex-shrink: 0;
 }
 .user-chip-sub::before { content: "· "; }
-.agent-dock {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  padding: var(--spacing-md);
-  gap: var(--spacing-md);
-}
-.agent-dock-head {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  border-bottom: 1px dashed var(--border);
-  padding-bottom: var(--spacing-xs);
-}
-.agent-dock-body { flex: 1; display: flex; align-items: center; justify-content: center; }
-.agent-dock-foot { border-top: 1px dashed var(--border); padding-top: var(--spacing-xs); }
+/* (agent dock retired 2026-08-30: ruyin is the workspace RUNTIME - agents live
+   inside business products' task flows, never as shell-level chrome.) */

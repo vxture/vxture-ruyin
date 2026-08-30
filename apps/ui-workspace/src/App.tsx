@@ -18,7 +18,6 @@ import {
   Button,
   Input,
   ShellBrand,
-  ShellDock,
   ShellHeader,
   ShellIconButton,
   ShellPageContainer,
@@ -34,7 +33,6 @@ import { WorkspacePanel } from "./workspace";
 import { HomePage } from "./home";
 import { SettingsView } from "./settings";
 import { UserSlot } from "./user";
-import { AgentDock } from "./agent";
 
 /** Caption-overlay clearance only applies inside the Electron shell. */
 const IS_ELECTRON = navigator.userAgent.includes("Electron");
@@ -107,7 +105,6 @@ function Workbench({ api }: { api: Api }) {
   const [workspaces, setWorkspaces] = useState<WorkspaceMeta[]>([]);
   const [view, setView] = useState<View>({ kind: "home" });
   const [collapsed, setCollapsed] = useState(false);
-  const [dockOpen, setDockOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const health = useRuntimeHealth();
@@ -233,18 +230,12 @@ function Workbench({ api }: { api: Api }) {
         icon: "settings" as const,
         onSelect: () => navigate("#settings"),
       },
-      {
-        key: "agent",
-        label: dockOpen ? "收起如影助手" : "打开如影助手",
-        icon: "sparkles" as const,
-        onSelect: () => setDockOpen(!dockOpen),
-      },
     ].filter((a) => match(a.label));
     if (actions.length > 0) {
       groups.push({ key: "actions", heading: "动作", items: actions });
     }
     return groups;
-  }, [query, workspaces, products, navigate, dockOpen]);
+  }, [query, workspaces, products, navigate]);
 
   const header = (
     <ShellHeader
@@ -279,12 +270,6 @@ function Workbench({ api }: { api: Api }) {
           <StatusBadge tone={health.ok ? "success" : "danger"} dot>
             {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
           </StatusBadge>
-          <ShellIconButton
-            icon="sparkles"
-            label="如影助手"
-            active={dockOpen}
-            onClick={() => setDockOpen(!dockOpen)}
-          />
           <ShellIconButton
             icon="settings"
             label="设置"
@@ -324,17 +309,12 @@ function Workbench({ api }: { api: Api }) {
   );
 
   return (
+    // 无全局 agent 面：ruyin 是工作空间运行时（20-specs/10 §1.3），智能体现在
+    // 各业务产品的任务流里（Harness 任务 + 人工检查点），不做壳级对话助手。
     <ShellViewport
       header={header}
       sidebar={sidebar}
       sidebarMode={collapsed ? "collapsed" : "expanded"}
-      dock={
-        dockOpen ? (
-          <ShellDock mode="narrow">
-            <AgentDock onClose={() => setDockOpen(false)} />
-          </ShellDock>
-        ) : undefined
-      }
     >
       <ShellPageContainer width="wide-2xl" className="workbench-page">
         {error && <div className="error-box">{error}</div>}
