@@ -11,9 +11,10 @@ import "./app.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {/* Light default preserves the deliberate choice from PR #12; dark is
-        driven by the DS .dark class contract (never prefers-color-scheme). */}
-    <ThemeProvider defaultMode="light">
+    {/* Dark-first tech-console identity (owner decision 2026-08-30,
+        superseding #12's light default); the DS .dark class contract drives
+        it - never prefers-color-scheme. Users can switch in 设置. */}
+    <ThemeProvider defaultMode="dark">
       <App />
     </ThemeProvider>
   </StrictMode>,

@@ -101,13 +101,17 @@ function openWindow(): void {
     title: "Ruyin",
     // Modern chrome: hide the native frame, float the Windows caption
     // buttons over the app's own top bar (which declares a drag region).
+    // Dark-first tech-console identity: colors match the DS dark background
+    // (neutral-950); overlay height matches the ShellHeader "md" band (48).
+    // The overlay is fixed at creation - after a light-theme switch the
+    // caption buttons keep the dark tint until a shell-side sync lands.
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      color: "#fbfcfe",
-      symbolColor: "#52627a",
-      height: 46,
+      color: "#0a0a0a",
+      symbolColor: "#a3a3a3",
+      height: 48,
     },
-    backgroundColor: "#f4f7fa",
+    backgroundColor: "#0a0a0a",
     webPreferences: {
       // The window is a pure web client of the Local API - no Node access,
       // no preload. The contract boundary stays at the HTTP surface.

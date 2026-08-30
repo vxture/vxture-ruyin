@@ -3,11 +3,29 @@
  * 审计) per the runtime-owned control surfaces of
  * docs/40-implementation/10-product-integration-guide.md section 6.3.
  * Pending checkpoints stay pinned above the tabs: human decisions outrank
- * navigation (50-harness section 6).
+ * navigation (50-harness section 6). Presentation is DS-native: SectionHeader
+ * ladder, SegmentedControl tab switch, StatusBadge tones, Table family.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Input, NativeSelect, Textarea } from "@vxture/design-system";
+import {
+  Button,
+  EmptyState,
+  Input,
+  NativeSelect,
+  PanelCard,
+  SectionHeader,
+  SegmentedControl,
+  StatusBadge,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
+  type StatusBadgeTone,
+} from "@vxture/design-system";
 import {
   Api,
   type AuditEvent,
@@ -21,12 +39,15 @@ import { verifyChain } from "./chain";
 
 type TabId = "overview" | "context" | "tasks" | "audit";
 
-const TABS: Array<{ id: TabId; label: string }> = [
-  { id: "overview", label: "概览" },
-  { id: "context", label: "上下文" },
-  { id: "tasks", label: "任务" },
-  { id: "audit", label: "审计" },
-];
+/** Business/task states → tone. Severity mapping is the product's judgment
+ *  (DS tone doc): waiting on a human is a warning-grade signal here. */
+function stateTone(state: string): StatusBadgeTone {
+  if (state === "completed" || state === "passed") return "success";
+  if (state === "failed") return "danger";
+  if (state === "waiting_human" || state === "pending_human") return "warning";
+  if (state === "running" || state === "selecting") return "info";
+  return "neutral";
+}
 
 export function WorkspacePanel({ api, id }: { api: Api; id: string }) {
   const [tab, setTab] = useState<TabId>("overview");
@@ -82,17 +103,20 @@ export function WorkspacePanel({ api, id }: { api: Api; id: string }) {
     [instances],
   );
 
-  if (!view) return <p className="muted">加载中……</p>;
+  if (!view) return <p className="text-body-md text-muted-foreground">加载中……</p>;
   return (
-    <>
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>
-          {view.meta.name} <span className="pill">{view.businessState}</span>
-        </h1>
-        <span className="muted mono">
-          {view.product.name} {view.product.version} · {view.meta.id}
-        </span>
-      </div>
+    <div className="flex flex-col gap-lg">
+      <SectionHeader
+        level={1}
+        icon="cube"
+        title={view.meta.name}
+        titleSuffix={
+          <StatusBadge tone={stateTone(view.businessState)}>
+            {view.businessState}
+          </StatusBadge>
+        }
+        description={`${view.product.name} ${view.product.version} · ${view.meta.id}`}
+      />
       {error && <div className="error-box">{error}</div>}
 
       {pending.map((t) => (
@@ -103,20 +127,21 @@ export function WorkspacePanel({ api, id }: { api: Api; id: string }) {
         />
       ))}
 
-      <nav className="tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            className={`tab${tab === t.id ? " active" : ""}`}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-            {t.id === "tasks" && pending.length > 0 && (
-              <span className="badge">{pending.length}</span>
-            )}
-          </button>
-        ))}
-      </nav>
+      <SegmentedControl<TabId>
+        ariaLabel="工作空间板块"
+        items={[
+          { value: "overview", label: "概览" },
+          { value: "context", label: "上下文" },
+          {
+            value: "tasks",
+            label: "任务",
+            ...(pending.length > 0 ? { count: pending.length } : {}),
+          },
+          { value: "audit", label: "审计" },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
 
       {tab === "overview" && (
         <OverviewTab
@@ -146,7 +171,7 @@ export function WorkspacePanel({ api, id }: { api: Api; id: string }) {
         />
       )}
       {tab === "audit" && <AuditTab audit={audit} chainOk={chainOk} />}
-    </>
+    </div>
   );
 }
 
@@ -164,20 +189,22 @@ function OverviewTab({
   const recent = [...instances].reverse().slice(0, 5);
   return (
     <>
-      <h2>业务阶段</h2>
+      <SectionHeader level={2} title="业务阶段" icon="workflow" />
       <StateStepper view={view} onTransition={onTransition} />
-      <h2>最近任务</h2>
-      {recent.length === 0 && <div className="empty">尚无任务执行记录</div>}
+      <SectionHeader level={2} title="最近任务" icon="clock-counter-clockwise" />
+      {recent.length === 0 && (
+        <EmptyState icon="list-checks" title="尚无任务执行记录" />
+      )}
       {recent.map((t) => (
         <div key={t.id} className="card">
           <b>{t.taskId}</b>{" "}
-          <span className={`pill ${t.state}`}>{t.state}</span>
-          <span className="muted" style={{ marginLeft: 10 }}>
+          <StatusBadge tone={stateTone(t.state)}>{t.state}</StatusBadge>
+          <span className="text-body-sm text-muted-foreground ml-sm">
             {t.updatedAt}
           </span>
         </div>
       ))}
-      <h2>产品</h2>
+      <SectionHeader level={2} title="产品" icon="package" />
       <div className="card">
         <div className="ws-name">{view.product.name}</div>
         <div className="ws-meta-line">
@@ -216,7 +243,7 @@ function StateStepper({
       </div>
       {transitions.length > 0 && (
         <div className="row">
-          <span className="muted">推进：</span>
+          <span className="text-body-sm text-muted-foreground">推进：</span>
           {transitions.map((t) => (
             <Button
               variant="outline"
@@ -274,15 +301,18 @@ function ContextTab({
   const effectiveType = bindType || contextTypes[0] || "";
   return (
     <>
-      <h2>文件授权 · Grants</h2>
+      <SectionHeader level={2} title="文件授权 · Grants" icon="folder-open" />
       {grants.length === 0 && (
-        <div className="empty">
-          尚未授权任何文件夹——Runtime 只能访问你显式授权的目录
-        </div>
+        <EmptyState
+          icon="lock"
+          title="尚未授权任何文件夹"
+          description="Runtime 只能访问你显式授权的目录。"
+        />
       )}
       {grants.map((g) => (
         <div key={g.id} className="card mono">
-          {g.path} <span className="muted">({g.mode})</span>
+          {g.path}{" "}
+          <span className="text-body-sm text-muted-foreground">({g.mode})</span>
         </div>
       ))}
       <div className="row">
@@ -302,7 +332,7 @@ function ContextTab({
         </Button>
       </div>
 
-      <h2>类型绑定 · Bindings</h2>
+      <SectionHeader level={2} title="类型绑定 · Bindings" icon="plugs-connected" />
       {bindings.map((b) => (
         <BindingCard key={b.type} api={api} wsId={wsId} binding={b} />
       ))}
@@ -368,27 +398,37 @@ function BindingCard({
       >
         <span>
           <b>{binding.type}</b>{" "}
-          <span className="muted mono">← {binding.root}</span>
+          <span className="text-body-sm text-muted-foreground mono">
+            ← {binding.root}
+          </span>
         </span>
-        <span className="muted">{open ? "收起" : "查看条目"}</span>
+        <span className="text-body-sm text-muted-foreground">
+          {open ? "收起" : "查看条目"}
+        </span>
       </div>
       {open && items !== null && (
-        <table style={{ marginTop: 8 }}>
-          <tbody>
+        <Table className="mt-sm">
+          <TableBody>
             {items.length === 0 && (
-              <tr>
-                <td className="muted">（该绑定当前未发现任何条目）</td>
-              </tr>
+              <TableRow>
+                <TableCell className="text-muted-foreground">
+                  （该绑定当前未发现任何条目）
+                </TableCell>
+              </TableRow>
             )}
             {items.map((i) => (
-              <tr key={i.id}>
-                <td>{i.name}</td>
-                <td className="muted">{(i.bytes / 1024).toFixed(1)} KB</td>
-                <td className="muted">{i.modifiedAt.slice(0, 10)}</td>
-              </tr>
+              <TableRow key={i.id}>
+                <TableCell>{i.name}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {(i.bytes / 1024).toFixed(1)} KB
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {i.modifiedAt.slice(0, 10)}
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
     </div>
   );
@@ -407,12 +447,16 @@ function TasksTab({
 }) {
   return (
     <>
-      <h2>任务定义</h2>
+      {/* 智能在这里：业务契约声明的 AI 任务（Harness 执行 + 人工检查点），
+          不是壳级助手（20-specs/10 §1.3 定位）。 */}
+      <SectionHeader level={2} title="任务定义" icon="sparkles" />
       {view.tasks.map((t) => (
         <TaskLauncher key={t.id} def={t} onLaunch={(inputs) => onLaunch(t.id, inputs)} />
       ))}
-      <h2>任务实例</h2>
-      {instances.length === 0 && <div className="empty">尚无任务实例</div>}
+      <SectionHeader level={2} title="任务实例" icon="list-checks" />
+      {instances.length === 0 && (
+        <EmptyState icon="circle-dashed" title="尚无任务实例" />
+      )}
       {[...instances].reverse().map((t) => (
         <InstanceCard key={t.id} instance={t} />
       ))}
@@ -433,7 +477,7 @@ function TaskLauncher({
   return (
     <div className="card">
       <div style={{ fontWeight: 600 }}>{def.id}</div>
-      <div className="muted">
+      <div className="text-body-sm text-muted-foreground">
         {def.objective} · 输入类型: {def.input_types.join(", ") || "（无）"}
       </div>
       <div className="row" style={{ marginTop: 6 }}>
@@ -474,48 +518,52 @@ function InstanceCard({ instance }: { instance: TaskInstance }) {
       <div className="row" style={{ justifyContent: "space-between", margin: 0 }}>
         <span>
           <b>{instance.taskId}</b>{" "}
-          <span className={`pill ${instance.state}`}>{instance.state}</span>
+          <StatusBadge tone={stateTone(instance.state)}>
+            {instance.state}
+          </StatusBadge>
         </span>
-        <span className="muted">{instance.updatedAt}</span>
+        <span className="text-body-sm text-muted-foreground">
+          {instance.updatedAt}
+        </span>
       </div>
       {instance.error && <div className="error-box">{instance.error}</div>}
       {open && (
         <div style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
           {instance.verification.length > 0 && (
-            <table style={{ marginBottom: 10 }}>
-              <thead>
-                <tr>
-                  <th>验证规则</th>
-                  <th>方式</th>
-                  <th>结论</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="mb-sm">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>验证规则</TableHead>
+                  <TableHead>方式</TableHead>
+                  <TableHead>结论</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {instance.verification.map((v) => (
-                  <tr key={v.id}>
-                    <td>{v.id}</td>
-                    <td className="muted">{v.kind}</td>
-                    <td>
-                      <span
-                        className={`pill ${v.status === "pending_human" ? "waiting_human" : v.status === "passed" ? "completed" : "failed"}`}
-                      >
+                  <TableRow key={v.id}>
+                    <TableCell>{v.id}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {v.kind}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge tone={stateTone(v.status)}>
                         {v.status}
-                      </span>
-                    </td>
-                  </tr>
+                      </StatusBadge>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
           {instance.result &&
             Object.entries(instance.result.content).map(([cap, text]) => (
               <div key={cap} style={{ marginBottom: 6 }}>
-                <div className="muted">{cap}</div>
+                <div className="text-body-sm text-muted-foreground">{cap}</div>
                 <div className="mono">{text}</div>
               </div>
             ))}
           {instance.result && (
-            <div className="muted">
+            <div className="text-body-sm text-muted-foreground">
               来源（Provenance）: {instance.result.sources.join(", ")}
             </div>
           )}
@@ -534,55 +582,64 @@ function CheckpointCard({
 }) {
   const kind = instance.checkpoint?.kind ?? "verification_review";
   return (
-    <div className="checkpoint">
-      <div className="checkpoint-title">
-        {kind === "context_confirm"
-          ? `任务「${instance.taskId}」请求使用以下上下文（含高敏感项，需你确认）`
-          : `任务「${instance.taskId}」的成果等待人工评审`}
-      </div>
-      {kind === "context_confirm" && (
-        <table>
-          <tbody>
+    <PanelCard
+      tone="warning"
+      icon="shield-warning"
+      title={
+        kind === "context_confirm"
+          ? `任务「${instance.taskId}」请求使用以下上下文`
+          : `任务「${instance.taskId}」的成果等待人工评审`
+      }
+      description={
+        kind === "context_confirm"
+          ? "含高敏感项，执行前需要你确认（context_confirm 门）"
+          : "验证结论如下，批准后任务继续"
+      }
+      action={
+        <div className="flex items-center gap-xs">
+          <Button onClick={() => onDecide(true)}>批准</Button>
+          <Button
+            variant="destructive"
+            confirmExempt="Checkpoint 决策本身就是人工确认步骤（50-harness §6），无需二次弹窗"
+            onClick={() => onDecide(false)}
+          >
+            拒绝
+          </Button>
+        </div>
+      }
+    >
+      {kind === "context_confirm" ? (
+        <Table>
+          <TableBody>
             {(instance.contextSet ?? []).map((i) => (
-              <tr key={i.id}>
-                <td>{i.name}</td>
-                <td className="muted">{i.type}</td>
-                <td className="muted">{(i.bytes / 1024).toFixed(1)} KB</td>
-              </tr>
+              <TableRow key={i.id}>
+                <TableCell>{i.name}</TableCell>
+                <TableCell className="text-muted-foreground">{i.type}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {(i.bytes / 1024).toFixed(1)} KB
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      )}
-      {kind === "verification_review" && (
-        <table>
-          <tbody>
+          </TableBody>
+        </Table>
+      ) : (
+        <Table>
+          <TableBody>
             {instance.verification.map((v) => (
-              <tr key={v.id}>
-                <td>{v.id}</td>
-                <td>
-                  <span
-                    className={`pill ${v.status === "pending_human" ? "waiting_human" : v.status === "passed" ? "completed" : "failed"}`}
-                  >
-                    {v.status}
-                  </span>
-                </td>
-                <td className="muted">{v.note ?? ""}</td>
-              </tr>
+              <TableRow key={v.id}>
+                <TableCell>{v.id}</TableCell>
+                <TableCell>
+                  <StatusBadge tone={stateTone(v.status)}>{v.status}</StatusBadge>
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {v.note ?? ""}
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
-      <div className="row" style={{ marginTop: 8 }}>
-        <Button onClick={() => onDecide(true)}>批准</Button>
-        <Button
-          variant="destructive"
-          confirmExempt="Checkpoint 决策本身就是人工确认步骤（50-harness §6），无需二次弹窗"
-          onClick={() => onDecide(false)}
-        >
-          拒绝
-        </Button>
-      </div>
-    </div>
+    </PanelCard>
   );
 }
 
@@ -603,18 +660,22 @@ function AuditTab({
   const rows = kindFilter ? audit.filter((e) => e.kind === kindFilter) : audit;
   return (
     <>
-      <h2>
-        审计轨迹 · {audit.length} 条
-        <span
-          className={`chain-badge${chainOk === true ? " ok" : chainOk === false ? " bad" : ""}`}
-        >
-          {chainOk === null
-            ? "校验中…"
-            : chainOk
-              ? "✓ 哈希链完整（本地重算）"
-              : "✗ 哈希链断裂"}
-        </span>
-      </h2>
+      <SectionHeader
+        level={2}
+        icon="fingerprint"
+        title={`审计轨迹 · ${audit.length} 条`}
+        titleSuffix={
+          <StatusBadge
+            tone={chainOk === true ? "success" : chainOk === false ? "danger" : "neutral"}
+          >
+            {chainOk === null
+              ? "校验中…"
+              : chainOk
+                ? "哈希链完整（本地重算）"
+                : "哈希链断裂"}
+          </StatusBadge>
+        }
+      />
       <div className="row">
         <NativeSelect
           value={kindFilter}
@@ -630,26 +691,26 @@ function AuditTab({
         </NativeSelect>
       </div>
       <div className="card audit-scroll">
-        <table className="audit-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>kind</th>
-              <th>actor</th>
-              <th>payload</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table className="audit-table">
+          <TableHeader>
+            <TableRow>
+              <TableHead>#</TableHead>
+              <TableHead>kind</TableHead>
+              <TableHead>actor</TableHead>
+              <TableHead>payload</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.map((e, i) => (
-              <tr key={e.event_id}>
-                <td>{i + 1}</td>
-                <td>{e.kind}</td>
-                <td>{e.actor}</td>
-                <td>{JSON.stringify(e.payload)}</td>
-              </tr>
+              <TableRow key={e.event_id}>
+                <TableCell>{i + 1}</TableCell>
+                <TableCell>{e.kind}</TableCell>
+                <TableCell>{e.actor}</TableCell>
+                <TableCell>{JSON.stringify(e.payload)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </>
   );
