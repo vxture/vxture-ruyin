@@ -29,7 +29,7 @@ product:
     minimum: ${minimum}
 workspace:
   type: project
-  lifecycle: finite
+
   operations: [create, open]
 objects:
   - id: root
@@ -60,7 +60,15 @@ capabilities:
     kind: analysis
     description: 分析
 tools:
-  - { id: read_file, category: local_read, risk: low, default: allow }
+  - id: read_file
+    category: local_read
+    risk: low
+    default: allow
+    input_schema:
+      type: object
+      properties:
+        path: { type: string, x-ruyin-ref: path }
+      required: [path]
 tasks:
   - id: run
     objective: 跑一次

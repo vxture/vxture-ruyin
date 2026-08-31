@@ -10,6 +10,23 @@
 export interface ClockPort {
   /** ISO-8601 timestamp. */
   now(): string;
+  /** Wait, for retry backoff. Hosts own their own timers. */
+  sleep(ms: number): Promise<void>;
+}
+
+/**
+ * A failure that is temporary - the network dropped, the provider is down.
+ *
+ * Ports throw this when they know the difference; the host is the only layer
+ * that can tell, because it owns the transport. The runtime retries these and
+ * then suspends the task rather than failing it: a task killed by someone
+ * else's outage is not a task that went wrong (50-harness 8.4).
+ */
+export class TransientError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "TransientError";
+  }
 }
 
 export interface IdPort {
@@ -22,23 +39,70 @@ export interface CryptoPort {
   sha256(input: string): string;
 }
 
-export interface CapabilityInvocation {
-  capability: string;
-  workspace: string;
-  taskInstance: string;
-  inputs: Record<string, unknown>;
+/** A tool the provider asked the runtime to run. */
+export interface ToolCall {
+  id: string;
+  tool: string;
+  arguments: Record<string, unknown>;
 }
 
-export interface CapabilityResult {
-  content: string;
+/** One message in a capability's conversation. */
+export type TurnMessage =
+  | { role: "user"; content: string }
+  | { role: "assistant"; content: string; toolCalls?: ToolCall[] }
+  | { role: "tool"; callId: string; content: string; isError?: boolean };
+
+/** A tool the runtime is willing to actually execute this turn. */
+export interface ToolOffer {
+  id: string;
+  description?: string;
+}
+
+export interface CapabilityTurnRequest {
+  capability: string;
+  /**
+   * Stable across the whole task - the cross-product aggregation key
+   * (platform integration rule X-2). Providers log it verbatim, which is what
+   * makes one task's cost and failure point reconstructable across products.
+   */
+  taskId: string;
+  workspace: string;
+  /**
+   * The conversation so far. Earlier capabilities' output accumulates here,
+   * so capability N sees N-1's result.
+   */
+  messages: TurnMessage[];
+  /**
+   * Tools the runtime will actually execute if asked. Offering a tool the
+   * runtime cannot gate would be a lie, so this stays empty until the Tool
+   * Gate exists (50-harness section 5).
+   */
+  tools: ToolOffer[];
 }
 
 /**
- * AI capability invocation. Both hosts point this at the Vxture AI Gateway
- * (60 section T10); Phase A uses a mock implementation.
+ * One turn's outcome: the provider wants tools, or it produced output.
+ *
+ * Verification capabilities (`verify:<rule>`) answer with a verdict as the
+ * first token - `PASS`, or `FAIL: <what is wrong>`. Anything unreadable is
+ * escalated to a person rather than assumed to pass: guessing in the passing
+ * direction is how a verification step turns into decoration.
+ */
+export type CapabilityTurn =
+  | { kind: "tool_calls"; calls: ToolCall[] }
+  | { kind: "content"; content: string };
+
+/**
+ * Capability invocation, one turn at a time.
+ *
+ * The runtime owns the loop (ADR-002): the provider is stateless and answers
+ * "what next", it never runs the task to completion. That split is what keeps
+ * tool execution, gating, audit and human checkpoints on the machine that
+ * holds the data. Both hosts point this at the business product's capability
+ * surface, which is what holds the credentials for Atlas (ADR-001).
  */
 export interface AIGatewayPort {
-  invoke(request: CapabilityInvocation): Promise<CapabilityResult>;
+  turn(request: CapabilityTurnRequest): Promise<CapabilityTurn>;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +144,34 @@ export interface ContextItem extends ContextItemMeta {
 export interface ConnectorPort {
   discover(binding: Binding): Promise<ContextItemMeta[]>;
   read(item: ContextItemMeta): Promise<ContextItem>;
+}
+
+/**
+ * Tool execution, after the Tool Gate has let a call through.
+ *
+ * Separate from ConnectorPort on purpose: connectors *read* context, tools
+ * *act*. Hosts implement the tools their platform can actually perform, and
+ * an unimplemented tool must fail loudly rather than return an empty success -
+ * to a model, an empty result reads as "it ran and found nothing".
+ */
+export interface ToolExecutionRequest {
+  tool: string;
+  arguments: Record<string, unknown>;
+  workspace: string;
+  taskId: string;
+  /** Folders the user granted; path arguments have already been checked. */
+  grants: FolderGrant[];
+}
+
+export interface ToolExecutionResult {
+  content: string;
+  isError?: boolean;
+}
+
+export interface ToolExecutorPort {
+  /** Tool ids this host can actually run. */
+  supports(tool: string): boolean;
+  execute(request: ToolExecutionRequest): Promise<ToolExecutionResult>;
 }
 
 /** Relevance ranking over candidates (local host: FTS5; 04 section 6.1). */
@@ -178,4 +270,8 @@ export interface RuntimePorts {
   /** Connector registry by connector id (e.g. "local-fs"). */
   connectors?: Map<string, ConnectorPort>;
   ranker?: RankerPort;
+  /** Executes tools the Tool Gate lets through. */
+  tools?: ToolExecutorPort;
+  /** True once the user has asked this task to stop (see HarnessDeps). */
+  isCancelled?: (taskInstanceId: string) => boolean;
 }

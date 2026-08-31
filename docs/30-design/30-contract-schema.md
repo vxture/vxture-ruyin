@@ -104,8 +104,7 @@ product:
 
 ```yaml
 workspace:
-  type: project           # 必填。persistent | project | document
-  lifecycle: finite       # 必填。continuous | finite | versioned
+  type: project           # 必填。continuous | project
   operations:             # 可选。默认 [create, open]
     - create
     - open
@@ -113,13 +112,18 @@ workspace:
     - restore
 ```
 
-MVP 合法组合（声明冗余用于显式化，R2）：
+Ruyin 支持两类业务形态，一个字段表达：
 
-| type | lifecycle |
-|---|---|
-| persistent | continuous |
-| project | finite |
-| document | versioned |
+| type | 容器行为 | 例 |
+|---|---|---|
+| `continuous` | 一个长期容器，随业务一直跑，没有交付即结束的时点 | 客户关系管理 |
+| `project` | 每次作业新建一个相对独立的容器，有始有终，交付即闭合 | 标书编写 |
+
+> **原 `lifecycle` 字段已撤销（2026-08-31）。** 它的三个取值与 `type` 的三个
+> 取值一一对应（persistent/continuous、project/finite、document/versioned）
+> —— 同一件事说了两遍，而 R2 存在的唯一职责就是保证这两遍一致。合并后
+> **R2 一并退役，编号不复用**。原 `document`/`versioned` 归入 `project`：
+> 版次是**成果对象**的属性，不是容器的形态。
 
 ---
 
@@ -210,11 +214,27 @@ capabilities:
 
 ```yaml
 tools:
-  - id: read_file
-    category: local_read    # local_read|local_write|query|generate|export|external_send
-    risk: low               # low | medium | high
-    default: allow          # allow | ask | deny
+  - id: write_document
+    category: local_write   # local_read|local_write|query|generate|export|external_send
+    risk: medium            # low | medium | high
+    default: ask            # allow | ask | deny
+    input_schema:           # 必填。JSON Schema draft 2020-12，顶层须为 object
+      type: object
+      properties:
+        path:    { type: string, x-ruyin-ref: path }          # 须落在已授权目录内
+        content: { type: string }
+        source:  { type: string, x-ruyin-ref: context_item }  # 须属于本任务上下文集
+      required: [path, content]
+    output_schema: { ... }  # 可选
 ```
+
+> **`input_schema` 为什么必填。** Tool Gate 放行前要做三项校验：参数合 schema、
+> 路径类参数落在授权范围内、引用的资料在本次上下文集内（05 §5.2）。三项都需要
+> 知道**哪个参数是什么**。没有它，闸门只能做「问不问用户」，做不了「参数合不
+> 合法」——而一个能写文件却不校验路径的工具，等于绕过了整个授权模型。
+>
+> `x-ruyin-ref` 词表：`path` | `context_item`。**不标注的方向是放行**，所以
+> R13 对 `local_read`/`local_write`/`export` 类工具强制要求至少一个 `path` 标注。
 
 约束（R7）：
 
@@ -319,7 +339,7 @@ sync:
 | 规则 | 内容 | 层级 |
 |---|---|---|
 | R1 | 顶层键完整；`contract` 版本受当前 Runtime 支持 | L1 / L3 |
-| R2 | workspace type / lifecycle 组合合法 | L1 |
+| R2 | ~~workspace type / lifecycle 组合合法~~ **已退役（2026-08-31）**：两字段合并为 `workspace.type`，该规则失去检查对象。编号不复用 | — |
 | R3 | relations.to 引用已声明对象；恰好一个 primary 对象 | L2 |
 | R4 | states.object 为 primary 对象；initial 与所有 transitions.to 均在 items 中；无不可达状态 | L2 |
 | R5 | 全部集合 id 唯一（objects / context.types / capabilities / tools / tasks / states.items）；required 类型的 sources 非空 | L2 |
@@ -330,6 +350,7 @@ sync:
 | R10 | permissions 中 delete / external_send / sync_to_cloud 不得为 allow | L1 |
 | R11 | temporary 类同步策略固定 local_only | L1 |
 | R12 | 包签名有效且签名身份与 product.publisher 一致 | L4 |
+| R13 | `input_schema.required` 中每个名字均已声明；`local_read`/`local_write`/`export` 类工具至少标注一个 `x-ruyin-ref: path` 参数 | L2 |
 
 ---
 
@@ -350,7 +371,6 @@ product:
 
 workspace:
   type: project
-  lifecycle: finite
   operations: [create, open, archive, restore]
 
 objects:

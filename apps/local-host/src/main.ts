@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
  * Runtime daemon entry point (dev mode).
  *
@@ -25,8 +25,10 @@ import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { ProductRegistry } from "./product-registry.js";
 import { createLocalApi } from "./server.js";
+import { TaskRunner } from "./task-runner.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { FtsRanker, reindexBinding } from "./fts.js";
+import { LocalToolExecutor } from "./tool-executor.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
 
@@ -60,6 +62,10 @@ try {
 const localFs = new LocalFsConnector();
 const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
 
+// Shared with the TaskRunner: cancellation is an in-memory signal so the
+// running loop cannot overwrite it on its next persist.
+const cancelledTasks = new Set<string>();
+
 const runtime = new WorkspaceRuntime({
   storage,
   clock: nodeClock,
@@ -68,6 +74,8 @@ const runtime = new WorkspaceRuntime({
   gateway: new MockAIGateway(),
   connectors,
   ranker: new FtsRanker(storage),
+  tools: new LocalToolExecutor(),
+  isCancelled: (id) => cancelledTasks.has(id),
 });
 
 const defaultUiDir = resolve(
@@ -95,9 +103,12 @@ console.log(
   }`,
 );
 
+const tasks = new TaskRunner(runtime, cancelledTasks);
+
 const server = createLocalApi({
   runtime,
   registry,
+  tasks,
   token,
   version: VERSION,
   reindex: (wsId, binding) => reindexBinding(storage, wsId, binding, localFs),
@@ -134,6 +145,18 @@ async function syncEntitlements(): Promise<void> {
 }
 void syncEntitlements().catch(() => {});
 setInterval(() => void syncEntitlements().catch(() => {}), 5 * 60_000).unref();
+
+// Pick up tasks a previous process died holding (50-harness §8.3). Failing
+// this sweep must not stop the daemon: an un-recovered task is a stuck task,
+// a daemon that will not start is every task stuck.
+void tasks
+  .recoverAll()
+  .then((picked) => {
+    if (picked > 0) console.log(`[ruyin] resumed ${picked} interrupted task(s)`);
+  })
+  .catch((cause) => {
+    console.error("[ruyin] task recovery sweep failed:", cause);
+  });
 
 server.listen(port, "127.0.0.1", () => {
   console.log(`[ruyin] local runtime ${VERSION}`);

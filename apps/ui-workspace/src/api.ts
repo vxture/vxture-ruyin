@@ -63,11 +63,33 @@ export interface VerificationOutcome {
   note?: string;
 }
 
+export type CheckpointKind =
+  | "context_confirm"
+  | "verification_review"
+  | "tool_ask";
+
+export interface Checkpoint {
+  id: string;
+  kind: CheckpointKind;
+  subject: unknown;
+  options: Array<"approve" | "reject" | "modify">;
+  raisedAt: string;
+  decision?: { by: string; choice: string; at: string };
+}
+
+/** The confirmation in front of the user, if any. */
+export function pendingCheckpoint(
+  instance: TaskInstance,
+): Checkpoint | undefined {
+  return instance.checkpoints?.find((c) => !c.decision);
+}
+
 export interface TaskInstance {
   id: string;
   taskId: string;
   state: string;
-  checkpoint?: { kind: "context_confirm" | "verification_review" };
+  /** Confirmation queue, oldest first; undecided entries are still waiting. */
+  checkpoints: Checkpoint[];
   contextSet?: ContextItemMeta[];
   verification: VerificationOutcome[];
   capabilityOutputs: Record<string, string>;
@@ -189,6 +211,11 @@ export class Api {
       task,
       ...(inputs !== undefined ? { inputs } : {}),
     });
+  cancelTask = (id: string, taskInstance: string) =>
+    this.call<TaskInstance>(
+      `/workspaces/${id}/tasks/${taskInstance}/cancel`,
+      "POST",
+    );
   decide = (id: string, taskInstance: string, approve: boolean) =>
     this.call<TaskInstance>(
       `/workspaces/${id}/tasks/${taskInstance}/decision`,

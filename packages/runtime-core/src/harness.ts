@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Business Runtime Harness - task-scoped execution kernel.
  * Design authority: docs/30-design/50-harness.md, 40-context-architecture.md.
  *
@@ -17,13 +17,19 @@
  * tests): that path skips selection and marks the transmission as
  * caller-supplied context.
  *
- * Not yet implemented (later batches): Tool Gate over declared tools,
- * revision rounds, redaction hooks, recovery replay from journal.
+ * Also implemented: the turn-based capability loop with tool offers, the Tool
+ * Gate (decision synthesis + argument validation + task-scoped ask cache), the
+ * checkpoint queue with modify, and interrupted-task recovery.
+ *
+ * Not yet implemented: revision rounds on failed verification, redaction
+ * hooks, transient-error suspension, and cancellation.
  */
 
 import type { RuyinContract, TaskDefinition } from "@vxture/ruyin-contract-schema";
 import { emitAudit } from "./audit.js";
+import { TransientError } from "./ports.js";
 import { isPathGranted } from "./workspace.js";
+import { decideTool, validateToolCall } from "./tool-gate.js";
 import type {
   AIGatewayPort,
   Binding,
@@ -34,6 +40,10 @@ import type {
   FolderGrant,
   IdPort,
   RankerPort,
+  ToolCall,
+  ToolExecutorPort,
+  ToolOffer,
+  TurnMessage,
   WorkspaceStore,
 } from "./ports.js";
 
@@ -49,13 +59,112 @@ export type TaskInstanceState =
   | "waiting_human"
   | "suspended";
 
-export type CheckpointKind = "context_confirm" | "verification_review";
+/**
+ * Confirmation kinds that actually have an emitter.
+ *
+ * 50-harness section 6.2 lists six; the three without a trigger yet
+ * (transmission_confirm, state_transition, result_acceptance) are left out
+ * deliberately - a kind that can never be raised only buys the UI a branch
+ * that never runs, and a reader the impression it is handled.
+ */
+export type CheckpointKind =
+  | "context_confirm"
+  | "verification_review"
+  | "tool_ask";
+
+export type CheckpointChoice = "approve" | "reject" | "modify";
+
+/**
+ * One thing waiting on a person (50-harness section 6.1). `subject` carries
+ * the whole thing being decided - a confirmation the user cannot inspect is
+ * not a confirmation.
+ */
+export interface Checkpoint {
+  id: string;
+  kind: CheckpointKind;
+  subject: unknown;
+  options: CheckpointChoice[];
+  raisedAt: string;
+  decision?: { by: string; choice: CheckpointChoice; at: string };
+}
+
+/** A decision, with the edited subject when the user chose to modify. */
+export interface CheckpointDecision {
+  choice: CheckpointChoice;
+  /** Replacement subject; only read for `modify`. */
+  subject?: unknown;
+  /** Target a specific checkpoint; defaults to the oldest pending one. */
+  checkpointId?: string;
+  by?: string;
+  /**
+   * How long a tool approval lasts (50-harness 5.3). `once` is the default;
+   * `task` stops asking again for the same tool within this task. Floored
+   * operations ignore it - those are confirmed every single time.
+   */
+  scope?: "once" | "task";
+}
+
+/** What one capability's loop produced. */
+type CapabilityOutcome =
+  | { kind: "content"; content: string }
+  | { kind: "suspended" }
+  | { kind: "cancelled" }
+  | { kind: "failed"; reason: string };
+
+/** The phase `advance()` should run next. */
+export type ResumePoint = "select" | "execute" | "finalize";
+
+/** The confirmation currently in front of the user - oldest first, or none. */
+export function pendingCheckpoint(
+  instance: TaskInstanceRecord,
+): Checkpoint | undefined {
+  return instance.checkpoints.find((c) => !c.decision);
+}
+
+/**
+ * Where to re-enter an instance the process died holding, or null if there is
+ * nothing to recover (50-harness section 8.3).
+ *
+ * No journal replay is needed to spot one: `advance()` clears the resume
+ * marker as it claims the work, so "non-terminal, not awaiting a person, and
+ * no marker" is exactly the signature of an interrupted run.
+ *
+ * `execute` covers three interrupted states because the phases skip what is
+ * already on record - completed capabilities and decided verification rules
+ * are not redone, so re-entry lands on the first unfinished step.
+ */
+export function interruptedResumePoint(
+  instance: TaskInstanceRecord,
+): ResumePoint | null {
+  if (instance.resume) return null; // already armed: in flight, not interrupted
+  switch (instance.state) {
+    case "created":
+      return "select";
+    case "selecting":
+      return "select";
+    case "executing":
+    case "verifying":
+    case "finalizing":
+      return "execute";
+    case "suspended":
+      // Parked on someone else's outage. A restart is exactly the moment the
+      // network may be back, so it is worth another try (50-harness 8.4).
+      return "execute";
+    default:
+      // completed / failed / cancelled: done.
+      // waiting_human: not interrupted - it is waiting on a person, and the
+      // checkpoint is persisted, so it survives the restart on its own.
+      return null;
+  }
+}
 
 export interface VerificationOutcome {
   id: string;
   kind: "automated" | "ai_assisted" | "human";
   status: "passed" | "failed" | "pending_human";
   note?: string;
+  /** Why it failed - fed back into the next revision round. */
+  feedback?: string;
 }
 
 export interface TaskResult {
@@ -77,7 +186,48 @@ export interface TaskInstanceRecord {
   inputs?: Record<string, unknown>;
   /** Selected context (selection pipeline). */
   contextSet?: ContextItemMeta[];
-  checkpoint?: { kind: CheckpointKind };
+  /**
+   * Confirmation queue, oldest first (50-harness 6.3). A queue rather than one
+   * slot because the Tool Gate can raise a second question while the first is
+   * still open - a single slot silently drops one of them.
+   */
+  checkpoints: Checkpoint[];
+  /**
+   * Where `advance()` picks up. Absent means there is nothing to drive: the
+   * task is terminal, waiting on a person, or already in flight elsewhere.
+   * `advance()` clears it before doing the work, so it doubles as the claim
+   * that stops two callers from running the same step twice.
+   */
+  resume?: ResumePoint;
+  /** Recorded at the context_confirm checkpoint; read when execution resumes. */
+  contextConfirmed?: boolean;
+  /**
+   * The conversation, persisted only while a tool decision is outstanding.
+   * Suspending mid-loop is the one point where it cannot be rebuilt from
+   * capabilityOutputs - the capability has not produced its answer yet.
+   */
+  conversation?: TurnMessage[];
+  /** The capability whose loop is parked on a tool decision. */
+  pendingCapability?: string;
+  /** Calls waiting for the user's answer, then for execution. */
+  pendingToolCalls?: ToolCall[];
+  /** Set by the decision: run them, or report them back as refused. */
+  pendingToolsApproved?: boolean;
+  /**
+   * Tools the user approved for the rest of this task (50-harness 5.3, task
+   * scope). Never holds a floored operation - those are confirmed every time.
+   */
+  askCache?: string[];
+  /** Revision rounds already spent on failed verification (50-harness 7.2). */
+  revisionRound?: number;
+  /**
+   * The user asked to stop. Honoured at the next safe point rather than
+   * mid-call: aborting a call in flight leaves it unknown whether the effect
+   * happened, and "unknown" is worse than "finished then stopped".
+   */
+  cancelRequested?: boolean;
+  /** Why the task is suspended, shown to the user (50-harness 8.4). */
+  suspendedReason?: string;
   state: TaskInstanceState;
   capabilityOutputs: Record<string, string>;
   verification: VerificationOutcome[];
@@ -97,11 +247,53 @@ export interface HarnessDeps {
   gateway: AIGatewayPort;
   connectors: Map<string, ConnectorPort>;
   ranker?: RankerPort | undefined;
+  /** Executes tools the gate lets through; absent = no tool is on offer. */
+  tools?: ToolExecutorPort | undefined;
+  /**
+   * True once the user has asked this task to stop. Lives outside the record
+   * on purpose: the running loop holds its own copy and would overwrite a
+   * persisted flag on its next write.
+   */
+  isCancelled?: ((taskInstanceId: string) => boolean) | undefined;
 }
 
 export class HarnessError extends Error {}
 
+/** Internal signal: park the task, do not fail it. */
+class SuspendTask extends Error {}
+
+const TERMINAL_STATES: ReadonlySet<TaskInstanceState> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+/** Transient-error attempts before the task parks (50-harness 8.4). */
+const MAX_TRANSIENT_ATTEMPTS = 3;
+const BASE_BACKOFF_MS = 500;
+
 const MAX_ITEMS_PER_TYPE = 3;
+
+/**
+ * Runtime turn ceiling per capability (50-harness section 4: the loop is
+ * bounded so a runaway cannot spin forever). A contract-declared smaller
+ * value is future work.
+ */
+const MAX_TURNS = 12;
+
+/**
+ * Revision rounds before the result goes to a person (50-harness 7.2, runtime
+ * default 2). The ceiling is the point: verification that never passes must
+ * end at a human, not in an endless retry.
+ */
+const MAX_REVISIONS = 2;
+
+/** Cheap checks first, a person last (50-harness 7.1). */
+const VERIFICATION_ORDER: Record<VerificationOutcome["kind"], number> = {
+  automated: 0,
+  ai_assisted: 1,
+  human: 2,
+};
 
 export class Harness {
   constructor(private readonly deps: HarnessDeps) {}
@@ -124,14 +316,199 @@ export class Harness {
       state: "created",
       capabilityOutputs: {},
       verification: [],
+      checkpoints: [],
       createdAt: clock.now(),
       updatedAt: clock.now(),
     };
+    instance.resume = "select";
     await this.persist(instance);
     await this.audit(instance, "task.created", {
       task: taskId,
       mode: inputs ? "manual" : "selection",
     });
+    // Returns without executing anything: a real provider takes tens of
+    // seconds per turn, so the caller must be able to answer its request and
+    // drive the task separately. Call advance() to run it.
+    return instance;
+  }
+
+  /**
+   * Drive an instance to its next resting point - terminal, or waiting on a
+   * person. Safe to call on a fresh Harness, which is what makes it the same
+   * entry point recovery will use (50-harness section 8).
+   *
+   * Nothing to drive (terminal, awaiting a decision, or already in flight)
+   * returns the instance untouched.
+   */
+  async advance(taskInstanceId: string): Promise<TaskInstanceRecord> {
+    const instance = await this.loadInstance(taskInstanceId);
+    const resume = instance.resume;
+    if (!resume) return instance;
+
+    // Claim it first: clearing the marker before doing the work means a second
+    // caller finds nothing to do rather than running the same step twice.
+    instance.resume = undefined;
+    await this.persist(instance);
+
+    try {
+      switch (resume) {
+        case "select":
+          return await this.selectPhase(instance);
+        case "execute":
+          return await this.executePhase(instance);
+        case "finalize":
+          return await this.finalize(instance);
+      }
+    } catch (cause) {
+      if (cause instanceof SuspendTask) {
+        // Someone else's outage is not this task going wrong: park it with the
+        // reason, keep every result so far, and let recovery try again.
+        instance.suspendedReason = cause.message;
+        await this.transition(instance, "suspended");
+        await this.audit(instance, "task.suspended", { reason: cause.message });
+        return instance;
+      }
+      return this.fail(
+        instance,
+        cause instanceof Error ? cause.message : String(cause),
+      );
+    }
+  }
+
+  /**
+   * Ask the task to stop. Honoured at the next safe point - between turns or
+   * between capabilities - so a call already in flight finishes rather than
+   * leaving it unknown whether its effect landed.
+   *
+   * Side effects already performed are kept, not rolled back; the audit trail
+   * is what shows what happened (50-harness section 12).
+   */
+  async cancel(taskInstanceId: string): Promise<TaskInstanceRecord> {
+    const instance = await this.loadInstance(taskInstanceId);
+    if (TERMINAL_STATES.has(instance.state)) return instance;
+
+    instance.cancelRequested = true;
+    await this.audit(instance, "task.cancel_requested", { by: "user" });
+
+    // Nothing is driving it, so nothing will reach a safe point on its own -
+    // stop it here.
+    const idle =
+      instance.state === "waiting_human" ||
+      instance.state === "suspended" ||
+      instance.resume !== undefined;
+    if (idle) {
+      instance.resume = undefined;
+      return this.stopCancelled(instance);
+    }
+    await this.persist(instance);
+    return instance;
+  }
+
+  private async stopCancelled(
+    instance: TaskInstanceRecord,
+  ): Promise<TaskInstanceRecord> {
+    await this.transition(instance, "cancelled");
+    await this.audit(instance, "task.cancelled", {
+      completedCapabilities: Object.keys(instance.capabilityOutputs),
+    });
+    return instance;
+  }
+
+  /**
+   * Call the provider, retrying failures the host marked as temporary.
+   *
+   * Backoff is exponential and bounded; when it runs out the task suspends
+   * instead of failing. A transient error costs no revision round either -
+   * neither the work nor the model did anything wrong (50-harness 8.4).
+   */
+  private async turnWithRetry(
+    request: Parameters<AIGatewayPort["turn"]>[0],
+    instance: TaskInstanceRecord,
+  ): Promise<Awaited<ReturnType<AIGatewayPort["turn"]>>> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= MAX_TRANSIENT_ATTEMPTS; attempt++) {
+      try {
+        return await this.deps.gateway.turn(request);
+      } catch (cause) {
+        if (!(cause instanceof TransientError)) throw cause;
+        lastError = cause;
+        await this.audit(instance, "capability.retry", {
+          capability: request.capability,
+          attempt,
+          reason: cause.message,
+        });
+        if (attempt < MAX_TRANSIENT_ATTEMPTS) {
+          await this.deps.clock.sleep(BASE_BACKOFF_MS * 2 ** (attempt - 1));
+        }
+      }
+    }
+    throw new SuspendTask(
+      lastError instanceof Error ? lastError.message : String(lastError),
+    );
+  }
+
+  /**
+   * Re-arm an instance the process died holding, then drive it. A no-op on
+   * anything that is not actually interrupted, so it is safe to call over a
+   * whole workspace on startup.
+   */
+  async recover(taskInstanceId: string): Promise<TaskInstanceRecord> {
+    const instance = await this.loadInstance(taskInstanceId);
+    const from = interruptedResumePoint(instance);
+    if (!from) return instance;
+
+    await this.audit(instance, "task.resumed", {
+      interrupted_in: instance.state,
+      resume: from,
+    });
+    instance.resume = from;
+    await this.persist(instance);
+    return this.advance(taskInstanceId);
+  }
+
+  /**
+   * Put a question to the user and suspend. `modify` is offered only where
+   * editing the subject means something - approving a changed context set is
+   * a real action; "modifying" a verification verdict is not.
+   */
+  private async raise(
+    instance: TaskInstanceRecord,
+    kind: CheckpointKind,
+    subject: unknown,
+  ): Promise<Checkpoint> {
+    const checkpoint: Checkpoint = {
+      id: this.deps.id.newId("cp"),
+      kind,
+      subject,
+      options:
+        kind === "verification_review"
+          ? ["approve", "reject"]
+          : ["approve", "reject", "modify"],
+      raisedAt: this.deps.clock.now(),
+    };
+    instance.checkpoints.push(checkpoint);
+    await this.transition(instance, "waiting_human");
+    await this.audit(instance, "checkpoint.raised", {
+      checkpoint: checkpoint.id,
+      kind,
+      subject,
+    });
+    return checkpoint;
+  }
+
+  private async loadInstance(id: string): Promise<TaskInstanceRecord> {
+    const raw = await this.deps.store.getTaskInstance(id);
+    if (!raw) throw new HarnessError(`task instance "${id}" not found`);
+    return JSON.parse(raw) as TaskInstanceRecord;
+  }
+
+  /** Context selection, then straight into execution (04 section 6.1). */
+  private async selectPhase(
+    instance: TaskInstanceRecord,
+  ): Promise<TaskInstanceRecord> {
+    const { contract } = this.deps;
+    const definition = instance.definition;
+    const inputs = instance.inputs;
 
     await this.transition(instance, "selecting");
     if (inputs) {
@@ -180,11 +557,13 @@ export class Harness {
       (i) => sensitivityOf.get(i.type) === "high",
     );
     if (hasHigh) {
-      instance.checkpoint = { kind: "context_confirm" };
-      await this.transition(instance, "waiting_human");
-      await this.audit(instance, "checkpoint.raised", {
-        kind: "context_confirm",
-        items: selection.items.map((i) => i.id),
+      await this.raise(instance, "context_confirm", {
+        items: selection.items.map((i) => ({
+          id: i.id,
+          type: i.type,
+          name: i.name,
+          bytes: i.bytes,
+        })),
       });
       return instance;
     }
@@ -192,36 +571,101 @@ export class Harness {
   }
 
   /**
-   * Decide the pending checkpoint (context_confirm or verification_review).
-   * Safe on a freshly constructed Harness - rebuild-on-resume.
+   * Record the decision on a pending checkpoint. Safe on a freshly constructed
+   * Harness - rebuild-on-resume.
+   *
+   * Recording is fast; continuing the task is not, so this returns as soon as
+   * the decision is durable and leaves an approved task marked for advance().
+   * A crash in that window loses nothing: the marker is already persisted.
    */
   async decideCheckpoint(
     taskInstanceId: string,
-    approve: boolean,
+    decision: boolean | CheckpointDecision,
   ): Promise<TaskInstanceRecord> {
-    const raw = await this.deps.store.getTaskInstance(taskInstanceId);
-    if (!raw) {
-      throw new HarnessError(`task instance "${taskInstanceId}" not found`);
-    }
-    const instance = JSON.parse(raw) as TaskInstanceRecord;
-    if (instance.state !== "waiting_human") {
+    const input: CheckpointDecision =
+      typeof decision === "boolean"
+        ? { choice: decision ? "approve" : "reject" }
+        : decision;
+    const instance = await this.loadInstance(taskInstanceId);
+
+    const pendingList = instance.checkpoints.filter((c) => !c.decision);
+    const target = input.checkpointId
+      ? pendingList.find((c) => c.id === input.checkpointId)
+      : pendingList[0]; // oldest first (50-harness 6.3)
+    if (!target) {
       throw new HarnessError(
-        `task instance "${taskInstanceId}" is not waiting for a decision (state: ${instance.state})`,
+        `task instance "${taskInstanceId}" has no pending checkpoint to decide (state: ${instance.state})`,
       );
     }
-    const kind = instance.checkpoint?.kind ?? "verification_review";
-    await this.audit(instance, "checkpoint.decided", {
-      kind,
-      approve,
-      by: "user",
-    });
-    instance.checkpoint = undefined;
+    if (!target.options.includes(input.choice)) {
+      throw new HarnessError(
+        `checkpoint "${target.id}" does not offer "${input.choice}" (offers: ${target.options.join(", ")})`,
+      );
+    }
 
-    if (kind === "context_confirm") {
+    // modify edits the subject before approving - the user changes what they
+    // are agreeing to, and the change is part of the record (50-harness 6.3).
+    if (input.choice === "modify") {
+      if (input.subject === undefined) {
+        throw new HarnessError(
+          `checkpoint "${target.id}": modify requires a replacement subject`,
+        );
+      }
+      target.subject = input.subject;
+    }
+    target.decision = {
+      by: input.by ?? "user",
+      choice: input.choice,
+      at: this.deps.clock.now(),
+    };
+    const approve = input.choice !== "reject";
+
+    await this.audit(instance, "checkpoint.decided", {
+      checkpoint: target.id,
+      kind: target.kind,
+      choice: input.choice,
+      by: target.decision.by,
+    });
+
+    // Another question is still open - stay put until every one is answered.
+    if (instance.checkpoints.some((c) => !c.decision)) {
+      await this.persist(instance);
+      return instance;
+    }
+
+    if (target.kind === "tool_ask") {
+      // A refused tool is not a failed task: the provider gets told and picks
+      // another route. Failing here would throw away work over one call.
+      instance.pendingToolsApproved = approve;
+      if (input.choice === "modify") {
+        const edited = (input.subject as { calls?: ToolCall[] } | undefined)?.calls;
+        if (edited) instance.pendingToolCalls = edited;
+      }
+      if (approve && input.scope === "task") {
+        const floored = new Set(
+          this.deps.contract.tools
+            .filter((t) => t.category === "external_send")
+            .map((t) => t.id),
+        );
+        const remembered = (instance.pendingToolCalls ?? [])
+          .map((c) => c.tool)
+          .filter((id) => !floored.has(id));
+        instance.askCache = [...new Set([...(instance.askCache ?? []), ...remembered])];
+      }
+      instance.resume = "execute";
+      await this.transition(instance, "executing");
+      return instance;
+    }
+
+    if (target.kind === "context_confirm") {
       if (!approve) {
         return this.fail(instance, "user declined the selected context");
       }
-      return this.executePhase(instance, { userConfirmed: true });
+      instance.contextConfirmed = true;
+      instance.resume = "execute";
+      // Back to the state the checkpoint was raised from (50-harness 3.2).
+      await this.transition(instance, "selecting");
+      return instance;
     }
 
     for (const outcome of instance.verification) {
@@ -232,7 +676,9 @@ export class Harness {
     if (!approve) {
       return this.fail(instance, "human review rejected the result");
     }
-    return this.finalize(instance);
+    instance.resume = "finalize";
+    await this.transition(instance, "verifying");
+    return instance;
   }
 
   // -------------------------------------------------------------------------
@@ -294,7 +740,6 @@ export class Harness {
 
   private async executePhase(
     instance: TaskInstanceRecord,
-    options?: { userConfirmed?: boolean },
   ): Promise<TaskInstanceRecord> {
     const { crypto, connectors } = this.deps;
     await this.transition(instance, "executing");
@@ -339,83 +784,453 @@ export class Harness {
       context_items: transmissionItems,
       destination: "vxture-inference",
       persistence: "none",
-      confirmed_by: options?.userConfirmed ? "user" : "policy",
+      confirmed_by: instance.contextConfirmed ? "user" : "policy",
     });
 
-    for (const capability of instance.definition.capabilities) {
-      await this.journal(instance, "capability", { capability });
-      await this.audit(instance, "capability.invoked", { capability });
-      const result = await this.deps.gateway.invoke({
-        capability,
-        workspace: this.deps.workspaceId,
-        taskInstance: instance.id,
-        inputs: gatewayInputs,
-      });
-      instance.capabilityOutputs[capability] = result.content;
-      await this.persist(instance);
-      await this.audit(instance, "capability.completed", { capability });
+    // One conversation for the whole task: every capability appends to it, so
+    // capability N sees N-1's output. The straight-line predecessor handed all
+    // of them the same inputs - with a mock that returned a fixed string that
+    // looked fine, and with a real model it would produce unrelated fragments.
+    // A parked conversation wins over a rebuilt one: it holds a turn the
+    // capability has not answered yet, which capabilityOutputs cannot express.
+    const messages =
+      instance.conversation ??
+      this.rebuildConversation(instance, gatewayInputs);
+    // Consumed: from here the conversation lives in the local variable, and
+    // anything that suspends puts it back explicitly.
+    instance.conversation = undefined;
+
+    // Coming back from a tool_ask: run what the user approved, then carry on
+    // in the capability that was parked.
+    if (instance.pendingToolCalls?.length) {
+      const decided = instance.pendingToolCalls;
+      const approved = instance.pendingToolsApproved === true;
+      const parked = instance.pendingCapability;
+      instance.pendingToolCalls = undefined;
+      instance.pendingToolsApproved = undefined;
+      instance.pendingCapability = undefined;
+      instance.conversation = undefined;
+      const results = approved
+        ? await this.runTools(instance, decided)
+        : decided.map<TurnMessage>((call) => ({
+            role: "tool",
+            callId: call.id,
+            content: `the user declined "${call.tool}"`,
+            isError: true,
+          }));
+      messages.push(...results);
+      if (parked) {
+        const outcome = await this.runCapability(instance, parked, messages);
+        if (outcome.kind === "failed") return this.fail(instance, outcome.reason);
+        if (outcome.kind === "cancelled") return this.stopCancelled(instance);
+        if (outcome.kind === "suspended") return instance;
+        instance.capabilityOutputs[parked] = outcome.content;
+        await this.persist(instance);
+      }
     }
-    return this.verifyPhase(instance, gatewayInputs);
+
+    for (const capability of instance.definition.capabilities) {
+      // Already answered before an interruption: its output is persisted and
+      // the conversation was restored with it, so re-asking would only burn a
+      // call and produce a different answer for a step that already succeeded.
+      if (capability in instance.capabilityOutputs) continue;
+      // Safe point: between capabilities.
+      if (this.deps.isCancelled?.(instance.id)) return this.stopCancelled(instance);
+      const outcome = await this.runCapability(instance, capability, messages);
+      if (outcome.kind === "failed") return this.fail(instance, outcome.reason);
+      if (outcome.kind === "cancelled") return this.stopCancelled(instance);
+      if (outcome.kind === "suspended") return instance;
+      instance.capabilityOutputs[capability] = outcome.content;
+      await this.persist(instance);
+    }
+    return this.verifyPhase(instance, messages);
+  }
+
+  /**
+   * The conversation as it stood: the opening context, then every capability
+   * answer already on record. On a fresh run that is just the opening message;
+   * after an interruption it restores what the next capability must see.
+   */
+  private rebuildConversation(
+    instance: TaskInstanceRecord,
+    gatewayInputs: Record<string, unknown>,
+  ): TurnMessage[] {
+    const messages: TurnMessage[] = [
+      { role: "user", content: renderContext(instance.definition, gatewayInputs) },
+    ];
+    for (const capability of instance.definition.capabilities) {
+      const answer = instance.capabilityOutputs[capability];
+      if (answer !== undefined) {
+        messages.push({ role: "assistant", content: answer });
+      }
+    }
+    return messages;
+  }
+
+  /**
+   * One capability, run as a loop (50-harness section 4): the provider answers
+   * "what next" and the runtime decides. Bounded by MAX_TURNS so a provider
+   * that keeps asking for tools cannot spin forever.
+   */
+  private async runCapability(
+    instance: TaskInstanceRecord,
+    capability: string,
+    messages: TurnMessage[],
+  ): Promise<CapabilityOutcome> {
+    await this.journal(instance, "capability", { capability });
+    await this.audit(instance, "capability.invoked", { capability });
+    const offers = this.toolOffers(instance);
+
+    for (let step = 1; step <= MAX_TURNS; step++) {
+      // Safe point: between turns, with nothing in flight.
+      if (this.deps.isCancelled?.(instance.id)) return { kind: "cancelled" };
+      const turn = await this.turnWithRetry(
+        {
+          capability,
+          taskId: instance.id,
+          workspace: this.deps.workspaceId,
+          messages,
+          tools: offers,
+        },
+        instance,
+      );
+
+      if (turn.kind === "content") {
+        messages.push({ role: "assistant", content: turn.content });
+        await this.audit(instance, "capability.completed", { capability, turns: step });
+        return { kind: "content", content: turn.content };
+      }
+
+      messages.push({ role: "assistant", content: "", toolCalls: turn.calls });
+      const gated = await this.gateCalls(instance, turn.calls);
+
+      if (gated.needsApproval.length > 0) {
+        // Park the whole batch: the conversation holds an unanswered turn, so
+        // it has to persist. Refused calls in the same batch are carried along
+        // and reported together once the user answers.
+        instance.conversation = messages;
+        instance.pendingCapability = capability;
+        instance.pendingToolCalls = gated.needsApproval;
+        await this.raise(instance, "tool_ask", {
+          capability,
+          calls: gated.needsApproval.map((c) => ({
+            tool: c.tool,
+            arguments: c.arguments,
+          })),
+          refused: gated.refusals.map((r) => ({ tool: r.tool, reason: r.reason })),
+        });
+        return { kind: "suspended" };
+      }
+
+      const results = await this.runTools(instance, gated.allowed);
+      messages.push(...gated.refusalMessages, ...results);
+    }
+    return {
+      kind: "failed",
+      reason: `capability "${capability}" exceeded ${MAX_TURNS} turns without producing a result`,
+    };
+  }
+
+  /** Tools this task may use, as declared by the contract for this task. */
+  private toolOffers(instance: TaskInstanceRecord): ToolOffer[] {
+    const declared = new Set(instance.definition.tools);
+    return this.deps.contract.tools
+      .filter((t) => declared.has(t.id))
+      // A tool no host can run is not on offer: promising it and failing later
+      // costs a turn and teaches the provider nothing.
+      .filter((t) => this.deps.tools?.supports(t.id) ?? false)
+      .map((t) => ({ id: t.id, description: `${t.category} (risk: ${t.risk})` }));
+  }
+
+  /**
+   * Run each requested call past the gate: decide, then validate. Refusals
+   * come back as tool results so the provider can see why and change plan -
+   * that is what the `retryable`-style feedback loop is for.
+   */
+  private async gateCalls(
+    instance: TaskInstanceRecord,
+    calls: ToolCall[],
+  ): Promise<{
+    allowed: ToolCall[];
+    needsApproval: ToolCall[];
+    refusals: Array<{ tool: string; reason: string }>;
+    refusalMessages: TurnMessage[];
+  }> {
+    const allowed: ToolCall[] = [];
+    const needsApproval: ToolCall[] = [];
+    const refusals: Array<{ tool: string; reason: string }> = [];
+    const refusalMessages: TurnMessage[] = [];
+    const grants = jsonArray<FolderGrant>(await this.deps.store.getGrants());
+    const askCache = new Set(instance.askCache ?? []);
+
+    for (const call of calls) {
+      const tool = this.deps.contract.tools.find((t) => t.id === call.tool);
+      const refuse = async (reason: string, kind: string) => {
+        refusals.push({ tool: call.tool, reason });
+        refusalMessages.push({
+          role: "tool",
+          callId: call.id,
+          content: reason,
+          isError: true,
+        });
+        await this.audit(instance, "tool.decision", {
+          tool: call.tool,
+          decision: "deny",
+          source: kind,
+          reason,
+        });
+      };
+
+      await this.audit(instance, "tool.requested", {
+        tool: call.tool,
+        arguments: Object.keys(call.arguments),
+      });
+
+      if (!tool) {
+        await refuse(`tool "${call.tool}" is not declared in the contract`, "contract");
+        continue;
+      }
+      if (!instance.definition.tools.includes(tool.id)) {
+        await refuse(
+          `tool "${tool.id}" is not available to task "${instance.taskId}"`,
+          "contract",
+        );
+        continue;
+      }
+
+      const decision = decideTool({
+        tool,
+        permissions: this.deps.contract.permissions,
+        // Workspace-level user policy has no store yet; the layer exists in
+        // decideTool and is exercised by its unit tests.
+        userPolicy: undefined,
+        askCache,
+      });
+      if (decision.value === "deny") {
+        await refuse(`tool "${tool.id}" denied: ${decision.reason}`, decision.source);
+        continue;
+      }
+
+      // Validate before asking: there is no point putting an illegal call in
+      // front of the user, and an argument outside the granted folders is a
+      // refusal regardless of what the user would have said.
+      const valid = validateToolCall({
+        tool,
+        args: call.arguments,
+        grants,
+        contextSet: instance.contextSet ?? [],
+      });
+      if (!valid.ok) {
+        await refuse(`tool "${tool.id}" rejected: ${valid.reason}`, "parameter_check");
+        continue;
+      }
+
+      await this.audit(instance, "tool.decision", {
+        tool: tool.id,
+        decision: decision.value,
+        source: decision.source,
+      });
+      if (decision.value === "allow") allowed.push(call);
+      else needsApproval.push(call);
+    }
+    return { allowed, needsApproval, refusals, refusalMessages };
+  }
+
+  /** Execute approved calls, journalling the intent before any side effect. */
+  private async runTools(
+    instance: TaskInstanceRecord,
+    calls: ToolCall[],
+  ): Promise<TurnMessage[]> {
+    const out: TurnMessage[] = [];
+    const grants = jsonArray<FolderGrant>(await this.deps.store.getGrants());
+    for (const call of calls) {
+      // journal-before-write (50-harness 8.2): the intent is on record before
+      // the effect, so recovery can tell "never ran" from "ran, unrecorded".
+      await this.journal(instance, "tool", { tool: call.tool, callId: call.id });
+      let result: { content: string; isError?: boolean };
+      try {
+        if (!this.deps.tools) throw new Error("no tool executor is configured");
+        result = await this.deps.tools.execute({
+          tool: call.tool,
+          arguments: call.arguments,
+          workspace: this.deps.workspaceId,
+          taskId: instance.id,
+          grants,
+        });
+      } catch (cause) {
+        result = {
+          content: cause instanceof Error ? cause.message : String(cause),
+          isError: true,
+        };
+      }
+      await this.journal(instance, "tool.done", { tool: call.tool, callId: call.id });
+      await this.audit(instance, "tool.executed", {
+        tool: call.tool,
+        outcome: result.isError ? "error" : "success",
+      });
+      out.push({
+        role: "tool",
+        callId: call.id,
+        content: result.content,
+        ...(result.isError ? { isError: true } : {}),
+      });
+    }
+    return out;
   }
 
   private async verifyPhase(
     instance: TaskInstanceRecord,
-    gatewayInputs: Record<string, unknown>,
+    messages: TurnMessage[],
   ): Promise<TaskInstanceRecord> {
     await this.transition(instance, "verifying");
-    for (const rule of instance.definition.verification) {
+
+    // Cost-ascending, fail fast (50-harness 7.1): the cheap deterministic
+    // checks before the ones that cost a model call, and a person last.
+    const ordered = [...instance.definition.verification].sort(
+      (a, b) => VERIFICATION_ORDER[a.kind] - VERIFICATION_ORDER[b.kind],
+    );
+
+    for (const rule of ordered) {
+      // Idempotent per rule (50-harness 8.3): recovery reruns only what has
+      // no recorded outcome yet.
+      if (instance.verification.some((v) => v.id === rule.id)) continue;
       await this.audit(instance, "verification.run", {
         rule: rule.id,
         kind: rule.kind,
       });
+
+      let outcome: VerificationOutcome;
       if (rule.kind === "human") {
-        instance.verification.push({
+        outcome = { id: rule.id, kind: rule.kind, status: "pending_human" };
+      } else if (rule.kind === "ai_assisted") {
+        outcome = await this.runAiVerification(rule.id, instance, messages);
+      } else {
+        // The contract names an automated rule but says nothing about what it
+        // checks, so the runtime cannot evaluate it. Reporting "passed" would
+        // be a claim we did not earn - the whole point of the rule is that
+        // someone wanted this checked. It goes to a person instead.
+        outcome = {
           id: rule.id,
           kind: rule.kind,
           status: "pending_human",
-        });
-      } else if (rule.kind === "ai_assisted") {
-        await this.deps.gateway.invoke({
-          capability: `verify:${rule.id}`,
-          workspace: this.deps.workspaceId,
-          taskInstance: instance.id,
-          inputs: gatewayInputs,
-        });
-        instance.verification.push({
-          id: rule.id,
-          kind: rule.kind,
-          status: "passed",
-          note: "phase-a: ai_assisted verification is a pass-through stub",
-        });
-      } else {
-        instance.verification.push({
-          id: rule.id,
-          kind: rule.kind,
-          status: "passed",
-          note: "phase-a: automated verification is a pass-through stub",
-        });
+          note: "runtime cannot evaluate this rule: the contract does not declare what it checks",
+        };
       }
-      const latest = instance.verification[instance.verification.length - 1]!;
+
+      instance.verification.push(outcome);
       await this.persist(instance);
       await this.audit(instance, "verification.result", {
         rule: rule.id,
-        status: latest.status,
+        status: outcome.status,
+        ...(outcome.feedback ? { feedback: outcome.feedback } : {}),
       });
+
+      // Fail fast: a failed rule ends this pass, no point paying for the rest.
+      if (outcome.status === "failed") break;
+    }
+
+    const failed = instance.verification.filter((v) => v.status === "failed");
+    const round = instance.revisionRound ?? 0;
+
+    if (failed.length > 0 && round < MAX_REVISIONS) {
+      // Revision round (50-harness 7.2): the feedback goes back into the
+      // conversation and the work is regenerated. Not a silent retry - the
+      // model is told what was wrong.
+      instance.revisionRound = round + 1;
+      const complaints = failed
+        .map((v) => `- ${v.id}: ${v.feedback ?? "failed"}`)
+        .join("\n");
+      messages.push({
+        role: "user",
+        content: `verification failed on the previous attempt. revise the work to address:\n${complaints}`,
+      });
+      // Discard what failed review so it is produced again; keep the
+      // conversation, which now carries the reason.
+      instance.verification = instance.verification.filter(
+        (v) => v.status !== "failed",
+      );
+      instance.capabilityOutputs = {};
+      instance.conversation = messages;
+      await this.persist(instance);
+      await this.audit(instance, "task.revision", {
+        round: instance.revisionRound,
+        rules: failed.map((v) => v.id),
+      });
+      return this.executePhase(instance);
     }
 
     const pending = instance.verification.filter(
-      (v) => v.status === "pending_human",
+      (v) => v.status === "pending_human" || v.status === "failed",
     );
     if (pending.length > 0) {
-      instance.checkpoint = { kind: "verification_review" };
-      await this.transition(instance, "waiting_human");
-      await this.audit(instance, "checkpoint.raised", {
-        kind: "verification_review",
-        rules: pending.map((v) => v.id),
+      // The end of a failed verification is always a person, never a silent
+      // discard and never an endless retry (50-harness 7.2).
+      await this.raise(instance, "verification_review", {
+        rules: pending.map((v) => ({
+          id: v.id,
+          kind: v.kind,
+          status: v.status,
+          ...(v.note ? { note: v.note } : {}),
+          ...(v.feedback ? { feedback: v.feedback } : {}),
+        })),
+        revisionRounds: round,
+        outcomes: instance.verification,
       });
       return instance;
     }
     return this.finalize(instance);
+  }
+
+  /**
+   * Ask the reviewer, and read its verdict.
+   *
+   * The convention is `PASS` or `FAIL: <what is wrong>` as the first token.
+   * Anything else is **not** treated as a pass - an answer we cannot read is
+   * an answer we have not got, and guessing in the passing direction is how a
+   * verification step becomes decoration.
+   */
+  private async runAiVerification(
+    ruleId: string,
+    instance: TaskInstanceRecord,
+    messages: TurnMessage[],
+  ): Promise<VerificationOutcome> {
+    const turn = await this.turnWithRetry(
+      {
+        capability: `verify:${ruleId}`,
+        taskId: instance.id,
+        workspace: this.deps.workspaceId,
+        // The reviewer sees the same conversation the generator produced.
+        messages,
+        tools: [],
+      },
+      instance,
+    );
+    if (turn.kind !== "content") {
+      return {
+        id: ruleId,
+        kind: "ai_assisted",
+        status: "pending_human",
+        note: "reviewer asked for a tool; verification does not run tools",
+      };
+    }
+    const verdict = turn.content.trimStart();
+    if (/^pass\b/i.test(verdict)) {
+      return { id: ruleId, kind: "ai_assisted", status: "passed" };
+    }
+    if (/^fail\b/i.test(verdict)) {
+      return {
+        id: ruleId,
+        kind: "ai_assisted",
+        status: "failed",
+        feedback: verdict.replace(/^fail\b[:\s]*/i, "").trim() || "no reason given",
+      };
+    }
+    return {
+      id: ruleId,
+      kind: "ai_assisted",
+      status: "pending_human",
+      note: `reviewer answer could not be read as a verdict: ${verdict.slice(0, 200)}`,
+    };
   }
 
   private async finalize(
@@ -503,6 +1318,47 @@ export class Harness {
 
 function jsonArray<T>(raw: string | undefined): T[] {
   return raw ? (JSON.parse(raw) as T[]) : [];
+}
+
+/**
+ * Serialize the task and its materialized context into the opening message.
+ *
+ * Deliberately structural rather than a crafted prompt: the capability
+ * provider owns the framing (it is the business product's own surface), the
+ * runtime owns the facts. Keeping the kernel out of prompt authorship is also
+ * what lets the same contract behave identically on both runtimes.
+ */
+function renderContext(
+  definition: TaskDefinition,
+  inputs: Record<string, unknown>,
+): string {
+  const parts = [`objective: ${definition.objective}`];
+  if (definition.constraints?.length) {
+    parts.push(
+      `constraints:\n${definition.constraints.map((c) => `- ${c}`).join("\n")}`,
+    );
+  }
+  for (const [type, value] of Object.entries(inputs)) {
+    parts.push(`## ${type}\n${renderValue(value)}`);
+  }
+  return parts.join("\n\n");
+}
+
+function renderValue(value: unknown): string {
+  // Selection mode hands us [{ name, content }]; manual mode hands us
+  // whatever the caller passed.
+  if (Array.isArray(value)) {
+    return value
+      .map((item) =>
+        item !== null && typeof item === "object" && "content" in item
+          ? `### ${String((item as { name?: unknown }).name ?? "")}\n${String(
+              (item as { content: unknown }).content,
+            )}`
+          : JSON.stringify(item),
+      )
+      .join("\n\n");
+  }
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 /** Connector id an item was discovered through (by source convention). */

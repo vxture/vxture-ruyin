@@ -72,13 +72,70 @@ test("R1: unsupported contract version", () => {
   );
 });
 
-test("R2: illegal workspace type/lifecycle combination", () => {
+test("L1: a tool without input_schema is rejected", () => {
+  // A tool the gate cannot validate is a tool it cannot let through, so the
+  // schema is mandatory rather than a nicety.
   assert.ok(
     rules(
       mutate((c) => {
-        c.workspace.lifecycle = "continuous";
+        delete (tool(c, "read_file") as unknown as Record<string, unknown>)[
+          "input_schema"
+        ];
       }),
-    ).includes("R2"),
+    ).includes("L1"),
+  );
+});
+
+test("L1: x-ruyin-ref only accepts the known reference kinds", () => {
+  assert.ok(
+    rules(
+      mutate((c) => {
+        tool(c, "read_file").input_schema.properties["path"]!["x-ruyin-ref"] =
+          "anything" as never;
+      }),
+    ).includes("L1"),
+  );
+});
+
+test("R13: required parameters must be declared", () => {
+  assert.ok(
+    rules(
+      mutate((c) => {
+        tool(c, "read_file").input_schema.required = ["path", "missing"];
+      }),
+    ).includes("R13"),
+  );
+});
+
+test("R13: a path-class tool must annotate a path parameter", () => {
+  // Without the annotation the gate has nothing to compare against the
+  // granted folders - which reads as "allowed" rather than "unverifiable".
+  assert.ok(
+    rules(
+      mutate((c) => {
+        const t = tool(c, "write_document");
+        delete t.input_schema.properties["path"]!["x-ruyin-ref"];
+      }),
+    ).includes("R13"),
+  );
+  // A query tool touches no path, so it needs no annotation.
+  assert.ok(!rules(validateContract(structuredClone(base))).includes("R13"));
+});
+
+test("workspace.type is the single business form; the old pair is gone", () => {
+  // R2 existed only to keep `type` and `lifecycle` in agreement. They were the
+  // same statement twice (persistent/continuous, project/finite,
+  // document/versioned), so the fields merged and the rule retired with them.
+  assert.equal(base.workspace.type, "project");
+  assert.ok(!("lifecycle" in base.workspace));
+  // A leftover lifecycle key is now a structural failure (L1), not a rule.
+  assert.ok(
+    rules(
+      mutate((c) => {
+        (c.workspace as unknown as Record<string, unknown>)["lifecycle"] =
+          "finite";
+      }),
+    ).includes("L1"),
   );
 });
 
@@ -198,6 +255,11 @@ test("R7: external_send tool default is fixed to ask", () => {
           category: "external_send",
           risk: "medium",
           default: "allow",
+          input_schema: {
+            type: "object",
+            properties: { to: { type: "string" } },
+            required: ["to"],
+          },
         });
       }),
     ).includes("R7"),
