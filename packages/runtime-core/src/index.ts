@@ -26,7 +26,7 @@ export {
   ProjectRuntime,
   isPathGranted,
 } from "./project.js";
-export type { ProjectView } from "./project.js";
+export type { ProjectView, PendingConfirmation } from "./project.js";
 export { decideTool, validateToolCall } from "./tool-gate.js";
 export type {
   CallValidation,

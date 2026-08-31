@@ -28,6 +28,21 @@ export interface ProjectMeta {
   createdAt: string;
 }
 
+/**
+ * 跨项目的「在等我」（daemon /pending）。任务停在等人那一刻若无人知晓，等于
+ * 没停 —— 而未决确认原先只在它所属的那一个任务界面里看得到。
+ */
+export interface PendingConfirmation {
+  projectId: string;
+  projectName: string;
+  productId: string;
+  taskInstanceId: string;
+  taskId: string;
+  checkpointId: string;
+  kind: "context_confirm" | "verification_review" | "tool_ask";
+  raisedAt: string;
+}
+
 export interface TaskDef {
   id: string;
   objective: string;
@@ -199,6 +214,7 @@ export class Api {
     return data;
   }
 
+  pending = () => this.call<PendingConfirmation[]>("/pending");
   products = () => this.call<ProductInfo[]>("/products");
   workspaces = () => this.call<ProjectMeta[]>("/projects");
   createProject = (product: string, name: string) =>
