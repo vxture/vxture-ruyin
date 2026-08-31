@@ -138,12 +138,11 @@ test("harness: task with human verification suspends, resume completes", async (
   assert.ok(
     instance.verification.some((v) => v.id === "matrix_review" && v.status === "pending_human"),
   );
-  // msgs=1: the opening context message. The count is the whole point - it is
-  // what proves the capability was handed a conversation rather than a bag of
-  // inputs.
+  // msgs=0 for the first capability: the objective, constraints and context
+  // travel as structured fields, not as a prompt the runtime composed.
   assert.equal(
     instance.capabilityOutputs["requirement_analysis"],
-    "[mock:requirement_analysis|msgs=1]",
+    "[mock:requirement_analysis|msgs=0]",
   );
 
   // Rebuild-on-resume: a FRESH harness decides the checkpoint.
@@ -174,8 +173,11 @@ test("verify: an automated rule goes to the product, not to a runtime check", as
   const ports = makePorts();
   ports.gateway = {
     turn: async (req) => {
-      if (req.capability.startsWith("verify:")) asked.push(req.capability);
-      return { kind: "content" as const, content: "PASS" };
+      if (req.capability.startsWith("verify:")) {
+        asked.push(req.capability);
+        return { kind: "verdict" as const, passed: true };
+      }
+      return { kind: "content" as const, content: "drafted" };
     },
   };
   const runtime = new ProjectRuntime(ports);
@@ -207,7 +209,7 @@ test("verify: an unreadable automated verdict escalates, it does not pass", asyn
   assert.equal(instance.state, "waiting_human");
   const outcome = instance.verification.find((v) => v.id === "coverage_complete");
   assert.equal(outcome?.status, "pending_human");
-  assert.match(outcome?.note ?? "", /could not be read as a verdict/);
+  assert.match(outcome?.note ?? "", /not a verdict/);
 
   const done = await decide(harness, instance.id, true);
   assert.equal(done.state, "completed");
@@ -278,7 +280,7 @@ test("harness: recovery resumes an interrupted task without redoing finished wor
   // And the unfinished one was handed the earlier answer, not a blank slate.
   assert.equal(
     recovered.capabilityOutputs["consistency_analysis"],
-    "[mock:consistency_analysis|msgs=2]",
+    "[mock:consistency_analysis|msgs=1]",
   );
 
   const events = await runtime.listAuditEvents(meta.id);
@@ -423,12 +425,14 @@ function verifyingPorts(verdicts: string[]): RuntimePorts {
   ports.gateway = {
     turn: async (req) => {
       if (req.capability.startsWith("verify:")) {
-        const verdict = verdicts[Math.min(call++, verdicts.length - 1)]!;
-        return { kind: "content" as const, content: verdict };
+        const v = verdicts[Math.min(call++, verdicts.length - 1)]!;
+        return v === "PASS"
+          ? { kind: "verdict" as const, passed: true }
+          : { kind: "verdict" as const, passed: false, reason: v };
       }
-      const revising = req.messages.some(
-        (m) => m.role === "user" && /verification failed/.test(m.content),
-      );
+      // The revision arrives as data on the request, not as prose in the
+      // conversation - the runtime no longer writes the "please fix" sentence.
+      const revising = (req.revision?.failures.length ?? 0) > 0;
       return {
         kind: "content" as const,
         content: revising ? "revised draft" : "first draft",
@@ -441,7 +445,7 @@ function verifyingPorts(verdicts: string[]): RuntimePorts {
 test("verify: a FAIL sends the reason back and the work is regenerated", async () => {
   // generate_proposal has two ai_assisted rules then a human one.
   const runtime = new ProjectRuntime(
-    verifyingPorts(["FAIL: 有三条需求没覆盖", "PASS", "PASS"]),
+    verifyingPorts(["有三条需求没覆盖", "PASS", "PASS"]),
   );
   const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
@@ -463,7 +467,7 @@ test("verify: a FAIL sends the reason back and the work is regenerated", async (
 });
 
 test("verify: revisions are bounded and the end is always a person", async () => {
-  const runtime = new ProjectRuntime(verifyingPorts(["FAIL: still wrong"]));
+  const runtime = new ProjectRuntime(verifyingPorts(["still wrong"]));
   const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "generate_proposal", {
@@ -482,10 +486,12 @@ test("verify: revisions are bounded and the end is always a person", async () =>
   assert.match(JSON.stringify(cp?.subject), /still wrong/);
 });
 
-test("verify: an unreadable verdict escalates rather than passing", async () => {
-  const runtime = new ProjectRuntime(
-    verifyingPorts(["looks broadly reasonable to me"]),
-  );
+test("verify: a non-verdict reply escalates rather than passing", async () => {
+  // The provider answered a verification rule with prose. The runtime does not
+  // try to read a verdict out of it - guessing "passed" is how a verification
+  // step becomes decoration.
+  const ports = makePorts(); // its mock always answers with content
+  const runtime = new ProjectRuntime(ports);
   const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "generate_proposal", {
@@ -499,7 +505,7 @@ test("verify: an unreadable verdict escalates rather than passing", async () => 
   const outcome = instance.verification.find((v) => v.id === "requirement_coverage");
   // Not "passed": an answer we cannot read is an answer we have not got.
   assert.equal(outcome?.status, "pending_human");
-  assert.match(outcome?.note ?? "", /could not be read as a verdict/);
+  assert.match(outcome?.note ?? "", /not a verdict/);
   // And no revision was spent on it - there was no reason to feed back.
   assert.equal(instance.revisionRound ?? 0, 0);
 });
@@ -773,16 +779,16 @@ test("harness: capabilities chain - each one sees the previous output", async ()
   });
 
   // The mock reports how many messages it was handed. The first capability
-  // sees only the opening context; the second must also see the first one's
-  // answer. Equal counts would mean the straight-line bug is back: both fed
-  // the same inputs, neither aware of the other.
+  // starts with an empty conversation; the second must see the first one's
+  // answer in it. Equal counts would mean the straight-line bug is back: both
+  // fed the same inputs, neither aware of the other.
   assert.equal(
     instance.capabilityOutputs["coverage_verification"],
-    "[mock:coverage_verification|msgs=1]",
+    "[mock:coverage_verification|msgs=0]",
   );
   assert.equal(
     instance.capabilityOutputs["consistency_analysis"],
-    "[mock:consistency_analysis|msgs=2]",
+    "[mock:consistency_analysis|msgs=1]",
   );
 });
 

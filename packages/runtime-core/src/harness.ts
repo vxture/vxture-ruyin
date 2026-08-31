@@ -104,7 +104,10 @@ export interface CheckpointDecision {
   scope?: "once" | "task";
 }
 
-/** What one capability's loop produced. */
+/** The materialized context set as it goes to a provider. */
+type ContextFacts = Array<{ type: string; name: string; content: string }>;
+
+/** What one capability''s loop produced. */
 type CapabilityOutcome =
   | { kind: "content"; content: string }
   | { kind: "suspended" }
@@ -220,6 +223,11 @@ export interface TaskInstanceRecord {
   askCache?: string[];
   /** Revision rounds already spent on failed verification (50-harness 7.2). */
   revisionRound?: number;
+  /** What failed last round, handed to the next one as data (not as prose). */
+  pendingRevision?: {
+    round: number;
+    failures: Array<{ rule: string; reason: string }>;
+  };
   /**
    * The user asked to stop. Honoured at the next safe point rather than
    * mid-call: aborting a call in flight leaves it unknown whether the effect
@@ -747,10 +755,12 @@ export class Harness {
     // Materialize context and emit the inference-transmission audit event -
     // the single recorded exit for local context (04 section 7.3). Hashes and
     // metadata only, never content.
-    let gatewayInputs: Record<string, unknown>;
+    // Structured facts, carrying their declared context type. Not rendered into
+    // a prompt: composing that text is where domain knowledge lives, and it
+    // belongs to the product, not to the runtime.
+    const context: Array<{ type: string; name: string; content: string }> = [];
     let transmissionItems: Array<Record<string, unknown>>;
     if (instance.contextSet) {
-      const byType: Record<string, Array<{ name: string; content: string }>> = {};
       transmissionItems = [];
       for (const meta of instance.contextSet) {
         const connector = connectors.get(metaConnector(meta));
@@ -758,7 +768,7 @@ export class Harness {
           return this.fail(instance, `connector for item "${meta.id}" unavailable`);
         }
         const item = await connector.read(meta);
-        (byType[item.type] ??= []).push({ name: item.name, content: item.content });
+        context.push({ type: item.type, name: item.name, content: item.content });
         transmissionItems.push({
           id: item.id,
           type: item.type,
@@ -768,17 +778,20 @@ export class Harness {
         });
         await this.journal(instance, "context_read", { item: item.id });
       }
-      gatewayInputs = byType;
     } else {
+      // Manual mode: the caller supplied the context directly.
       const inputs = instance.inputs ?? {};
-      gatewayInputs = inputs;
-      transmissionItems = Object.entries(inputs).map(([type, value]) => ({
-        id: type,
-        type,
-        source: "caller",
-        content_hash: `sha256:${crypto.sha256(JSON.stringify(value))}`,
-        bytes: JSON.stringify(value).length,
-      }));
+      transmissionItems = Object.entries(inputs).map(([type, value]) => {
+        const content = typeof value === "string" ? value : JSON.stringify(value);
+        context.push({ type, name: type, content });
+        return {
+          id: type,
+          type,
+          source: "caller",
+          content_hash: `sha256:${crypto.sha256(content)}`,
+          bytes: content.length,
+        };
+      });
     }
     await this.audit(instance, "transmission.inference", {
       context_items: transmissionItems,
@@ -794,8 +807,7 @@ export class Harness {
     // A parked conversation wins over a rebuilt one: it holds a turn the
     // capability has not answered yet, which capabilityOutputs cannot express.
     const messages =
-      instance.conversation ??
-      this.rebuildConversation(instance, gatewayInputs);
+      instance.conversation ?? this.rebuildConversation(instance);
     // Consumed: from here the conversation lives in the local variable, and
     // anything that suspends puts it back explicitly.
     instance.conversation = undefined;
@@ -820,7 +832,7 @@ export class Harness {
           }));
       messages.push(...results);
       if (parked) {
-        const outcome = await this.runCapability(instance, parked, messages);
+        const outcome = await this.runCapability(instance, parked, messages, context);
         if (outcome.kind === "failed") return this.fail(instance, outcome.reason);
         if (outcome.kind === "cancelled") return this.stopCancelled(instance);
         if (outcome.kind === "suspended") return instance;
@@ -836,28 +848,25 @@ export class Harness {
       if (capability in instance.capabilityOutputs) continue;
       // Safe point: between capabilities.
       if (this.deps.isCancelled?.(instance.id)) return this.stopCancelled(instance);
-      const outcome = await this.runCapability(instance, capability, messages);
+      const outcome = await this.runCapability(instance, capability, messages, context);
       if (outcome.kind === "failed") return this.fail(instance, outcome.reason);
       if (outcome.kind === "cancelled") return this.stopCancelled(instance);
       if (outcome.kind === "suspended") return instance;
       instance.capabilityOutputs[capability] = outcome.content;
       await this.persist(instance);
     }
-    return this.verifyPhase(instance, messages);
+    return this.verifyPhase(instance, messages, context);
   }
 
   /**
-   * The conversation as it stood: the opening context, then every capability
-   * answer already on record. On a fresh run that is just the opening message;
-   * after an interruption it restores what the next capability must see.
+   * The conversation as it stood: every capability answer already on record.
+   *
+   * It does NOT open with a rendered prompt - the objective, constraints and
+   * context travel as structured fields on the request, and the provider
+   * decides how to put them to a model. On a fresh run this is simply empty.
    */
-  private rebuildConversation(
-    instance: TaskInstanceRecord,
-    gatewayInputs: Record<string, unknown>,
-  ): TurnMessage[] {
-    const messages: TurnMessage[] = [
-      { role: "user", content: renderContext(instance.definition, gatewayInputs) },
-    ];
+  private rebuildConversation(instance: TaskInstanceRecord): TurnMessage[] {
+    const messages: TurnMessage[] = [];
     for (const capability of instance.definition.capabilities) {
       const answer = instance.capabilityOutputs[capability];
       if (answer !== undefined) {
@@ -876,6 +885,7 @@ export class Harness {
     instance: TaskInstanceRecord,
     capability: string,
     messages: TurnMessage[],
+    context: ContextFacts,
   ): Promise<CapabilityOutcome> {
     await this.journal(instance, "capability", { capability });
     await this.audit(instance, "capability.invoked", { capability });
@@ -890,8 +900,14 @@ export class Harness {
           product: this.deps.contract.product.id,
           taskId: instance.id,
           workspace: this.deps.projectId,
+          objective: instance.definition.objective,
+          constraints: instance.definition.constraints ?? [],
+          context,
           messages,
           tools: offers,
+          ...(instance.pendingRevision
+            ? { revision: instance.pendingRevision }
+            : {}),
         },
         instance,
       );
@@ -900,6 +916,16 @@ export class Harness {
         messages.push({ role: "assistant", content: turn.content });
         await this.audit(instance, "capability.completed", { capability, turns: step });
         return { kind: "content", content: turn.content };
+      }
+
+      if (turn.kind === "verdict") {
+        // A verdict answers a verification rule, not a generation step. The
+        // provider used the wrong reply shape; saying so beats inventing a
+        // meaning for it.
+        return {
+          kind: "failed",
+          reason: `capability "${capability}" answered with a verdict, which only verification rules use`,
+        };
       }
 
       messages.push({ role: "assistant", content: "", toolCalls: turn.calls });
@@ -1082,6 +1108,7 @@ export class Harness {
   private async verifyPhase(
     instance: TaskInstanceRecord,
     messages: TurnMessage[],
+    context: ContextFacts,
   ): Promise<TaskInstanceRecord> {
     await this.transition(instance, "verifying");
 
@@ -1107,7 +1134,7 @@ export class Harness {
       const outcome: VerificationOutcome =
         rule.kind === "human"
           ? { id: rule.id, kind: rule.kind, status: "pending_human" }
-          : await this.runProviderVerification(rule.id, rule.kind, instance, messages);
+          : await this.runProviderVerification(rule.id, rule.kind, instance, messages, context);
 
       instance.verification.push(outcome);
       await this.persist(instance);
@@ -1129,13 +1156,16 @@ export class Harness {
       // conversation and the work is regenerated. Not a silent retry - the
       // model is told what was wrong.
       instance.revisionRound = round + 1;
-      const complaints = failed
-        .map((v) => `- ${v.id}: ${v.feedback ?? "failed"}`)
-        .join("\n");
-      messages.push({
-        role: "user",
-        content: `verification failed on the previous attempt. revise the work to address:\n${complaints}`,
-      });
+      // Handed to the next round as data on the request, not as a sentence
+      // appended to the conversation: asking for a fix is phrasing, and
+      // phrasing is the product''s job.
+      instance.pendingRevision = {
+        round: instance.revisionRound,
+        failures: failed.map((v) => ({
+          rule: v.id,
+          reason: v.feedback ?? "failed",
+        })),
+      };
       // Discard what failed review so it is produced again; keep the
       // conversation, which now carries the reason.
       instance.verification = instance.verification.filter(
@@ -1186,6 +1216,7 @@ export class Harness {
     kind: "automated" | "ai_assisted",
     instance: TaskInstanceRecord,
     messages: TurnMessage[],
+    context: ContextFacts,
   ): Promise<VerificationOutcome> {
     const turn = await this.turnWithRetry(
       {
@@ -1193,37 +1224,33 @@ export class Harness {
         product: this.deps.contract.product.id,
         taskId: instance.id,
         workspace: this.deps.projectId,
+        objective: instance.definition.objective,
+        constraints: instance.definition.constraints ?? [],
+        context,
         // The reviewer sees the same conversation the generator produced.
         messages,
         tools: [],
       },
       instance,
     );
-    if (turn.kind !== "content") {
-      return {
-        id: ruleId,
-        kind,
-        status: "pending_human",
-        note: "reviewer asked for a tool; verification does not run tools",
-      };
+    if (turn.kind === "verdict") {
+      return turn.passed
+        ? { id: ruleId, kind, status: "passed" }
+        : {
+            id: ruleId,
+            kind,
+            status: "failed",
+            feedback: turn.reason ?? "no reason given",
+          };
     }
-    const verdict = turn.content.trimStart();
-    if (/^pass\b/i.test(verdict)) {
-      return { id: ruleId, kind, status: "passed" };
-    }
-    if (/^fail\b/i.test(verdict)) {
-      return {
-        id: ruleId,
-        kind,
-        status: "failed",
-        feedback: verdict.replace(/^fail\b[:\s]*/i, "").trim() || "no reason given",
-      };
-    }
+    // Anything else is not a verdict, and the runtime does not try to read one
+    // out of it. Escalating is the safe direction: guessing "passed" is how a
+    // verification step becomes decoration.
     return {
       id: ruleId,
       kind,
       status: "pending_human",
-      note: `reviewer answer could not be read as a verdict: ${verdict.slice(0, 200)}`,
+      note: `verification capability answered with "${turn.kind}", not a verdict`,
     };
   }
 
@@ -1312,47 +1339,6 @@ export class Harness {
 
 function jsonArray<T>(raw: string | undefined): T[] {
   return raw ? (JSON.parse(raw) as T[]) : [];
-}
-
-/**
- * Serialize the task and its materialized context into the opening message.
- *
- * Deliberately structural rather than a crafted prompt: the capability
- * provider owns the framing (it is the business product's own surface), the
- * runtime owns the facts. Keeping the kernel out of prompt authorship is also
- * what lets the same contract behave identically on both runtimes.
- */
-function renderContext(
-  definition: TaskDefinition,
-  inputs: Record<string, unknown>,
-): string {
-  const parts = [`objective: ${definition.objective}`];
-  if (definition.constraints?.length) {
-    parts.push(
-      `constraints:\n${definition.constraints.map((c) => `- ${c}`).join("\n")}`,
-    );
-  }
-  for (const [type, value] of Object.entries(inputs)) {
-    parts.push(`## ${type}\n${renderValue(value)}`);
-  }
-  return parts.join("\n\n");
-}
-
-function renderValue(value: unknown): string {
-  // Selection mode hands us [{ name, content }]; manual mode hands us
-  // whatever the caller passed.
-  if (Array.isArray(value)) {
-    return value
-      .map((item) =>
-        item !== null && typeof item === "object" && "content" in item
-          ? `### ${String((item as { name?: unknown }).name ?? "")}\n${String(
-              (item as { content: unknown }).content,
-            )}`
-          : JSON.stringify(item),
-      )
-      .join("\n\n");
-  }
-  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 /** Connector id an item was discovered through (by source convention). */

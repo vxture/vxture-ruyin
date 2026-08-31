@@ -14,6 +14,7 @@
 | [ADR-008](ADR-008-runtime-layering.md) | 一个内核两个宿主；Runos 是能力供给层，不是对位运行时 | 已接受 | 2026-08-31 |
 | [ADR-009](ADR-009-capability-relay.md) | 能力通路定案：经业务产品的云端服务中转 | 已接受 | 2026-08-31 |
 | [ADR-010](ADR-010-verification-boundary.md) | 验证的工作界面：检查归产品，编排归 Runtime | 已接受 | 2026-08-31 |
+| [ADR-011](ADR-011-framework-boundary.md) | 框架边界：Runtime 给事实，产品给措辞与判定 | 已接受 | 2026-08-31 |
 
 后续候选（定稿时立 ADR）：Electron vs Tauri（60 §5.1）、
 每 Workspace 一库（60 §7.1）、推理传输 ≠ 数据存储（10 §15.2）。
