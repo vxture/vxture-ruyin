@@ -222,10 +222,11 @@ product:
 
 示例：
 
+标书编写（项目型）：
+
 ```yaml
 workspace:
   type: project
-  lifecycle: finite
   supports:
     - create
     - open
@@ -233,21 +234,18 @@ workspace:
     - restore
 ```
 
-CRM：
+客户关系管理（持续型）：
 
 ```yaml
 workspace:
-  type: persistent
-  lifecycle: continuous
+  type: continuous
 ```
 
-文档：
-
-```yaml
-workspace:
-  type: document
-  lifecycle: versioned
-```
+> **两类形态，一个字段（2026-08-31 收敛）。** 早期版本另有 `lifecycle`，取值与
+> `type` 一一对应（persistent/continuous、project/finite、document/versioned）
+> —— 同一件事说了两遍。合并后取值为 `continuous | project`；原「文档型 /
+> versioned」归入项目型，因为**版次是成果对象的属性，不是容器的形态**。
+> 落地规范见 03-A §6，校验规则 R2 随之退役。
 
 ---
 

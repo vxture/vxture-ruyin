@@ -11,6 +11,34 @@ export const SUPPORTED_CONTRACT_VERSIONS = ["0.1"];
 const ID = { type: "string", pattern: "^[a-z][a-z0-9_]*$" };
 const SEMVER = { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" };
 const NONEMPTY = { type: "string", minLength: 1 };
+
+/**
+ * A tool's parameter shape: JSON Schema draft 2020-12, restricted to an object
+ * at the top so the Tool Gate can address parameters by name.
+ *
+ * `x-ruyin-ref` marks the parameters that need more than type checking before
+ * a call is let through: a `path` must fall inside a granted folder, and a
+ * `context_item` must belong to this task's context set (50-harness 5.2).
+ * Without the annotation the gate would have to guess what a parameter means,
+ * and guessing wrong means letting the call through.
+ */
+const TOOL_IO_SCHEMA = {
+  type: "object",
+  required: ["type", "properties"],
+  properties: {
+    type: { const: "object" },
+    properties: {
+      type: "object",
+      // Property definitions are ordinary JSON Schema - only the Ruyin
+      // annotation is constrained here.
+      additionalProperties: {
+        type: "object",
+        properties: { "x-ruyin-ref": { enum: ["path", "context_item"] } },
+      },
+    },
+    required: { type: "array", items: { type: "string" } },
+  },
+};
 const DATA_CLASS = {
   enum: ["source", "core", "generated", "derived", "temporary"],
 };
@@ -57,10 +85,13 @@ export const contractJsonSchema = {
     workspace: {
       type: "object",
       additionalProperties: false,
-      required: ["type", "lifecycle"],
+      required: ["type"],
       properties: {
-        type: { enum: ["persistent", "project", "document"] },
-        lifecycle: { enum: ["continuous", "finite", "versioned"] },
+        // Two business forms, one field. The retired `lifecycle` had three
+        // values that mapped one-to-one onto the three `type` values - the
+        // same thing said twice. `document`/`versioned` folded into `project`:
+        // versions are a property of the produced result, not of the container.
+        type: { enum: ["continuous", "project"] },
         operations: {
           type: "array",
           items: { enum: ["create", "open", "archive", "restore"] },
@@ -171,7 +202,7 @@ export const contractJsonSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "category", "risk", "default"],
+        required: ["id", "category", "risk", "default", "input_schema"],
         properties: {
           id: ID,
           category: {
@@ -179,6 +210,8 @@ export const contractJsonSchema = {
           },
           risk: { enum: ["low", "medium", "high"] },
           default: PERMISSION_VALUE,
+          input_schema: TOOL_IO_SCHEMA,
+          output_schema: TOOL_IO_SCHEMA,
         },
       },
     },

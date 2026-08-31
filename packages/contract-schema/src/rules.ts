@@ -46,24 +46,10 @@ const r1: Rule = (c, errors) => {
   }
 };
 
-// R2 - legal workspace type/lifecycle combination.
-const LIFECYCLE_FOR_TYPE: Record<string, string> = {
-  persistent: "continuous",
-  project: "finite",
-  document: "versioned",
-};
-
-const r2: Rule = (c, errors) => {
-  const expected = LIFECYCLE_FOR_TYPE[c.workspace.type];
-  if (expected !== c.workspace.lifecycle) {
-    err(
-      errors,
-      "R2",
-      "workspace.lifecycle",
-      `workspace type "${c.workspace.type}" requires lifecycle "${expected}", got "${c.workspace.lifecycle}"`,
-    );
-  }
-};
+// R2 - RETIRED. It checked that workspace.type and workspace.lifecycle agreed,
+// which was only ever necessary because the two fields said the same thing in
+// different words. They are now one field, so the rule has nothing left to
+// check. The number is not reused.
 
 // R3 - relations reference declared objects; exactly one primary object.
 const r3: Rule = (c, errors) => {
@@ -287,7 +273,53 @@ const r11: Rule = (c, errors) => {
   });
 };
 
-const RULES: Rule[] = [r1, r2, r3, r4, r5, r7, r8, r9, r10, r11];
+/**
+ * R13 - a tool's input_schema must be usable by the Tool Gate.
+ *
+ * L1 already fixes the shape; this checks the parts a JSON Schema cannot:
+ * every name in `required` is actually declared, and a path-class tool
+ * carries at least one annotated parameter. The second half matters most -
+ * a tool that writes files but marks no parameter as a path would sail past
+ * the grant check with nothing to check, which reads as "allowed" rather
+ * than "unverifiable".
+ */
+const PATH_CLASS: ReadonlySet<string> = new Set([
+  "local_read",
+  "local_write",
+  "export",
+]);
+
+const r13: Rule = (c, errors) => {
+  c.tools.forEach((tool, i) => {
+    const schema = tool.input_schema;
+    const declared = Object.keys(schema.properties ?? {});
+    for (const name of schema.required ?? []) {
+      if (!declared.includes(name)) {
+        err(
+          errors,
+          "R13",
+          `tools[${i}].input_schema.required`,
+          `tool "${tool.id}" requires parameter "${name}" but does not declare it`,
+        );
+      }
+    }
+    if (PATH_CLASS.has(tool.category)) {
+      const annotated = declared.some(
+        (name) => schema.properties[name]?.["x-ruyin-ref"] === "path",
+      );
+      if (!annotated) {
+        err(
+          errors,
+          "R13",
+          `tools[${i}].input_schema.properties`,
+          `tool "${tool.id}" is category ${tool.category} but marks no parameter with x-ruyin-ref: path - the gate would have nothing to check against the granted folders`,
+        );
+      }
+    }
+  });
+};
+
+const RULES: Rule[] = [r1, r3, r4, r5, r7, r8, r9, r10, r11, r13];
 
 export function runRules(contract: RuyinContract): ValidationError[] {
   const errors: ValidationError[] = [];

@@ -12,8 +12,8 @@ product:
     minimum: 0.1.0
 
 workspace:
+  # 项目型：每次投标开一个独立容器，交付即闭合（持续型见 continuous）。
   type: project
-  lifecycle: finite
   operations: [create, open, archive, restore]
 
 objects:
@@ -121,10 +121,52 @@ capabilities:
     description: 校验方案内部与资料间的一致性
 
 tools:
-  - { id: read_file,        category: local_read,  risk: low,    default: allow }
-  - { id: write_document,   category: local_write, risk: medium, default: ask }
-  - { id: search_knowledge, category: query,       risk: low,    default: allow }
-  - { id: export_result,    category: export,      risk: high,   default: ask }
+  # input_schema 必填：闸门校验不了参数的工具，就是放行不了的工具。
+  # x-ruyin-ref 标出需要超出类型检查的参数 —— path 必须落在已授权目录内，
+  # context_item 必须属于本次任务的上下文集（50-harness §5.2）。
+  - id: read_file
+    category: local_read
+    risk: low
+    default: allow
+    input_schema:
+      type: object
+      properties:
+        path: { type: string, x-ruyin-ref: path }
+      required: [path]
+
+  - id: write_document
+    category: local_write
+    risk: medium
+    default: ask
+    input_schema:
+      type: object
+      properties:
+        path:    { type: string, x-ruyin-ref: path }
+        content: { type: string }
+        source:  { type: string, x-ruyin-ref: context_item }
+      required: [path, content]
+
+  - id: search_knowledge
+    category: query
+    risk: low
+    default: allow
+    input_schema:
+      type: object
+      properties:
+        query: { type: string }
+        limit: { type: integer, minimum: 1, maximum: 50 }
+      required: [query]
+
+  - id: export_result
+    category: export
+    risk: high
+    default: ask
+    input_schema:
+      type: object
+      properties:
+        path:   { type: string, x-ruyin-ref: path }
+        format: { type: string, enum: [docx, pdf] }
+      required: [path, format]
 
 tasks:
   - id: analyze_tender

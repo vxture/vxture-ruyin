@@ -6,8 +6,12 @@
  * truth for semantics; these types mirror its section numbers.
  */
 
-export type WorkspaceType = "persistent" | "project" | "document";
-export type WorkspaceLifecycle = "continuous" | "finite" | "versioned";
+/**
+ * The two business forms Ruyin supports: `continuous` runs alongside the
+ * business with no finish line (customer relations), `project` opens a fresh
+ * container per engagement and closes it on delivery (a tender).
+ */
+export type WorkspaceType = "continuous" | "project";
 export type WorkspaceOperation = "create" | "open" | "archive" | "restore";
 export type RelationKind = "contains" | "references" | "derives";
 export type ContextSource =
@@ -56,8 +60,17 @@ export interface ProductIdentity {
 
 export interface WorkspaceDefinition {
   type: WorkspaceType;
-  lifecycle: WorkspaceLifecycle;
   operations?: WorkspaceOperation[];
+}
+
+/** Parameters that need a gate check beyond their JSON type. */
+export type ToolRefKind = "path" | "context_item";
+
+/** JSON Schema draft 2020-12, object-typed, with Ruyin's ref annotation. */
+export interface ToolIoSchema {
+  type: "object";
+  properties: Record<string, { "x-ruyin-ref"?: ToolRefKind } & Record<string, unknown>>;
+  required?: string[];
 }
 
 export interface ObjectRelation {
@@ -108,6 +121,9 @@ export interface Tool {
   category: ToolCategory;
   risk: RiskLevel;
   default: PermissionValue;
+  /** Required: a tool the gate cannot validate is a tool it cannot let through. */
+  input_schema: ToolIoSchema;
+  output_schema?: ToolIoSchema;
 }
 
 export interface VerificationRule {
