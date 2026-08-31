@@ -25,8 +25,8 @@ import {
   type ShellNavSection,
   type ShellSearchGroup,
 } from "@vxture/design-system";
-import { Api, type ProductInfo, type WorkspaceMeta } from "./api";
-import { WorkspacePanel } from "./workspace";
+import { Api, type ProductInfo, type ProjectMeta } from "./api";
+import { ProjectPanel } from "./workspace";
 import { HomePage } from "./home";
 import { SettingsView } from "./settings";
 import { UserSlot } from "./user";
@@ -99,7 +99,7 @@ function useRuntimeHealth() {
 
 export function Workbench({ api }: { api: Api }) {
   const [products, setProducts] = useState<ProductInfo[]>([]);
-  const [workspaces, setWorkspaces] = useState<WorkspaceMeta[]>([]);
+  const [workspaces, setWorkspaces] = useState<ProjectMeta[]>([]);
   const [view, setView] = useState<View>({ kind: "home" });
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
@@ -130,7 +130,7 @@ export function Workbench({ api }: { api: Api }) {
     }
   }, []);
 
-  const openWorkspace = useCallback(
+  const openProject = useCallback(
     async (id: string) => {
       await refreshSidebar();
       setView({ kind: "workspace", id });
@@ -196,7 +196,7 @@ export function Workbench({ api }: { api: Api }) {
       .map((w) => ({
         key: w.id,
         label: w.name,
-        description: `${w.productId} · ${w.workspaceType}`,
+        description: `${w.productId} · ${w.projectType}`,
         icon: "cube" as const,
         onSelect: () => navigate(`#ws/${w.id}`),
       }));
@@ -327,7 +327,7 @@ export function Workbench({ api }: { api: Api }) {
         {view.kind === "settings" ? (
           <SettingsView api={api} />
         ) : view.kind === "workspace" ? (
-          <WorkspacePanel key={view.id} api={api} id={view.id} />
+          <ProjectPanel key={view.id} api={api} id={view.id} />
         ) : (
           <HomePage
             api={api}
@@ -335,7 +335,7 @@ export function Workbench({ api }: { api: Api }) {
             workspaces={workspaces}
             health={health}
             onOpen={(id) => setView({ kind: "workspace", id })}
-            onCreated={openWorkspace}
+            onCreated={openProject}
             onError={setError}
           />
         )}

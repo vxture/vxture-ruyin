@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Vxture platform integration for the desktop Runtime (liaison L3(a)/(b);
  * design: docs/30-design/40-context-architecture.md section 9, platform
  * authority: the integration general spec / product_200 C1+C2).
@@ -429,15 +429,15 @@ export class PlatformService {
     if (!this.config.platformApiBase) {
       throw new PlatformNotConfiguredError();
     }
-    const wsId = this.claims?.active_workspace;
-    if (!wsId) throw new NotSignedInError("no active_workspace claim on this session");
-    const key = `${wsId}:${[...products].sort().join(",")}`;
+    const projectId = this.claims?.active_workspace;
+    if (!projectId) throw new NotSignedInError("no active_workspace claim on this session");
+    const key = `${projectId}:${[...products].sort().join(",")}`;
     const hit = this.entCache.get(key);
     if (hit && Date.now() < hit.expiresAt) return hit.body;
 
     const token = await this.ensureAccessToken();
     const url = new URL(`${this.config.platformApiBase}/platform/entitlements`);
-    url.searchParams.set("workspace_id", wsId);
+    url.searchParams.set("workspace_id", projectId);
     // Always the batch parameter - one consistent envelope shape downstream
     // ({ workspace_id, entitlements: { [code]: envelope } }).
     url.searchParams.set("products", products.join(","));

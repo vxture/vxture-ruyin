@@ -21,7 +21,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { WorkspaceRuntime, type ConnectorPort } from "@vxture/ruyin-core";
+import { ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { ProductRegistry } from "./product-registry.js";
@@ -73,7 +73,7 @@ const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
 // running loop cannot overwrite it on its next persist.
 const cancelledTasks = new Set<string>();
 
-const runtime = new WorkspaceRuntime({
+const runtime = new ProjectRuntime({
   storage,
   clock: nodeClock,
   id: nodeId,
@@ -125,7 +125,7 @@ const server = createLocalApi({
   tasks,
   token,
   version: VERSION,
-  reindex: (wsId, binding) => reindexBinding(storage, wsId, binding, localFs),
+  reindex: (projectId, binding) => reindexBinding(storage, projectId, binding, localFs),
   uiDir,
   platform,
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。

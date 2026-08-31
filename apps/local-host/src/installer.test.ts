@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 安装管线用例（30-contract-schema §18.2 信任链 / §18.4 更新与回滚）。
  * 重点：管线顺序即安全顺序，且**失败绝不在磁盘留下半个产品**。
  */
@@ -27,7 +27,7 @@ product:
   publisher: vxture
   runtime:
     minimum: ${minimum}
-workspace:
+project:
   type: project
 
   operations: [create, open]
@@ -52,7 +52,7 @@ context:
     - id: report
       name: 报告
       required: false
-      sources: [workspace]
+      sources: [project]
       class: generated
       sensitivity: low
 capabilities:

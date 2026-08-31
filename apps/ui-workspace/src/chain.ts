@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Client-side audit-chain verification (WebCrypto SHA-256). Mirrors
  * runtime-core/src/audit.ts: genesis anchored to the workspace id; each
  * event's hash covers its body including prev_hash. JSON.parse ->
@@ -20,10 +20,10 @@ async function sha256Hex(input: string): Promise<string> {
 }
 
 export async function verifyChain(
-  workspaceId: string,
+  projectId: string,
   events: AuditEvent[],
 ): Promise<boolean> {
-  let prev = await sha256Hex(`genesis:${workspaceId}`);
+  let prev = await sha256Hex(`genesis:${projectId}`);
   for (const event of events) {
     if (event.prev_hash !== prev) return false;
     const { hash, ...body } = event;

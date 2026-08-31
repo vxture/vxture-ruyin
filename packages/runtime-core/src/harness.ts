@@ -28,7 +28,7 @@
 import type { RuyinContract, TaskDefinition } from "@vxture/ruyin-contract-schema";
 import { emitAudit } from "./audit.js";
 import { TransientError } from "./ports.js";
-import { isPathGranted } from "./workspace.js";
+import { isPathGranted } from "./project.js";
 import { decideTool, validateToolCall } from "./tool-gate.js";
 import type {
   AIGatewayPort,
@@ -44,7 +44,7 @@ import type {
   ToolExecutorPort,
   ToolOffer,
   TurnMessage,
-  WorkspaceStore,
+  ProjectStore,
 } from "./ports.js";
 
 export type TaskInstanceState =
@@ -238,9 +238,9 @@ export interface TaskInstanceRecord {
 }
 
 export interface HarnessDeps {
-  store: WorkspaceStore;
+  store: ProjectStore;
   contract: RuyinContract;
-  workspaceId: string;
+  projectId: string;
   clock: ClockPort;
   id: IdPort;
   crypto: CryptoPort;
@@ -309,7 +309,7 @@ export class Harness {
     }
     const instance: TaskInstanceRecord = {
       id: id.newId("ti"),
-      workspace: this.deps.workspaceId,
+      workspace: this.deps.projectId,
       taskId,
       definition,
       inputs,
@@ -729,7 +729,7 @@ export class Harness {
         continue;
       }
       const ranked = ranker
-        ? await ranker.rank(this.deps.workspaceId, definition.objective, candidates)
+        ? await ranker.rank(this.deps.projectId, definition.objective, candidates)
         : [...candidates].sort((a, b) =>
             b.modifiedAt.localeCompare(a.modifiedAt),
           );
@@ -889,7 +889,7 @@ export class Harness {
           capability,
           product: this.deps.contract.product.id,
           taskId: instance.id,
-          workspace: this.deps.workspaceId,
+          workspace: this.deps.projectId,
           messages,
           tools: offers,
         },
@@ -1054,7 +1054,7 @@ export class Harness {
         result = await this.deps.tools.execute({
           tool: call.tool,
           arguments: call.arguments,
-          workspace: this.deps.workspaceId,
+          workspace: this.deps.projectId,
           taskId: instance.id,
           grants,
         });
@@ -1192,7 +1192,7 @@ export class Harness {
         capability: `verify:${ruleId}`,
         product: this.deps.contract.product.id,
         taskId: instance.id,
-        workspace: this.deps.workspaceId,
+        workspace: this.deps.projectId,
         // The reviewer sees the same conversation the generator produced.
         messages,
         tools: [],
@@ -1300,7 +1300,7 @@ export class Harness {
       this.deps.clock,
       this.deps.id,
       {
-        workspace: this.deps.workspaceId,
+        workspace: this.deps.projectId,
         task_instance: instance.id,
         kind,
         actor: "harness",

@@ -1,4 +1,4 @@
-export * from "./ports.js";
+﻿export * from "./ports.js";
 export { emitAudit, genesisHash, verifyAuditChain } from "./audit.js";
 export type { AuditInput } from "./audit.js";
 export {
@@ -22,11 +22,11 @@ export type {
 export {
   ContractInvalidError,
   NeedsHumanConfirmationError,
-  WorkspaceNotFoundError,
-  WorkspaceRuntime,
+  ProjectNotFoundError,
+  ProjectRuntime,
   isPathGranted,
-} from "./workspace.js";
-export type { WorkspaceView } from "./workspace.js";
+} from "./project.js";
+export type { ProjectView } from "./project.js";
 export { decideTool, validateToolCall } from "./tool-gate.js";
 export type {
   CallValidation,

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Dev workspace console served by the daemon at GET / - a deliberately plain
  * HTML page so the Local Web access mode (60 section 4.2) works from day one:
  * the Electron shell AND any browser open the same URL. The real Workspace UI
@@ -77,7 +77,7 @@ async function boot() {
   } catch (e) { fail(e); }
 }
 async function refreshWs() {
-  var list = await api("/workspaces");
+  var list = await api("/projects");
   document.getElementById("wsList").innerHTML = list.map(function (w) {
     var cls = current && current.meta.id === w.id ? "card sel" : "card";
     return '<div class="' + cls + '" onclick="openWs(\\'' + w.id + '\\')">'
@@ -89,7 +89,7 @@ async function createWs() {
   try {
     var product = document.getElementById("productSel").value;
     var name = document.getElementById("wsName").value || product;
-    var meta = await api("/workspaces", "POST", { product: product, name: name });
+    var meta = await api("/projects", "POST", { product: product, name: name });
     await refreshWs();
     await openWs(meta.id);
   } catch (e) { fail(e); }
@@ -97,17 +97,17 @@ async function createWs() {
 async function openWs(id) {
   clearErr();
   try {
-    current = await api("/workspaces/" + id);
+    current = await api("/projects/" + id);
     await render();
     await refreshWs();
   } catch (e) { fail(e); }
 }
 async function render() {
   var ws = current;
-  var instances = await api("/workspaces/" + ws.meta.id + "/tasks");
-  var audit = await api("/workspaces/" + ws.meta.id + "/audit");
-  var grants = await api("/workspaces/" + ws.meta.id + "/grants");
-  var bindings = await api("/workspaces/" + ws.meta.id + "/bindings");
+  var instances = await api("/projects/" + ws.meta.id + "/tasks");
+  var audit = await api("/projects/" + ws.meta.id + "/audit");
+  var grants = await api("/projects/" + ws.meta.id + "/grants");
+  var bindings = await api("/projects/" + ws.meta.id + "/bindings");
   var html = "<h1>" + esc(ws.meta.name)
     + ' <span class="state">' + esc(ws.businessState) + "</span></h1>"
     + '<div class="muted">' + esc(ws.product.id) + "@" + esc(ws.product.version)
@@ -164,7 +164,7 @@ async function render() {
 async function transition() {
   clearErr();
   try {
-    await api("/workspaces/" + current.meta.id + "/state", "POST", {
+    await api("/projects/" + current.meta.id + "/state", "POST", {
       to: document.getElementById("stTo").value,
       humanConfirmed: document.getElementById("stConfirm").checked
     });
@@ -177,14 +177,14 @@ async function runTask(taskId, i) {
     var raw = document.getElementById("in" + i).value.trim();
     var body = { task: taskId };
     if (raw.length > 0) body.inputs = JSON.parse(raw);
-    await api("/workspaces/" + current.meta.id + "/tasks", "POST", body);
+    await api("/projects/" + current.meta.id + "/tasks", "POST", body);
     await openWs(current.meta.id);
   } catch (e) { fail(e); }
 }
 async function addGrant() {
   clearErr();
   try {
-    await api("/workspaces/" + current.meta.id + "/grants", "POST",
+    await api("/projects/" + current.meta.id + "/grants", "POST",
       { path: document.getElementById("grantPath").value });
     await openWs(current.meta.id);
   } catch (e) { fail(e); }
@@ -192,7 +192,7 @@ async function addGrant() {
 async function addBinding() {
   clearErr();
   try {
-    await api("/workspaces/" + current.meta.id + "/bindings", "POST", {
+    await api("/projects/" + current.meta.id + "/bindings", "POST", {
       type: document.getElementById("bindType").value,
       root: document.getElementById("bindRoot").value
     });
@@ -202,7 +202,7 @@ async function addBinding() {
 async function decide(tid, approve) {
   clearErr();
   try {
-    await api("/workspaces/" + current.meta.id + "/tasks/" + tid + "/decision", "POST", { approve: approve });
+    await api("/projects/" + current.meta.id + "/tasks/" + tid + "/decision", "POST", { approve: approve });
     await openWs(current.meta.id);
   } catch (e) { fail(e); }
 }

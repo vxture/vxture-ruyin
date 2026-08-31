@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Workspace Runtime - workspace-scoped, long-lived kernel surface.
  * Design authority: docs/30-design/10-workspace-runtime.md section 7.
  *
@@ -25,8 +25,8 @@ import type {
   ContextItemMeta,
   FolderGrant,
   RuntimePorts,
-  WorkspaceMeta,
-  WorkspaceStore,
+  ProjectMeta,
+  ProjectStore,
 } from "./ports.js";
 
 function parseJsonArray<T>(raw: string | undefined): T[] {
@@ -51,7 +51,7 @@ export class ContractInvalidError extends Error {
   }
 }
 
-export class WorkspaceNotFoundError extends Error {
+export class ProjectNotFoundError extends Error {
   constructor(id: string) {
     super(`workspace "${id}" not found`);
   }
@@ -65,33 +65,37 @@ export class NeedsHumanConfirmationError extends Error {
   }
 }
 
-export interface WorkspaceView {
-  meta: WorkspaceMeta;
+export interface ProjectView {
+  meta: ProjectMeta;
   businessState: string;
   contract: RuyinContract;
 }
 
-export class WorkspaceRuntime {
+export class ProjectRuntime {
   constructor(private readonly ports: RuntimePorts) {}
 
-  async createWorkspace(
+  async createProject(
     rawContract: unknown,
     name: string,
-  ): Promise<WorkspaceMeta> {
+  ): Promise<ProjectMeta> {
     const validation = validateContract(rawContract);
     if (!validation.ok) {
       throw new ContractInvalidError(validation.errors);
     }
     const contract = rawContract as RuyinContract;
-    const id = this.ports.id.newId("ws");
-    const store = await this.ports.storage.createWorkspaceStore(id);
-    const meta: WorkspaceMeta = {
+    // New containers get the `prj_` prefix. Existing `ws_` ids are NOT rewritten:
+    // the audit chain''s genesis hash is sha256("genesis:" + id), so changing an
+    // id would invalidate every chain already written. Ids are opaque, so the
+    // two prefixes coexist without meaning anything.
+    const id = this.ports.id.newId("prj");
+    const store = await this.ports.storage.createProjectStore(id);
+    const meta: ProjectMeta = {
       id,
       productId: contract.product.id,
       productVersion: contract.product.version,
       contractVersion: contract.contract,
       name,
-      workspaceType: contract.workspace.type,
+      projectType: contract.project.type,
       createdAt: this.ports.clock.now(),
     };
     await store.putMeta(meta);
@@ -106,17 +110,17 @@ export class WorkspaceRuntime {
     return meta;
   }
 
-  async openWorkspace(id: string): Promise<WorkspaceView> {
+  async openProject(id: string): Promise<ProjectView> {
     const { store, meta, contract } = await this.load(id);
     const businessState =
       (await store.getBusinessState()) ?? contract.states.initial;
     return { meta, businessState, contract };
   }
 
-  async listWorkspaces(): Promise<WorkspaceMeta[]> {
-    const out: WorkspaceMeta[] = [];
-    for (const id of await this.ports.storage.listWorkspaceIds()) {
-      const store = await this.ports.storage.openWorkspaceStore(id);
+  async listProjects(): Promise<ProjectMeta[]> {
+    const out: ProjectMeta[] = [];
+    for (const id of await this.ports.storage.listProjectIds()) {
+      const store = await this.ports.storage.openProjectStore(id);
       const meta = await store?.getMeta();
       if (meta) out.push(meta);
     }
@@ -262,7 +266,7 @@ export class WorkspaceRuntime {
     return new Harness({
       store,
       contract,
-      workspaceId: id,
+      projectId: id,
       clock: this.ports.clock,
       id: this.ports.id,
       crypto: this.ports.crypto,
@@ -299,20 +303,20 @@ export class WorkspaceRuntime {
   // -------------------------------------------------------------------------
 
   private async load(id: string): Promise<{
-    store: WorkspaceStore;
-    meta: WorkspaceMeta;
+    store: ProjectStore;
+    meta: ProjectMeta;
     contract: RuyinContract;
   }> {
-    const store = await this.ports.storage.openWorkspaceStore(id);
-    if (!store) throw new WorkspaceNotFoundError(id);
+    const store = await this.ports.storage.openProjectStore(id);
+    if (!store) throw new ProjectNotFoundError(id);
     const meta = await store.getMeta();
     const contractJson = await store.getContract();
-    if (!meta || !contractJson) throw new WorkspaceNotFoundError(id);
+    if (!meta || !contractJson) throw new ProjectNotFoundError(id);
     return { store, meta, contract: JSON.parse(contractJson) as RuyinContract };
   }
 
   private audit(
-    store: WorkspaceStore,
+    store: ProjectStore,
     workspace: string,
     kind: string,
     actor: "harness" | "user" | "system",

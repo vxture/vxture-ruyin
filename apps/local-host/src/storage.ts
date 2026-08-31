@@ -1,8 +1,8 @@
-/**
+﻿/**
  * SQLite StoragePort - one database per workspace under the data directory
  * (docs/30-design/60-technical-architecture.md section 7.1):
  *
- *   <dataDir>/workspaces/ws_<id>/workspace.db
+ *   <dataDir>/projects/<id>/project.db
  *
  * Phase A: plain SQLite; at-rest encryption (SQLCipher + OS keychain, 60
  * section 7.3) is TD-009. Tables are the Phase A subset of 60 section 7.2 -
@@ -10,7 +10,7 @@
  */
 
 import Database from "better-sqlite3-multiple-ciphers";
-import { mkdirSync, existsSync, readdirSync } from "node:fs";
+import { mkdirSync, existsSync, readdirSync, renameSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { KeyManager } from "./keys.js";
@@ -18,9 +18,37 @@ import type {
   AuditEvent,
   JournalEntry,
   StoragePort,
-  WorkspaceMeta,
-  WorkspaceStore,
+  ProjectMeta,
+  ProjectStore,
 } from "@vxture/ruyin-core";
+
+/** On-disk home of the local containers (ADR-007: they are projects). */
+const PROJECTS_DIR = "projects";
+const PROJECT_DB = "project.db";
+
+/**
+ * One-time move of the pre-rename layout into place.
+ *
+ * Only the directory and file names change - **ids are left exactly as they
+ * are**. The audit chain''s genesis hash is `sha256("genesis:" + id)`, so
+ * rewriting an id would invalidate every chain already written; ids are opaque,
+ * so `ws_` and `prj_` coexist meaning nothing.
+ *
+ * Refuses to act if the new directory already exists: a half-finished move is
+ * worse than an unmoved one, and there is no safe way to merge the two.
+ */
+function migrateWorkspaceDirs(dataDir: string): void {
+  const from = join(dataDir, "workspaces");
+  const to = join(dataDir, PROJECTS_DIR);
+  if (!existsSync(from) || existsSync(to)) return;
+  renameSync(from, to);
+  for (const entry of readdirSync(to, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const oldDb = join(to, entry.name, "workspace.db");
+    if (existsSync(oldDb)) renameSync(oldDb, join(to, entry.name, PROJECT_DB));
+  }
+  console.log(`[ruyin] migrated ${from} -> ${to} (ids unchanged)`);
+}
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS kv (
@@ -86,7 +114,7 @@ function openDatabase(file: string): Database.Database {
   return nativeBinding ? new Database(file, { nativeBinding }) : new Database(file);
 }
 
-export class SqliteWorkspaceStore implements WorkspaceStore {
+export class SqliteProjectStore implements ProjectStore {
   constructor(private readonly db: Database.Database) {}
 
   private kvGet(key: string): string | undefined {
@@ -104,12 +132,12 @@ export class SqliteWorkspaceStore implements WorkspaceStore {
       .run(key, value);
   }
 
-  async putMeta(meta: WorkspaceMeta): Promise<void> {
+  async putMeta(meta: ProjectMeta): Promise<void> {
     this.kvPut("meta", JSON.stringify(meta));
   }
-  async getMeta(): Promise<WorkspaceMeta | undefined> {
+  async getMeta(): Promise<ProjectMeta | undefined> {
     const raw = this.kvGet("meta");
-    return raw ? (JSON.parse(raw) as WorkspaceMeta) : undefined;
+    return raw ? (JSON.parse(raw) as ProjectMeta) : undefined;
   }
 
   async putContract(contractJson: string): Promise<void> {
@@ -217,14 +245,15 @@ export class SqliteWorkspaceStore implements WorkspaceStore {
 export class SqliteStoragePort implements StoragePort {
   private readonly open = new Map<
     string,
-    { store: SqliteWorkspaceStore; db: Database.Database }
+    { store: SqliteProjectStore; db: Database.Database }
   >();
 
   constructor(
     private readonly dataDir: string,
     private readonly keys: KeyManager,
   ) {
-    mkdirSync(join(dataDir, "workspaces"), { recursive: true });
+    migrateWorkspaceDirs(dataDir);
+    mkdirSync(join(dataDir, PROJECTS_DIR), { recursive: true });
   }
 
   /**
@@ -253,15 +282,15 @@ export class SqliteStoragePort implements StoragePort {
     this.open.clear();
   }
 
-  private wsDir(workspaceId: string): string {
-    return join(this.dataDir, "workspaces", workspaceId);
+  private projectDir(projectId: string): string {
+    return join(this.dataDir, PROJECTS_DIR, projectId);
   }
 
-  private openDb(workspaceId: string): SqliteWorkspaceStore {
-    const cached = this.open.get(workspaceId);
+  private openDb(projectId: string): SqliteProjectStore {
+    const cached = this.open.get(projectId);
     if (cached) return cached.store;
-    const dir = this.wsDir(workspaceId);
-    const db = openDatabase(join(dir, "workspace.db"));
+    const dir = this.projectDir(projectId);
+    const db = openDatabase(join(dir, PROJECT_DB));
     // At-rest encryption (TD-009): SQLCipher-compatible scheme, raw hex key
     // per workspace. Cipher selection must precede the key pragma, both
     // before any other statement.
@@ -272,48 +301,48 @@ export class SqliteStoragePort implements StoragePort {
     } catch (cause) {
       db.close();
       throw new Error(
-        `workspace "${workspaceId}" database cannot be unlocked - wrong key or a pre-encryption dev database (delete the dev data dir to reset): ${cause instanceof Error ? cause.message : cause}`,
+        `workspace "${projectId}" database cannot be unlocked - wrong key or a pre-encryption dev database (delete the dev data dir to reset): ${cause instanceof Error ? cause.message : cause}`,
       );
     }
     db.pragma("journal_mode = WAL");
     db.exec(DDL);
-    const store = new SqliteWorkspaceStore(db);
-    this.open.set(workspaceId, { store, db });
+    const store = new SqliteProjectStore(db);
+    this.open.set(projectId, { store, db });
     return store;
   }
 
-  async createWorkspaceStore(workspaceId: string): Promise<WorkspaceStore> {
-    const dir = this.wsDir(workspaceId);
+  async createProjectStore(projectId: string): Promise<ProjectStore> {
+    const dir = this.projectDir(projectId);
     if (existsSync(dir)) {
       throw new Error(`workspace directory already exists: ${dir}`);
     }
     mkdirSync(join(dir, "files"), { recursive: true });
-    return this.openDb(workspaceId);
+    return this.openDb(projectId);
   }
 
-  async openWorkspaceStore(
-    workspaceId: string,
-  ): Promise<WorkspaceStore | undefined> {
-    if (!existsSync(join(this.wsDir(workspaceId), "workspace.db"))) {
+  async openProjectStore(
+    projectId: string,
+  ): Promise<ProjectStore | undefined> {
+    if (!existsSync(join(this.projectDir(projectId), PROJECT_DB))) {
       return undefined;
     }
-    return this.openDb(workspaceId);
+    return this.openDb(projectId);
   }
 
   /** Host-side access to the concrete store (FTS index surface). */
-  openHostStore(workspaceId: string): SqliteWorkspaceStore | undefined {
-    if (!existsSync(join(this.wsDir(workspaceId), "workspace.db"))) {
+  openHostStore(projectId: string): SqliteProjectStore | undefined {
+    if (!existsSync(join(this.projectDir(projectId), PROJECT_DB))) {
       return undefined;
     }
-    return this.openDb(workspaceId);
+    return this.openDb(projectId);
   }
 
-  async listWorkspaceIds(): Promise<string[]> {
-    const root = join(this.dataDir, "workspaces");
+  async listProjectIds(): Promise<string[]> {
+    const root = join(this.dataDir, PROJECTS_DIR);
     return readdirSync(root, { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => e.name)
-      .filter((name) => existsSync(join(root, name, "workspace.db")))
+      .filter((name) => existsSync(join(root, name, PROJECT_DB)))
       .sort();
   }
 }

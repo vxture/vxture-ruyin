@@ -1,4 +1,4 @@
-/**
+﻿/**
  * FTS5-backed relevance ranking + index maintenance
  * (docs/30-design/40-context-architecture.md sections 5.1, 6.1).
  *
@@ -14,12 +14,12 @@ import type { SqliteStoragePort } from "./storage.js";
 /** Rebuild the index rows for one binding's type from connector content. */
 export async function reindexBinding(
   storage: SqliteStoragePort,
-  workspaceId: string,
+  projectId: string,
   binding: Binding,
   connector: ConnectorPort,
 ): Promise<number> {
-  const store = storage.openHostStore(workspaceId);
-  if (!store) throw new Error(`workspace "${workspaceId}" not found`);
+  const store = storage.openHostStore(projectId);
+  if (!store) throw new Error(`workspace "${projectId}" not found`);
   const metas = await connector.discover(binding);
   const rows = [];
   for (const meta of metas) {
@@ -44,11 +44,11 @@ export class FtsRanker implements RankerPort {
   constructor(private readonly storage: SqliteStoragePort) {}
 
   async rank(
-    workspaceId: string,
+    projectId: string,
     query: string,
     candidates: ContextItemMeta[],
   ): Promise<ContextItemMeta[]> {
-    const store = this.storage.openHostStore(workspaceId);
+    const store = this.storage.openHostStore(projectId);
     const match = toMatchQuery(query);
     let orderedIds: string[] = [];
     if (store && match.length > 0) {

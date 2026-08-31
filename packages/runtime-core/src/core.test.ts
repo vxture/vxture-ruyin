@@ -13,7 +13,7 @@ import type { RuyinContract, Tool } from "@vxture/ruyin-contract-schema";
 import {
   MemoryConnector,
   MemoryStoragePort,
-  WorkspaceRuntime,
+  ProjectRuntime,
   verifyAuditChain,
   ContractInvalidError,
   NeedsHumanConfirmationError,
@@ -78,35 +78,35 @@ function decide(
   return harness.decideCheckpoint(id, approve).then(() => harness.advance(id));
 }
 
-test("createWorkspace validates, persists, and seeds the initial state", async () => {
+test("createProject validates, persists, and seeds the initial state", async () => {
   const ports = makePorts();
-  const runtime = new WorkspaceRuntime(ports);
-  const meta = await runtime.createWorkspace(bidContract, "投标项目 A");
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "投标项目 A");
   assert.equal(meta.productId, "vxture.bid");
-  assert.equal(meta.workspaceType, "project");
+  assert.equal(meta.projectType, "project");
 
-  const view = await runtime.openWorkspace(meta.id);
+  const view = await runtime.openProject(meta.id);
   assert.equal(view.businessState, "draft");
   assert.equal(view.contract.product.id, "vxture.bid");
 
-  const listed = await runtime.listWorkspaces();
+  const listed = await runtime.listProjects();
   assert.equal(listed.length, 1);
   assert.equal(listed[0]!.id, meta.id);
 });
 
-test("createWorkspace rejects an invalid contract", async () => {
-  const runtime = new WorkspaceRuntime(makePorts());
+test("createProject rejects an invalid contract", async () => {
+  const runtime = new ProjectRuntime(makePorts());
   const broken = structuredClone(bidContract) as { contract: string };
   broken.contract = "9.9";
   await assert.rejects(
-    runtime.createWorkspace(broken, "bad"),
+    runtime.createProject(broken, "bad"),
     ContractInvalidError,
   );
 });
 
 test("business state machine follows the contract, confirm: human enforced", async () => {
-  const runtime = new WorkspaceRuntime(makePorts());
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws");
 
   assert.equal(await runtime.transitionBusinessState(meta.id, "planning"), "planning");
   await runtime.transitionBusinessState(meta.id, "writing");
@@ -120,15 +120,15 @@ test("business state machine follows the contract, confirm: human enforced", asy
   await runtime.transitionBusinessState(meta.id, "submitted", {
     humanConfirmed: true,
   });
-  assert.equal((await runtime.openWorkspace(meta.id)).businessState, "submitted");
+  assert.equal((await runtime.openProject(meta.id)).businessState, "submitted");
 
   // illegal jump
   await assert.rejects(runtime.transitionBusinessState(meta.id, "draft"));
 });
 
 test("harness: task with human verification suspends, resume completes", async () => {
-  const runtime = new WorkspaceRuntime(makePorts());
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
 
   const instance = await runTask(harness, "analyze_tender", {
@@ -155,8 +155,8 @@ test("harness: task with human verification suspends, resume completes", async (
 });
 
 test("harness: human rejection fails the task", async () => {
-  const runtime = new WorkspaceRuntime(makePorts());
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender", {
     tender_document: {},
@@ -178,8 +178,8 @@ test("verify: an automated rule goes to the product, not to a runtime check", as
       return { kind: "content" as const, content: "PASS" };
     },
   };
-  const runtime = new WorkspaceRuntime(ports);
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   // validate_coverage declares one automated rule.
   const instance = await runTask(harness, "validate_coverage", {
@@ -195,8 +195,8 @@ test("verify: an automated rule goes to the product, not to a runtime check", as
 });
 
 test("verify: an unreadable automated verdict escalates, it does not pass", async () => {
-  const runtime = new WorkspaceRuntime(makePorts()); // mock answers with prose
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(makePorts()); // mock answers with prose
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "validate_coverage", {
     requirement_matrix: {},
@@ -214,8 +214,8 @@ test("verify: an unreadable automated verdict escalates, it does not pass", asyn
 });
 
 test("harness: startTask records but does not execute; advance drives it", async () => {
-  const runtime = new WorkspaceRuntime(makePorts());
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
 
   const created = await harness.startTask("validate_coverage", {
@@ -242,8 +242,8 @@ test("harness: startTask records but does not execute; advance drives it", async
 
 test("harness: recovery resumes an interrupted task without redoing finished work", async () => {
   const ports = makePorts();
-  const runtime = new WorkspaceRuntime(ports);
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const created = await harness.startTask("validate_coverage", {
     requirement_matrix: {},
@@ -253,7 +253,7 @@ test("harness: recovery resumes an interrupted task without redoing finished wor
   // Freeze the record the way a killed process leaves one: mid-execution,
   // the first capability already answered, and the resume marker cleared
   // because advance() had claimed the work before dying.
-  const store = await ports.storage.openWorkspaceStore(meta.id);
+  const store = await ports.storage.openProjectStore(meta.id);
   assert.ok(store);
   const frozen = JSON.parse(
     (await store.getTaskInstance(created.id))!,
@@ -330,8 +330,8 @@ test("transient: retried with backoff, then parked - not failed", async () => {
       throw new TransientError("provider unreachable");
     },
   };
-  const runtime = new WorkspaceRuntime(ports);
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender", {
     tender_document: {},
@@ -354,8 +354,8 @@ test("transient: a permanent error still fails, it is not parked forever", async
       throw new Error("contract says this capability does not exist");
     },
   };
-  const runtime = new WorkspaceRuntime(ports);
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender", {
     tender_document: {},
@@ -364,8 +364,8 @@ test("transient: a permanent error still fails, it is not parked forever", async
 });
 
 test("cancel: an idle task stops at once and keeps what it produced", async () => {
-  const runtime = new WorkspaceRuntime(makePorts());
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const waiting = await runTask(harness, "analyze_tender", { tender_document: {} });
   assert.equal(waiting.state, "waiting_human");
@@ -394,8 +394,8 @@ test("cancel: a running task stops between capabilities", async () => {
       return { kind: "content" as const, content: "partial" };
     },
   };
-  const runtime = new WorkspaceRuntime(ports);
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   // validate_coverage has two capabilities; the second must not run.
   const instance = await runTask(harness, "validate_coverage", {
@@ -440,10 +440,10 @@ function verifyingPorts(verdicts: string[]): RuntimePorts {
 
 test("verify: a FAIL sends the reason back and the work is regenerated", async () => {
   // generate_proposal has two ai_assisted rules then a human one.
-  const runtime = new WorkspaceRuntime(
+  const runtime = new ProjectRuntime(
     verifyingPorts(["FAIL: 有三条需求没覆盖", "PASS", "PASS"]),
   );
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "generate_proposal", {
     requirement_matrix: {},
@@ -463,8 +463,8 @@ test("verify: a FAIL sends the reason back and the work is regenerated", async (
 });
 
 test("verify: revisions are bounded and the end is always a person", async () => {
-  const runtime = new WorkspaceRuntime(verifyingPorts(["FAIL: still wrong"]));
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(verifyingPorts(["FAIL: still wrong"]));
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "generate_proposal", {
     requirement_matrix: {},
@@ -483,10 +483,10 @@ test("verify: revisions are bounded and the end is always a person", async () =>
 });
 
 test("verify: an unreadable verdict escalates rather than passing", async () => {
-  const runtime = new WorkspaceRuntime(
+  const runtime = new ProjectRuntime(
     verifyingPorts(["looks broadly reasonable to me"]),
   );
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "generate_proposal", {
     requirement_matrix: {},
@@ -693,8 +693,8 @@ test("harness: an ask-class tool suspends on tool_ask, then runs on approval", a
       return { kind: "content" as const, content: "done" };
     },
   };
-  const runtime = new WorkspaceRuntime(ports);
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws");
   await runtime.addGrant(meta.id, "C:/work", "readwrite");
   const harness = await runtime.createHarness(meta.id);
 
@@ -748,8 +748,8 @@ test("harness: a refused tool reports back instead of failing the task", async (
       };
     },
   };
-  const runtime = new WorkspaceRuntime(ports);
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws");
   await runtime.addGrant(meta.id, "C:/work", "readwrite");
   const harness = await runtime.createHarness(meta.id);
 
@@ -763,8 +763,8 @@ test("harness: a refused tool reports back instead of failing the task", async (
 });
 
 test("harness: capabilities chain - each one sees the previous output", async () => {
-  const runtime = new WorkspaceRuntime(makePorts());
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   // validate_coverage declares two capabilities, run in order.
   const instance = await runTask(harness, "validate_coverage", {
@@ -801,8 +801,8 @@ test("harness: an illegal call is refused with a reason, and looping is bounded"
       };
     },
   };
-  const runtime = new WorkspaceRuntime(ports);
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender", {
     tender_document: {},
@@ -818,8 +818,8 @@ test("harness: an illegal call is refused with a reason, and looping is bounded"
 });
 
 test("harness: missing required context fails startability, not the AI", async () => {
-  const runtime = new WorkspaceRuntime(makePorts());
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   // tender_document is required: true and not supplied.
   const instance = await runTask(harness, "analyze_tender", {});
@@ -830,29 +830,29 @@ test("harness: missing required context fails startability, not the AI", async (
 });
 
 test("harness: unknown task id throws", async () => {
-  const runtime = new WorkspaceRuntime(makePorts());
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   await assert.rejects(harness.startTask("nope", {}));
 });
 
 function makeSelectionFixture(): {
   ports: RuntimePorts;
-  runtime: WorkspaceRuntime;
+  runtime: ProjectRuntime;
   connector: MemoryConnector;
 } {
   const ports = makePorts();
   const connector = new MemoryConnector();
   ports.connectors = new Map([["memory", connector]]);
-  return { ports, runtime: new WorkspaceRuntime(ports), connector };
+  return { ports, runtime: new ProjectRuntime(ports), connector };
 }
 
 async function bindTender(
-  runtime: WorkspaceRuntime,
+  runtime: ProjectRuntime,
   connector: MemoryConnector,
-  wsId: string,
+  projectId: string,
 ): Promise<void> {
-  await runtime.addGrant(wsId, "/granted/tenders");
+  await runtime.addGrant(projectId, "/granted/tenders");
   connector.register("/granted/tenders", [
     {
       id: "itm_tender_v2",
@@ -875,10 +875,10 @@ async function bindTender(
   ]);
   // Binding validation rejects roots outside grants first.
   await assert.rejects(
-    runtime.setBinding(wsId, { type: "tender_document", root: "/elsewhere" }),
+    runtime.setBinding(projectId, { type: "tender_document", root: "/elsewhere" }),
     /outside every granted folder/,
   );
-  await runtime.setBinding(wsId, {
+  await runtime.setBinding(projectId, {
     type: "tender_document",
     root: "/granted/tenders",
     connector: "memory",
@@ -887,7 +887,7 @@ async function bindTender(
 
 test("selection pipeline: high sensitivity gates on context_confirm, then completes", async () => {
   const { ports, runtime, connector } = makeSelectionFixture();
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws");
   await bindTender(runtime, connector, meta.id);
 
   const harness = await runtime.createHarness(meta.id);
@@ -924,7 +924,7 @@ test("selection pipeline: high sensitivity gates on context_confirm, then comple
 
 test("selection pipeline: declining the context stops the task", async () => {
   const { runtime, connector } = makeSelectionFixture();
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws");
   await bindTender(runtime, connector, meta.id);
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender");
@@ -936,7 +936,7 @@ test("selection pipeline: declining the context stops the task", async () => {
 
 test("discoverContext previews bound items; empty without a binding", async () => {
   const { runtime, connector } = makeSelectionFixture();
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws");
   assert.deepEqual(await runtime.discoverContext(meta.id, "tender_document"), []);
   await bindTender(runtime, connector, meta.id);
   const items = await runtime.discoverContext(meta.id, "tender_document");
@@ -946,7 +946,7 @@ test("discoverContext previews bound items; empty without a binding", async () =
 
 test("selection pipeline: required type without binding fails startability", async () => {
   const { runtime } = makeSelectionFixture();
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender");
   assert.equal(instance.state, "failed");
@@ -955,8 +955,8 @@ test("selection pipeline: required type without binding fails startability", asy
 
 test("audit chain verifies end-to-end and detects tamper", async () => {
   const ports = makePorts();
-  const runtime = new WorkspaceRuntime(ports);
-  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender", {
     tender_document: {},

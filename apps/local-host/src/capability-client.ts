@@ -64,7 +64,7 @@ export class CapabilityClient implements AIGatewayPort {
           // reconstructed across products.
           taskId: request.taskId,
           // The LOCAL container id, for correlation only. Deliberately not
-          // called workspaceId: that word means the platform tenant workspace,
+          // called projectId: that word means the platform tenant workspace,
           // and the callee must take identity from the token alone - a body
           // field with a familiar name is an invitation to trust it instead.
           projectId: request.workspace,

@@ -1,4 +1,4 @@
-# Bid product runtime contract - the canonical example from
+﻿# Bid product runtime contract - the canonical example from
 # docs/30-design/30-contract-schema.md section 16. Passes rules R1-R11;
 # the contract-schema test suite uses this file as its primary fixture.
 contract: "0.1"
@@ -11,7 +11,7 @@ product:
   runtime:
     minimum: 0.1.0
 
-workspace:
+project:
   # 项目型：每次投标开一个独立容器，交付即闭合（持续型见 continuous）。
   type: project
   operations: [create, open, archive, restore]
@@ -81,25 +81,25 @@ context:
     - id: requirement_matrix
       name: 需求矩阵
       required: false
-      sources: [workspace]
+      sources: [project]
       class: derived
       sensitivity: medium
     - id: technical_proposal
       name: 技术方案文档
       required: false
-      sources: [workspace]
+      sources: [project]
       class: generated
       sensitivity: high
     - id: coverage_report
       name: 需求覆盖报告
       required: false
-      sources: [workspace]
+      sources: [project]
       class: derived
       sensitivity: medium
     - id: deliverable_package
       name: 投标成果包
       required: false
-      sources: [workspace]
+      sources: [project]
       class: generated
       sensitivity: high
 

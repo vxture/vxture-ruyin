@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Capability Resolver over a real loopback HTTP server (ADR-009).
  *
  * The interesting behaviour is not "it can POST" - it is how it classifies
@@ -19,7 +19,7 @@ function request(): CapabilityTurnRequest {
     capability: "requirement_analysis",
     product: "vxture.bid",
     taskId: "ti_0001",
-    workspace: "ws_0001",
+    workspace: "prj_0001",
     messages: [{ role: "user", content: "hello" }],
     tools: [],
   };
@@ -72,10 +72,11 @@ test("resolver: routes by product + capability and carries the aggregation key",
       // X-2: without taskId one task's cost and failure point cannot be
       // reconstructed across products.
       assert.equal(body["taskId"], "ti_0001");
-      // The local container id travels as projectId, never as workspaceId -
+      // The local container id travels as projectId, never as workspaceId:
       // that word means the platform tenant workspace, and a familiar name on
-      // a body field is an invitation for the callee to trust it over the token.
-      assert.equal(body["projectId"], "ws_0001");
+      // a body field is an invitation for the callee to trust it over the
+      // token (integration rule 8: identity comes from the token alone).
+      assert.equal(body["projectId"], "prj_0001");
       assert.ok(!("workspaceId" in body));
     },
   );
