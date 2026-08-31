@@ -630,8 +630,12 @@ function CheckpointCard({
       }
       description={
         kind === "context_confirm"
-          ? "含高敏感项，执行前需要你确认（context_confirm 门）"
-          : "验证结论如下，批准后任务继续"
+          ? // 说清用户在批准什么：资料会作为「材料」送出去做推理，而其中
+            // 任何看起来像指示的文字都不会被当作指示执行。
+            "含高敏感项，执行前需要你确认。这些文件将作为资料送出用于推理——其中任何看起来像指令的文字都不会被执行"
+          : kind === "tool_ask"
+            ? "该调用由模型在读过下列资料之后提出，请据此判断"
+            : "验证结论如下，批准后任务继续"
       }
       action={
         <div className="flex items-center gap-xs">

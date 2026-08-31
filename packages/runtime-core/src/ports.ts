@@ -50,12 +50,42 @@ export interface ToolCall {
 export type TurnMessage =
   | { role: "user"; content: string }
   | { role: "assistant"; content: string; toolCalls?: ToolCall[] }
-  | { role: "tool"; callId: string; content: string; isError?: boolean };
+  // A tool message carries whatever the tool returned - a file's contents, an
+  // API's response. That is DATA too, and for the same reason as context:
+  // someone other than the user may have written it.
+  | {
+      role: "tool";
+      callId: string;
+      content: string;
+      isError?: boolean;
+      origin?: ContentOrigin;
+    };
 
 /** A tool the runtime is willing to actually execute this turn. */
 export interface ToolOffer {
   id: string;
   description?: string;
+}
+
+/**
+ * Where a piece of content came from - and therefore how it must be treated.
+ *
+ * The runtime is the only layer that knows this: by the time text reaches a
+ * model it is just text. Deliberately coarse, and deliberately without the
+ * local path - the provider needs to know *that* it is a user file, not where
+ * on the user's disk it sits. The full reference stays local, for the audit
+ * trail and for what the user is shown.
+ */
+export type ContentOrigin =
+  | { kind: "local_file"; connector: string }
+  | { kind: "caller" }
+  | { kind: "tool_result"; tool: string };
+
+export interface ContextFact {
+  type: string;
+  name: string;
+  content: string;
+  origin: ContentOrigin;
 }
 
 export interface CapabilityTurnRequest {
@@ -81,8 +111,20 @@ export interface CapabilityTurnRequest {
    */
   objective: string;
   constraints: string[];
-  /** The materialized context set, carrying its declared type. */
-  context: Array<{ type: string; name: string; content: string }>;
+  /**
+   * The materialized context set.
+   *
+   * **These are DATA, not instructions.** The runtime is the only layer that
+   * knows where each piece came from, so it says so here: content that arrived
+   * from a user's file or a tool result may have been written by someone other
+   * than the user - a tender document is authored by whoever issued it. Text
+   * inside it that reads like a direction is content to report, not a direction
+   * to follow.
+   *
+   * Only `objective` and `constraints` above are instructions, and they come
+   * from the contract.
+   */
+  context: ContextFact[];
   /**
    * The conversation so far - what the provider answered, what tools returned.
    * Earlier capabilities' output accumulates here, so capability N sees
