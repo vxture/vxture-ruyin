@@ -17,8 +17,22 @@ import { emitAudit } from "./audit.js";
 import {
   Harness,
   interruptedResumePoint,
+  pendingCheckpoint,
+  type CheckpointKind,
   type TaskInstanceRecord,
 } from "./harness.js";
+
+/** One thing waiting on a person, with enough to find it. */
+export interface PendingConfirmation {
+  projectId: string;
+  projectName: string;
+  productId: string;
+  taskInstanceId: string;
+  taskId: string;
+  checkpointId: string;
+  kind: CheckpointKind;
+  raisedAt: string;
+}
 import type {
   AuditEvent,
   Binding,
@@ -298,6 +312,51 @@ export class ProjectRuntime {
   async listInterruptedTasks(id: string): Promise<TaskInstanceRecord[]> {
     const instances = await this.listTaskInstances(id);
     return instances.filter((t) => interruptedResumePoint(t) !== null);
+  }
+
+  /**
+   * Everything, across every project, currently waiting on a person.
+   *
+   * A task that stops for a confirmation nobody is told about has not stopped
+   * for a person - it has just stopped. Until now a pending checkpoint was
+   * only visible from inside the task that raised it, which means the user had
+   * to already be looking at the one place that would have told them.
+   *
+   * Oldest first: the thing that has been blocked longest is the thing most
+   * likely to be forgotten.
+   *
+   * The subject is not included. It can be large, and a list is for deciding
+   * where to look - the full subject is shown at the decision point, which is
+   * where "a confirmation the user cannot inspect is not a confirmation"
+   * applies.
+   */
+  async listPendingConfirmations(): Promise<PendingConfirmation[]> {
+    const out: PendingConfirmation[] = [];
+    for (const project of await this.listProjects()) {
+      let instances: TaskInstanceRecord[];
+      try {
+        instances = await this.listTaskInstances(project.id);
+      } catch {
+        // One unreadable project must not blank the whole list: a partial
+        // answer still gets the user to the other confirmations.
+        continue;
+      }
+      for (const instance of instances) {
+        const checkpoint = pendingCheckpoint(instance);
+        if (!checkpoint) continue;
+        out.push({
+          projectId: project.id,
+          projectName: project.name,
+          productId: project.productId,
+          taskInstanceId: instance.id,
+          taskId: instance.taskId,
+          checkpointId: checkpoint.id,
+          kind: checkpoint.kind,
+          raisedAt: checkpoint.raisedAt,
+        });
+      }
+    }
+    return out.sort((a, b) => a.raisedAt.localeCompare(b.raisedAt));
   }
 
   // -------------------------------------------------------------------------

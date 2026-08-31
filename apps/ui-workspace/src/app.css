@@ -294,3 +294,76 @@ body {
 .user-chip-sub::before { content: "· "; }
 /* (agent dock retired 2026-08-30: ruyin is the workspace RUNTIME - agents live
    inside business products' task flows, never as shell-level chrome.) */
+
+/* 未决确认入口（M4）。计数徽标用 danger 而非 accent：它不是装饰，是「有人
+   在等」；语义色与品牌强调色分开，正是为了让需要注意的东西一眼可辨。 */
+.pending-trigger {
+  position: relative;
+  padding-inline: var(--spacing-xs);
+}
+.pending-count {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding-inline: 4px;
+  border-radius: 999px;
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.pending-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.pending-item:hover,
+.pending-item:focus-visible {
+  background: var(--accent);
+}
+.pending-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.pending-item-title {
+  font-weight: 600;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pending-item-kind,
+.pending-item-age {
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  white-space: nowrap;
+}
+.pending-item-age {
+  flex-shrink: 0;
+}

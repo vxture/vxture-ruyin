@@ -30,6 +30,7 @@ import { ProjectPanel } from "./workspace";
 import { HomePage } from "./home";
 import { SettingsView } from "./settings";
 import { UserSlot } from "./user";
+import { PendingInbox, usePending } from "./pending";
 import { useInstallPrompt } from "./install";
 
 /** Caption-overlay clearance only applies inside the Electron shell. */
@@ -106,6 +107,7 @@ export function Workbench({ api }: { api: Api }) {
   const [error, setError] = useState<string | null>(null);
   const health = useRuntimeHealth();
   const chrome = useHostChrome();
+  const pending = usePending(api);
   const { canInstall, install } = useInstallPrompt();
 
   const refreshSidebar = useCallback(async () => {
@@ -266,6 +268,12 @@ export function Workbench({ api }: { api: Api }) {
       }
       trailing={
         <div className="no-drag flex items-center gap-xs">
+          {/* 常驻：未决确认在哪个视图都看得见。放进某个页面里等于又要求
+              用户先找对地方，而那正是这条要修的问题。 */}
+          <PendingInbox
+            rows={pending}
+            onOpen={(id) => setView({ kind: "workspace", id })}
+          />
           <StatusBadge tone={health.ok ? "success" : "danger"} dot>
             {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
           </StatusBadge>

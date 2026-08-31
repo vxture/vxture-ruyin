@@ -11,7 +11,13 @@
  * the shell's launch verification (no GUI interaction needed).
  */
 
-import { app, BrowserWindow, shell, utilityProcess } from "electron";
+import {
+  app,
+  BrowserWindow,
+  Notification,
+  shell,
+  utilityProcess,
+} from "electron";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -92,6 +98,89 @@ async function waitForHealth(timeoutMs = 15_000): Promise<void> {
   throw new Error(`runtime daemon did not become healthy on port ${PORT}`);
 }
 
+/**
+ * System notifications for tasks parked on a person (10-workspace-runtime:
+ * 系统通知 is the shell's job, not the runtime's).
+ *
+ * Polls the daemon's own HTTP surface rather than receiving a push from the
+ * page. That keeps the window a pure web client with no preload and no Node
+ * access - the contract boundary stays at HTTP (60 section 4.2) - and it means
+ * the notification still fires when the renderer is busy, backgrounded, or
+ * showing a different view.
+ *
+ * Only newly-raised confirmations notify. Re-announcing the same checkpoint on
+ * every poll would train the user to dismiss the one that mattered.
+ */
+const KIND_LABEL: Record<string, string> = {
+  context_confirm: "需要确认要送出的资料",
+  tool_ask: "需要批准一次工具调用",
+  verification_review: "需要人工复核",
+};
+
+interface PendingRow {
+  projectId: string;
+  projectName: string;
+  taskId: string;
+  checkpointId: string;
+  kind: string;
+}
+
+function watchPending(win: BrowserWindow): void {
+  // Seeded on the first poll rather than empty: everything already waiting
+  // when the app starts is a backlog the user is about to see on screen, not
+  // news. Announcing it as new would make every launch a burst of alerts.
+  let announced: Set<string> | undefined;
+
+  const poll = async (): Promise<void> => {
+    let rows: PendingRow[];
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/pending`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      if (!res.ok) return;
+      rows = (await res.json()) as PendingRow[];
+    } catch {
+      return; // daemon busy or restarting - nothing to say
+    }
+
+    const live = new Set(rows.map((r) => r.checkpointId));
+    if (!announced) {
+      announced = live;
+    } else {
+      for (const row of rows) {
+        if (announced.has(row.checkpointId)) continue;
+        if (Notification.isSupported()) {
+          const n = new Notification({
+            title: `${row.projectName} 在等你`,
+            body: KIND_LABEL[row.kind] ?? "有一处需要你确认",
+          });
+          // The point of the notification is to get back to the decision, so
+          // it is a way there rather than an announcement to acknowledge.
+          n.on("click", () => {
+            if (win.isDestroyed()) return;
+            if (win.isMinimized()) win.restore();
+            win.show();
+            win.focus();
+            void win.loadURL(
+              `http://127.0.0.1:${PORT}/?token=${TOKEN}#ws/${row.projectId}`,
+            );
+          });
+          n.show();
+        }
+        announced.add(row.checkpointId);
+      }
+      // Forget what is no longer pending, so a later confirmation with the
+      // same id would announce again - and so this set cannot grow forever.
+      for (const id of announced) if (!live.has(id)) announced.delete(id);
+    }
+  };
+
+  const timer = setInterval(() => void poll(), 10_000);
+  timer.unref?.();
+  win.on("closed", () => clearInterval(timer));
+  void poll();
+}
+
 function openWindow(): void {
   const win = new BrowserWindow({
     width: 1280,
@@ -131,6 +220,7 @@ function openWindow(): void {
     return { action: "allow" };
   });
   void win.loadURL(`http://127.0.0.1:${PORT}/?token=${TOKEN}`);
+  watchPending(win);
 }
 
 app.whenReady().then(async () => {

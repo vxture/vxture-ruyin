@@ -283,6 +283,13 @@ async function handle(
     }
   }
 
+  // GET /pending - 跨项目的「在等我」清单（50-harness §6）。
+  // 桌面壳轮询它发系统通知，界面用它做未决入口；两者看的是同一份事实。
+  if (method === "GET" && path === "/pending") {
+    send(res, 200, await deps.runtime.listPendingConfirmations());
+    return;
+  }
+
   // GET /products - 受管资产视图：已装 + 启用态 + 订阅可用性（§18.5）
   if (method === "GET" && path === "/products") {
     send(res, 200, deps.registry.list());

@@ -1077,6 +1077,42 @@ test("selection pipeline: required type without binding fails startability", asy
   assert.match(instance.error ?? "", /required context "tender_document" has no binding/);
 });
 
+/**
+ * 「在等我」清单（M4）。任务停在等人那一刻若无人知晓，等于没停——而未决确认
+ * 原先只在它所属的那一个任务界面里看得到。
+ */
+test("在等我：跨项目汇总未决确认，最久的排最前", async () => {
+  const ports = makePorts();
+  const runtime = new ProjectRuntime(ports);
+  assert.deepEqual(await runtime.listPendingConfirmations(), []);
+
+  const a = await runtime.createProject(bidContract, "项目甲");
+  const b = await runtime.createProject(bidContract, "项目乙");
+  const ha = await runtime.createHarness(a.id);
+  const hb = await runtime.createHarness(b.id);
+  const ia = await runTask(ha, "analyze_tender", { tender_document: {} });
+  const ib = await runTask(hb, "analyze_tender", { tender_document: {} });
+
+  const pending = await runtime.listPendingConfirmations();
+  assert.equal(pending.length, 2);
+  // 两个项目都在等，而任一项目的界面都只看得见自己那一个。
+  assert.deepEqual(
+    [...pending].map((p) => p.projectName).sort(),
+    ["项目乙", "项目甲"].sort(),
+  );
+  assert.ok(pending.every((p) => p.kind === "verification_review"));
+  assert.ok(pending.some((p) => p.taskInstanceId === ia.id));
+  assert.ok(pending.some((p) => p.taskInstanceId === ib.id));
+  // 等得最久的排最前：那是最容易被忘掉的一个。
+  assert.ok(pending[0]!.raisedAt <= pending[1]!.raisedAt);
+
+  // 做完决定就该从清单里消失，否则入口很快变成一堆已经处理过的噪音。
+  await decide(ha, ia.id, true);
+  const after = await runtime.listPendingConfirmations();
+  assert.equal(after.length, 1);
+  assert.equal(after[0]!.taskInstanceId, ib.id);
+});
+
 test("audit chain verifies end-to-end and detects tamper", async () => {
   const ports = makePorts();
   const runtime = new ProjectRuntime(ports);
