@@ -1,4 +1,4 @@
-# 如影 Workspace Runtime：AI 原生业务工作空间架构设计
+﻿# 如影 Workspace Runtime：AI 原生业务工作空间架构设计
 
 > **Ruyin Workspace Runtime Architecture**
 >
@@ -96,7 +96,7 @@ Workspace 生命周期、契约加载、上下文解析、能力解析、任务�
 |---|---|---|
 | 规范与契约 | 同一份 | 同一份 |
 | 业务产品与业务语义 | 同一个 / 一致 | 同一个 / 一致 |
-| AI 能力 | Vxture 云端 | Vxture 云端（当前阶段） |
+| AI 能力 | 产品的云端能力面 | 产品的云端能力面（当前阶段） |
 | 数据驻留 | 云端 | 本地，是否上云由用户控制 |
 
 > **同一个业务产品（如标书编写），既可以在云端完成，也可以在本地完成。
@@ -968,7 +968,9 @@ flowchart TB
 
 ### 智能面 · Intelligence Plane —— 统一
 
-AI 能力（Model / Knowledge / Skill / Agent）当前一律由 Vxture 云端提供：
+AI 能力经产品自己的云端能力面提供（2026-08-31 修订，ADR-009 / 011：原写「一律
+由 Vxture 云端提供」，读起来像 Runtime 直连云端 AI；实际 Runtime 只认识产品的
+能力面，模型由那一侧接）：
 
 ``` text
 Cloud Runtime ──┐
