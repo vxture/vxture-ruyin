@@ -235,12 +235,22 @@ checkpoint:
 验证规则按代价升序执行，快速失败：
 
 ```text
-automated        确定性规则（结构 / 覆盖 / 一致性检查），本地执行
+automated        确定性规则（结构 / 覆盖 / 一致性检查）
     ↓ 通过
-ai_assisted      AI 评审（走同一 Capability Resolver 与 Transmission Gate）
+ai_assisted      AI 评审
     ↓ 通过
 human            verification_review Checkpoint
 ```
+
+前两者**都走同一 Capability Resolver 与 Transmission Gate，解析到产品的能力面**。
+
+> **更正（2026-08-31，ADR-010）。** 本节原写 automated 为「本地执行」，据此
+> 曾把它理解为 Runtime 要内建一批检查——**该理解作废**。契约只说「检查什么」
+> 的名字，**产品才知道那个名字是什么意思**；Runtime 只负责编排（排序、调用、
+> 收结果、失败进修订轮、终点交人、留痕），不介入检查内容。
+>
+> 因此 `kind` 的作用从「在哪执行」降为**「代价／排序提示」**——正好就是本节
+> 「按代价升序、快速失败」的依据：automated 确定性、便宜，该先跑。
 
 ## 7.2 修订轮
 

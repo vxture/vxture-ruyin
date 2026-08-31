@@ -13,6 +13,7 @@
  *   RUYIN_OIDC_CLIENT_ID     public client id (default ruyin; beta: ruyin-beta)
  *   RUYIN_PLATFORM_API_BASE  entitlements API base (unset = C2 disabled)
  *   RUYIN_CONSOLE_BASE       console deep-link base (default https://vxture.com)
+ *   RUYIN_CAPABILITY_BASE    business-product capability surface (unset = mock)
  */
 
 import { randomBytes } from "node:crypto";
@@ -29,6 +30,7 @@ import { TaskRunner } from "./task-runner.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { FtsRanker, reindexBinding } from "./fts.js";
 import { LocalToolExecutor } from "./tool-executor.js";
+import { CapabilityClient } from "./capability-client.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
 
@@ -40,6 +42,11 @@ const dataDir = resolve(
 const productsDir = resolve(process.env["RUYIN_PRODUCTS_DIR"] ?? "products");
 const port = Number(process.env["RUYIN_PORT"] ?? 7420);
 const token = process.env["RUYIN_TOKEN"] ?? randomBytes(24).toString("hex");
+
+// Capability provider base (ADR-009: the business product''s own cloud service
+// holds the credentials for Atlas). Unset = mock, and the daemon says so -
+// "not wired up" must never look like "working".
+const capabilityBase = process.env["RUYIN_CAPABILITY_BASE"] ?? "";
 
 const keys = await KeyManager.open(dataDir);
 const storage = new SqliteStoragePort(dataDir, keys);
@@ -71,7 +78,14 @@ const runtime = new WorkspaceRuntime({
   clock: nodeClock,
   id: nodeId,
   crypto: nodeCrypto,
-  gateway: new MockAIGateway(),
+  gateway: capabilityBase
+    ? new CapabilityClient({
+        baseUrl: capabilityBase,
+        // Late binding: `platform` is constructed below, and the gateway is
+        // only called once a task runs - long after startup.
+        token: () => platform.bearerToken(),
+      })
+    : new MockAIGateway(),
   connectors,
   ranker: new FtsRanker(storage),
   tools: new LocalToolExecutor(),

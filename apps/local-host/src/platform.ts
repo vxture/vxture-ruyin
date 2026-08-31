@@ -313,6 +313,21 @@ export class PlatformService {
     }
   }
 
+  /**
+   * The user's access token for outbound calls that need to prove who is
+   * asking - the capability surface verifies it to learn user / org /
+   * workspace (ADR-009). Returns undefined when signed out rather than
+   * throwing: a capability call without identity should be refused by the
+   * callee, not crash the task here.
+   */
+  async bearerToken(): Promise<string | undefined> {
+    try {
+      return await this.ensureAccessToken();
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Valid access token, refreshing near expiry. Throws when signed out. */
   private async ensureAccessToken(): Promise<string> {
     if (this.accessToken && Date.now() < this.accessToken.expiresAt - 60_000) {

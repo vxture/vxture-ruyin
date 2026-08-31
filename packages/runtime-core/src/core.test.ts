@@ -166,23 +166,49 @@ test("harness: human rejection fails the task", async () => {
   assert.match(rejected.error ?? "", /rejected/);
 });
 
-test("harness: an unevaluable automated rule escalates, it does not pass", async () => {
-  const runtime = new WorkspaceRuntime(makePorts());
+test("verify: an automated rule goes to the product, not to a runtime check", async () => {
+  // ADR-010: the contract says WHAT to check by name; the product knows what
+  // that name means. `kind` only orders the pipeline, it does not decide where
+  // the check runs - so automated goes down the same capability path.
+  const asked: string[] = [];
+  const ports = makePorts();
+  ports.gateway = {
+    turn: async (req) => {
+      if (req.capability.startsWith("verify:")) asked.push(req.capability);
+      return { kind: "content" as const, content: "PASS" };
+    },
+  };
+  const runtime = new WorkspaceRuntime(ports);
   const meta = await runtime.createWorkspace(bidContract, "ws");
   const harness = await runtime.createHarness(meta.id);
-  // validate_coverage declares one automated rule. The contract names it but
-  // never says what it checks, so the runtime cannot evaluate it - and
-  // reporting "passed" would be claiming a check that never happened.
+  // validate_coverage declares one automated rule.
   const instance = await runTask(harness, "validate_coverage", {
     requirement_matrix: {},
     technical_proposal: {},
   });
+
+  assert.deepEqual(asked, ["verify:coverage_complete"]);
+  const outcome = instance.verification.find((v) => v.id === "coverage_complete");
+  assert.equal(outcome?.kind, "automated");
+  assert.equal(outcome?.status, "passed");
+  assert.equal(instance.state, "completed");
+});
+
+test("verify: an unreadable automated verdict escalates, it does not pass", async () => {
+  const runtime = new WorkspaceRuntime(makePorts()); // mock answers with prose
+  const meta = await runtime.createWorkspace(bidContract, "ws");
+  const harness = await runtime.createHarness(meta.id);
+  const instance = await runTask(harness, "validate_coverage", {
+    requirement_matrix: {},
+    technical_proposal: {},
+  });
+  // Same rule as above, unreadable answer: not "passed". Claiming a check that
+  // never happened is worse than admitting we could not read the answer.
   assert.equal(instance.state, "waiting_human");
   const outcome = instance.verification.find((v) => v.id === "coverage_complete");
   assert.equal(outcome?.status, "pending_human");
-  assert.match(outcome?.note ?? "", /does not declare what it checks/);
+  assert.match(outcome?.note ?? "", /could not be read as a verdict/);
 
-  // A person can still accept it, and then the task finishes.
   const done = await decide(harness, instance.id, true);
   assert.equal(done.state, "completed");
 });

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Host ports - the seam between the isomorphic kernel and its hosts
  * (local Node daemon / cloud runtime). Design authority:
  * docs/30-design/60-technical-architecture.md section 6.2.
@@ -60,6 +60,11 @@ export interface ToolOffer {
 
 export interface CapabilityTurnRequest {
   capability: string;
+  /**
+   * The product whose capability this is. Resolution needs it and the contract
+   * cannot carry a provider (R6), so it travels with the request instead.
+   */
+  product: string;
   /**
    * Stable across the whole task - the cross-product aggregation key
    * (platform integration rule X-2). Providers log it verbatim, which is what
