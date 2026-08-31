@@ -23,6 +23,7 @@ import {
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { loadProducts } from "./products.js";
+import { ProductRegistry } from "./product-registry.js";
 import { createLocalApi } from "./server.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { FtsRanker, reindexBinding } from "./fts.js";
@@ -111,12 +112,11 @@ test("milestone: bid contract loads, workspace created, task runs over SQLite", 
 test("local api: token gate, product listing, workspace + task flow", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-api-"));
   const token = "test-token";
-  const scan = loadProducts(productsDir);
   const { ports, storage } = await makePorts(dataDir);
   const runtime = new WorkspaceRuntime(ports);
   const server = createLocalApi({
     runtime,
-    products: scan.loaded,
+    registry: new ProductRegistry(productsDir, dataDir),
     token,
     version: "test",
     systemInfo: testSystemInfo,
@@ -286,7 +286,7 @@ test("daemon serves the built workspace ui with traversal guard", async () => {
   const { ports, storage } = await makePorts(dataDir);
   const server = createLocalApi({
     runtime: new WorkspaceRuntime(ports),
-    products: [],
+    registry: new ProductRegistry(join(uiDir, "no-products"), dataDir),
     token: "t",
     version: "test",
     systemInfo: testSystemInfo,

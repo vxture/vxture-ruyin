@@ -187,7 +187,11 @@ export function UserSlot({
               <>
                 <span className="user-chip-name">{displayName}</span>
                 <span className="user-chip-sub">
-                  {signedIn ? session?.org?.name ?? "已登录" : "未登录"}
+                  {signedIn
+                    ? session?.profile?.email ??
+                      session?.org?.name ??
+                      "已登录"
+                    : "未登录"}
                 </span>
                 <Icon
                   name="caret-up-down"

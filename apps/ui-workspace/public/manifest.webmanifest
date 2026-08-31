@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "如影 Ruyin",
+  "short_name": "Ruyin",
+  "description": "Vxture AI 原生业务产品的本地智能工作环境",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

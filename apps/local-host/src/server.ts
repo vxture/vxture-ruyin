@@ -16,8 +16,9 @@ import {
   type Binding,
   type WorkspaceRuntime,
 } from "@vxture/ruyin-core";
-import type { LoadedProduct } from "./products.js";
 import { DEV_UI_HTML } from "./dev-ui.js";
+import type { ProductRegistry } from "./product-registry.js";
+import { installPackage } from "./installer.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -26,7 +27,8 @@ import {
 
 export interface LocalApiDeps {
   runtime: WorkspaceRuntime;
-  products: LoadedProduct[];
+  /** 受管产品资产（安装 / 启用 / 订阅可用性，30-contract-schema §18）。 */
+  registry: ProductRegistry;
   token: string;
   version: string;
   /** Rebuild the FTS index rows for one binding; returns indexed count. */
@@ -36,6 +38,11 @@ export interface LocalApiDeps {
   /** Vxture platform integration (C1 identity + C2 entitlements); absent in
    *  tests that exercise the runtime surface only. */
   platform?: PlatformService;
+  /**
+   * 是否要求安装包经 Vxture Registry 副署（§18.2）。缺省 true（安全默认）；
+   * 仅开发模式显式置 false 才允许装未签名包。
+   */
+  requireSignedPackages?: boolean;
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -55,7 +62,14 @@ const STATIC_MIME: Record<string, string> = {
   ".svg": "image/svg+xml",
   ".map": "application/json",
   ".ico": "image/x-icon",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
 };
+
+/** Root-level UI files the daemon serves besides index.html (PWA identity:
+ *  manifest enables the installed-app window with Window Controls Overlay,
+ *  collapsing the browser title bar so the app header is THE title bar -
+ *  the same single-bar contract as the Electron shell). */
+const UI_ROOT_FILES = new Set(["manifest.webmanifest", "icon.svg", "favicon.ico"]);
 
 function serveStatic(res: ServerResponse, root: string, rel: string): void {
   // Normalize and refuse traversal outside the UI root.
@@ -159,6 +173,11 @@ async function handle(
     serveStatic(res, deps.uiDir, path.slice(1));
     return;
   }
+  // Whitelisted UI root files (PWA manifest + icons).
+  if (method === "GET" && deps.uiDir && UI_ROOT_FILES.has(path.slice(1))) {
+    serveStatic(res, deps.uiDir, path.slice(1));
+    return;
+  }
 
   if (method === "GET" && path === "/health") {
     send(res, 200, { ok: true, version: deps.version });
@@ -255,22 +274,91 @@ async function handle(
     }
   }
 
-  // GET /products
+  // GET /products - 受管资产视图：已装 + 启用态 + 订阅可用性（§18.5）
   if (method === "GET" && path === "/products") {
-    send(
-      res,
-      200,
-      deps.products.map((p) => ({ id: p.id, name: p.name, version: p.version })),
-    );
+    send(res, 200, deps.registry.list());
+    return;
+  }
+
+  // POST /products/install - 安装 .ruyinpkg（请求体为包字节；管线见 installer.ts）
+  if (method === "POST" && path === "/products/install") {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    try {
+      const result = installPackage(Buffer.concat(chunks), {
+        storeDir: deps.registry.storeDir,
+        runtimeVersion: deps.version,
+        // 无 Registry 根证书前，生产口径由宿主注入；缺省要求签名（安全默认）。
+        requireSignature: deps.requireSignedPackages !== false,
+      });
+      deps.registry.rescan();
+      send(res, 201, {
+        productId: result.productId,
+        version: result.version,
+        signed: result.signed,
+      });
+    } catch (cause) {
+      send(res, 400, {
+        error: "install_rejected",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+    return;
+  }
+
+  // POST /products/:id/activate  { version } - 切换生效版本（§18.4 回滚）
+  if (
+    method === "POST" &&
+    segments[0] === "products" &&
+    segments.length === 3 &&
+    segments[2] === "activate"
+  ) {
+    const body = await readJson(req);
+    try {
+      deps.registry.activate(segments[1]!, String(body["version"] ?? ""));
+    } catch (cause) {
+      send(res, 404, {
+        error: "version_not_installed",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+      return;
+    }
+    send(res, 200, deps.registry.list().find((p) => p.id === segments[1]));
+    return;
+  }
+
+  // POST /products/:id/enable|disable - 本机启用/停用（不卸载，数据不动）
+  if (
+    method === "POST" &&
+    segments[0] === "products" &&
+    segments.length === 3 &&
+    (segments[2] === "enable" || segments[2] === "disable")
+  ) {
+    try {
+      deps.registry.setEnabled(segments[1]!, segments[2] === "enable");
+    } catch (cause) {
+      send(res, 404, {
+        error: "product_not_found",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+      return;
+    }
+    send(res, 200, deps.registry.list().find((p) => p.id === segments[1]));
     return;
   }
 
   // POST /workspaces  { product, name }
   if (method === "POST" && path === "/workspaces") {
     const body = await readJson(req);
-    const product = deps.products.find((p) => p.id === body["product"]);
+    const product = deps.registry.find(String(body["product"] ?? ""));
     if (!product) {
       send(res, 404, { error: "product_not_found", product: body["product"] });
+      return;
+    }
+    // §18.5：退订 / 停用的产品不可打开；已有工作空间的数据仍可读可导出。
+    const blocked = deps.registry.blockedReason(product.id);
+    if (blocked) {
+      send(res, 403, { error: "product_unavailable", message: blocked });
       return;
     }
     const name = typeof body["name"] === "string" && body["name"].length > 0
