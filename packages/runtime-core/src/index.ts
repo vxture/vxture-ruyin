@@ -20,8 +20,10 @@ export type {
   VerificationOutcome,
 } from "./harness.js";
 export {
+  AlreadyAttributedError,
   ContractInvalidError,
   NeedsHumanConfirmationError,
+  NoWorkspaceError,
   ProjectNotFoundError,
   ProjectRuntime,
   isPathGranted,

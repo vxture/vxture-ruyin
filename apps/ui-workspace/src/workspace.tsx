@@ -79,7 +79,16 @@ export function ProjectPanel({ api, id }: { api: Api; id: string }) {
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [chainOk, setChainOk] = useState<boolean | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * 两种错误分开存，因为它们的寿命不一样。
+   *
+   * 轮询每 1–5 秒跑一次，成功时清掉自己的错误是对的；但如果它同时清掉**用户
+   * 刚点那一下**的失败，那条错误活不过一秒——按钮看起来就是「点了没反应」，
+   * 比没有按钮更糟。
+   */
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? pollError;
 
   const refresh = useCallback(async () => {
     try {
@@ -96,9 +105,9 @@ export function ProjectPanel({ api, id }: { api: Api; id: string }) {
       setBindings(b);
       setAudit(a);
       setChainOk(await verifyChain(id, a));
-      setError(null);
+      setPollError(null);
     } catch (e) {
-      setError(String((e as Error).message));
+      setPollError(String((e as Error).message));
     }
   }, [api, id]);
 
@@ -122,11 +131,14 @@ export function ProjectPanel({ api, id }: { api: Api; id: string }) {
 
   const guard = useCallback(
     async (fn: () => Promise<unknown>) => {
+      // 上一次动作的结果到此为止：新动作开始时清掉，成功就不再显示，失败则被
+      // 下面那条新的替换。
+      setActionError(null);
       try {
         await fn();
         await refresh();
       } catch (e) {
-        setError(String((e as Error).message));
+        setActionError(String((e as Error).message));
       }
     },
     [refresh],
@@ -152,6 +164,30 @@ export function ProjectPanel({ api, id }: { api: Api; id: string }) {
         description={`${view.product.name} ${view.product.version} · ${view.meta.id}`}
       />
       {error && <div className="error-box">{error}</div>}
+
+      {/* 归属为空 = attribution 之前写下的记录。这不是一种受支持的状态，所以
+          说清它是什么、以及怎么了结它，而不是让它安静地一直待在列表里。 */}
+      {!view.meta.workspaceId && (
+        <div className="notice-box">
+          <div className="flex flex-col gap-2xs">
+            <strong>该项目尚未归属工作区</strong>
+            <span className="text-body-sm text-muted-foreground">
+              它建于工作区归属启用之前。订阅、权益与数据边界都按工作区划分，
+              导入后它才会随工作区一起呈现。
+            </span>
+          </div>
+          <Button
+            onClick={() =>
+              void guard(async () => {
+                await api.importProject(id);
+                await refresh();
+              })
+            }
+          >
+            导入当前工作区
+          </Button>
+        </div>
+      )}
 
       {pending.map((t) => (
         <CheckpointCard

@@ -22,6 +22,8 @@ import {
   decideTool,
   validateToolCall,
   TransientError,
+  NoWorkspaceError,
+  AlreadyAttributedError,
   type Harness,
   type CapabilityTurnRequest,
   type RuntimePorts,
@@ -87,7 +89,7 @@ function decide(
 test("createProject validates, persists, and seeds the initial state", async () => {
   const ports = makePorts();
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "投标项目 A");
+  const meta = await runtime.createProject(bidContract, "投标项目 A", "wsp_test");
   assert.equal(meta.productId, "vxture.bid");
   assert.equal(meta.projectType, "project");
 
@@ -100,19 +102,71 @@ test("createProject validates, persists, and seeds the initial state", async () 
   assert.equal(listed[0]!.id, meta.id);
 });
 
+/**
+ * 项目必须归属工作区（ADR-015）。不变量由类型持有 —— 没有能产出「无归属项目」
+ * 的代码路径，也就没有以后要去审的路径。
+ */
+test("归属：没有工作区就建不出项目", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  await assert.rejects(
+    runtime.createProject(bidContract, "无主项目", ""),
+    NoWorkspaceError,
+  );
+  assert.deepEqual(await runtime.listProjects(), []);
+});
+
+test("归属：新建的项目一律带上工作区", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "甲", "wsp_a");
+  assert.equal(meta.workspaceId, "wsp_a");
+  assert.equal((await runtime.openProject(meta.id)).meta.workspaceId, "wsp_a");
+});
+
+test("导入：只填空白，不给已归属的项目搬家", async () => {
+  const ports = makePorts();
+  const runtime = new ProjectRuntime(ports);
+
+  // 手工造一条 attribution 之前的记录：那时的 meta 就是没有这个字段的。
+  const store = await ports.storage.createProjectStore("ws_legacy");
+  await store.putMeta({
+    id: "ws_legacy",
+    productId: "vxture.bid",
+    productVersion: "1.0.0",
+    contractVersion: "0.1",
+    name: "老项目",
+    projectType: "project",
+    createdAt: "2026-01-01T00:00:00Z",
+  });
+  await store.putContract(JSON.stringify(bidContract));
+  await store.setBusinessState("draft");
+
+  const imported = await runtime.importProject("ws_legacy", "wsp_a");
+  assert.equal(imported.workspaceId, "wsp_a");
+
+  // 再导一次就是搬家了 —— 那会把数据挪过订阅与权益边界，不能由「导入」顺手做掉。
+  await assert.rejects(
+    runtime.importProject("ws_legacy", "wsp_b"),
+    AlreadyAttributedError,
+  );
+  assert.equal(
+    (await runtime.openProject("ws_legacy")).meta.workspaceId,
+    "wsp_a",
+  );
+});
+
 test("createProject rejects an invalid contract", async () => {
   const runtime = new ProjectRuntime(makePorts());
   const broken = structuredClone(bidContract) as { contract: string };
   broken.contract = "9.9";
   await assert.rejects(
-    runtime.createProject(broken, "bad"),
+    runtime.createProject(broken, "bad", "wsp_test"),
     ContractInvalidError,
   );
 });
 
 test("business state machine follows the contract, confirm: human enforced", async () => {
   const runtime = new ProjectRuntime(makePorts());
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
 
   assert.equal(await runtime.transitionBusinessState(meta.id, "planning"), "planning");
   await runtime.transitionBusinessState(meta.id, "writing");
@@ -134,7 +188,7 @@ test("business state machine follows the contract, confirm: human enforced", asy
 
 test("harness: task with human verification suspends, resume completes", async () => {
   const runtime = new ProjectRuntime(makePorts());
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
 
   const instance = await runTask(harness, "analyze_tender", {
@@ -161,7 +215,7 @@ test("harness: task with human verification suspends, resume completes", async (
 
 test("harness: human rejection fails the task", async () => {
   const runtime = new ProjectRuntime(makePorts());
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender", {
     tender_document: {},
@@ -187,7 +241,7 @@ test("verify: an automated rule goes to the product, not to a runtime check", as
     },
   };
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   // validate_coverage declares one automated rule.
   const instance = await runTask(harness, "validate_coverage", {
@@ -204,7 +258,7 @@ test("verify: an automated rule goes to the product, not to a runtime check", as
 
 test("verify: an unreadable automated verdict escalates, it does not pass", async () => {
   const runtime = new ProjectRuntime(makePorts()); // mock answers with prose
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "validate_coverage", {
     requirement_matrix: {},
@@ -223,7 +277,7 @@ test("verify: an unreadable automated verdict escalates, it does not pass", asyn
 
 test("harness: startTask records but does not execute; advance drives it", async () => {
   const runtime = new ProjectRuntime(makePorts());
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
 
   const created = await harness.startTask("validate_coverage", {
@@ -251,7 +305,7 @@ test("harness: startTask records but does not execute; advance drives it", async
 test("harness: recovery resumes an interrupted task without redoing finished work", async () => {
   const ports = makePorts();
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const created = await harness.startTask("validate_coverage", {
     requirement_matrix: {},
@@ -339,7 +393,7 @@ test("transient: retried with backoff, then parked - not failed", async () => {
     },
   };
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender", {
     tender_document: {},
@@ -363,7 +417,7 @@ test("transient: a permanent error still fails, it is not parked forever", async
     },
   };
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender", {
     tender_document: {},
@@ -373,7 +427,7 @@ test("transient: a permanent error still fails, it is not parked forever", async
 
 test("cancel: an idle task stops at once and keeps what it produced", async () => {
   const runtime = new ProjectRuntime(makePorts());
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const waiting = await runTask(harness, "analyze_tender", { tender_document: {} });
   assert.equal(waiting.state, "waiting_human");
@@ -403,7 +457,7 @@ test("cancel: a running task stops between capabilities", async () => {
     },
   };
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   // validate_coverage has two capabilities; the second must not run.
   const instance = await runTask(harness, "validate_coverage", {
@@ -453,7 +507,7 @@ test("verify: a FAIL sends the reason back and the work is regenerated", async (
   const runtime = new ProjectRuntime(
     verifyingPorts(["有三条需求没覆盖", "PASS", "PASS"]),
   );
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "generate_proposal", {
     requirement_matrix: {},
@@ -474,7 +528,7 @@ test("verify: a FAIL sends the reason back and the work is regenerated", async (
 
 test("verify: revisions are bounded and the end is always a person", async () => {
   const runtime = new ProjectRuntime(verifyingPorts(["still wrong"]));
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "generate_proposal", {
     requirement_matrix: {},
@@ -498,7 +552,7 @@ test("verify: a non-verdict reply escalates rather than passing", async () => {
   // step becomes decoration.
   const ports = makePorts(); // its mock always answers with content
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "generate_proposal", {
     requirement_matrix: {},
@@ -706,7 +760,7 @@ test("harness: an ask-class tool suspends on tool_ask, then runs on approval", a
     },
   };
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   await runtime.addGrant(meta.id, "C:/work", "readwrite");
   const harness = await runtime.createHarness(meta.id);
 
@@ -761,7 +815,7 @@ test("harness: a refused tool reports back instead of failing the task", async (
     },
   };
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   await runtime.addGrant(meta.id, "C:/work", "readwrite");
   const harness = await runtime.createHarness(meta.id);
 
@@ -776,7 +830,7 @@ test("harness: a refused tool reports back instead of failing the task", async (
 
 test("harness: capabilities chain - each one sees the previous output", async () => {
   const runtime = new ProjectRuntime(makePorts());
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   // validate_coverage declares two capabilities, run in order.
   const instance = await runTask(harness, "validate_coverage", {
@@ -814,7 +868,7 @@ test("harness: an illegal call is refused with a reason, and looping is bounded"
     },
   };
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender", {
     tender_document: {},
@@ -831,7 +885,7 @@ test("harness: an illegal call is refused with a reason, and looping is bounded"
 
 test("harness: missing required context fails startability, not the AI", async () => {
   const runtime = new ProjectRuntime(makePorts());
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   // tender_document is required: true and not supplied.
   const instance = await runTask(harness, "analyze_tender", {});
@@ -843,7 +897,7 @@ test("harness: missing required context fails startability, not the AI", async (
 
 test("harness: unknown task id throws", async () => {
   const runtime = new ProjectRuntime(makePorts());
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   await assert.rejects(harness.startTask("nope", {}));
 });
@@ -899,7 +953,7 @@ async function bindTender(
 
 test("selection pipeline: high sensitivity gates on context_confirm, then completes", async () => {
   const { ports, runtime, connector } = makeSelectionFixture();
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   await bindTender(runtime, connector, meta.id);
 
   const harness = await runtime.createHarness(meta.id);
@@ -936,7 +990,7 @@ test("selection pipeline: high sensitivity gates on context_confirm, then comple
 
 test("selection pipeline: declining the context stops the task", async () => {
   const { runtime, connector } = makeSelectionFixture();
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   await bindTender(runtime, connector, meta.id);
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender");
@@ -948,7 +1002,7 @@ test("selection pipeline: declining the context stops the task", async () => {
 
 test("discoverContext previews bound items; empty without a binding", async () => {
   const { runtime, connector } = makeSelectionFixture();
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   assert.deepEqual(await runtime.discoverContext(meta.id, "tender_document"), []);
   await bindTender(runtime, connector, meta.id);
   const items = await runtime.discoverContext(meta.id, "tender_document");
@@ -972,7 +1026,7 @@ test("上下文承载：二进制以字节 + 媒体类型过线，不被降级�
       return { kind: "content", content: "ok" };
     },
   };
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   await runtime.addGrant(meta.id, "/granted/tenders");
   const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x00, 0xff, 0xfe]);
   connector.register("/granted/tenders", [
@@ -1032,7 +1086,7 @@ test("上下文承载：读不了的资料如实标 unavailable，既不编内�
       return { kind: "content", content: "ok" };
     },
   };
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   await runtime.addGrant(meta.id, "/granted/tenders");
   connector.register("/granted/tenders", [
     {
@@ -1070,7 +1124,7 @@ test("上下文承载：读不了的资料如实标 unavailable，既不编内�
 
 test("selection pipeline: required type without binding fails startability", async () => {
   const { runtime } = makeSelectionFixture();
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender");
   assert.equal(instance.state, "failed");
@@ -1086,8 +1140,8 @@ test("在等我：跨项目汇总未决确认，最久的排最前", async () =>
   const runtime = new ProjectRuntime(ports);
   assert.deepEqual(await runtime.listPendingConfirmations(), []);
 
-  const a = await runtime.createProject(bidContract, "项目甲");
-  const b = await runtime.createProject(bidContract, "项目乙");
+  const a = await runtime.createProject(bidContract, "项目甲", "wsp_test");
+  const b = await runtime.createProject(bidContract, "项目乙", "wsp_test");
   const ha = await runtime.createHarness(a.id);
   const hb = await runtime.createHarness(b.id);
   const ia = await runTask(ha, "analyze_tender", { tender_document: {} });
@@ -1116,7 +1170,7 @@ test("在等我：跨项目汇总未决确认，最久的排最前", async () =>
 test("audit chain verifies end-to-end and detects tamper", async () => {
   const ports = makePorts();
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   const instance = await runTask(harness, "analyze_tender", {
     tender_document: {},
@@ -1150,7 +1204,7 @@ test("provenance: context carries where it came from, without the local path", a
     },
   };
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   const harness = await runtime.createHarness(meta.id);
   await runTask(harness, "analyze_tender", { tender_document: "招标正文" });
 
@@ -1189,7 +1243,7 @@ test("provenance: a tool result is marked as data, naming the tool", async () =>
     },
   };
   const runtime = new ProjectRuntime(ports);
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   await runtime.addGrant(meta.id, "C:/work", "read");
   const harness = await runtime.createHarness(meta.id);
   await runTask(harness, "analyze_tender", { tender_document: {} });
@@ -1203,7 +1257,7 @@ test("provenance: a tool result is marked as data, naming the tool", async () =>
 
 test("provenance: the confirm card says the material is data, and where it is", async () => {
   const { runtime, connector } = makeSelectionFixture();
-  const meta = await runtime.createProject(bidContract, "ws");
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
   await bindTender(runtime, connector, meta.id);
   const harness = await runtime.createHarness(meta.id);
   const parked = await runTask(harness, "analyze_tender");

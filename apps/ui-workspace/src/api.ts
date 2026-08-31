@@ -26,6 +26,20 @@ export interface ProjectMeta {
   name: string;
   projectType: string;
   createdAt: string;
+  /**
+   * 所属平台工作区（ADR-015）。缺失 = attribution 之前写下的记录，属**待导入
+   * 队列**而非一种受支持的状态。新建的项目一律有值。
+   */
+  workspaceId?: string;
+}
+
+/**
+ * `GET /projects` 的形状。`elsewhere` 只报**数量不报名字**：隔离要照做，但
+ * 「切换一下项目全没了」在用户那里和「数据丢了」分不开。
+ */
+export interface ProjectList {
+  items: ProjectMeta[];
+  elsewhere: number;
 }
 
 /**
@@ -216,9 +230,12 @@ export class Api {
 
   pending = () => this.call<PendingConfirmation[]>("/pending");
   products = () => this.call<ProductInfo[]>("/products");
-  workspaces = () => this.call<ProjectMeta[]>("/projects");
+  projects = () => this.call<ProjectList>("/projects");
   createProject = (product: string, name: string) =>
     this.call<ProjectMeta>("/projects", "POST", { product, name });
+  /** 把 attribution 之前的项目导入当前工作区（ADR-015）。 */
+  importProject = (id: string) =>
+    this.call<ProjectMeta>(`/projects/${id}/import`, "POST");
   workspace = (id: string) => this.call<ProjectView>(`/projects/${id}`);
   taskInstances = (id: string) =>
     this.call<TaskInstance[]>(`/projects/${id}/tasks`);

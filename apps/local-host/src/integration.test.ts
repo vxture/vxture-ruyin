@@ -26,6 +26,7 @@ import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { loadProducts } from "./products.js";
 import { ProductRegistry } from "./product-registry.js";
 import { createLocalApi } from "./server.js";
+import type { PlatformService } from "./platform.js";
 import { TaskRunner } from "./task-runner.js";
 
 interface PolledTask {
@@ -97,6 +98,19 @@ const testSystemInfo = {
   startedAt: new Date().toISOString(),
 };
 
+/**
+ * 登录态替身。服务端只用到 session() 里的当前工作区；真 PlatformService 要拉
+ * OIDC discovery 与凭据库，那不是这条用例要试的东西。
+ */
+function signedInTo(workspaceId: string): PlatformService {
+  return {
+    session: () => ({
+      signedIn: true,
+      workspace: { id: workspaceId, name: "测试工作区" },
+    }),
+  } as unknown as PlatformService;
+}
+
 test("milestone: bid contract loads, workspace created, task runs over SQLite", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-it-"));
   const first = await makePorts(dataDir);
@@ -108,7 +122,7 @@ test("milestone: bid contract loads, workspace created, task runs over SQLite", 
     assert.ok(bid, "bid product must load");
 
     const runtime = new ProjectRuntime(first.ports);
-    const meta = await runtime.createProject(bid.contract, "投标项目 A");
+    const meta = await runtime.createProject(bid.contract, "投标项目 A", "wsp_test");
     assert.equal(meta.productId, "vxture.bid");
     assert.equal((await runtime.openProject(meta.id)).businessState, "draft");
 
@@ -156,6 +170,9 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     token,
     version: "test",
     systemInfo: testSystemInfo,
+    // 登录态替身：服务端只从会话里读当前工作区，绝不从请求体里读 —— 请求体里
+    // 带工作区等于让调用方自己挑数据边界。
+    platform: signedInTo("wsp_test"),
     reindex: (projectId, binding) =>
       reindexBinding(storage, projectId, binding, new LocalFsConnector()),
   });
@@ -207,7 +224,16 @@ test("local api: token gate, product listing, workspace + task flow", async () =
       body: JSON.stringify({ product: "vxture.bid", name: "api-ws" }),
     });
     assert.equal(created.status, 201);
-    const meta = (await created.json()) as { id: string };
+    const meta = (await created.json()) as { id: string; workspaceId?: string };
+    // 新建的项目一律带工作区（ADR-015）——不变量在 HTTP 面也成立。
+    assert.equal(meta.workspaceId, "wsp_test");
+
+    // 列表按当前工作区过滤，且报出别处还有几个（只给数量）。
+    const listed = (await (
+      await fetch(`${base}/projects`, { headers: authed })
+    ).json()) as { items: Array<{ id: string }>; elsewhere: number };
+    assert.deepEqual(listed.items.map((p) => p.id), [meta.id]);
+    assert.equal(listed.elsewhere, 0);
 
     const task = await fetch(`${base}/projects/${meta.id}/tasks`, {
       method: "POST",
@@ -300,7 +326,7 @@ test("selection over real files: grant -> bind (indexes) -> gate -> complete", a
     const scan = loadProducts(productsDir);
     const bid = scan.loaded.find((p) => p.id === "vxture.bid");
     assert.ok(bid);
-    const meta = await runtime.createProject(bid.contract, "sel-ws");
+    const meta = await runtime.createProject(bid.contract, "sel-ws", "wsp_test");
 
     // Grant, then bind (binding outside the grant is refused).
     await runtime.addGrant(meta.id, filesDir);
@@ -412,7 +438,7 @@ test("project database is encrypted at rest (TD-009)", async () => {
     const scan = loadProducts(productsDir);
     const bid = scan.loaded.find((p) => p.id === "vxture.bid");
     assert.ok(bid);
-    const meta = await runtime.createProject(bid.contract, "enc-ws");
+    const meta = await runtime.createProject(bid.contract, "enc-ws", "wsp_test");
     storage.closeAll();
 
     // A plaintext SQLite file starts with "SQLite format 3\0"; an encrypted
@@ -466,6 +492,104 @@ test("the pre-rename layout migrates in place, ids untouched", async () => {
       storage.closeAll();
     }
   } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 项目必须归属工作区（ADR-015）。这条用例守的是**没有登录态就没有新建能力**
+ * 这个不变量在 HTTP 面上的表现：不是把按钮藏起来，是这个动作缺少它的主体。
+ */
+test("归属：未登录不能新建项目；老项目可导入当前工作区", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-attr-"));
+  const { ports, storage } = await makePorts(dataDir);
+  const runtime = new ProjectRuntime(ports);
+
+  // attribution 之前写下的记录：那时的 meta 就是没有这个字段的。
+  const legacy = await storage.createProjectStore("ws_legacy0002");
+  await legacy.putMeta({
+    id: "ws_legacy0002",
+    productId: "vxture.bid",
+    productVersion: "1.0.0",
+    contractVersion: "0.1",
+    name: "老项目",
+    projectType: "project",
+    createdAt: "2026-01-01T00:00:00Z",
+  });
+  const bidProduct = loadProducts(productsDir).loaded.find(
+    (p) => p.id === "vxture.bid",
+  );
+  assert.ok(bidProduct);
+  await legacy.putContract(JSON.stringify(bidProduct.contract));
+  await legacy.setBusinessState("draft");
+
+  const token = "attr-token";
+  const authed = { authorization: `Bearer ${token}` };
+  const json = { ...authed, "content-type": "application/json" };
+  const deps = {
+    runtime,
+    registry: new ProductRegistry(productsDir, dataDir),
+    tasks: new TaskRunner(runtime),
+    token,
+    version: "test",
+    systemInfo: testSystemInfo,
+    reindex: async () => 0,
+  };
+
+  // 未登录：没有工作区，新建被拒。
+  const signedOut = createLocalApi(deps);
+  await new Promise<void>((ok) => signedOut.listen(0, "127.0.0.1", ok));
+  const outBase = `http://127.0.0.1:${(signedOut.address() as AddressInfo).port}`;
+  try {
+    const refused = await fetch(`${outBase}/projects`, {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ product: "vxture.bid", name: "无主项目" }),
+    });
+    assert.equal(refused.status, 409);
+    assert.equal(
+      ((await refused.json()) as { error: string }).error,
+      "no_active_workspace",
+    );
+
+    // 未归属的老项目在任何工作区下都看得见 —— 那是待导入队列，不能因为过滤
+    // 而消失：用户会以为数据没了。
+    const list = (await (
+      await fetch(`${outBase}/projects`, { headers: authed })
+    ).json()) as { items: Array<{ id: string; workspaceId?: string }> };
+    assert.deepEqual(list.items.map((p) => p.id), ["ws_legacy0002"]);
+    assert.equal(list.items[0]?.workspaceId, undefined);
+  } finally {
+    signedOut.close();
+  }
+
+  // 登录后：导入成功，且再导一次是搬家，被拒。
+  const signedIn = createLocalApi({ ...deps, platform: signedInTo("wsp_a") });
+  await new Promise<void>((ok) => signedIn.listen(0, "127.0.0.1", ok));
+  const inBase = `http://127.0.0.1:${(signedIn.address() as AddressInfo).port}`;
+  try {
+    const imported = await fetch(`${inBase}/projects/ws_legacy0002/import`, {
+      method: "POST",
+      headers: json,
+    });
+    assert.equal(imported.status, 200);
+    assert.equal(
+      ((await imported.json()) as { workspaceId: string }).workspaceId,
+      "wsp_a",
+    );
+
+    const again = await fetch(`${inBase}/projects/ws_legacy0002/import`, {
+      method: "POST",
+      headers: json,
+    });
+    assert.equal(again.status, 409);
+    assert.equal(
+      ((await again.json()) as { error: string }).error,
+      "already_attributed",
+    );
+  } finally {
+    signedIn.close();
+    storage.closeAll();
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
