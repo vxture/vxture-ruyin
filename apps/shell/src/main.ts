@@ -89,9 +89,25 @@ async function waitForHealth(timeoutMs = 15_000): Promise<void> {
   while (Date.now() < deadline) {
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/health`);
-      if (res.ok) return;
-    } catch {
-      // daemon not up yet
+      if (res.ok) {
+        // `/health` is open, so a healthy answer only proves *a* daemon is on
+        // this port - not that it is the one we just forked. Someone running
+        // the daemon by hand takes the port, our child dies on EADDRINUSE, and
+        // the window would load against a stranger with a token it will not
+        // accept: a blank "未连接" screen with nothing pointing at the cause.
+        // An authed endpoint settles ownership.
+        const mine = await fetch(`http://127.0.0.1:${PORT}/system`, {
+          headers: { authorization: `Bearer ${TOKEN}` },
+        });
+        if (mine.ok) return;
+        throw new Error(
+          `port ${PORT} is already held by another Ruyin runtime that this app ` +
+            `did not start. Stop it (or close the window that owns it) and try again.`,
+        );
+      }
+    } catch (cause) {
+      // Rethrow our own diagnosis; a fetch failure just means "not up yet".
+      if (cause instanceof Error && cause.message.startsWith("port ")) throw cause;
     }
     await new Promise((ok) => setTimeout(ok, 200));
   }

@@ -25,14 +25,9 @@ body {
 .titlebar { -webkit-app-region: drag; app-region: drag; }
 .titlebar .no-drag { -webkit-app-region: no-drag; app-region: no-drag; }
 .caption-spacer { width: 138px; height: 1px; flex-shrink: 0; }
-/* 安装为 PWA（Window Controls Overlay）：浏览器收起自带标题栏，header 铺进
-   标题栏区，按 env(titlebar-area-*) 避让系统窗口按钮 —— 与 Electron 无边框壳
-   同一「单条标题栏」契约。普通浏览器窗口（.app-topbar 无 .titlebar）则是纯
-   工具条，不拖拽不避让。 */
-.titlebar-wco {
-  padding-left: env(titlebar-area-x, 0px);
-  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
-}
+/* （.titlebar-wco 已随 PWA 一并移除：装成 PWA 会得到一个不启动运行时的应用
+   图标。桌面应用只有 Electron 壳一个入口；普通浏览器窗口的 .app-topbar 不带
+   .titlebar，是纯工具条，不拖拽不避让。） */
 
 /* ---------- login screen (first surface) + splash ---------- */
 .splash {

@@ -31,38 +31,25 @@ import { HomePage } from "./home";
 import { SettingsView } from "./settings";
 import { UserSlot } from "./user";
 import { PendingInbox, usePending } from "./pending";
-import { useInstallPrompt } from "./install";
 
 /** Caption-overlay clearance only applies inside the Electron shell. */
 const IS_ELECTRON = navigator.userAgent.includes("Electron");
 
 /**
- * 窗口 chrome 由谁提供 —— 单条标题栏契约的基座（三种宿主同一 header 组件）：
- *  - electron：无边框壳，本 header 就是标题栏（拖拽区 + Windows 按钮避让）；
- *  - wco：安装为 PWA 且 Window Controls Overlay 生效，浏览器收起自己的标题栏，
- *    header 铺进标题栏区（env(titlebar-area-*) 避让系统按钮）——与 electron 同构；
- *  - browser：普通浏览器窗口/标签页自带标题栏，header 退化为应用工具条，
- *    不再假装标题栏（无拖拽、无避让），避免双标题栏。
+ * 窗口 chrome 由谁提供。**两种，不是三种：**
+ *  - electron：桌面应用。无边框壳，本 header 就是标题栏（拖拽区 + Windows
+ *    按钮避让）。**这是唯一的应用入口**——它自己拉起运行时。
+ *  - browser：浏览器访问。窗口自带标题栏，header 退化为应用工具条，不假装
+ *    标题栏（无拖拽、无避让），避免双标题栏。
+ *
+ * 曾有第三种 `wco`：装成 PWA 后 Window Controls Overlay 生效，外观与 electron
+ * 同构。已随 PWA 一并去掉——**它长得像桌面应用，却不启动运行时**，守护进程没跑
+ * 时点开就是「未连接」。一个永远不会出现的分支只会让读代码的人以为它被处理了。
  */
-export type HostChrome = "electron" | "wco" | "browser";
-
-interface WindowControlsOverlay extends EventTarget {
-  visible: boolean;
-}
+export type HostChrome = "electron" | "browser";
 
 export function useHostChrome(): HostChrome {
-  const wcoApi = (
-    navigator as Navigator & { windowControlsOverlay?: WindowControlsOverlay }
-  ).windowControlsOverlay;
-  const [wcoVisible, setWcoVisible] = useState(() => Boolean(wcoApi?.visible));
-  useEffect(() => {
-    if (!wcoApi) return;
-    const onChange = () => setWcoVisible(Boolean(wcoApi.visible));
-    wcoApi.addEventListener("geometrychange", onChange);
-    return () => wcoApi.removeEventListener("geometrychange", onChange);
-  }, [wcoApi]);
-  if (IS_ELECTRON) return "electron";
-  return wcoVisible ? "wco" : "browser";
+  return IS_ELECTRON ? "electron" : "browser";
 }
 
 type View =
@@ -110,7 +97,6 @@ export function Workbench({ api }: { api: Api }) {
   const health = useRuntimeHealth();
   const chrome = useHostChrome();
   const pending = usePending(api);
-  const { canInstall, install } = useInstallPrompt();
 
   const refreshSidebar = useCallback(async () => {
     try {
@@ -296,13 +282,7 @@ export function Workbench({ api }: { api: Api }) {
           <StatusBadge tone={health.ok ? "success" : "danger"} dot>
             {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
           </StatusBadge>
-          {chrome === "browser" && canInstall && (
-            <ShellIconButton
-              icon="desktop"
-              label="安装桌面应用（单条标题栏）"
-              onClick={() => void install()}
-            />
-          )}
+          {/* 「安装桌面应用」（PWA）已移除，理由见 login.tsx 同处注释。 */}
           <ShellIconButton
             icon="settings"
             label="设置"

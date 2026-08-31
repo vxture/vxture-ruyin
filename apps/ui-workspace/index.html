@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0a0a0a" />
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- 刻意没有 web app manifest：装成 PWA 会得到一个「不启动运行时的应用
+         图标」，而 Ruyin 的主体是本地运行时。桌面应用只有一个，就是 Electron
+         壳（它自己拉起守护进程）。浏览器访问照旧可用——那是访问方式，不是
+         另一个应用。 -->
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <title>Ruyin</title>
   </head>
