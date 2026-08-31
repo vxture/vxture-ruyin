@@ -20,7 +20,10 @@ function request(): CapabilityTurnRequest {
     product: "vxture.bid",
     taskId: "ti_0001",
     workspace: "prj_0001",
-    messages: [{ role: "user", content: "hello" }],
+    objective: "解析招标文件，生成需求矩阵",
+    constraints: ["需求条目必须可回溯到招标原文"],
+    context: [{ type: "tender_document", name: "t.pdf", content: "..." }],
+    messages: [],
     tools: [],
   };
 }
@@ -154,6 +157,58 @@ test("resolver: signed out sends no bearer rather than failing early", async () 
       // Refusing an unidentified call is the callee's job; crashing here would
       // just hide why.
       assert.equal(seen.auth, undefined);
+    },
+  );
+});
+
+test("resolver: facts travel structured; the runtime writes no prompt", async () => {
+  await withServer(
+    (_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ kind: "content", content: "ok" }));
+    },
+    async (base, seen) => {
+      await new CapabilityClient({ baseUrl: base }).turn(request());
+      const body = JSON.parse(seen.body ?? "{}") as Record<string, unknown>;
+
+      // Objective, constraints and context arrive as data. Composing them into
+      // a prompt is where domain knowledge lives, and that belongs to the
+      // product - a runtime that writes the prompt has taken over that part.
+      assert.equal(body["objective"], "解析招标文件，生成需求矩阵");
+      assert.deepEqual(body["constraints"], ["需求条目必须可回溯到招标原文"]);
+      assert.deepEqual(body["context"], [
+        { type: "tender_document", name: "t.pdf", content: "..." },
+      ]);
+      // And nothing was pre-rendered into the conversation on their behalf.
+      assert.deepEqual(body["messages"], []);
+    },
+  );
+});
+
+test("resolver: a verdict is read as a field, not parsed out of prose", async () => {
+  await withServer(
+    (_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ kind: "verdict", passed: false, reason: "三条未覆盖" }));
+    },
+    async (base) => {
+      const turn = await new CapabilityClient({ baseUrl: base }).turn(request());
+      assert.deepEqual(turn, { kind: "verdict", passed: false, reason: "三条未覆盖" });
+    },
+  );
+
+  // A verdict without the boolean is not a verdict. Reading a pass out of a
+  // malformed reply is the failure mode this shape exists to prevent.
+  await withServer(
+    (_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ kind: "verdict", reason: "looks fine" }));
+    },
+    async (base) => {
+      await assert.rejects(
+        new CapabilityClient({ baseUrl: base }).turn(request()),
+        /unreadable turn/,
+      );
     },
   );
 });

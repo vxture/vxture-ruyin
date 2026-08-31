@@ -73,29 +73,51 @@ export interface CapabilityTurnRequest {
   taskId: string;
   workspace: string;
   /**
-   * The conversation so far. Earlier capabilities' output accumulates here,
-   * so capability N sees N-1's result.
+   * What the task is for, verbatim from the contract.
+   *
+   * Facts, not phrasing. How to put this to a model is the product's business:
+   * a runtime that composes the prompt has quietly taken over the part of the
+   * work where domain knowledge lives.
+   */
+  objective: string;
+  constraints: string[];
+  /** The materialized context set, carrying its declared type. */
+  context: Array<{ type: string; name: string; content: string }>;
+  /**
+   * The conversation so far - what the provider answered, what tools returned.
+   * Earlier capabilities' output accumulates here, so capability N sees
+   * N-1's result.
    */
   messages: TurnMessage[];
   /**
    * Tools the runtime will actually execute if asked. Offering a tool the
-   * runtime cannot gate would be a lie, so this stays empty until the Tool
-   * Gate exists (50-harness section 5).
+   * runtime cannot gate would be a lie (50-harness section 5).
    */
   tools: ToolOffer[];
+  /**
+   * Present only on a revision round: which rules failed last time and why
+   * (50-harness 7.2). Handed over as data - the runtime does not write the
+   * sentence that asks for a fix.
+   */
+  revision?: {
+    round: number;
+    failures: Array<{ rule: string; reason: string }>;
+  };
 }
 
 /**
- * One turn's outcome: the provider wants tools, or it produced output.
+ * One turn's outcome.
  *
- * Verification capabilities (`verify:<rule>`) answer with a verdict as the
- * first token - `PASS`, or `FAIL: <what is wrong>`. Anything unreadable is
- * escalated to a person rather than assumed to pass: guessing in the passing
- * direction is how a verification step turns into decoration.
+ * `verdict` is what a verification capability answers with. It is a field, not
+ * a sentence to be parsed: reading a model's prose to decide whether a check
+ * passed puts the runtime in the business of interpreting business language,
+ * and gets it wrong in the passing direction - which is exactly how a
+ * verification step turns into decoration.
  */
 export type CapabilityTurn =
   | { kind: "tool_calls"; calls: ToolCall[] }
-  | { kind: "content"; content: string };
+  | { kind: "content"; content: string }
+  | { kind: "verdict"; passed: boolean; reason?: string };
 
 /**
  * Capability invocation, one turn at a time.

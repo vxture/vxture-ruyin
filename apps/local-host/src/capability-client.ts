@@ -68,8 +68,13 @@ export class CapabilityClient implements AIGatewayPort {
           // and the callee must take identity from the token alone - a body
           // field with a familiar name is an invitation to trust it instead.
           projectId: request.workspace,
+          // Facts, not phrasing: the provider composes what the model sees.
+          objective: request.objective,
+          constraints: request.constraints,
+          context: request.context,
           messages: request.messages,
           tools: request.tools,
+          ...(request.revision ? { revision: request.revision } : {}),
         }),
       });
     } catch (cause) {
@@ -107,12 +112,21 @@ function parseTurn(body: unknown): CapabilityTurn {
     kind?: string;
     content?: unknown;
     calls?: unknown;
+    passed?: unknown;
+    reason?: unknown;
   };
   if (data?.kind === "tool_calls" && Array.isArray(data.calls)) {
     return { kind: "tool_calls", calls: data.calls as ToolCall[] };
   }
   if (data?.kind === "content" && typeof data.content === "string") {
     return { kind: "content", content: data.content };
+  }
+  if (data?.kind === "verdict" && typeof data.passed === "boolean") {
+    return {
+      kind: "verdict",
+      passed: data.passed,
+      ...(typeof data.reason === "string" ? { reason: data.reason } : {}),
+    };
   }
   // A shape we cannot read is not a result. Failing here beats handing the
   // harness an empty answer that would read as "the capability produced nothing".
