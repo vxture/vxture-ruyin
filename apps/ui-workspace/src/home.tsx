@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Home - the work entry point of a CLIENT WORK RUNTIME (20-specs/10 §1.1/§5.2).
  *
  * 产品主体在平台：平台订阅了 → 本地可用；平台 0 订阅 → 本地无可用产品，但运行
@@ -126,9 +126,9 @@ export function HomePage({
           },
           {
             id: "spaces",
-            label: "工作空间",
+            label: "项目",
             value: String(workspaces.length),
-            description: "本地业务空间",
+            description: "本地业务项目",
             icon: "cube",
           },
           {
@@ -302,7 +302,7 @@ function InstalledProductCard({
                 autoFocus
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="工作空间名称"
+                placeholder="项目名称"
                 onKeyDown={(e) => e.key === "Escape" && setCreating(false)}
               />
               <Button
@@ -325,7 +325,7 @@ function InstalledProductCard({
             </div>
           ) : (
             <div className="flex items-center gap-xs">
-              <Button onClick={() => setCreating(true)}>新建工作空间</Button>
+              <Button onClick={() => setCreating(true)}>新建项目</Button>
               {workspaces.length === 0 && (
                 <span className="text-body-sm text-muted-foreground">
                   从这里开始第一个项目

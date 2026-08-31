@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Settings - runtime transparency and preferences. DS-native: ghost-button
  * section nav, SegmentedControl pickers over the ThemeProvider's three axes
  * (mode / density / font size - the user-preference axis of the DS sizing
@@ -175,7 +175,7 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
         <SettingRow label="产品目录">
           <span className="mono">{system?.productsDir ?? "…"}</span>
         </SettingRow>
-        <SettingRow label="静态加密" hint="每个工作空间独立密钥，SQLCipher 加密">
+        <SettingRow label="静态加密" hint="每个项目独立密钥，SQLCipher 加密">
           {system ? (
             system.keyProtection === "dpapi" ? (
               <StatusBadge tone="success">主密钥由 Windows DPAPI 保护</StatusBadge>
@@ -204,7 +204,7 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
         </SettingRow>
         <SettingRow
           label="审计"
-          hint="每次传输与执行都有哈希链审计，可在工作空间的「审计」板块查看与本地校验"
+          hint="每次传输与执行都有哈希链审计，可在项目的「审计」板块查看与本地校验"
         >
           <span className="text-body-sm text-muted-foreground">
             推理传输 ≠ 数据存储：传输临时、不持久化

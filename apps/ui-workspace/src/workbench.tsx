@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Workbench - the signed-in/local product surface on the DS shell system (L3
  * portal experience). Frameless titlebar: the ShellHeader adapts to the host
  * (electron / installed-PWA WCO / plain browser) for a single title-bar
@@ -174,7 +174,7 @@ export function Workbench({ api }: { api: Api }) {
     ];
     if (workspaces.length > 0) {
       list.push({
-        title: "工作空间",
+        title: "项目",
         dividerBefore: true,
         items: workspaces.map((w) => ({
           href: `#ws/${w.id}`,
@@ -201,7 +201,7 @@ export function Workbench({ api }: { api: Api }) {
         onSelect: () => navigate(`#ws/${w.id}`),
       }));
     if (wsItems.length > 0) {
-      groups.push({ key: "ws", heading: "工作空间", items: wsItems });
+      groups.push({ key: "ws", heading: "项目", items: wsItems });
     }
     const productItems = products
       .filter((p) => match(p.name) || match(p.id))
@@ -257,7 +257,7 @@ export function Workbench({ api }: { api: Api }) {
             onQueryChange={setQuery}
             groups={searchGroups}
             labels={{
-              placeholder: "搜索工作空间、产品与动作…",
+              placeholder: "搜索项目、产品与动作…",
               empty: "没有匹配的结果",
               resultsLabel: "搜索结果",
             }}

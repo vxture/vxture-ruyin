@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Workspace panel - sectioned into functional tabs (概览 / 上下文 / 任务 /
  * 审计) per the runtime-owned control surfaces of
  * docs/40-implementation/10-product-integration-guide.md section 6.3.
@@ -162,7 +162,7 @@ export function WorkspacePanel({ api, id }: { api: Api; id: string }) {
       ))}
 
       <SegmentedControl<TabId>
-        ariaLabel="工作空间板块"
+        ariaLabel="项目板块"
         items={[
           { value: "overview", label: "概览" },
           { value: "context", label: "上下文" },
