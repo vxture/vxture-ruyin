@@ -1,4 +1,4 @@
-# 如影 Runtime Contract Schema：契约规范与产品分发设计
+﻿# 如影 Runtime Contract Schema：契约规范与产品分发设计
 
 > **Ruyin Runtime Contract Schema & Distribution Specification**
 >
@@ -206,7 +206,11 @@ capabilities:
 
 不出现任何模型名 / Provider 名（03 Principle 4，R6 禁止 `model:` 等绑定键）。
 
-当前阶段所有能力经 Capability Resolver 一律解析到 Vxture 云端（02 §15.1）。
+能力经 Capability Resolver 解析到**产品自己的云端能力面**（ADR-009）。
+
+> **修订（2026-08-31）。** 原文写「一律解析到 Vxture 云端」。实际通路是：
+> Runtime 调产品的能力面，由那一侧持凭据去接模型。**Runtime 与 Atlas 没有
+> 关系**——能力面背后是什么，不是运行时该知道的事（ADR-008 / 011）。
 
 ---
 
@@ -604,26 +608,59 @@ Runtime 安装 / 加载时验证：平台签名 + 发布者签名 + 摘要一致
 - Runtime 只内置 Vxture Registry 根证书
 - 第三方 publisher 由平台审核与背书；Runtime 不信任任何未经平台副署的包
 
-## 18.3 分发通道
+## 18.3 分发通道 —— 两级供给
+
+> **修订（2026-08-31，ADR-012）。** 本节原先只画一条路：Registry → 下载 →
+> 验签 → 安装。于是「产品到本地」被签名信任锚整条挡住，而信任锚又依赖尚不
+> 存在的 Registry。先不问怎么装，先问**什么必须在本地**——答案比预期轻得多。
+
+产品在本地需要的，**只是一份契约声明**（不到 20KB 的 YAML）。产品的智能
+（提示词、编排）在它自己的能力面，模型在那一侧接，都不在本地。因此按**产品
+随附什么**分两级：
+
+| 产品形态 | 本地需要 | 供给方式 |
+|---|---|---|
+| 纯契约 | 一份契约 | **拉取 + 缓存，不安装** |
+| 契约 + 静态资产 | 模板 / schema / 示例 | 产品包 |
+| 契约 + 本地技能 | 可执行的连接器 | 产品包 **+ 签名** |
 
 ```mermaid
 flowchart TB
     P["Business Product 构建发布"]
+    CAP["产品能力面<br/>GET /products/{id}/contract"]
     REG["Vxture Product Registry<br/>版本库 + 双签"]
     ENT["Subscription Entitlement<br/>产品 × 版本范围 × 有效期"]
-    CR["Cloud Runtime<br/>直接加载"]
-    LR["Ruyin Local Runtime<br/>下载 → 验签 → 安装"]
+    T1["一级：契约拉取 + 缓存<br/>校验 R1–R13，离线沿用"]
+    T2["二级：产品包<br/>下载 → 验签 → 安装"]
 
+    P --> CAP
     P --> REG
-    REG --> ENT
-    ENT --> CR
-    ENT --> LR
+    ENT --> T1
+    ENT --> T2
+    CAP --> T1
+    REG --> T2
 ```
 
-原则：
+**一级 · 契约拉取**
 
-> **Same Contract, Any Runtime → Same Package, Any Runtime。**
-> 云端与本地加载同一个产品包，不存在"本地特供版"。
+- 来源：产品自己的能力面——与能力调用同一条通路，不新增依赖，也不新增一处
+  存主机名的地方
+- 校验：照常过 R1–R13。契约校验是加载期的事，与它从哪来无关
+- 缓存：按 `product.version` 落盘，多版本并存，可回退
+- 离线：沿用最后一次拉到的契约。与权益是同一个问题的同一个答案（ADR-003）
+- 项目绑定：项目创建时快照当时的契约，产品升版不动既有项目
+
+**二级 · 产品包**：只在产品随附本地资产或本地可执行技能时才需要。后者一旦
+成立，签名不再是可选项——那是在用户机器上跑第三方代码。
+
+原则（改写）：
+
+> **Same Contract, Any Runtime。**
+> 云端与本地加载**同一份契约**，不存在「本地特供版」。
+> 包只是契约的一种承载方式，不是唯一方式。
+
+> **「不安装」不等于「不留在本地」。** 契约仍落盘、仍版本化、仍离线可用；
+> 区别在**获取方式**，不在本地有没有。
 
 ## 18.4 更新与回滚
 

@@ -1,4 +1,4 @@
-# 如影 Runtime Contract：AI 原生业务产品运行时契约设计
+﻿# 如影 Runtime Contract：AI 原生业务产品运行时契约设计
 
 > **Ruyin Business Product Runtime Contract**
 >
@@ -515,13 +515,18 @@ Available Model
 当前阶段的解析结果：
 
 ```text
-Cloud Runtime ──┐
-                ├──→ Vxture 云端 AI 服务
-Local Runtime ──┘
+Cloud Runtime ──┐                          ┌──→ 模型（Atlas）
+                ├──→ 产品自己的云端能力面 ──┤
+Local Runtime ──┘                          └──→ 其它供给
 ```
 
-> **智能面统一：无论运行在云端还是本地，AI 能力当前一律解析到 Vxture 云端。**
-> 未来引入本地 / 私有智能能力时，只改变解析结果，不改变契约。
+> **智能面统一：无论运行在云端还是本地，能力都解析到同一处——产品自己的
+> 云端能力面。** 未来引入本地 / 私有智能能力时，只改变解析结果，不改变契约。
+
+> **修订（2026-08-31，ADR-009 / 011）。** 原文写「一律解析到 Vxture 云端」，
+> 读起来像 Runtime 直接对接云端 AI 服务。实际是：**Runtime 只认识产品的能力
+> 面**，由那一侧持凭据去接模型。Runtime 与 Atlas 之间没有关系——能力面背后
+> 用什么模型，不是运行时该知道的事。
 
 ---
 

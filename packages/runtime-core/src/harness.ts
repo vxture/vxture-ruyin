@@ -1204,12 +1204,12 @@ export class Harness {
   }
 
   /**
-   * Ask the reviewer, and read its verdict.
+   * Ask the product's capability surface to run a verification rule.
    *
-   * The convention is `PASS` or `FAIL: <what is wrong>` as the first token.
-   * Anything else is **not** treated as a pass - an answer we cannot read is
-   * an answer we have not got, and guessing in the passing direction is how a
-   * verification step becomes decoration.
+   * The answer must arrive as a `verdict` turn - a field, not a sentence to be
+   * parsed (ADR-011). Any other shape escalates to a person: an answer we
+   * cannot read is an answer we have not got, and guessing in the passing
+   * direction is how a verification step becomes decoration.
    */
   private async runProviderVerification(
     ruleId: string,
