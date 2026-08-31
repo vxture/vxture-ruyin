@@ -20,6 +20,7 @@ import { DEV_UI_HTML } from "./dev-ui.js";
 import type { ProductRegistry } from "./product-registry.js";
 import type { TaskRunner } from "./task-runner.js";
 import { installPackage } from "./installer.js";
+import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -46,6 +47,11 @@ export interface LocalApiDeps {
    * 仅开发模式显式置 false 才允许装未签名包。
    */
   requireSignedPackages?: boolean;
+  /**
+   * 一级供给：从产品能力面拉契约（ADR-012）。未配置能力面时缺省——此时
+   * POST /products/:id/fetch 如实回答「没有可拉的地方」，不假装拉过。
+   */
+  fetchContract?: (productId: string) => Promise<FetchOutcome>;
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -303,6 +309,36 @@ async function handle(
     } catch (cause) {
       send(res, 400, {
         error: "install_rejected",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+    return;
+  }
+
+  // POST /products/:id/fetch - 一级供给：从产品能力面拉契约（ADR-012 §18.3）
+  if (
+    method === "POST" &&
+    segments[0] === "products" &&
+    segments.length === 3 &&
+    segments[2] === "fetch"
+  ) {
+    if (!deps.fetchContract) {
+      send(res, 503, {
+        error: "capability_base_not_configured",
+        message:
+          "契约拉取需要已配置的产品能力面（RUYIN_CAPABILITY_BASE）；当前未配置",
+      });
+      return;
+    }
+    try {
+      const outcome = await deps.fetchContract(segments[1]!);
+      // 只有真落了新版本才需要重扫；current/offline 没动过库。
+      if (outcome.status === "fetched") deps.registry.rescan();
+      send(res, outcome.status === "fetched" ? 201 : 200, outcome);
+    } catch (cause) {
+      // 契约本身不可接受 —— 产品的问题，说清楚是哪一条不过。
+      send(res, cause instanceof ContractFetchError ? 422 : 500, {
+        error: "contract_rejected",
         message: cause instanceof Error ? cause.message : String(cause),
       });
     }

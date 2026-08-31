@@ -13,7 +13,8 @@
  *   RUYIN_OIDC_CLIENT_ID     public client id (default ruyin; beta: ruyin-beta)
  *   RUYIN_PLATFORM_API_BASE  entitlements API base (unset = C2 disabled)
  *   RUYIN_CONSOLE_BASE       console deep-link base (default https://vxture.com)
- *   RUYIN_CAPABILITY_BASE    business-product capability surface (unset = mock)
+ *   RUYIN_CAPABILITY_BASE    business-product capability surface (unset = mock);
+ *                            also the source for contract fetch (ADR-012)
  */
 
 import { randomBytes } from "node:crypto";
@@ -31,6 +32,7 @@ import { LocalFsConnector } from "./connector-fs.js";
 import { FtsRanker, reindexBinding } from "./fts.js";
 import { LocalToolExecutor } from "./tool-executor.js";
 import { CapabilityClient } from "./capability-client.js";
+import { fetchContract } from "./contract-fetch.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
 
@@ -130,6 +132,18 @@ const server = createLocalApi({
   platform,
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
   requireSignedPackages: process.env["RUYIN_ALLOW_UNSIGNED_PACKAGES"] !== "1",
+  // 一级供给：与能力调用同一条通路、同一个设置（ADR-012）。未配置能力面就没有
+  // 可拉的地方，此时不注入——服务端据此如实回答，而不是静默无事发生。
+  ...(capabilityBase
+    ? {
+        fetchContract: (productId: string) =>
+          fetchContract(productId, {
+            baseUrl: capabilityBase,
+            token: () => platform.bearerToken(),
+            storeDir: registry.storeDir,
+          }),
+      }
+    : {}),
   systemInfo: {
     version: VERSION,
     platform: process.platform,

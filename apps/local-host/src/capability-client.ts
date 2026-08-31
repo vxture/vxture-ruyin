@@ -33,6 +33,19 @@ export interface CapabilityClientConfig {
 /** Network-class failures the runtime should retry rather than fail on. */
 const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
+/**
+ * Is this status the surface being briefly unavailable, or the surface
+ * definitively refusing?
+ *
+ * Shared with the contract fetcher, which talks to the same host and must
+ * draw the same line - the two act differently on the answer (retry-and-park
+ * vs fall back to cache), but "is this someone else's outage" is one question
+ * and deserves one answer, not two that can drift apart.
+ */
+export function isTransientStatus(status: number): boolean {
+  return TRANSIENT_STATUS.has(status);
+}
+
 export class CapabilityClient implements AIGatewayPort {
   constructor(private readonly config: CapabilityClientConfig) {}
 
