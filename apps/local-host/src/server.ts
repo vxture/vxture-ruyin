@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Local API - loopback-only HTTP surface of the Runtime daemon
  * (docs/30-design/60-technical-architecture.md section 8). Every request
  * except /health must carry the per-session bearer token; the server binds
@@ -12,9 +12,9 @@ import {
   ContractInvalidError,
   HarnessError,
   NeedsHumanConfirmationError,
-  WorkspaceNotFoundError,
+  ProjectNotFoundError,
   type Binding,
-  type WorkspaceRuntime,
+  type ProjectRuntime,
 } from "@vxture/ruyin-core";
 import { DEV_UI_HTML } from "./dev-ui.js";
 import type { ProductRegistry } from "./product-registry.js";
@@ -27,7 +27,7 @@ import {
 } from "./platform.js";
 
 export interface LocalApiDeps {
-  runtime: WorkspaceRuntime;
+  runtime: ProjectRuntime;
   /** 受管产品资产（安装 / 启用 / 订阅可用性，30-contract-schema §18）。 */
   registry: ProductRegistry;
   /** 任务在请求之外推进——真实 provider 每回合十秒到一分钟，不能占住 HTTP。 */
@@ -35,7 +35,7 @@ export interface LocalApiDeps {
   token: string;
   version: string;
   /** Rebuild the FTS index rows for one binding; returns indexed count. */
-  reindex: (workspaceId: string, binding: Binding) => Promise<number>;
+  reindex: (projectId: string, binding: Binding) => Promise<number>;
   /** Built Workspace UI directory; when set, served at / (dev console moves to /dev). */
   uiDir?: string;
   /** Vxture platform integration (C1 identity + C2 entitlements); absent in
@@ -109,7 +109,7 @@ function errorStatus(cause: unknown): { status: number; body: unknown } {
   if (cause instanceof ContractInvalidError) {
     return { status: 400, body: { error: "contract_invalid", details: cause.errors } };
   }
-  if (cause instanceof WorkspaceNotFoundError) {
+  if (cause instanceof ProjectNotFoundError) {
     return { status: 404, body: { error: "workspace_not_found", message: cause.message } };
   }
   if (cause instanceof NeedsHumanConfirmationError) {
@@ -350,8 +350,8 @@ async function handle(
     return;
   }
 
-  // POST /workspaces  { product, name }
-  if (method === "POST" && path === "/workspaces") {
+  // POST /projects  { product, name }
+  if (method === "POST" && path === "/projects") {
     const body = await readJson(req);
     const product = deps.registry.find(String(body["product"] ?? ""));
     if (!product) {
@@ -367,23 +367,23 @@ async function handle(
     const name = typeof body["name"] === "string" && body["name"].length > 0
       ? body["name"]
       : product.name;
-    const meta = await deps.runtime.createWorkspace(product.contract, name);
+    const meta = await deps.runtime.createProject(product.contract, name);
     send(res, 201, meta);
     return;
   }
 
-  // GET /workspaces
-  if (method === "GET" && path === "/workspaces") {
-    send(res, 200, await deps.runtime.listWorkspaces());
+  // GET /projects
+  if (method === "GET" && path === "/projects") {
+    send(res, 200, await deps.runtime.listProjects());
     return;
   }
 
-  // /workspaces/:id[...]
-  if (segments[0] === "workspaces" && segments.length >= 2) {
-    const wsId = segments[1]!;
+  // /projects/:id[...]
+  if (segments[0] === "projects" && segments.length >= 2) {
+    const projectId = segments[1]!;
 
     if (method === "GET" && segments.length === 2) {
-      const view = await deps.runtime.openWorkspace(wsId);
+      const view = await deps.runtime.openProject(projectId);
       send(res, 200, {
         meta: view.meta,
         businessState: view.businessState,
@@ -398,33 +398,33 @@ async function handle(
       return;
     }
 
-    // GET /workspaces/:id/tasks - task instances
+    // GET /projects/:id/tasks - task instances
     if (method === "GET" && segments.length === 3 && segments[2] === "tasks") {
-      send(res, 200, await deps.runtime.listTaskInstances(wsId));
+      send(res, 200, await deps.runtime.listTaskInstances(projectId));
       return;
     }
 
-    // POST /workspaces/:id/state  { to, humanConfirmed? }
+    // POST /projects/:id/state  { to, humanConfirmed? }
     if (method === "POST" && segments.length === 3 && segments[2] === "state") {
       const body = await readJson(req);
       const to = String(body["to"] ?? "");
-      const state = await deps.runtime.transitionBusinessState(wsId, to, {
+      const state = await deps.runtime.transitionBusinessState(projectId, to, {
         humanConfirmed: body["humanConfirmed"] === true,
       });
       send(res, 200, { businessState: state });
       return;
     }
 
-    // GET/POST /workspaces/:id/grants  { path, mode? }
+    // GET/POST /projects/:id/grants  { path, mode? }
     if (segments.length === 3 && segments[2] === "grants") {
       if (method === "GET") {
-        send(res, 200, await deps.runtime.listGrants(wsId));
+        send(res, 200, await deps.runtime.listGrants(projectId));
         return;
       }
       if (method === "POST") {
         const body = await readJson(req);
         const grant = await deps.runtime.addGrant(
-          wsId,
+          projectId,
           String(body["path"] ?? ""),
           body["mode"] === "readwrite" ? "readwrite" : "read",
         );
@@ -433,32 +433,32 @@ async function handle(
       }
     }
 
-    // GET/POST /workspaces/:id/bindings  { type, root }
+    // GET/POST /projects/:id/bindings  { type, root }
     if (segments.length === 3 && segments[2] === "bindings") {
       if (method === "GET") {
-        send(res, 200, await deps.runtime.listBindings(wsId));
+        send(res, 200, await deps.runtime.listBindings(projectId));
         return;
       }
       if (method === "POST") {
         const body = await readJson(req);
-        const binding = await deps.runtime.setBinding(wsId, {
+        const binding = await deps.runtime.setBinding(projectId, {
           type: String(body["type"] ?? ""),
           root: String(body["root"] ?? ""),
         });
         // Index the newly bound content right away (04 section 5.1).
-        const indexed = await deps.reindex(wsId, binding);
+        const indexed = await deps.reindex(projectId, binding);
         send(res, 201, { ...binding, indexed });
         return;
       }
     }
 
-    // GET /workspaces/:id/tasks/:tid - poll one instance while it runs
+    // GET /projects/:id/tasks/:tid - poll one instance while it runs
     if (
       method === "GET" &&
       segments.length === 4 &&
       segments[2] === "tasks"
     ) {
-      const instances = await deps.runtime.listTaskInstances(wsId);
+      const instances = await deps.runtime.listTaskInstances(projectId);
       const found = instances.find((t) => t.id === segments[3]);
       if (!found) {
         send(res, 404, { error: "task_not_found", task: segments[3] });
@@ -468,11 +468,11 @@ async function handle(
       return;
     }
 
-    // POST /workspaces/:id/tasks  { task, inputs? }  (inputs absent => selection)
+    // POST /projects/:id/tasks  { task, inputs? }  (inputs absent => selection)
     // 202: the instance is recorded, execution continues in the background.
     if (method === "POST" && segments.length === 3 && segments[2] === "tasks") {
       const body = await readJson(req);
-      const harness = await deps.runtime.createHarness(wsId);
+      const harness = await deps.runtime.createHarness(projectId);
       const instance = await harness.startTask(
         String(body["task"] ?? ""),
         body["inputs"] === undefined
@@ -481,23 +481,23 @@ async function handle(
       );
       // Claim before answering: start() is synchronous, so the caller can
       // never poll in the window between "accepted" and "actually running".
-      deps.tasks.start(wsId, instance.id);
+      deps.tasks.start(projectId, instance.id);
       send(res, 202, instance);
       return;
     }
 
-    // POST /workspaces/:id/tasks/:tid/cancel - stop at the next safe point
+    // POST /projects/:id/tasks/:tid/cancel - stop at the next safe point
     if (
       method === "POST" &&
       segments.length === 5 &&
       segments[2] === "tasks" &&
       segments[4] === "cancel"
     ) {
-      send(res, 202, await deps.tasks.cancel(wsId, segments[3]!));
+      send(res, 202, await deps.tasks.cancel(projectId, segments[3]!));
       return;
     }
 
-    // POST /workspaces/:id/tasks/:tid/decision  { approve }
+    // POST /projects/:id/tasks/:tid/decision  { approve }
     // Also 202: an approved task keeps running after the decision is durable.
     if (
       method === "POST" &&
@@ -506,29 +506,29 @@ async function handle(
       segments[4] === "decision"
     ) {
       const body = await readJson(req);
-      const harness = await deps.runtime.createHarness(wsId);
+      const harness = await deps.runtime.createHarness(projectId);
       const instance = await harness.decideCheckpoint(
         segments[3]!,
         body["approve"] === true,
       );
-      deps.tasks.start(wsId, instance.id);
+      deps.tasks.start(projectId, instance.id);
       send(res, 202, instance);
       return;
     }
 
-    // GET /workspaces/:id/context/:type - binding item preview
+    // GET /projects/:id/context/:type - binding item preview
     if (
       method === "GET" &&
       segments.length === 4 &&
       segments[2] === "context"
     ) {
-      send(res, 200, await deps.runtime.discoverContext(wsId, segments[3]!));
+      send(res, 200, await deps.runtime.discoverContext(projectId, segments[3]!));
       return;
     }
 
-    // GET /workspaces/:id/audit
+    // GET /projects/:id/audit
     if (method === "GET" && segments.length === 3 && segments[2] === "audit") {
-      send(res, 200, await deps.runtime.listAuditEvents(wsId));
+      send(res, 200, await deps.runtime.listAuditEvents(projectId));
       return;
     }
   }

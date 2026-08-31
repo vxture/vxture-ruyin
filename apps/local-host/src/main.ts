@@ -13,6 +13,7 @@
  *   RUYIN_OIDC_CLIENT_ID     public client id (default ruyin; beta: ruyin-beta)
  *   RUYIN_PLATFORM_API_BASE  entitlements API base (unset = C2 disabled)
  *   RUYIN_CONSOLE_BASE       console deep-link base (default https://vxture.com)
+ *   RUYIN_CAPABILITY_BASE    business-product capability surface (unset = mock)
  */
 
 import { randomBytes } from "node:crypto";
@@ -20,7 +21,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { WorkspaceRuntime, type ConnectorPort } from "@vxture/ruyin-core";
+import { ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { ProductRegistry } from "./product-registry.js";
@@ -29,6 +30,7 @@ import { TaskRunner } from "./task-runner.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { FtsRanker, reindexBinding } from "./fts.js";
 import { LocalToolExecutor } from "./tool-executor.js";
+import { CapabilityClient } from "./capability-client.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
 
@@ -40,6 +42,11 @@ const dataDir = resolve(
 const productsDir = resolve(process.env["RUYIN_PRODUCTS_DIR"] ?? "products");
 const port = Number(process.env["RUYIN_PORT"] ?? 7420);
 const token = process.env["RUYIN_TOKEN"] ?? randomBytes(24).toString("hex");
+
+// Capability provider base (ADR-009: the business product''s own cloud service
+// holds the credentials for Atlas). Unset = mock, and the daemon says so -
+// "not wired up" must never look like "working".
+const capabilityBase = process.env["RUYIN_CAPABILITY_BASE"] ?? "";
 
 const keys = await KeyManager.open(dataDir);
 const storage = new SqliteStoragePort(dataDir, keys);
@@ -66,12 +73,19 @@ const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
 // running loop cannot overwrite it on its next persist.
 const cancelledTasks = new Set<string>();
 
-const runtime = new WorkspaceRuntime({
+const runtime = new ProjectRuntime({
   storage,
   clock: nodeClock,
   id: nodeId,
   crypto: nodeCrypto,
-  gateway: new MockAIGateway(),
+  gateway: capabilityBase
+    ? new CapabilityClient({
+        baseUrl: capabilityBase,
+        // Late binding: `platform` is constructed below, and the gateway is
+        // only called once a task runs - long after startup.
+        token: () => platform.bearerToken(),
+      })
+    : new MockAIGateway(),
   connectors,
   ranker: new FtsRanker(storage),
   tools: new LocalToolExecutor(),
@@ -111,7 +125,7 @@ const server = createLocalApi({
   tasks,
   token,
   version: VERSION,
-  reindex: (wsId, binding) => reindexBinding(storage, wsId, binding, localFs),
+  reindex: (projectId, binding) => reindexBinding(storage, projectId, binding, localFs),
   uiDir,
   platform,
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。

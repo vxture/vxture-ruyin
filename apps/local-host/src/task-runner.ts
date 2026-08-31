@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Drives task instances outside the request that created them.
  *
  * A real capability provider takes tens of seconds per turn (ADR-002: the
@@ -12,7 +12,7 @@
  * `advance()` entry point, called on startup for every non-terminal instance.
  */
 
-import type { WorkspaceRuntime } from "@vxture/ruyin-core";
+import type { ProjectRuntime } from "@vxture/ruyin-core";
 
 export class TaskRunner {
   /** Instances currently being driven, so a retry does not double-drive. */
@@ -25,7 +25,7 @@ export class TaskRunner {
    * `Harness.cancel` for durability and audit.
    */
   constructor(
-    private readonly runtime: WorkspaceRuntime,
+    private readonly runtime: ProjectRuntime,
     private readonly cancelled: Set<string> = new Set(),
   ) {}
 
@@ -38,9 +38,9 @@ export class TaskRunner {
    * Ask a task to stop. A running one stops at its next safe point; an idle
    * one is marked immediately by the harness.
    */
-  async cancel(workspaceId: string, taskInstanceId: string): Promise<unknown> {
+  async cancel(projectId: string, taskInstanceId: string): Promise<unknown> {
     this.cancelled.add(taskInstanceId);
-    const harness = await this.runtime.createHarness(workspaceId);
+    const harness = await this.runtime.createHarness(projectId);
     return harness.cancel(taskInstanceId);
   }
 
@@ -49,8 +49,8 @@ export class TaskRunner {
    * `advance()` is itself claim-guarded, so a duplicate call is a no-op even
    * across processes; this set only avoids the pointless work locally.
    */
-  start(workspaceId: string, taskInstanceId: string): void {
-    this.spawn(workspaceId, taskInstanceId, "advance");
+  start(projectId: string, taskInstanceId: string): void {
+    this.spawn(projectId, taskInstanceId, "advance");
   }
 
   /**
@@ -64,7 +64,7 @@ export class TaskRunner {
    */
   async recoverAll(): Promise<number> {
     let picked = 0;
-    for (const workspace of await this.runtime.listWorkspaces()) {
+    for (const workspace of await this.runtime.listProjects()) {
       const interrupted = await this.runtime.listInterruptedTasks(workspace.id);
       for (const task of interrupted) {
         picked += 1;
@@ -75,24 +75,24 @@ export class TaskRunner {
   }
 
   private spawn(
-    workspaceId: string,
+    projectId: string,
     taskInstanceId: string,
     mode: "advance" | "recover",
   ): void {
     if (this.inFlight.has(taskInstanceId)) return;
     this.inFlight.add(taskInstanceId);
-    void this.drive(workspaceId, taskInstanceId, mode).finally(() => {
+    void this.drive(projectId, taskInstanceId, mode).finally(() => {
       this.inFlight.delete(taskInstanceId);
     });
   }
 
   private async drive(
-    workspaceId: string,
+    projectId: string,
     taskInstanceId: string,
     mode: "advance" | "recover",
   ): Promise<void> {
     try {
-      const harness = await this.runtime.createHarness(workspaceId);
+      const harness = await this.runtime.createHarness(projectId);
       await (mode === "recover"
         ? harness.recover(taskInstanceId)
         : harness.advance(taskInstanceId));

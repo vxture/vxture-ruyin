@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Semantic validation rules R1-R11 (L2 referential + L3 compatibility layers).
  * Design authority: docs/30-design/30-contract-schema.md section 15.
  *
@@ -46,7 +46,7 @@ const r1: Rule = (c, errors) => {
   }
 };
 
-// R2 - RETIRED. It checked that workspace.type and workspace.lifecycle agreed,
+// R2 - RETIRED. It checked that the container type and lifecycle agreed,
 // which was only ever necessary because the two fields said the same thing in
 // different words. They are now one field, so the rule has nothing left to
 // check. The number is not reused.

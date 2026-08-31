@@ -1,4 +1,4 @@
-/**
+﻿/**
  * In-memory StoragePort - the reference implementation of the storage ports.
  * Used by the kernel's own tests and useful for any host's unit tests; it is
  * exported deliberately as executable documentation of the port contract.
@@ -8,22 +8,22 @@ import type {
   AuditEvent,
   JournalEntry,
   StoragePort,
-  WorkspaceMeta,
-  WorkspaceStore,
+  ProjectMeta,
+  ProjectStore,
 } from "./ports.js";
 
-class MemoryWorkspaceStore implements WorkspaceStore {
-  private meta: WorkspaceMeta | undefined;
+class MemoryProjectStore implements ProjectStore {
+  private meta: ProjectMeta | undefined;
   private contract: string | undefined;
   private businessState: string | undefined;
   private readonly tasks = new Map<string, string>();
   private readonly audit: AuditEvent[] = [];
   private readonly journal: JournalEntry[] = [];
 
-  async putMeta(meta: WorkspaceMeta): Promise<void> {
+  async putMeta(meta: ProjectMeta): Promise<void> {
     this.meta = meta;
   }
-  async getMeta(): Promise<WorkspaceMeta | undefined> {
+  async getMeta(): Promise<ProjectMeta | undefined> {
     return this.meta;
   }
 
@@ -87,24 +87,24 @@ class MemoryWorkspaceStore implements WorkspaceStore {
 }
 
 export class MemoryStoragePort implements StoragePort {
-  private readonly stores = new Map<string, MemoryWorkspaceStore>();
+  private readonly stores = new Map<string, MemoryProjectStore>();
 
-  async createWorkspaceStore(workspaceId: string): Promise<WorkspaceStore> {
-    if (this.stores.has(workspaceId)) {
-      throw new Error(`workspace store "${workspaceId}" already exists`);
+  async createProjectStore(projectId: string): Promise<ProjectStore> {
+    if (this.stores.has(projectId)) {
+      throw new Error(`workspace store "${projectId}" already exists`);
     }
-    const store = new MemoryWorkspaceStore();
-    this.stores.set(workspaceId, store);
+    const store = new MemoryProjectStore();
+    this.stores.set(projectId, store);
     return store;
   }
 
-  async openWorkspaceStore(
-    workspaceId: string,
-  ): Promise<WorkspaceStore | undefined> {
-    return this.stores.get(workspaceId);
+  async openProjectStore(
+    projectId: string,
+  ): Promise<ProjectStore | undefined> {
+    return this.stores.get(projectId);
   }
 
-  async listWorkspaceIds(): Promise<string[]> {
+  async listProjectIds(): Promise<string[]> {
     return [...this.stores.keys()];
   }
 }

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Typed client over the daemon's Local API. The session token arrives via
  * ?token= (shell) or is pasted once (browser access) and is held in memory.
  */
@@ -19,12 +19,12 @@ export interface ProductInfo {
   reason?: string;
 }
 
-export interface WorkspaceMeta {
+export interface ProjectMeta {
   id: string;
   productId: string;
   productVersion: string;
   name: string;
-  workspaceType: string;
+  projectType: string;
   createdAt: string;
 }
 
@@ -39,8 +39,8 @@ export interface StateItem {
   transitions: Array<{ to: string; confirm?: "human" }>;
 }
 
-export interface WorkspaceView {
-  meta: WorkspaceMeta;
+export interface ProjectView {
+  meta: ProjectMeta;
   businessState: string;
   product: { id: string; name: string; version: string };
   tasks: TaskDef[];
@@ -200,46 +200,46 @@ export class Api {
   }
 
   products = () => this.call<ProductInfo[]>("/products");
-  workspaces = () => this.call<WorkspaceMeta[]>("/workspaces");
-  createWorkspace = (product: string, name: string) =>
-    this.call<WorkspaceMeta>("/workspaces", "POST", { product, name });
-  workspace = (id: string) => this.call<WorkspaceView>(`/workspaces/${id}`);
+  workspaces = () => this.call<ProjectMeta[]>("/projects");
+  createProject = (product: string, name: string) =>
+    this.call<ProjectMeta>("/projects", "POST", { product, name });
+  workspace = (id: string) => this.call<ProjectView>(`/projects/${id}`);
   taskInstances = (id: string) =>
-    this.call<TaskInstance[]>(`/workspaces/${id}/tasks`);
+    this.call<TaskInstance[]>(`/projects/${id}/tasks`);
   startTask = (id: string, task: string, inputs?: Record<string, unknown>) =>
-    this.call<TaskInstance>(`/workspaces/${id}/tasks`, "POST", {
+    this.call<TaskInstance>(`/projects/${id}/tasks`, "POST", {
       task,
       ...(inputs !== undefined ? { inputs } : {}),
     });
   cancelTask = (id: string, taskInstance: string) =>
     this.call<TaskInstance>(
-      `/workspaces/${id}/tasks/${taskInstance}/cancel`,
+      `/projects/${id}/tasks/${taskInstance}/cancel`,
       "POST",
     );
   decide = (id: string, taskInstance: string, approve: boolean) =>
     this.call<TaskInstance>(
-      `/workspaces/${id}/tasks/${taskInstance}/decision`,
+      `/projects/${id}/tasks/${taskInstance}/decision`,
       "POST",
       { approve },
     );
   transition = (id: string, to: string, humanConfirmed: boolean) =>
-    this.call<{ businessState: string }>(`/workspaces/${id}/state`, "POST", {
+    this.call<{ businessState: string }>(`/projects/${id}/state`, "POST", {
       to,
       humanConfirmed,
     });
-  grants = (id: string) => this.call<FolderGrant[]>(`/workspaces/${id}/grants`);
+  grants = (id: string) => this.call<FolderGrant[]>(`/projects/${id}/grants`);
   addGrant = (id: string, path: string) =>
-    this.call<FolderGrant>(`/workspaces/${id}/grants`, "POST", { path });
-  bindings = (id: string) => this.call<Binding[]>(`/workspaces/${id}/bindings`);
+    this.call<FolderGrant>(`/projects/${id}/grants`, "POST", { path });
+  bindings = (id: string) => this.call<Binding[]>(`/projects/${id}/bindings`);
   setBinding = (id: string, type: string, root: string) =>
     this.call<Binding & { indexed: number }>(
-      `/workspaces/${id}/bindings`,
+      `/projects/${id}/bindings`,
       "POST",
       { type, root },
     );
-  audit = (id: string) => this.call<AuditEvent[]>(`/workspaces/${id}/audit`);
+  audit = (id: string) => this.call<AuditEvent[]>(`/projects/${id}/audit`);
   contextItems = (id: string, type: string) =>
-    this.call<ContextItemMeta[]>(`/workspaces/${id}/context/${type}`);
+    this.call<ContextItemMeta[]>(`/projects/${id}/context/${type}`);
   system = () => this.call<SystemInfo>("/system");
   session = () => this.call<SessionInfo>("/auth/session");
   login = () => this.call<{ authorizeUrl: string }>("/auth/login", "POST");

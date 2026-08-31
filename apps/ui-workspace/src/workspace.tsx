@@ -34,7 +34,7 @@ import {
   type ContextItemMeta,
   type FolderGrant,
   type TaskInstance,
-  type WorkspaceView,
+  type ProjectView,
 } from "./api";
 import { verifyChain } from "./chain";
 
@@ -71,9 +71,9 @@ const TASK_STATE_LABEL: Record<string, string> = {
   cancelled: "已取消",
 };
 
-export function WorkspacePanel({ api, id }: { api: Api; id: string }) {
+export function ProjectPanel({ api, id }: { api: Api; id: string }) {
   const [tab, setTab] = useState<TabId>("overview");
-  const [view, setView] = useState<WorkspaceView | null>(null);
+  const [view, setView] = useState<ProjectView | null>(null);
   const [instances, setInstances] = useState<TaskInstance[]>([]);
   const [grants, setGrants] = useState<FolderGrant[]>([]);
   const [bindings, setBindings] = useState<Binding[]>([]);
@@ -187,7 +187,7 @@ export function WorkspacePanel({ api, id }: { api: Api; id: string }) {
       {tab === "context" && (
         <ContextTab
           api={api}
-          wsId={id}
+          projectId={id}
           view={view}
           grants={grants}
           bindings={bindings}
@@ -216,7 +216,7 @@ function OverviewTab({
   instances,
   onTransition,
 }: {
-  view: WorkspaceView;
+  view: ProjectView;
   instances: TaskInstance[];
   onTransition: (to: string, humanConfirmed: boolean) => void;
 }) {
@@ -245,7 +245,7 @@ function OverviewTab({
         <div className="ws-name">{view.product.name}</div>
         <div className="ws-meta-line">
           {view.product.id}@{view.product.version} · workspace 类型{" "}
-          {view.meta.workspaceType} · 创建于 {view.meta.createdAt}
+          {view.meta.projectType} · 创建于 {view.meta.createdAt}
         </div>
       </div>
     </>
@@ -256,7 +256,7 @@ function StateStepper({
   view,
   onTransition,
 }: {
-  view: WorkspaceView;
+  view: ProjectView;
   onTransition: (to: string, humanConfirmed: boolean) => void;
 }) {
   const items = view.states?.items ?? [];
@@ -312,7 +312,7 @@ function StateStepper({
 
 function ContextTab({
   api,
-  wsId,
+  projectId,
   view,
   grants,
   bindings,
@@ -320,8 +320,8 @@ function ContextTab({
   onBind,
 }: {
   api: Api;
-  wsId: string;
-  view: WorkspaceView;
+  projectId: string;
+  view: ProjectView;
   grants: FolderGrant[];
   bindings: Binding[];
   onAddGrant: (path: string) => void;
@@ -370,7 +370,7 @@ function ContextTab({
 
       <SectionHeader level={2} title="类型绑定 · Bindings" icon="plugs-connected" />
       {bindings.map((b) => (
-        <BindingCard key={b.type} api={api} wsId={wsId} binding={b} />
+        <BindingCard key={b.type} api={api} projectId={projectId} binding={b} />
       ))}
       <div className="row">
         <NativeSelect
@@ -406,11 +406,11 @@ function ContextTab({
 
 function BindingCard({
   api,
-  wsId,
+  projectId,
   binding,
 }: {
   api: Api;
-  wsId: string;
+  projectId: string;
   binding: Binding;
 }) {
   const [items, setItems] = useState<ContextItemMeta[] | null>(null);
@@ -425,7 +425,7 @@ function BindingCard({
           setOpen(next);
           if (next && items === null) {
             try {
-              setItems(await api.contextItems(wsId, binding.type));
+              setItems(await api.contextItems(projectId, binding.type));
             } catch {
               setItems([]);
             }
@@ -477,7 +477,7 @@ function TasksTab({
   instances,
   onLaunch,
 }: {
-  view: WorkspaceView;
+  view: ProjectView;
   instances: TaskInstance[];
   onLaunch: (task: string, inputs?: Record<string, unknown>) => void;
 }) {

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * JSON Schema for the Ruyin Runtime Contract - the L1 (structural) validation
  * layer. Design authority: docs/30-design/30-contract-schema.md sections 3-14.
  *
@@ -53,7 +53,7 @@ export const contractJsonSchema = {
   required: [
     "contract",
     "product",
-    "workspace",
+    "project",
     "objects",
     "states",
     "context",
@@ -82,7 +82,7 @@ export const contractJsonSchema = {
         },
       },
     },
-    workspace: {
+    project: {
       type: "object",
       additionalProperties: false,
       required: ["type"],
@@ -173,7 +173,7 @@ export const contractJsonSchema = {
               sources: {
                 type: "array",
                 items: {
-                  enum: ["cloud", "local", "lan", "private", "external", "workspace"],
+                  enum: ["cloud", "local", "lan", "private", "external", "project"],
                 },
               },
               class: DATA_CLASS,

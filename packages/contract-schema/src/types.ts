@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Ruyin Runtime Contract types.
  *
  * Design authority: docs/30-design/30-contract-schema.md (03-A). Field-level
@@ -11,8 +11,8 @@
  * business with no finish line (customer relations), `project` opens a fresh
  * container per engagement and closes it on delivery (a tender).
  */
-export type WorkspaceType = "continuous" | "project";
-export type WorkspaceOperation = "create" | "open" | "archive" | "restore";
+export type ProjectType = "continuous" | "project";
+export type ProjectOperation = "create" | "open" | "archive" | "restore";
 export type RelationKind = "contains" | "references" | "derives";
 export type ContextSource =
   | "cloud"
@@ -20,7 +20,7 @@ export type ContextSource =
   | "lan"
   | "private"
   | "external"
-  | "workspace";
+  | "project";
 export type DataClass =
   | "source"
   | "core"
@@ -58,9 +58,9 @@ export interface ProductIdentity {
   runtime: { minimum: string };
 }
 
-export interface WorkspaceDefinition {
-  type: WorkspaceType;
-  operations?: WorkspaceOperation[];
+export interface ProjectDefinition {
+  type: ProjectType;
+  operations?: ProjectOperation[];
 }
 
 /** Parameters that need a gate check beyond their JSON type. */
@@ -163,7 +163,7 @@ export interface SyncContract {
 export interface RuyinContract {
   contract: string;
   product: ProductIdentity;
-  workspace: WorkspaceDefinition;
+  project: ProjectDefinition;
   objects: BusinessObject[];
   states: StateMachine;
   context: { types: ContextType[] };

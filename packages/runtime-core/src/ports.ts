@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Host ports - the seam between the isomorphic kernel and its hosts
  * (local Node daemon / cloud runtime). Design authority:
  * docs/30-design/60-technical-architecture.md section 6.2.
@@ -60,6 +60,11 @@ export interface ToolOffer {
 
 export interface CapabilityTurnRequest {
   capability: string;
+  /**
+   * The product whose capability this is. Resolution needs it and the contract
+   * cannot carry a provider (R6), so it travels with the request instead.
+   */
+  product: string;
   /**
    * Stable across the whole task - the cross-product aggregation key
    * (platform integration rule X-2). Providers log it verbatim, which is what
@@ -177,7 +182,7 @@ export interface ToolExecutorPort {
 /** Relevance ranking over candidates (local host: FTS5; 04 section 6.1). */
 export interface RankerPort {
   rank(
-    workspaceId: string,
+    projectId: string,
     query: string,
     candidates: ContextItemMeta[],
   ): Promise<ContextItemMeta[]>;
@@ -193,13 +198,13 @@ export interface KeychainPort {
 // Storage
 // ---------------------------------------------------------------------------
 
-export interface WorkspaceMeta {
+export interface ProjectMeta {
   id: string;
   productId: string;
   productVersion: string;
   contractVersion: string;
   name: string;
-  workspaceType: string;
+  projectType: string;
   createdAt: string;
 }
 
@@ -227,9 +232,9 @@ export interface JournalEntry {
  * (one database per workspace, 60 section 7.1); hosts implement this over
  * SQLite (local) or their own store (cloud).
  */
-export interface WorkspaceStore {
-  putMeta(meta: WorkspaceMeta): Promise<void>;
-  getMeta(): Promise<WorkspaceMeta | undefined>;
+export interface ProjectStore {
+  putMeta(meta: ProjectMeta): Promise<void>;
+  getMeta(): Promise<ProjectMeta | undefined>;
 
   putContract(contractJson: string): Promise<void>;
   getContract(): Promise<string | undefined>;
@@ -255,9 +260,9 @@ export interface WorkspaceStore {
 }
 
 export interface StoragePort {
-  createWorkspaceStore(workspaceId: string): Promise<WorkspaceStore>;
-  openWorkspaceStore(workspaceId: string): Promise<WorkspaceStore | undefined>;
-  listWorkspaceIds(): Promise<string[]>;
+  createProjectStore(projectId: string): Promise<ProjectStore>;
+  openProjectStore(projectId: string): Promise<ProjectStore | undefined>;
+  listProjectIds(): Promise<string[]>;
 }
 
 /** The port bundle the kernel is constructed with. */

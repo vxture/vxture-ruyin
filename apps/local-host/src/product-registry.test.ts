@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 产品可用性规则（30-contract-schema §18.5 + owner 口径）：
  *   平台订阅了 → 本地可用；0 订阅 → 本地无可用产品，但运行环境与本地数据仍在。
  * 这些用例把「已安装 ≠ 可用」钉死，防止回退成"装了就能开"。
@@ -19,7 +19,7 @@ product:
   publisher: vxture
   runtime:
     minimum: 0.1.0
-workspace:
+project:
   type: project
 
   operations: [create, open]
@@ -44,7 +44,7 @@ context:
     - id: report
       name: 报告
       required: false
-      sources: [workspace]
+      sources: [project]
       class: generated
       sensitivity: low
 capabilities:

@@ -28,7 +28,7 @@
 import type { RuyinContract, TaskDefinition } from "@vxture/ruyin-contract-schema";
 import { emitAudit } from "./audit.js";
 import { TransientError } from "./ports.js";
-import { isPathGranted } from "./workspace.js";
+import { isPathGranted } from "./project.js";
 import { decideTool, validateToolCall } from "./tool-gate.js";
 import type {
   AIGatewayPort,
@@ -44,7 +44,7 @@ import type {
   ToolExecutorPort,
   ToolOffer,
   TurnMessage,
-  WorkspaceStore,
+  ProjectStore,
 } from "./ports.js";
 
 export type TaskInstanceState =
@@ -238,9 +238,9 @@ export interface TaskInstanceRecord {
 }
 
 export interface HarnessDeps {
-  store: WorkspaceStore;
+  store: ProjectStore;
   contract: RuyinContract;
-  workspaceId: string;
+  projectId: string;
   clock: ClockPort;
   id: IdPort;
   crypto: CryptoPort;
@@ -309,7 +309,7 @@ export class Harness {
     }
     const instance: TaskInstanceRecord = {
       id: id.newId("ti"),
-      workspace: this.deps.workspaceId,
+      workspace: this.deps.projectId,
       taskId,
       definition,
       inputs,
@@ -729,7 +729,7 @@ export class Harness {
         continue;
       }
       const ranked = ranker
-        ? await ranker.rank(this.deps.workspaceId, definition.objective, candidates)
+        ? await ranker.rank(this.deps.projectId, definition.objective, candidates)
         : [...candidates].sort((a, b) =>
             b.modifiedAt.localeCompare(a.modifiedAt),
           );
@@ -887,8 +887,9 @@ export class Harness {
       const turn = await this.turnWithRetry(
         {
           capability,
+          product: this.deps.contract.product.id,
           taskId: instance.id,
-          workspace: this.deps.workspaceId,
+          workspace: this.deps.projectId,
           messages,
           tools: offers,
         },
@@ -1053,7 +1054,7 @@ export class Harness {
         result = await this.deps.tools.execute({
           tool: call.tool,
           arguments: call.arguments,
-          workspace: this.deps.workspaceId,
+          workspace: this.deps.projectId,
           taskId: instance.id,
           grants,
         });
@@ -1099,23 +1100,14 @@ export class Harness {
         kind: rule.kind,
       });
 
-      let outcome: VerificationOutcome;
-      if (rule.kind === "human") {
-        outcome = { id: rule.id, kind: rule.kind, status: "pending_human" };
-      } else if (rule.kind === "ai_assisted") {
-        outcome = await this.runAiVerification(rule.id, instance, messages);
-      } else {
-        // The contract names an automated rule but says nothing about what it
-        // checks, so the runtime cannot evaluate it. Reporting "passed" would
-        // be a claim we did not earn - the whole point of the rule is that
-        // someone wanted this checked. It goes to a person instead.
-        outcome = {
-          id: rule.id,
-          kind: rule.kind,
-          status: "pending_human",
-          note: "runtime cannot evaluate this rule: the contract does not declare what it checks",
-        };
-      }
+      // Both machine kinds go to the product's capability surface (ADR-010):
+      // the contract says WHAT to check by name, the product knows what that
+      // name means, and the runtime only orchestrates. `kind` is a cost hint -
+      // it decides ordering, not where the check runs.
+      const outcome: VerificationOutcome =
+        rule.kind === "human"
+          ? { id: rule.id, kind: rule.kind, status: "pending_human" }
+          : await this.runProviderVerification(rule.id, rule.kind, instance, messages);
 
       instance.verification.push(outcome);
       await this.persist(instance);
@@ -1189,16 +1181,18 @@ export class Harness {
    * an answer we have not got, and guessing in the passing direction is how a
    * verification step becomes decoration.
    */
-  private async runAiVerification(
+  private async runProviderVerification(
     ruleId: string,
+    kind: "automated" | "ai_assisted",
     instance: TaskInstanceRecord,
     messages: TurnMessage[],
   ): Promise<VerificationOutcome> {
     const turn = await this.turnWithRetry(
       {
         capability: `verify:${ruleId}`,
+        product: this.deps.contract.product.id,
         taskId: instance.id,
-        workspace: this.deps.workspaceId,
+        workspace: this.deps.projectId,
         // The reviewer sees the same conversation the generator produced.
         messages,
         tools: [],
@@ -1208,26 +1202,26 @@ export class Harness {
     if (turn.kind !== "content") {
       return {
         id: ruleId,
-        kind: "ai_assisted",
+        kind,
         status: "pending_human",
         note: "reviewer asked for a tool; verification does not run tools",
       };
     }
     const verdict = turn.content.trimStart();
     if (/^pass\b/i.test(verdict)) {
-      return { id: ruleId, kind: "ai_assisted", status: "passed" };
+      return { id: ruleId, kind, status: "passed" };
     }
     if (/^fail\b/i.test(verdict)) {
       return {
         id: ruleId,
-        kind: "ai_assisted",
+        kind,
         status: "failed",
         feedback: verdict.replace(/^fail\b[:\s]*/i, "").trim() || "no reason given",
       };
     }
     return {
       id: ruleId,
-      kind: "ai_assisted",
+      kind,
       status: "pending_human",
       note: `reviewer answer could not be read as a verdict: ${verdict.slice(0, 200)}`,
     };
@@ -1306,7 +1300,7 @@ export class Harness {
       this.deps.clock,
       this.deps.id,
       {
-        workspace: this.deps.workspaceId,
+        workspace: this.deps.projectId,
         task_instance: instance.id,
         kind,
         actor: "harness",

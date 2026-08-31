@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Rule-by-rule validator tests. The canonical Bid contract (products/bid,
  * from design doc 30-contract-schema.md section 16) is the passing fixture;
  * failure cases are targeted mutations of it, one per rule.
@@ -122,17 +122,17 @@ test("R13: a path-class tool must annotate a path parameter", () => {
   assert.ok(!rules(validateContract(structuredClone(base))).includes("R13"));
 });
 
-test("workspace.type is the single business form; the old pair is gone", () => {
+test("project.type is the single business form; the old pair is gone", () => {
   // R2 existed only to keep `type` and `lifecycle` in agreement. They were the
   // same statement twice (persistent/continuous, project/finite,
   // document/versioned), so the fields merged and the rule retired with them.
-  assert.equal(base.workspace.type, "project");
-  assert.ok(!("lifecycle" in base.workspace));
+  assert.equal(base.project.type, "project");
+  assert.ok(!("lifecycle" in base.project));
   // A leftover lifecycle key is now a structural failure (L1), not a rule.
   assert.ok(
     rules(
       mutate((c) => {
-        (c.workspace as unknown as Record<string, unknown>)["lifecycle"] =
+        (c.project as unknown as Record<string, unknown>)["lifecycle"] =
           "finite";
       }),
     ).includes("L1"),

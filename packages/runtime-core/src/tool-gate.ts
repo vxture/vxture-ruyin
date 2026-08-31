@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tool Gate - what stands between a model's request and an actual effect.
  * Design authority: docs/30-design/50-harness.md section 5.
  *
@@ -18,7 +18,7 @@ import type {
   Tool,
   ToolCategory,
 } from "@vxture/ruyin-contract-schema";
-import { isPathGranted } from "./workspace.js";
+import { isPathGranted } from "./project.js";
 import type { ContextItemMeta, FolderGrant } from "./ports.js";
 
 export type GateSource =

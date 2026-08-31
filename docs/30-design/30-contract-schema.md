@@ -177,12 +177,12 @@ context:
       sensitivity: high         # low | medium | high
 ```
 
-`sources` 枚举：`cloud | local | lan | private | external | workspace`
+`sources` 枚举：`cloud | local | lan | private | external | project`
 
 要点：
 
 - `sources` 只声明**允许的来源种类**；实际绑定（哪个文件夹、哪个知识库）是 Workspace 级运行时配置，不在契约中（04 文档 §3）
-- `workspace` 来源指本工作空间既有生成物 —— 任务的 output 成为后续任务的可选 input
+- `project` 来源指本项目既有生成物 —— 任务的 output 成为后续任务的可选 input
 - `class` 对接同步策略（§14）；`sensitivity` 对接推理传输策略（04 文档 §7）
 
 sensitivity 的默认运行时行为（用户策略可整体调整，见 04 文档 §7.2）：

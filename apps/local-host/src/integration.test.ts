@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import {
-  WorkspaceRuntime,
+  ProjectRuntime,
   pendingCheckpoint,
   verifyAuditChain,
   type RuntimePorts,
@@ -42,12 +42,12 @@ interface PolledTask {
 async function pollTask(
   base: string,
   headers: Record<string, string>,
-  workspaceId: string,
+  projectId: string,
   taskId: string,
 ): Promise<PolledTask> {
   for (let attempt = 0; attempt < 300; attempt++) {
     const res = await fetch(
-      `${base}/workspaces/${workspaceId}/tasks/${taskId}`,
+      `${base}/projects/${projectId}/tasks/${taskId}`,
       { headers },
     );
     const body = (await res.json()) as PolledTask;
@@ -107,10 +107,10 @@ test("milestone: bid contract loads, workspace created, task runs over SQLite", 
     const bid = scan.loaded.find((p) => p.id === "vxture.bid");
     assert.ok(bid, "bid product must load");
 
-    const runtime = new WorkspaceRuntime(first.ports);
-    const meta = await runtime.createWorkspace(bid.contract, "投标项目 A");
+    const runtime = new ProjectRuntime(first.ports);
+    const meta = await runtime.createProject(bid.contract, "投标项目 A");
     assert.equal(meta.productId, "vxture.bid");
-    assert.equal((await runtime.openWorkspace(meta.id)).businessState, "draft");
+    assert.equal((await runtime.openProject(meta.id)).businessState, "draft");
 
     // Run a task to the human checkpoint.
     const harness = await runtime.createHarness(meta.id);
@@ -124,8 +124,8 @@ test("milestone: bid contract loads, workspace created, task runs over SQLite", 
     // over the SAME data dir.
     first.storage.closeAll();
     second = await makePorts(dataDir);
-    const reopened = new WorkspaceRuntime(second.ports);
-    const view = await reopened.openWorkspace(meta.id);
+    const reopened = new ProjectRuntime(second.ports);
+    const view = await reopened.openProject(meta.id);
     assert.equal(view.meta.name, "投标项目 A");
     const resumed = await reopened.createHarness(meta.id);
     await resumed.decideCheckpoint(instance.id, true);
@@ -148,7 +148,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-api-"));
   const token = "test-token";
   const { ports, storage } = await makePorts(dataDir);
-  const runtime = new WorkspaceRuntime(ports);
+  const runtime = new ProjectRuntime(ports);
   const server = createLocalApi({
     runtime,
     registry: new ProductRegistry(productsDir, dataDir),
@@ -156,8 +156,8 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     token,
     version: "test",
     systemInfo: testSystemInfo,
-    reindex: (wsId, binding) =>
-      reindexBinding(storage, wsId, binding, new LocalFsConnector()),
+    reindex: (projectId, binding) =>
+      reindexBinding(storage, projectId, binding, new LocalFsConnector()),
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const { port } = server.address() as AddressInfo;
@@ -183,7 +183,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     const sysInfo = (await system.json()) as { keyProtection: string };
     assert.ok(["dpapi", "plaintext"].includes(sysInfo.keyProtection));
 
-    const created = await fetch(`${base}/workspaces`, {
+    const created = await fetch(`${base}/projects`, {
       method: "POST",
       headers: json,
       body: JSON.stringify({ product: "vxture.bid", name: "api-ws" }),
@@ -191,7 +191,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     assert.equal(created.status, 201);
     const meta = (await created.json()) as { id: string };
 
-    const task = await fetch(`${base}/workspaces/${meta.id}/tasks`, {
+    const task = await fetch(`${base}/projects/${meta.id}/tasks`, {
       method: "POST",
       headers: json,
       body: JSON.stringify({
@@ -209,7 +209,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     assert.equal(instance.state, "waiting_human");
 
     const decided = await fetch(
-      `${base}/workspaces/${meta.id}/tasks/${instance.id}/decision`,
+      `${base}/projects/${meta.id}/tasks/${instance.id}/decision`,
       { method: "POST", headers: json, body: JSON.stringify({ approve: true }) },
     );
     assert.equal(decided.status, 202);
@@ -218,27 +218,27 @@ test("local api: token gate, product listing, workspace + task flow", async () =
 
     // Human-confirm state transition surfaces as 409 until confirmed.
     for (const to of ["planning", "writing", "review"]) {
-      const r = await fetch(`${base}/workspaces/${meta.id}/state`, {
+      const r = await fetch(`${base}/projects/${meta.id}/state`, {
         method: "POST",
         headers: json,
         body: JSON.stringify({ to }),
       });
       assert.equal(r.status, 200);
     }
-    const refused = await fetch(`${base}/workspaces/${meta.id}/state`, {
+    const refused = await fetch(`${base}/projects/${meta.id}/state`, {
       method: "POST",
       headers: json,
       body: JSON.stringify({ to: "submitted" }),
     });
     assert.equal(refused.status, 409);
-    const confirmed = await fetch(`${base}/workspaces/${meta.id}/state`, {
+    const confirmed = await fetch(`${base}/projects/${meta.id}/state`, {
       method: "POST",
       headers: json,
       body: JSON.stringify({ to: "submitted", humanConfirmed: true }),
     });
     assert.equal(confirmed.status, 200);
 
-    const audit = await fetch(`${base}/workspaces/${meta.id}/audit`, {
+    const audit = await fetch(`${base}/projects/${meta.id}/audit`, {
       headers: authed,
     });
     const events = (await audit.json()) as Parameters<typeof verifyAuditChain>[2];
@@ -254,7 +254,7 @@ test("selection over real files: grant -> bind (indexes) -> gate -> complete", a
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-sel-"));
   const filesDir = mkdtempSync(join(tmpdir(), "ruyin-files-"));
   const { ports, storage } = await makePorts(dataDir);
-  const runtime = new WorkspaceRuntime(ports);
+  const runtime = new ProjectRuntime(ports);
   try {
     // Two tender files on disk; the newer/matching one should rank first.
     mkdirSync(join(filesDir, "sub"));
@@ -268,7 +268,7 @@ test("selection over real files: grant -> bind (indexes) -> gate -> complete", a
     const scan = loadProducts(productsDir);
     const bid = scan.loaded.find((p) => p.id === "vxture.bid");
     assert.ok(bid);
-    const meta = await runtime.createWorkspace(bid.contract, "sel-ws");
+    const meta = await runtime.createProject(bid.contract, "sel-ws");
 
     // Grant, then bind (binding outside the grant is refused).
     await runtime.addGrant(meta.id, filesDir);
@@ -329,7 +329,7 @@ test("daemon serves the built workspace ui with traversal guard", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-ui-"));
   const uiDir = mkdtempSync(join(tmpdir(), "ruyin-uidist-"));
   const { ports, storage } = await makePorts(dataDir);
-  const uiRuntime = new WorkspaceRuntime(ports);
+  const uiRuntime = new ProjectRuntime(ports);
   const server = createLocalApi({
     runtime: uiRuntime,
     registry: new ProductRegistry(join(uiDir, "no-products"), dataDir),
@@ -372,20 +372,20 @@ test("daemon serves the built workspace ui with traversal guard", async () => {
   }
 });
 
-test("workspace database is encrypted at rest (TD-009)", async () => {
+test("project database is encrypted at rest (TD-009)", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-enc-"));
   const { ports, storage } = await makePorts(dataDir);
-  const runtime = new WorkspaceRuntime(ports);
+  const runtime = new ProjectRuntime(ports);
   try {
     const scan = loadProducts(productsDir);
     const bid = scan.loaded.find((p) => p.id === "vxture.bid");
     assert.ok(bid);
-    const meta = await runtime.createWorkspace(bid.contract, "enc-ws");
+    const meta = await runtime.createProject(bid.contract, "enc-ws");
     storage.closeAll();
 
     // A plaintext SQLite file starts with "SQLite format 3\0"; an encrypted
     // one must not.
-    const dbPath = join(dataDir, "workspaces", meta.id, "workspace.db");
+    const dbPath = join(dataDir, "projects", meta.id, "project.db");
     const header = readFileSync(dbPath).subarray(0, 16).toString("latin1");
     assert.ok(
       !header.startsWith("SQLite format 3"),
@@ -393,10 +393,10 @@ test("workspace database is encrypted at rest (TD-009)", async () => {
     );
 
     // The per-workspace key blob exists and reopening with the key works.
-    assert.ok(existsSync(join(dataDir, "workspaces", meta.id, "key.enc")));
+    assert.ok(existsSync(join(dataDir, "projects", meta.id, "key.enc")));
     const reopened = await makePorts(dataDir);
     try {
-      const view = await new WorkspaceRuntime(reopened.ports).openWorkspace(
+      const view = await new ProjectRuntime(reopened.ports).openProject(
         meta.id,
       );
       assert.equal(view.meta.name, "enc-ws");
@@ -405,6 +405,35 @@ test("workspace database is encrypted at rest (TD-009)", async () => {
     }
   } finally {
     storage.closeAll();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("the pre-rename layout migrates in place, ids untouched", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-mig-"));
+  try {
+    // Lay down what a pre-rename install looks like: an existing container
+    // under the old names, with the old `ws_` id.
+    const legacyId = "ws_legacy0001";
+    const legacyDir = join(dataDir, "workspaces", legacyId);
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(join(legacyDir, "workspace.db"), "not-a-real-db");
+
+    // Opening storage performs the move.
+    const { storage } = await makePorts(dataDir);
+    try {
+      assert.ok(!existsSync(join(dataDir, "workspaces")), "old dir is gone");
+      assert.ok(
+        existsSync(join(dataDir, "projects", legacyId, "project.db")),
+        "container moved under its ORIGINAL id",
+      );
+      // The id is what the audit chain's genesis hash is built from, so a
+      // migration that rewrote ids would invalidate every chain on disk.
+      assert.deepEqual(await storage.listProjectIds(), [legacyId]);
+    } finally {
+      storage.closeAll();
+    }
+  } finally {
     rmSync(dataDir, { recursive: true, force: true });
   }
 });

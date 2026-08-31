@@ -26,7 +26,7 @@ import {
   type EntitlementsBatch,
   type ProductInfo,
   type SessionInfo,
-  type WorkspaceMeta,
+  type ProjectMeta,
 } from "./api";
 
 const BLURBS: Record<string, string> = {
@@ -57,10 +57,10 @@ export function HomePage({
 }: {
   api: Api;
   products: ProductInfo[];
-  workspaces: WorkspaceMeta[];
+  workspaces: ProjectMeta[];
   health: { ok: boolean; version?: string };
-  onOpen: (wsId: string) => void;
-  onCreated: (wsId: string) => void | Promise<void>;
+  onOpen: (projectId: string) => void;
+  onCreated: (projectId: string) => void | Promise<void>;
   onError: (msg: string) => void;
 }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
@@ -256,9 +256,9 @@ function InstalledProductCard({
 }: {
   api: Api;
   product: ProductInfo;
-  workspaces: WorkspaceMeta[];
-  onOpen: (wsId: string) => void;
-  onCreated: (wsId: string) => void | Promise<void>;
+  workspaces: ProjectMeta[];
+  onOpen: (projectId: string) => void;
+  onCreated: (projectId: string) => void | Promise<void>;
   onError: (msg: string) => void;
 }) {
   const [creating, setCreating] = useState(false);
@@ -308,7 +308,7 @@ function InstalledProductCard({
               <Button
                 onClick={async () => {
                   try {
-                    const meta = await api.createWorkspace(
+                    const meta = await api.createProject(
                       product.id,
                       name || product.name,
                     );

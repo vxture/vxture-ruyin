@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Hash-chained audit events. Design authority:
  * docs/30-design/50-harness.md section 9.
  *
@@ -14,7 +14,7 @@ import type {
   ClockPort,
   CryptoPort,
   IdPort,
-  WorkspaceStore,
+  ProjectStore,
 } from "./ports.js";
 
 export interface AuditInput {
@@ -25,8 +25,8 @@ export interface AuditInput {
   payload: unknown;
 }
 
-export function genesisHash(crypto: CryptoPort, workspaceId: string): string {
-  return crypto.sha256(`genesis:${workspaceId}`);
+export function genesisHash(crypto: CryptoPort, projectId: string): string {
+  return crypto.sha256(`genesis:${projectId}`);
 }
 
 function seal(
@@ -40,7 +40,7 @@ function seal(
 }
 
 export async function emitAudit(
-  store: WorkspaceStore,
+  store: ProjectStore,
   crypto: CryptoPort,
   clock: ClockPort,
   id: IdPort,
@@ -64,10 +64,10 @@ export async function emitAudit(
 /** Walk the chain from genesis; false on any break or content tamper. */
 export function verifyAuditChain(
   crypto: CryptoPort,
-  workspaceId: string,
+  projectId: string,
   events: AuditEvent[],
 ): boolean {
-  let prev = genesisHash(crypto, workspaceId);
+  let prev = genesisHash(crypto, projectId);
   for (const event of events) {
     if (event.prev_hash !== prev) return false;
     const { hash, ...body } = event;
