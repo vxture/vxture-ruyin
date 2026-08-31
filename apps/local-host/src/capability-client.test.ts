@@ -22,7 +22,14 @@ function request(): CapabilityTurnRequest {
     workspace: "prj_0001",
     objective: "解析招标文件，生成需求矩阵",
     constraints: ["需求条目必须可回溯到招标原文"],
-    context: [{ type: "tender_document", name: "t.pdf", content: "..." }],
+    context: [
+      {
+        type: "tender_document",
+        name: "t.pdf",
+        content: "...",
+        origin: { kind: "local_file", connector: "local-fs" },
+      },
+    ],
     messages: [],
     tools: [],
   };
@@ -176,9 +183,19 @@ test("resolver: facts travel structured; the runtime writes no prompt", async ()
       // product - a runtime that writes the prompt has taken over that part.
       assert.equal(body["objective"], "解析招标文件，生成需求矩阵");
       assert.deepEqual(body["constraints"], ["需求条目必须可回溯到招标原文"]);
+      // Origin travels with the content: the runtime is the only layer that
+      // knows a file was the user''s, and the provider needs it to treat the
+      // text as material rather than as direction.
       assert.deepEqual(body["context"], [
-        { type: "tender_document", name: "t.pdf", content: "..." },
+        {
+          type: "tender_document",
+          name: "t.pdf",
+          content: "...",
+          origin: { kind: "local_file", connector: "local-fs" },
+        },
       ]);
+      // But not where it sits on the user''s disk.
+      assert.ok(!JSON.stringify(body["context"]).includes("ref"));
       // And nothing was pre-rendered into the conversation on their behalf.
       assert.deepEqual(body["messages"], []);
     },

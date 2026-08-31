@@ -40,6 +40,7 @@ import type {
   FolderGrant,
   IdPort,
   RankerPort,
+  ContextFact,
   ToolCall,
   ToolExecutorPort,
   ToolOffer,
@@ -105,7 +106,7 @@ export interface CheckpointDecision {
 }
 
 /** The materialized context set as it goes to a provider. */
-type ContextFacts = Array<{ type: string; name: string; content: string }>;
+type ContextFacts = ContextFact[];
 
 /** What one capability''s loop produced. */
 type CapabilityOutcome =
@@ -571,7 +572,13 @@ export class Harness {
           type: i.type,
           name: i.name,
           bytes: i.bytes,
+          ref: i.ref,
+          origin: "local_file",
         })),
+        // Stated so the person deciding knows what they are agreeing to: these
+        // files go out as material to work FROM. Anything inside them that
+        // reads like an instruction is not a instruction the runtime will act on.
+        contentIsData: true,
       });
       return instance;
     }
@@ -755,10 +762,14 @@ export class Harness {
     // Materialize context and emit the inference-transmission audit event -
     // the single recorded exit for local context (04 section 7.3). Hashes and
     // metadata only, never content.
-    // Structured facts, carrying their declared context type. Not rendered into
-    // a prompt: composing that text is where domain knowledge lives, and it
-    // belongs to the product, not to the runtime.
-    const context: Array<{ type: string; name: string; content: string }> = [];
+    // Structured facts, carrying their declared type AND where they came from.
+    // Not rendered into a prompt: composing that text is where domain knowledge
+    // lives, and it belongs to the product, not to the runtime.
+    //
+    // The origin matters because the runtime is the only layer that knows it —
+    // by the time this text reaches a model it is just text, and a tender
+    // document was written by whoever issued it, not by our user.
+    const context: ContextFacts = [];
     let transmissionItems: Array<Record<string, unknown>>;
     if (instance.contextSet) {
       transmissionItems = [];
@@ -768,11 +779,20 @@ export class Harness {
           return this.fail(instance, `connector for item "${meta.id}" unavailable`);
         }
         const item = await connector.read(meta);
-        context.push({ type: item.type, name: item.name, content: item.content });
+        context.push({
+          type: item.type,
+          name: item.name,
+          content: item.content,
+          origin: { kind: "local_file", connector: metaConnector(meta) },
+        });
         transmissionItems.push({
           id: item.id,
           type: item.type,
           source: item.source,
+          // The full local reference stays here, in the audit - it is not sent
+          // to the provider, which has no business knowing the user''s paths.
+          ref: item.ref,
+          origin: "local_file",
           content_hash: `sha256:${crypto.sha256(item.content)}`,
           bytes: item.bytes,
         });
@@ -783,7 +803,7 @@ export class Harness {
       const inputs = instance.inputs ?? {};
       transmissionItems = Object.entries(inputs).map(([type, value]) => {
         const content = typeof value === "string" ? value : JSON.stringify(value);
-        context.push({ type, name: type, content });
+        context.push({ type, name: type, content, origin: { kind: "caller" } });
         return {
           id: type,
           type,
@@ -945,6 +965,13 @@ export class Harness {
             arguments: c.arguments,
           })),
           refused: gated.refusals.map((r) => ({ tool: r.tool, reason: r.reason })),
+          // The arguments were proposed by a model that had just read the
+          // context - which is material someone else may have written. Saying
+          // so lets the person judge the request on that basis rather than
+          // assuming it originated from their own intent.
+          proposedAfterReading: [
+            ...new Set(context.map((c) => c.name)),
+          ],
         });
         return { kind: "suspended" };
       }
@@ -1099,6 +1126,9 @@ export class Harness {
         role: "tool",
         callId: call.id,
         content: result.content,
+        // Whatever came back is data, and it may have been written by someone
+        // other than the user - the same reason context items carry an origin.
+        origin: { kind: "tool_result", tool: call.tool },
         ...(result.isError ? { isError: true } : {}),
       });
     }
