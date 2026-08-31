@@ -185,6 +185,7 @@ export function HomePage({
                   api={api}
                   product={p}
                   workspaces={workspaces.filter((w) => w.productId === p.id)}
+                  workspaceName={session?.workspace?.name}
                   onOpen={onOpen}
                   onCreated={onCreated}
                   onError={onError}
@@ -250,6 +251,7 @@ function InstalledProductCard({
   api,
   product,
   workspaces,
+  workspaceName,
   onOpen,
   onCreated,
   onError,
@@ -257,6 +259,8 @@ function InstalledProductCard({
   api: Api;
   product: ProductInfo;
   workspaces: ProjectMeta[];
+  /** 当前平台工作区名；未登录为 undefined，此时不能新建项目。 */
+  workspaceName?: string | undefined;
   onOpen: (projectId: string) => void;
   onCreated: (projectId: string) => void | Promise<void>;
   onError: (msg: string) => void;
@@ -325,12 +329,18 @@ function InstalledProductCard({
             </div>
           ) : (
             <div className="flex items-center gap-xs">
-              <Button onClick={() => setCreating(true)}>新建项目</Button>
-              {workspaces.length === 0 && (
-                <span className="text-body-sm text-muted-foreground">
-                  从这里开始第一个项目
-                </span>
-              )}
+              {/* 项目须归属工作区（ADR-015）。没有登录态就没有工作区，也就
+                  无从新建 —— 说清缺的是什么，而不是让按钮没反应。 */}
+              <Button disabled={!workspaceName} onClick={() => setCreating(true)}>
+                新建项目
+              </Button>
+              <span className="text-body-sm text-muted-foreground">
+                {!workspaceName
+                  ? "登录并选择工作区后可新建——项目须归属于一个工作区"
+                  : workspaces.length === 0
+                    ? `将建在「${workspaceName}」，从这里开始第一个项目`
+                    : `将建在「${workspaceName}」`}
+              </span>
             </div>
           )}
         </div>

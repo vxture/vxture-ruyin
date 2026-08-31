@@ -101,6 +101,8 @@ function useRuntimeHealth() {
 export function Workbench({ api }: { api: Api }) {
   const [products, setProducts] = useState<ProductInfo[]>([]);
   const [workspaces, setWorkspaces] = useState<ProjectMeta[]>([]);
+  /** 其他工作区里还有几个项目。只报数量——让人知道数据还在，不泄露名字。 */
+  const [elsewhere, setElsewhere] = useState(0);
   const [view, setView] = useState<View>({ kind: "home" });
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
@@ -113,7 +115,9 @@ export function Workbench({ api }: { api: Api }) {
   const refreshSidebar = useCallback(async () => {
     try {
       setProducts(await api.products());
-      setWorkspaces(await api.workspaces());
+      const list = await api.projects();
+      setWorkspaces(list.items);
+      setElsewhere(list.elsewhere);
       setError(null);
     } catch (e) {
       setError(String((e as Error).message));
@@ -174,11 +178,26 @@ export function Workbench({ api }: { api: Api }) {
         items: [{ href: "#home", label: "首页", icon: "home" }],
       },
     ];
-    if (workspaces.length > 0) {
+    const mine = workspaces.filter((w) => w.workspaceId);
+    // 归属为空的另起一组：它们不是普通项目，是一份**待导入队列**（ADR-015）。
+    // 混在一起会让「这是个不该长期存在的状态」这件事消失。
+    const pendingImport = workspaces.filter((w) => !w.workspaceId);
+    if (mine.length > 0) {
       list.push({
         title: "项目",
         dividerBefore: true,
-        items: workspaces.map((w) => ({
+        items: mine.map((w) => ({
+          href: `#ws/${w.id}`,
+          label: w.name,
+          icon: "cube" as const,
+        })),
+      });
+    }
+    if (pendingImport.length > 0) {
+      list.push({
+        title: "待导入工作区",
+        dividerBefore: true,
+        items: pendingImport.map((w) => ({
           href: `#ws/${w.id}`,
           label: w.name,
           icon: "cube" as const,
@@ -312,12 +331,21 @@ export function Workbench({ api }: { api: Api }) {
         collapseAllGroups: "收起全部分组",
       }}
       footer={
-        <UserSlot
-          api={api}
-          productIds={products.map((p) => p.id)}
-          collapsed={collapsed}
-          onOpenSettings={() => navigate("#settings")}
-        />
+        <>
+          {/* 只报数量，不报名字：隔离要照做，但「切到别的工作区，项目全没了」
+              在用户那里和「数据丢了」分不开。 */}
+          {elsewhere > 0 && !collapsed && (
+            <p className="sidebar-elsewhere">
+              另有 {elsewhere} 个项目在其他工作区
+            </p>
+          )}
+          <UserSlot
+            api={api}
+            productIds={products.map((p) => p.id)}
+            collapsed={collapsed}
+            onOpenSettings={() => navigate("#settings")}
+          />
+        </>
       }
     />
   );

@@ -79,6 +79,22 @@ export class NeedsHumanConfirmationError extends Error {
   }
 }
 
+/** No workspace to put a project in - the caller is not signed in to one. */
+export class NoWorkspaceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NoWorkspaceError";
+  }
+}
+
+/** Attribution already settled; changing it is not an import (ADR-015). */
+export class AlreadyAttributedError extends Error {
+  constructor(id: string, workspaceId: string) {
+    super(`project "${id}" already belongs to workspace "${workspaceId}"`);
+    this.name = "AlreadyAttributedError";
+  }
+}
+
 export interface ProjectView {
   meta: ProjectMeta;
   businessState: string;
@@ -88,10 +104,25 @@ export interface ProjectView {
 export class ProjectRuntime {
   constructor(private readonly ports: RuntimePorts) {}
 
+  /**
+   * Create a project inside a workspace.
+   *
+   * `workspaceId` is required, and that is the whole point: a project with no
+   * workspace is not a supported state (ADR-015). Making it a parameter rather
+   * than something inferred later means the invariant is held by the type -
+   * there is no code path that produces an unattributed project, so there is
+   * none to audit later.
+   */
   async createProject(
     rawContract: unknown,
     name: string,
+    workspaceId: string,
   ): Promise<ProjectMeta> {
+    if (!workspaceId) {
+      throw new NoWorkspaceError(
+        "a project must belong to a workspace; sign in and select one first",
+      );
+    }
     const validation = validateContract(rawContract);
     if (!validation.ok) {
       throw new ContractInvalidError(validation.errors);
@@ -111,6 +142,7 @@ export class ProjectRuntime {
       name,
       projectType: contract.project.type,
       createdAt: this.ports.clock.now(),
+      workspaceId,
     };
     await store.putMeta(meta);
     await store.putContract(JSON.stringify(contract));
@@ -309,6 +341,31 @@ export class ProjectRuntime {
    * mid-flight forever, and the user sees a task that never finishes and
    * cannot be restarted.
    */
+  /**
+   * Import a project written before attribution existed into a workspace.
+   *
+   * Only ever fills a blank. Re-homing an already-attributed project would
+   * move data across a subscription and entitlement boundary, which is a
+   * different operation with different consequences - and one an "import"
+   * button must not quietly perform. It is refused here rather than guarded
+   * at the caller, because the next caller would have to remember.
+   */
+  async importProject(id: string, workspaceId: string): Promise<ProjectMeta> {
+    if (!workspaceId) {
+      throw new NoWorkspaceError(
+        "a project must belong to a workspace; sign in and select one first",
+      );
+    }
+    const { store, meta } = await this.load(id);
+    if (meta.workspaceId) {
+      throw new AlreadyAttributedError(id, meta.workspaceId);
+    }
+    const updated: ProjectMeta = { ...meta, workspaceId };
+    await store.putMeta(updated);
+    await this.audit(store, id, "project.imported", "user", { workspaceId });
+    return updated;
+  }
+
   async listInterruptedTasks(id: string): Promise<TaskInstanceRecord[]> {
     const instances = await this.listTaskInstances(id);
     return instances.filter((t) => interruptedResumePoint(t) !== null);

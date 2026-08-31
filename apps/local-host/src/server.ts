@@ -21,6 +21,7 @@ import type { ProductRegistry } from "./product-registry.js";
 import type { TaskRunner } from "./task-runner.js";
 import { installPackage } from "./installer.js";
 import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
+import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -62,6 +63,16 @@ export interface LocalApiDeps {
     keyProtection: "dpapi" | "plaintext";
     startedAt: string;
   };
+}
+
+/**
+ * The workspace the user is currently signed in to, or undefined when signed
+ * out. Read from the session claims, never from the request body: a body field
+ * naming a workspace would be the caller choosing its own data boundary.
+ */
+function activeWorkspace(deps: LocalApiDeps): string | undefined {
+  const id = deps.platform?.session().workspace?.id;
+  return id && id.length > 0 ? id : undefined;
 }
 
 const STATIC_MIME: Record<string, string> = {
@@ -407,23 +418,84 @@ async function handle(
       send(res, 403, { error: "product_unavailable", message: blocked });
       return;
     }
+    // 项目必须归属工作区（ADR-015）。没有登录态就没有工作区，也就无从新建 ——
+    // 这不是把功能藏起来，是这个动作缺少它的主体。
+    const workspaceId = activeWorkspace(deps);
+    if (!workspaceId) {
+      send(res, 409, {
+        error: "no_active_workspace",
+        message:
+          "项目须归属于一个工作区；请先登录 Vxture 账号并选择工作区后再新建",
+      });
+      return;
+    }
     const name = typeof body["name"] === "string" && body["name"].length > 0
       ? body["name"]
       : product.name;
-    const meta = await deps.runtime.createProject(product.contract, name);
+    const meta = await deps.runtime.createProject(
+      product.contract,
+      name,
+      workspaceId,
+    );
     send(res, 201, meta);
     return;
   }
 
-  // GET /projects
+  // GET /projects - 按当前工作区过滤（ADR-007：订阅、权益、数据边界都按工作区
+  // 划）。别的工作区的项目**只报数量不报名字**：隔离照做，但让人知道数据还在
+  // ——「切换一下项目全没了」与「数据丢了」在用户那里分不开。
   if (method === "GET" && path === "/projects") {
-    send(res, 200, await deps.runtime.listProjects());
+    const workspaceId = activeWorkspace(deps);
+    const all = await deps.runtime.listProjects();
+    // `workspaceId &&` 不是多余的：未登录时它是 undefined，而未归属项目的
+    // workspaceId 也是 undefined —— 光比相等会把「没有归属」当成「归属于没有」，
+    // 于是同一个项目既算我的又算待导入，在列表里出现两次。
+    const mine = workspaceId
+      ? all.filter((p) => p.workspaceId === workspaceId)
+      : [];
+    // 归属为空的是 attribution 之前写下的记录：一份**待导入队列**，不是一种
+    // 受支持的状态。任何工作区下都看得见，直到用户把它导进某一个。
+    const unattributed = all.filter((p) => !p.workspaceId);
+    send(res, 200, {
+      items: [...mine, ...unattributed],
+      elsewhere: all.length - mine.length - unattributed.length,
+    });
     return;
   }
 
   // /projects/:id[...]
   if (segments[0] === "projects" && segments.length >= 2) {
     const projectId = segments[1]!;
+
+    // POST /projects/:id/import - 把 attribution 之前的项目导入当前工作区。
+    // 只填空白，不搬家：改变一个已有归属会把数据挪过订阅与权益边界，那是另一
+    // 件事，不该由一个「导入」按钮顺手做掉（ADR-015）。
+    if (
+      method === "POST" &&
+      segments.length === 3 &&
+      segments[2] === "import"
+    ) {
+      const workspaceId = activeWorkspace(deps);
+      if (!workspaceId) {
+        send(res, 409, {
+          error: "no_active_workspace",
+          message: "请先登录并选择工作区，再把该项目导入其中",
+        });
+        return;
+      }
+      try {
+        send(res, 200, await deps.runtime.importProject(projectId, workspaceId));
+      } catch (cause) {
+        send(res, cause instanceof AlreadyAttributedError ? 409 : 404, {
+          error:
+            cause instanceof AlreadyAttributedError
+              ? "already_attributed"
+              : "project_not_found",
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+      }
+      return;
+    }
 
     if (method === "GET" && segments.length === 2) {
       const view = await deps.runtime.openProject(projectId);

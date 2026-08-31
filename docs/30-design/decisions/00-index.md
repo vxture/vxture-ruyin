@@ -18,6 +18,7 @@
 | [ADR-012](ADR-012-two-tier-product-supply.md) | 两级产品供给：契约拉取为主，产品包为辅 | 已接受 | 2026-08-31 |
 | [ADR-013](ADR-013-artifact-materialization.md) | 成果落盘：结构化内容由 Runtime 渲染，字节回传为辅 | 已接受 | 2026-08-31 |
 | [ADR-014](ADR-014-untrusted-content-provenance.md) | 上下文是资料，不是指令：出处随内容传递 | 已接受 | 2026-08-31 |
+| [ADR-015](ADR-015-projects-belong-to-a-workspace.md) | 项目必须归属工作区，无归属不是一种受支持的状态 | 已接受 | 2026-08-31 |
 
 后续候选（定稿时立 ADR）：Electron vs Tauri（60 §5.1）、
 每 Workspace 一库（60 §7.1）、推理传输 ≠ 数据存储（10 §15.2）。

@@ -309,6 +309,17 @@ export interface ProjectMeta {
   name: string;
   projectType: string;
   createdAt: string;
+  /**
+   * The platform workspace this project belongs to (ADR-007: subscription,
+   * entitlement and data boundaries are all drawn per workspace, so a project
+   * belongs to exactly one).
+   *
+   * Required for every project created from now on - `createProject` will not
+   * make one without it. Optional only in the type, and only for records
+   * written before attribution existed: those are a backlog to import, not a
+   * supported state. Nothing new may reach disk without this field.
+   */
+  workspaceId?: string;
 }
 
 export interface AuditEvent {
