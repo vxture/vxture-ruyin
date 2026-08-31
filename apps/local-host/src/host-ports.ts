@@ -7,8 +7,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
   AIGatewayPort,
-  CapabilityInvocation,
-  CapabilityResult,
+  CapabilityTurn,
+  CapabilityTurnRequest,
   ClockPort,
   CryptoPort,
   IdPort,
@@ -16,6 +16,11 @@ import type {
 
 export const nodeClock: ClockPort = {
   now: () => new Date().toISOString(),
+  sleep: (ms) =>
+    new Promise((done) => {
+      // unref: a pending backoff must not be the reason the daemon stays up.
+      setTimeout(done, ms).unref?.();
+    }),
 };
 
 export const nodeId: IdPort = {
@@ -27,10 +32,19 @@ export const nodeCrypto: CryptoPort = {
     createHash("sha256").update(input, "utf8").digest("hex"),
 };
 
+/**
+ * Stand-in provider until the Capability Resolver lands (ADR-001).
+ *
+ * It echoes how many messages it was handed on purpose: the straight-line
+ * predecessor fed every capability the same inputs, and a mock that ignored
+ * the conversation is exactly what kept that hidden. This one makes chaining
+ * visible - the count must grow from one capability to the next.
+ */
 export class MockAIGateway implements AIGatewayPort {
-  async invoke(request: CapabilityInvocation): Promise<CapabilityResult> {
+  async turn(request: CapabilityTurnRequest): Promise<CapabilityTurn> {
     return {
-      content: `[mock:${request.capability}] generated for task ${request.taskInstance} with inputs: ${Object.keys(request.inputs).join(", ") || "(none)"}`,
+      kind: "content",
+      content: `[mock:${request.capability}] task ${request.taskId}, ${request.messages.length} message(s) in context`,
     };
   }
 }

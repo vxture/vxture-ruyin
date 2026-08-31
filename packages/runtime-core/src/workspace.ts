@@ -14,7 +14,11 @@ import {
   type ValidationError,
 } from "@vxture/ruyin-contract-schema";
 import { emitAudit } from "./audit.js";
-import { Harness, type TaskInstanceRecord } from "./harness.js";
+import {
+  Harness,
+  interruptedResumePoint,
+  type TaskInstanceRecord,
+} from "./harness.js";
 import type {
   AuditEvent,
   Binding,
@@ -265,6 +269,8 @@ export class WorkspaceRuntime {
       gateway: this.ports.gateway,
       connectors: this.ports.connectors ?? new Map(),
       ranker: this.ports.ranker,
+      tools: this.ports.tools,
+      isCancelled: this.ports.isCancelled,
     });
   }
 
@@ -277,6 +283,17 @@ export class WorkspaceRuntime {
     const { store } = await this.load(id);
     const raw = await store.listTaskInstances();
     return raw.map((r) => JSON.parse(r) as TaskInstanceRecord);
+  }
+
+  /**
+   * Instances a previous process died holding. Hosts sweep these on startup
+   * and hand each to `Harness.recover` - without it an interrupted task stays
+   * mid-flight forever, and the user sees a task that never finishes and
+   * cannot be restarted.
+   */
+  async listInterruptedTasks(id: string): Promise<TaskInstanceRecord[]> {
+    const instances = await this.listTaskInstances(id);
+    return instances.filter((t) => interruptedResumePoint(t) !== null);
   }
 
   // -------------------------------------------------------------------------

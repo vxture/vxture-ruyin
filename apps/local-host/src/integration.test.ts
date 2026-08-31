@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Phase A milestone integration test (workplan W2):
  *
  *   "The bid example contract is genuinely validated, loaded, and a
@@ -17,6 +17,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import {
   WorkspaceRuntime,
+  pendingCheckpoint,
   verifyAuditChain,
   type RuntimePorts,
 } from "@vxture/ruyin-core";
@@ -25,8 +26,39 @@ import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { loadProducts } from "./products.js";
 import { ProductRegistry } from "./product-registry.js";
 import { createLocalApi } from "./server.js";
+import { TaskRunner } from "./task-runner.js";
+
+interface PolledTask {
+  id: string;
+  state: string;
+  running: boolean;
+  checkpoint?: { kind: string };
+}
+
+/**
+ * Tasks run outside the request that created them, so POST answers
+ * "accepted" rather than "finished". Poll until the runner lets go.
+ */
+async function pollTask(
+  base: string,
+  headers: Record<string, string>,
+  workspaceId: string,
+  taskId: string,
+): Promise<PolledTask> {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const res = await fetch(
+      `${base}/workspaces/${workspaceId}/tasks/${taskId}`,
+      { headers },
+    );
+    const body = (await res.json()) as PolledTask;
+    if (!body.running) return body;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(`task ${taskId} never settled`);
+}
 import { LocalFsConnector } from "./connector-fs.js";
 import { FtsRanker, reindexBinding } from "./fts.js";
+import { LocalToolExecutor } from "./tool-executor.js";
 import { KeyManager } from "./keys.js";
 
 // Compiled test runs from dist/, so ../../../ is the repo root.
@@ -49,6 +81,7 @@ async function makePorts(dataDir: string): Promise<{
       gateway: new MockAIGateway(),
       connectors: new Map([["local-fs", new LocalFsConnector()]]),
       ranker: new FtsRanker(storage),
+      tools: new LocalToolExecutor(),
     },
     storage,
   };
@@ -81,9 +114,10 @@ test("milestone: bid contract loads, workspace created, task runs over SQLite", 
 
     // Run a task to the human checkpoint.
     const harness = await runtime.createHarness(meta.id);
-    const instance = await harness.startTask("analyze_tender", {
+    const created2 = await harness.startTask("analyze_tender", {
       tender_document: { ref: "file://tender.pdf" },
     });
+    const instance = await harness.advance(created2.id);
     assert.equal(instance.state, "waiting_human");
 
     // Simulate a daemon restart: close every handle, then brand-new ports
@@ -94,7 +128,8 @@ test("milestone: bid contract loads, workspace created, task runs over SQLite", 
     const view = await reopened.openWorkspace(meta.id);
     assert.equal(view.meta.name, "投标项目 A");
     const resumed = await reopened.createHarness(meta.id);
-    const done = await resumed.decideCheckpoint(instance.id, true);
+    await resumed.decideCheckpoint(instance.id, true);
+    const done = await resumed.advance(instance.id);
     assert.equal(done.state, "completed");
     assert.ok(done.result?.content["requirement_analysis"]);
 
@@ -117,6 +152,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
   const server = createLocalApi({
     runtime,
     registry: new ProductRegistry(productsDir, dataDir),
+    tasks: new TaskRunner(runtime),
     token,
     version: "test",
     systemInfo: testSystemInfo,
@@ -163,16 +199,22 @@ test("local api: token gate, product listing, workspace + task flow", async () =
         inputs: { tender_document: {} },
       }),
     });
-    assert.equal(task.status, 201);
-    const instance = (await task.json()) as { id: string; state: string };
+    // 202, not 201: the instance is recorded, execution continues in the
+    // background. A real provider takes minutes, so the request cannot wait.
+    assert.equal(task.status, 202);
+    const accepted = (await task.json()) as { id: string; state: string };
+    assert.equal(accepted.state, "created");
+
+    const instance = await pollTask(base, json, meta.id, accepted.id);
     assert.equal(instance.state, "waiting_human");
 
     const decided = await fetch(
       `${base}/workspaces/${meta.id}/tasks/${instance.id}/decision`,
       { method: "POST", headers: json, body: JSON.stringify({ approve: true }) },
     );
-    assert.equal(decided.status, 200);
-    assert.equal(((await decided.json()) as { state: string }).state, "completed");
+    assert.equal(decided.status, 202);
+    const settled = await pollTask(base, json, meta.id, instance.id);
+    assert.equal(settled.state, "completed");
 
     // Human-confirm state transition surfaces as 409 until confirmed.
     for (const to of ["planning", "writing", "review"]) {
@@ -249,15 +291,18 @@ test("selection over real files: grant -> bind (indexes) -> gate -> complete", a
     // Selection path: no inputs. tender_document is high sensitivity =>
     // context_confirm gate BEFORE any capability invocation.
     const harness = await runtime.createHarness(meta.id);
-    const instance = await harness.startTask("analyze_tender");
+    const started = await harness.startTask("analyze_tender");
+    const instance = await harness.advance(started.id);
     assert.equal(instance.state, "waiting_human");
-    assert.equal(instance.checkpoint?.kind, "context_confirm");
+    assert.equal(pendingCheckpoint(instance)?.kind, "context_confirm");
     assert.ok((instance.contextSet?.length ?? 0) >= 1);
     assert.deepEqual(instance.capabilityOutputs, {});
 
-    const afterContext = await harness.decideCheckpoint(instance.id, true);
-    assert.equal(afterContext.checkpoint?.kind, "verification_review");
-    const done = await harness.decideCheckpoint(instance.id, true);
+    await harness.decideCheckpoint(instance.id, true);
+    const afterContext = await harness.advance(instance.id);
+    assert.equal(pendingCheckpoint(afterContext)?.kind, "verification_review");
+    await harness.decideCheckpoint(instance.id, true);
+    const done = await harness.advance(instance.id);
     assert.equal(done.state, "completed");
 
     // Transmission audit carries hashes, not content; chain verifies.
@@ -284,9 +329,11 @@ test("daemon serves the built workspace ui with traversal guard", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-ui-"));
   const uiDir = mkdtempSync(join(tmpdir(), "ruyin-uidist-"));
   const { ports, storage } = await makePorts(dataDir);
+  const uiRuntime = new WorkspaceRuntime(ports);
   const server = createLocalApi({
-    runtime: new WorkspaceRuntime(ports),
+    runtime: uiRuntime,
     registry: new ProductRegistry(join(uiDir, "no-products"), dataDir),
+    tasks: new TaskRunner(uiRuntime),
     token: "t",
     version: "test",
     systemInfo: testSystemInfo,

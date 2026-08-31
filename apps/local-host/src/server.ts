@@ -18,6 +18,7 @@ import {
 } from "@vxture/ruyin-core";
 import { DEV_UI_HTML } from "./dev-ui.js";
 import type { ProductRegistry } from "./product-registry.js";
+import type { TaskRunner } from "./task-runner.js";
 import { installPackage } from "./installer.js";
 import {
   NotSignedInError,
@@ -29,6 +30,8 @@ export interface LocalApiDeps {
   runtime: WorkspaceRuntime;
   /** 受管产品资产（安装 / 启用 / 订阅可用性，30-contract-schema §18）。 */
   registry: ProductRegistry;
+  /** 任务在请求之外推进——真实 provider 每回合十秒到一分钟，不能占住 HTTP。 */
+  tasks: TaskRunner;
   token: string;
   version: string;
   /** Rebuild the FTS index rows for one binding; returns indexed count. */
@@ -449,7 +452,24 @@ async function handle(
       }
     }
 
+    // GET /workspaces/:id/tasks/:tid - poll one instance while it runs
+    if (
+      method === "GET" &&
+      segments.length === 4 &&
+      segments[2] === "tasks"
+    ) {
+      const instances = await deps.runtime.listTaskInstances(wsId);
+      const found = instances.find((t) => t.id === segments[3]);
+      if (!found) {
+        send(res, 404, { error: "task_not_found", task: segments[3] });
+        return;
+      }
+      send(res, 200, { ...found, running: deps.tasks.isRunning(found.id) });
+      return;
+    }
+
     // POST /workspaces/:id/tasks  { task, inputs? }  (inputs absent => selection)
+    // 202: the instance is recorded, execution continues in the background.
     if (method === "POST" && segments.length === 3 && segments[2] === "tasks") {
       const body = await readJson(req);
       const harness = await deps.runtime.createHarness(wsId);
@@ -459,11 +479,26 @@ async function handle(
           ? undefined
           : (body["inputs"] as Record<string, unknown>),
       );
-      send(res, 201, instance);
+      // Claim before answering: start() is synchronous, so the caller can
+      // never poll in the window between "accepted" and "actually running".
+      deps.tasks.start(wsId, instance.id);
+      send(res, 202, instance);
+      return;
+    }
+
+    // POST /workspaces/:id/tasks/:tid/cancel - stop at the next safe point
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[2] === "tasks" &&
+      segments[4] === "cancel"
+    ) {
+      send(res, 202, await deps.tasks.cancel(wsId, segments[3]!));
       return;
     }
 
     // POST /workspaces/:id/tasks/:tid/decision  { approve }
+    // Also 202: an approved task keeps running after the decision is durable.
     if (
       method === "POST" &&
       segments.length === 5 &&
@@ -476,7 +511,8 @@ async function handle(
         segments[3]!,
         body["approve"] === true,
       );
-      send(res, 200, instance);
+      deps.tasks.start(wsId, instance.id);
+      send(res, 202, instance);
       return;
     }
 

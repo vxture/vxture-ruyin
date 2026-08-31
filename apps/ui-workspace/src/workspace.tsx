@@ -39,15 +39,36 @@ import { verifyChain } from "./chain";
 
 type TabId = "overview" | "context" | "tasks" | "audit";
 
+/** Task states that will never change again on their own. */
+const TERMINAL_TASK_STATES = new Set(["completed", "failed", "cancelled"]);
+
 /** Business/task states → tone. Severity mapping is the product's judgment
  *  (DS tone doc): waiting on a human is a warning-grade signal here. */
 function stateTone(state: string): StatusBadgeTone {
   if (state === "completed" || state === "passed") return "success";
   if (state === "failed") return "danger";
   if (state === "waiting_human" || state === "pending_human") return "warning";
-  if (state === "running" || state === "selecting") return "info";
+  // Parked on someone else's outage, not a failure of this task - it will be
+  // picked up again, so it reads as "waiting", not "broken".
+  if (state === "suspended") return "warning";
+  if (state === "running" || state === "selecting" || state === "executing")
+    return "info";
   return "neutral";
 }
+
+/** What the user is actually looking at, in their words. */
+const TASK_STATE_LABEL: Record<string, string> = {
+  created: "待启动",
+  selecting: "选取资料中",
+  executing: "执行中",
+  verifying: "校验中",
+  finalizing: "收尾中",
+  waiting_human: "等待确认",
+  suspended: "已暂停（服务暂时不可用）",
+  completed: "已完成",
+  failed: "已失败",
+  cancelled: "已取消",
+};
 
 export function WorkspacePanel({ api, id }: { api: Api; id: string }) {
   const [tab, setTab] = useState<TabId>("overview");
@@ -80,11 +101,23 @@ export function WorkspacePanel({ api, id }: { api: Api; id: string }) {
     }
   }, [api, id]);
 
+  // Tasks now run outside the request that started them, so the only way to
+  // see progress is to ask. Poll fast while something is actually moving,
+  // slowly when nothing is - a five-second lag on a running task reads as
+  // "nothing happened".
+  const active = useMemo(
+    () =>
+      instances.some(
+        (t) => !TERMINAL_TASK_STATES.has(t.state) && t.state !== "waiting_human",
+      ),
+    [instances],
+  );
+
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => void refresh(), 5000);
+    const timer = setInterval(() => void refresh(), active ? 1000 : 5000);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, active]);
 
   const guard = useCallback(
     async (fn: () => Promise<unknown>) => {
@@ -198,7 +231,9 @@ function OverviewTab({
       {recent.map((t) => (
         <div key={t.id} className="card">
           <b>{t.taskId}</b>{" "}
-          <StatusBadge tone={stateTone(t.state)}>{t.state}</StatusBadge>
+          <StatusBadge tone={stateTone(t.state)}>
+            {TASK_STATE_LABEL[t.state] ?? t.state}
+          </StatusBadge>
           <span className="text-body-sm text-muted-foreground ml-sm">
             {t.updatedAt}
           </span>
@@ -580,7 +615,7 @@ function CheckpointCard({
   instance: TaskInstance;
   onDecide: (approve: boolean) => void;
 }) {
-  const kind = instance.checkpoint?.kind ?? "verification_review";
+  const kind = pendingCheckpoint(instance)?.kind ?? "verification_review";
   return (
     <PanelCard
       tone="warning"
@@ -588,7 +623,9 @@ function CheckpointCard({
       title={
         kind === "context_confirm"
           ? `任务「${instance.taskId}」请求使用以下上下文`
-          : `任务「${instance.taskId}」的成果等待人工评审`
+          : kind === "tool_ask"
+            ? `任务「${instance.taskId}」请求执行一个工具`
+            : `任务「${instance.taskId}」的成果等待人工评审`
       }
       description={
         kind === "context_confirm"
