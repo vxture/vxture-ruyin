@@ -35,8 +35,10 @@ import type {
   Binding,
   ClockPort,
   ConnectorPort,
+  ContextContent,
   ContextItemMeta,
   CryptoPort,
+  FactContent,
   FolderGrant,
   IdPort,
   RankerPort,
@@ -782,7 +784,7 @@ export class Harness {
         context.push({
           type: item.type,
           name: item.name,
-          content: item.content,
+          content: toFactContent(item.content, crypto),
           origin: { kind: "local_file", connector: metaConnector(meta) },
         });
         transmissionItems.push({
@@ -793,7 +795,11 @@ export class Harness {
           // to the provider, which has no business knowing the user''s paths.
           ref: item.ref,
           origin: "local_file",
-          content_hash: `sha256:${crypto.sha256(item.content)}`,
+          // What is leaving, in the terms that decide how much leaves. An
+          // item we could not read has no content hash: hashing the reason
+          // would put a digest of our own sentence in the trail and make it
+          // look like something was transmitted.
+          ...describeForAudit(item.content, crypto),
           bytes: item.bytes,
         });
         await this.journal(instance, "context_read", { item: item.id });
@@ -802,14 +808,19 @@ export class Harness {
       // Manual mode: the caller supplied the context directly.
       const inputs = instance.inputs ?? {};
       transmissionItems = Object.entries(inputs).map(([type, value]) => {
-        const content = typeof value === "string" ? value : JSON.stringify(value);
-        context.push({ type, name: type, content, origin: { kind: "caller" } });
+        const text = typeof value === "string" ? value : JSON.stringify(value);
+        context.push({
+          type,
+          name: type,
+          content: { kind: "text", text },
+          origin: { kind: "caller" },
+        });
         return {
           id: type,
           type,
           source: "caller",
-          content_hash: `sha256:${crypto.sha256(content)}`,
-          bytes: content.length,
+          content_hash: `sha256:${crypto.sha256(text)}`,
+          bytes: text.length,
         };
       });
     }
@@ -1374,4 +1385,79 @@ function jsonArray<T>(raw: string | undefined): T[] {
 /** Connector id an item was discovered through (by source convention). */
 function metaConnector(meta: ContextItemMeta): string {
   return meta.source === "local" ? "local-fs" : meta.source;
+}
+
+/**
+ * Carrier form -> wire form. Bytes become base64 because the turn request is
+ * JSON; nothing else changes shape.
+ *
+ * `unavailable` crosses the wire as itself. The runtime does not substitute a
+ * sentence for the missing material and does not drop the item silently: the
+ * provider has to know an input it asked for is not there, or it will reason
+ * as though it had been given everything.
+ *
+ * Turning an unreadable format into text is not attempted here. That is a
+ * model capability the product supplies (ADR-008); a parser in the framework
+ * would also be the framework deciding what the material *says*.
+ */
+function toFactContent(content: ContextContent, crypto: CryptoPort): FactContent {
+  switch (content.kind) {
+    case "text":
+      return content.truncated
+        ? { kind: "text", text: content.text, truncated: true }
+        : { kind: "text", text: content.text };
+    case "binary":
+      return {
+        kind: "binary",
+        mediaType: content.mediaType,
+        base64: crypto.base64(content.bytes),
+        bytes: content.bytes.byteLength,
+      };
+    case "unavailable":
+      return content.mediaType
+        ? {
+            kind: "unavailable",
+            reason: content.reason,
+            mediaType: content.mediaType,
+          }
+        : { kind: "unavailable", reason: content.reason };
+  }
+}
+
+/**
+ * What the audit records about one item's content.
+ *
+ * The volume and the kind of what leaves, in the terms a person would use to
+ * judge it: a whole scanned PDF and a paragraph of notes are not the same
+ * event even when both are "one context item" (see TD-018).
+ */
+function describeForAudit(
+  content: ContextContent,
+  crypto: CryptoPort,
+): Record<string, unknown> {
+  switch (content.kind) {
+    case "text":
+      return {
+        content_kind: "text",
+        content_hash: `sha256:${crypto.sha256(content.text)}`,
+        ...(content.truncated ? { truncated: true } : {}),
+      };
+    case "binary":
+      return {
+        content_kind: "binary",
+        media_type: content.mediaType,
+        // Hashed over the real bytes - a hash of a stand-in string would be a
+        // digest of our own words presented as a record of the user's file.
+        content_hash: `sha256:${crypto.sha256(content.bytes)}`,
+        transmitted_bytes: content.bytes.byteLength,
+      };
+    case "unavailable":
+      // No content_hash on purpose: there is no content. A hash here would
+      // read as "something was sent".
+      return {
+        content_kind: "unavailable",
+        reason: content.reason,
+        ...(content.mediaType ? { media_type: content.mediaType } : {}),
+      };
+  }
 }

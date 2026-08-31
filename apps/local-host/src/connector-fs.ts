@@ -4,8 +4,15 @@
  *
  * Grant containment is validated by the kernel when a binding is created and
  * revalidated at selection time; this connector additionally never walks
- * outside the binding root it is given. Text content only in this phase;
- * binary files surface as metadata-only items with a placeholder body.
+ * outside the binding root it is given.
+ *
+ * On content: this connector reports what a file **is**, and never invents a
+ * body for one it cannot read as text. A recognized non-text format is carried
+ * as bytes with its media type; anything else - unknown format, oversized,
+ * unreadable - comes back `unavailable` with the reason. No parsing happens
+ * here: turning a PDF into text is a model capability the product supplies
+ * (ADR-008, TD-018), and a parser in the connector would also be this layer
+ * deciding what the material says.
  */
 
 import { createHash } from "node:crypto";
@@ -21,12 +28,54 @@ import type {
 const TEXT_EXTENSIONS = new Set([
   ".txt", ".md", ".markdown", ".yaml", ".yml", ".json", ".csv", ".xml", ".html",
 ]);
+
+/**
+ * Formats carried as bytes. Deliberately short: this is a **carrier** table,
+ * not a support matrix. An entry here says "these bytes have a name", nothing
+ * about whether anything downstream can read them - the provider answers that,
+ * and answers it honestly, which a placeholder body would have prevented.
+ */
+const BINARY_MEDIA_TYPES = new Map<string, string>([
+  [".pdf", "application/pdf"],
+  [".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  [".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  [".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+  [".doc", "application/msword"],
+  [".xls", "application/vnd.ms-excel"],
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".webp", "image/webp"],
+]);
+
 const MAX_DEPTH = 4;
 const MAX_FILES = 500;
 const MAX_CONTENT_BYTES = 256_000;
+/**
+ * Cap on bytes carried for one non-text item. Larger than the text cap because
+ * a document format spends bytes on structure, but still a cap: an oversized
+ * file is reported as such, never silently cut. Truncated bytes are not a
+ * smaller document - they are a corrupt one, and a reader cannot tell.
+ */
+const MAX_BINARY_BYTES = 20_000_000;
 
 function itemId(absPath: string): string {
   return `itm_${createHash("sha256").update(absPath).digest("hex").slice(0, 16)}`;
+}
+
+function unavailable(
+  item: ContextItemMeta,
+  reason: string,
+  mediaType?: string,
+): ContextItem {
+  return {
+    ...item,
+    content: { kind: "unavailable", reason, ...(mediaType ? { mediaType } : {}) },
+  };
+}
+
+function describe(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 export class LocalFsConnector implements ConnectorPort {
@@ -67,18 +116,54 @@ export class LocalFsConnector implements ConnectorPort {
   }
 
   async read(item: ContextItemMeta): Promise<ContextItem> {
-    if (!TEXT_EXTENSIONS.has(extname(item.ref).toLowerCase())) {
+    const ext = extname(item.ref).toLowerCase();
+
+    if (TEXT_EXTENSIONS.has(ext)) {
+      let buffer: Buffer;
+      try {
+        buffer = readFileSync(item.ref);
+      } catch (cause) {
+        return unavailable(item, `unreadable: ${describe(cause)}`);
+      }
+      const truncated = buffer.byteLength > MAX_CONTENT_BYTES;
+      // Truncation is reported as a fact, not appended as a sentence: a note
+      // inside the body is indistinguishable from something the document says.
       return {
         ...item,
-        content: `[binary or unsupported file type: ${item.name}]`,
+        content: {
+          kind: "text",
+          text: buffer.subarray(0, MAX_CONTENT_BYTES).toString("utf8"),
+          ...(truncated ? { truncated: true } : {}),
+        },
       };
     }
-    const buffer = readFileSync(item.ref);
-    const truncated = buffer.byteLength > MAX_CONTENT_BYTES;
-    const content = buffer.subarray(0, MAX_CONTENT_BYTES).toString("utf8");
-    return {
-      ...item,
-      content: truncated ? `${content}\n[truncated at ${MAX_CONTENT_BYTES} bytes]` : content,
-    };
+
+    const mediaType = BINARY_MEDIA_TYPES.get(ext);
+    if (!mediaType) {
+      return unavailable(item, `unrecognized file type "${ext || "(none)"}"`);
+    }
+    // Sized here, not from the meta: that size was taken at discovery, and a
+    // file that grew since would walk straight past a check made against the
+    // old number.
+    let size: number;
+    try {
+      size = statSync(item.ref).size;
+    } catch (cause) {
+      return unavailable(item, `unreadable: ${describe(cause)}`, mediaType);
+    }
+    if (size > MAX_BINARY_BYTES) {
+      return unavailable(
+        item,
+        `exceeds the ${MAX_BINARY_BYTES}-byte limit for carried files (${size} bytes)`,
+        mediaType,
+      );
+    }
+    let bytes: Buffer;
+    try {
+      bytes = readFileSync(item.ref);
+    } catch (cause) {
+      return unavailable(item, `unreadable: ${describe(cause)}`, mediaType);
+    }
+    return { ...item, content: { kind: "binary", mediaType, bytes } };
   }
 }

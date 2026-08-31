@@ -28,8 +28,11 @@ export const nodeId: IdPort = {
 };
 
 export const nodeCrypto: CryptoPort = {
-  sha256: (input: string) =>
-    createHash("sha256").update(input, "utf8").digest("hex"),
+  sha256: (input: string | Uint8Array) =>
+    createHash("sha256")
+      .update(typeof input === "string" ? Buffer.from(input, "utf8") : input)
+      .digest("hex"),
+  base64: (input: Uint8Array) => Buffer.from(input).toString("base64"),
 };
 
 /**

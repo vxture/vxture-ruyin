@@ -35,8 +35,14 @@ export interface IdPort {
 }
 
 export interface CryptoPort {
-  /** Hex-encoded SHA-256 of the input string. */
-  sha256(input: string): string;
+  /**
+   * Hex-encoded SHA-256. Takes bytes as well as text because context is not
+   * always text: hashing a stand-in string for a file we could not read would
+   * put a hash of our own words in the audit trail.
+   */
+  sha256(input: string | Uint8Array): string;
+  /** Base64 of raw bytes - hosts own the encoder (Buffer / btoa). */
+  base64(input: Uint8Array): string;
 }
 
 /** A tool the provider asked the runtime to run. */
@@ -81,10 +87,43 @@ export type ContentOrigin =
   | { kind: "caller" }
   | { kind: "tool_result"; tool: string };
 
+/**
+ * What a context item actually holds.
+ *
+ * A union rather than a string because **not everything a user points at is
+ * text**, and the two ways of pretending otherwise both corrupt the material:
+ * substituting a stand-in sentence hands the model something shaped exactly
+ * like content that isn't, and decoding bytes as UTF-8 hands it mojibake. A
+ * reader cannot tell either one from the real thing.
+ *
+ * `unavailable` is therefore a first-class answer. "We could not read this"
+ * is information; a sentence saying so, sitting where the document should be,
+ * is not.
+ *
+ * Which formats a runtime can actually carry is a separate question from
+ * whether the carrier can express them - this is the carrier. Turning a PDF
+ * into text is a model capability, supplied by the product's own surface
+ * (ADR-008); no parser belongs here.
+ */
+export type ContextContent =
+  | { kind: "text"; text: string; truncated?: boolean }
+  | { kind: "binary"; mediaType: string; bytes: Uint8Array }
+  | { kind: "unavailable"; reason: string; mediaType?: string };
+
+/**
+ * The wire form of the above: identical, except bytes travel base64-encoded
+ * because the turn request is JSON. Kept as a separate type so the encoding
+ * boundary is visible rather than implied.
+ */
+export type FactContent =
+  | { kind: "text"; text: string; truncated?: boolean }
+  | { kind: "binary"; mediaType: string; base64: string; bytes: number }
+  | { kind: "unavailable"; reason: string; mediaType?: string };
+
 export interface ContextFact {
   type: string;
   name: string;
-  content: string;
+  content: FactContent;
   origin: ContentOrigin;
 }
 
@@ -206,7 +245,7 @@ export interface ContextItemMeta {
 }
 
 export interface ContextItem extends ContextItemMeta {
-  content: string;
+  content: ContextContent;
 }
 
 /** Context source access (04 section 4). */
