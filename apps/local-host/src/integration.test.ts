@@ -183,6 +183,18 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     const sysInfo = (await system.json()) as { keyProtection: string };
     assert.ok(["dpapi", "plaintext"].includes(sysInfo.keyProtection));
 
+    // 契约拉取未配置能力面时必须如实回答 503（ADR-012）。「没接通」看起来像
+    // 「拉过了、无事发生」是最坏的一种沉默。
+    const noBase = await fetch(`${base}/products/vxture.bid/fetch`, {
+      method: "POST",
+      headers: json,
+    });
+    assert.equal(noBase.status, 503);
+    assert.equal(
+      ((await noBase.json()) as { error: string }).error,
+      "capability_base_not_configured",
+    );
+
     const created = await fetch(`${base}/projects`, {
       method: "POST",
       headers: json,

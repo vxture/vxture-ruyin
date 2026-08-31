@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json && node --test dist/integration.test.js dist/platform.test.js dist/product-registry.test.js dist/pkg.test.js dist/installer.test.js dist/capability-client.test.js",
+    "test": "tsc -p tsconfig.json && node --test \"dist/**/*.test.js\"",
     "start": "node dist/main.js"
   },
   "dependencies": {

@@ -24,6 +24,7 @@ import { join } from "node:path";
 import type { RuyinContract } from "@vxture/ruyin-contract-schema";
 import { loadProducts, type LoadedProduct, type ProductScan } from "./products.js";
 import { compareVersions, listStored } from "./installer.js";
+import { sourceOf } from "./contract-fetch.js";
 
 /** 平台订阅对某产品的判定；null = 未知（未登录 / 订阅面未接通）。 */
 export type Entitled = boolean | null;
@@ -42,8 +43,14 @@ export interface ProductView {
   reason?: string;
   /** 库中并存的全部版本（§18.4 保留旧版本用于回滚）；内置产品为单版本。 */
   versions: string[];
-  /** true = 来自受管产品库（.ruyinpkg 安装）；false = 内置/开发目录。 */
+  /** true = 来自受管产品库（拉取或安装）；false = 内置/开发目录。 */
   managed: boolean;
+  /**
+   * 当前生效版本是怎么来的（ADR-012 两级供给）。两级都落在同一个库里，但
+   * 「拉了一份契约」与「装了一个含本地技能的包」在信任上不是一回事，界面与
+   * 审计都需要分得开。
+   */
+  supply: "contract_fetch" | "package" | "builtin";
 }
 
 /** 解析某产品的订阅状态。抛错或返回 null 一律按「未知」处理。 */
@@ -210,6 +217,21 @@ export class ProductRegistry {
     return this.entitlements.has(id) ? this.entitlements.get(id)! : null;
   }
 
+  /**
+   * 生效版本的来源。拉取的版本目录里带 .source.json；库里没有这个标记的一律是
+   * .ruyinpkg 装的——**没有标记就当成包**是刻意的保守方向：把包错报成「只是一份
+   * 契约」会让人以为没有本地可执行内容，反过来错报不会造成这种误判。
+   */
+  private supplyOf(
+    id: string,
+    version: string,
+    inStore: boolean,
+  ): ProductView["supply"] {
+    if (!inStore) return "builtin";
+    const src = sourceOf(join(this.storeDir, id, version));
+    return src?.origin === "contract_fetch" ? "contract_fetch" : "package";
+  }
+
   list(): ProductView[] {
     return this.scan.loaded.map((p) => {
       const enabled = !this.disabled.has(p.id);
@@ -227,6 +249,7 @@ export class ProductRegistry {
         ...(reason ? { reason } : {}),
         versions: versions ?? [p.version],
         managed: versions !== undefined,
+        supply: this.supplyOf(p.id, p.version, versions !== undefined),
       };
     });
   }
