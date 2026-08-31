@@ -43,7 +43,11 @@ function makePorts(): RuntimePorts {
     clock: { now: () => new Date().toISOString(), sleep: async () => {} },
     id: { newId: (prefix) => `${prefix}_${(++seq).toString().padStart(4, "0")}_${randomUUID().slice(0, 8)}` },
     crypto: {
-      sha256: (input) => createHash("sha256").update(input, "utf8").digest("hex"),
+      sha256: (input) =>
+        createHash("sha256")
+          .update(typeof input === "string" ? Buffer.from(input, "utf8") : input)
+          .digest("hex"),
+      base64: (input) => Buffer.from(input).toString("base64"),
     },
     gateway: {
       // Echoes the conversation length so tests can assert that capability N
@@ -869,7 +873,7 @@ async function bindTender(
       name: "tender-v2.md",
       bytes: 2048,
       modifiedAt: "2026-07-20T00:00:00Z",
-      content: "智慧水务项目招标：技术要求37条……",
+      content: { kind: "text", text: "智慧水务项目招标：技术要求37条……" },
     },
     {
       id: "itm_tender_v1",
@@ -878,7 +882,7 @@ async function bindTender(
       name: "tender-v1.md",
       bytes: 1024,
       modifiedAt: "2026-07-01T00:00:00Z",
-      content: "旧版招标草案",
+      content: { kind: "text", text: "旧版招标草案" },
     },
   ]);
   // Binding validation rejects roots outside grants first.
@@ -950,6 +954,118 @@ test("discoverContext previews bound items; empty without a binding", async () =
   const items = await runtime.discoverContext(meta.id, "tender_document");
   assert.equal(items.length, 2);
   assert.ok(items.every((i) => i.type === "tender_document"));
+});
+
+/**
+ * 上下文承载面（M3）。钉的是同一件事的两面：**非文本不得被换成一句话**。
+ *
+ * 旧行为把「[binary or unsupported file type: X]」当作内容送进上下文——模型收到
+ * 的东西形状和文件内容一模一样，分辨不出来；审计里的 content_hash 哈希的还是这
+ * 句我们自己编的话。以下用例把这条路堵死。
+ */
+test("上下文承载：二进制以字节 + 媒体类型过线，不被降级成文本", async () => {
+  const { ports, runtime, connector } = makeSelectionFixture();
+  const seen: CapabilityTurnRequest[] = [];
+  ports.gateway = {
+    turn: async (req) => {
+      seen.push(req);
+      return { kind: "content", content: "ok" };
+    },
+  };
+  const meta = await runtime.createProject(bidContract, "ws");
+  await runtime.addGrant(meta.id, "/granted/tenders");
+  const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x00, 0xff, 0xfe]);
+  connector.register("/granted/tenders", [
+    {
+      id: "itm_pdf",
+      type: "tender_document",
+      ref: "/granted/tenders/t.pdf",
+      name: "t.pdf",
+      bytes: bytes.byteLength,
+      modifiedAt: "2026-07-20T00:00:00Z",
+      content: { kind: "binary", mediaType: "application/pdf", bytes },
+    },
+  ]);
+  await runtime.setBinding(meta.id, {
+    type: "tender_document",
+    root: "/granted/tenders",
+    connector: "memory",
+  });
+  const harness = await runtime.createHarness(meta.id);
+  const instance = await runTask(harness, "analyze_tender");
+  await decide(harness, instance.id, true);
+
+  const fact = seen[0]?.context[0];
+  assert.equal(fact?.content.kind, "binary");
+  assert.equal(
+    fact?.content.kind === "binary" && fact.content.mediaType,
+    "application/pdf",
+  );
+  // 字节真的过去了，且原样可还原 —— 不是被 UTF-8 解出来的乱码。
+  assert.deepEqual(
+    fact?.content.kind === "binary"
+      ? new Uint8Array(Buffer.from(fact.content.base64, "base64"))
+      : undefined,
+    bytes,
+  );
+
+  // 审计按真实字节算哈希，并记下媒体类型与外发量级（TD-018 的可见性要求）。
+  const events = await runtime.listAuditEvents(meta.id);
+  const tx = events.find((e) => e.kind === "transmission.inference");
+  const recorded = (tx?.payload as { context_items: Array<Record<string, unknown>> })
+    .context_items[0];
+  assert.equal(recorded?.["content_kind"], "binary");
+  assert.equal(recorded?.["media_type"], "application/pdf");
+  assert.equal(recorded?.["transmitted_bytes"], bytes.byteLength);
+  assert.equal(
+    recorded?.["content_hash"],
+    `sha256:${ports.crypto.sha256(bytes)}`,
+  );
+});
+
+test("上下文承载：读不了的资料如实标 unavailable，既不编内容也不悄悄丢掉", async () => {
+  const { ports, runtime, connector } = makeSelectionFixture();
+  const seen: CapabilityTurnRequest[] = [];
+  ports.gateway = {
+    turn: async (req) => {
+      seen.push(req);
+      return { kind: "content", content: "ok" };
+    },
+  };
+  const meta = await runtime.createProject(bidContract, "ws");
+  await runtime.addGrant(meta.id, "/granted/tenders");
+  connector.register("/granted/tenders", [
+    {
+      id: "itm_scan",
+      type: "tender_document",
+      ref: "/granted/tenders/scan.tif",
+      name: "scan.tif",
+      bytes: 900,
+      modifiedAt: "2026-07-20T00:00:00Z",
+      content: { kind: "unavailable", reason: 'unrecognized file type ".tif"' },
+    },
+  ]);
+  await runtime.setBinding(meta.id, {
+    type: "tender_document",
+    root: "/granted/tenders",
+    connector: "memory",
+  });
+  const harness = await runtime.createHarness(meta.id);
+  const instance = await runTask(harness, "analyze_tender");
+  await decide(harness, instance.id, true);
+
+  // 必须过线：静默丢掉会让提供方以为资料齐了，照样往下推理。
+  const fact = seen[0]?.context[0];
+  assert.equal(fact?.name, "scan.tif");
+  assert.equal(fact?.content.kind, "unavailable");
+
+  const events = await runtime.listAuditEvents(meta.id);
+  const tx = events.find((e) => e.kind === "transmission.inference");
+  const recorded = (tx?.payload as { context_items: Array<Record<string, unknown>> })
+    .context_items[0];
+  assert.equal(recorded?.["content_kind"], "unavailable");
+  // 没有内容就没有内容哈希：给理由算个哈希会让审计看起来像「发过东西」。
+  assert.equal(recorded?.["content_hash"], undefined);
 });
 
 test("selection pipeline: required type without binding fails startability", async () => {

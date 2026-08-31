@@ -24,7 +24,16 @@ export async function reindexBinding(
   const rows = [];
   for (const meta of metas) {
     const item = await connector.read(meta);
-    rows.push({ id: item.id, name: item.name, content: item.content });
+    // Only text has words to match. Non-text items stay in the index by name
+    // so they remain findable and selectable - dropping them would quietly
+    // remove the user's file from consideration. What must NOT go in is a
+    // stand-in body: indexing "unrecognized file type" made every such file
+    // match a search for those words.
+    rows.push({
+      id: item.id,
+      name: item.name,
+      content: item.content.kind === "text" ? item.content.text : "",
+    });
   }
   store.replaceIndexForType(binding.type, rows);
   return rows.length;

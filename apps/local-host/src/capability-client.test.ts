@@ -26,7 +26,7 @@ function request(): CapabilityTurnRequest {
       {
         type: "tender_document",
         name: "t.pdf",
-        content: "...",
+        content: { kind: "text", text: "..." },
         origin: { kind: "local_file", connector: "local-fs" },
       },
     ],
@@ -190,7 +190,9 @@ test("resolver: facts travel structured; the runtime writes no prompt", async ()
         {
           type: "tender_document",
           name: "t.pdf",
-          content: "...",
+          // Content is a tagged union, not a bare string: the provider has to
+          // be able to tell text from bytes from "we could not read this".
+          content: { kind: "text", text: "..." },
           origin: { kind: "local_file", connector: "local-fs" },
         },
       ]);
