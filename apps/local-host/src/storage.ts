@@ -10,7 +10,7 @@
  */
 
 import Database from "better-sqlite3-multiple-ciphers";
-import { mkdirSync, existsSync, readdirSync, renameSync } from "node:fs";
+import { mkdirSync, existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { KeyManager } from "./keys.js";
@@ -36,6 +36,15 @@ const PROJECT_DB = "project.db";
  *
  * Refuses to act if the new directory already exists: a half-finished move is
  * worse than an unmoved one, and there is no safe way to merge the two.
+ *
+ * **The `-wal` file must travel with its database.** In WAL mode a committed
+ * transaction lives in `<db>-wal` until a checkpoint folds it back; SQLite
+ * finds that file by the database's name. Renaming the database alone leaves
+ * the WAL orphaned under the old name, and everything still in it is silently
+ * gone - the database opens perfectly well, just missing its most recent
+ * writes. `-shm` is the opposite case: pure shared-memory index, rebuilt on
+ * demand, and a stale one is worse than none, so it is removed rather than
+ * carried.
  */
 function migrateWorkspaceDirs(dataDir: string): void {
   const from = join(dataDir, "workspaces");
@@ -44,8 +53,13 @@ function migrateWorkspaceDirs(dataDir: string): void {
   renameSync(from, to);
   for (const entry of readdirSync(to, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    const oldDb = join(to, entry.name, "workspace.db");
-    if (existsSync(oldDb)) renameSync(oldDb, join(to, entry.name, PROJECT_DB));
+    const dir = join(to, entry.name);
+    const oldDb = join(dir, "workspace.db");
+    if (!existsSync(oldDb)) continue;
+    renameSync(oldDb, join(dir, PROJECT_DB));
+    const oldWal = `${oldDb}-wal`;
+    if (existsSync(oldWal)) renameSync(oldWal, `${join(dir, PROJECT_DB)}-wal`);
+    rmSync(`${oldDb}-shm`, { force: true });
   }
   console.log(`[ruyin] migrated ${from} -> ${to} (ids unchanged)`);
 }
