@@ -25,10 +25,68 @@ import {
 import {
   Api,
   type EntitlementsBatch,
+  type InstalledPackage,
   type ProductInfo,
   type SessionInfo,
   type ProjectMeta,
 } from "./api";
+
+/**
+ * 装一个 .ruyinpkg（§18.2）。
+ *
+ * 用 file input 而不是壳里的原生对话框：**同一个页面在浏览器和壳里都要能用**
+ * （Local Web 访问模式从第一天起就成立）。壳里 file input 一样弹系统选择框，
+ * 少一条只有壳能走的路。
+ */
+function InstallPackageRow({
+  api,
+  onDone,
+  onError,
+}: {
+  api: Api;
+  onDone: () => void | Promise<void>;
+  onError: (msg: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<InstalledPackage | null>(null);
+  return (
+    <div className="flex flex-col gap-xs">
+      <label className="row">
+        <input
+          type="file"
+          accept=".ruyinpkg"
+          disabled={busy}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            // 选完就清掉输入框：同一个文件连选两次也要能触发。
+            e.target.value = "";
+            if (!file) return;
+            setBusy(true);
+            setDone(null);
+            void api
+              .installPackage(file)
+              .then(async (r) => {
+                setDone(r);
+                await onDone();
+              })
+              .catch((err: Error) => onError(err.message))
+              .finally(() => setBusy(false));
+          }}
+        />
+      </label>
+      {busy && (
+        <span className="text-body-sm text-muted-foreground">正在安装……</span>
+      )}
+      {done && (
+        <span className="text-body-sm text-muted-foreground">
+          已安装 {done.productId}@{done.version}
+          {/* 签没签名要照实说：未签名的包是另一回事，不该和签过的长一个样。 */}
+          {done.signed ? "（已副署）" : "（未签名）"}
+        </span>
+      )}
+    </div>
+  );
+}
 
 const BLURBS: Record<string, string> = {
   "vxture.bid": "招标解析 · 需求矩阵 · 方案生成 · 覆盖校验",
@@ -213,6 +271,7 @@ export function HomePage({
             </div>
           </>
         )}
+        <InstallPackageRow api={api} onDone={onRefresh} onError={onError} />
       </Section>
 
       {/* §18.5：退订/停用的产品不可打开，但仍列出——本地数据可访问、可导出。 */}

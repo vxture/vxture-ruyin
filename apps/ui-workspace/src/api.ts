@@ -49,6 +49,13 @@ export interface ProductInfo {
   supply: "contract_fetch" | "package" | "builtin";
 }
 
+/** 一次安装的结果。`signed` 要照实说 —— 未签名的包是另一回事。 */
+export interface InstalledPackage {
+  productId: string;
+  version: string;
+  signed: boolean;
+}
+
 export interface ProjectMeta {
   id: string;
   productId: string;
@@ -361,6 +368,26 @@ export class Api {
     return data;
   }
 
+  /**
+   * 安装一个 .ruyinpkg（§18.2）。请求体就是包字节。
+   *
+   * 走 file input 而不是原生对话框：**同一个页面在浏览器和壳里都要能用**
+   * （Local Web 访问模式是从第一天起就成立的约束）。壳里 file input 一样弹
+   * 系统选择框，少一条只有壳能走的路。
+   */
+  installPackage = async (file: File): Promise<InstalledPackage> => {
+    const res = await fetch("/products/install", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${this.token}`,
+        "content-type": "application/octet-stream",
+      },
+      body: await file.arrayBuffer(),
+    });
+    const data = (await res.json()) as InstalledPackage;
+    if (!res.ok) throw new ApiError(res.status, data as ApiError["body"]);
+    return data;
+  };
   pending = () => this.call<PendingConfirmation[]>("/pending");
   /** 立刻拉一次订阅（D5：用户付完款回到应用的那一刻）。 */
   refreshEntitlements = () =>
