@@ -18,6 +18,7 @@ import type { AddressInfo } from "node:net";
 import {
   ProjectRuntime,
   pendingCheckpoint,
+  toAuditView,
   verifyAuditChain,
   type RuntimePorts,
 } from "@vxture/ruyin-core";
@@ -375,7 +376,7 @@ test("selection over real files: grant -> bind (indexes) -> gate -> complete", a
 
     // Transmission audit carries hashes, not content; chain verifies.
     const events = await runtime.listAuditEvents(meta.id);
-    const tx = events.find((e) => e.kind === "transmission.inference");
+    const tx = events.map(toAuditView).find((e) => e.action === "transmission.inference");
     assert.ok(tx);
     const payload = tx.payload as {
       context_items: Array<{ content_hash: string }>;

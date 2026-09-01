@@ -1,5 +1,13 @@
 ﻿export * from "./ports.js";
-export { emitAudit, genesisHash, verifyAuditChain } from "./audit.js";
+export {
+  emitAudit,
+  genesisHash,
+  isLegacyAuditEvent,
+  toAuditView,
+  verifyAuditChain,
+  OUTCOME_MUST_BE_STATED,
+  RUNTIME_ACTOR,
+} from "./audit.js";
 export type { AuditInput } from "./audit.js";
 export {
   Harness,

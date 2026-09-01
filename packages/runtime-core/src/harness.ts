@@ -26,7 +26,11 @@
  */
 
 import type { RuyinContract, TaskDefinition } from "@vxture/ruyin-contract-schema";
-import { emitAudit } from "./audit.js";
+import {
+  emitAudit,
+  OUTCOME_MUST_BE_STATED,
+  RUNTIME_ACTOR,
+} from "./audit.js";
 import { TransientError } from "./ports.js";
 import { isPathGranted } from "./project.js";
 import { decideTool, validateToolCall } from "./tool-gate.js";
@@ -35,6 +39,7 @@ import type {
   Binding,
   ClockPort,
   ConnectorPort,
+  AuditOutcome,
   ContextContent,
   ContextItemMeta,
   CryptoPort,
@@ -443,11 +448,13 @@ export class Harness {
       } catch (cause) {
         if (!(cause instanceof TransientError)) throw cause;
         lastError = cause;
-        await this.audit(instance, "capability.retry", {
-          capability: request.capability,
-          attempt,
-          reason: cause.message,
-        });
+        await this.audit(
+          instance,
+          "capability.retry",
+          { capability: request.capability, attempt, reason: cause.message },
+          // 记的是「上一次没成」这个事实。
+          "failed",
+        );
         if (attempt < MAX_TRANSIENT_ATTEMPTS) {
           await this.deps.clock.sleep(BASE_BACKOFF_MS * 2 ** (attempt - 1));
         }
@@ -637,12 +644,18 @@ export class Harness {
     };
     const approve = input.choice !== "reject";
 
-    await this.audit(instance, "checkpoint.decided", {
-      checkpoint: target.id,
-      kind: target.kind,
-      choice: input.choice,
-      by: target.decision.by,
-    });
+    await this.audit(
+      instance,
+      "checkpoint.decided",
+      {
+        checkpoint: target.id,
+        kind: target.kind,
+        choice: input.choice,
+        by: target.decision.by,
+      },
+      // 人拒绝了就是 rejected。记成 success，审计就把每一次否决都写成了通过。
+      input.choice === "reject" ? "rejected" : "success",
+    );
 
     // Another question is still open - stay put until every one is answered.
     if (instance.checkpoints.some((c) => !c.decision)) {
@@ -1038,12 +1051,12 @@ export class Harness {
           content: reason,
           isError: true,
         });
-        await this.audit(instance, "tool.decision", {
-          tool: call.tool,
-          decision: "deny",
-          source: kind,
-          reason,
-        });
+        await this.audit(
+          instance,
+          "tool.decision",
+          { tool: call.tool, decision: "deny", source: kind, reason },
+          "rejected",
+        );
       };
 
       await this.audit(instance, "tool.requested", {
@@ -1090,11 +1103,13 @@ export class Harness {
         continue;
       }
 
-      await this.audit(instance, "tool.decision", {
-        tool: tool.id,
-        decision: decision.value,
-        source: decision.source,
-      });
+      await this.audit(
+        instance,
+        "tool.decision",
+        { tool: tool.id, decision: decision.value, source: decision.source },
+        // 这一支是「闸门放行或转人工确认」——都不是拒绝。deny 走上面那条。
+        "success",
+      );
       if (decision.value === "allow") allowed.push(call);
       else needsApproval.push(call);
     }
@@ -1129,10 +1144,13 @@ export class Harness {
         };
       }
       await this.journal(instance, "tool.done", { tool: call.tool, callId: call.id });
-      await this.audit(instance, "tool.executed", {
-        tool: call.tool,
-        outcome: result.isError ? "error" : "success",
-      });
+      await this.audit(
+        instance,
+        "tool.executed",
+        { tool: call.tool },
+        // 工具报错是 failed，不是 rejected —— 没有谁拒绝它，是它自己没做成。
+        result.isError ? "failed" : "success",
+      );
       out.push({
         role: "tool",
         callId: call.id,
@@ -1179,11 +1197,21 @@ export class Harness {
 
       instance.verification.push(outcome);
       await this.persist(instance);
-      await this.audit(instance, "verification.result", {
-        rule: rule.id,
-        status: outcome.status,
-        ...(outcome.feedback ? { feedback: outcome.feedback } : {}),
-      });
+      await this.audit(
+        instance,
+        "verification.result",
+        {
+          rule: rule.id,
+          status: outcome.status,
+          ...(outcome.feedback ? { feedback: outcome.feedback } : {}),
+        },
+        // 没过就是没过。pending_human 尚无结论，记 unknown 而不是替人先判一个。
+        outcome.status === "passed"
+          ? "success"
+          : outcome.status === "failed"
+            ? "rejected"
+            : "unknown",
+      );
 
       // Fail fast: a failed rule ends this pass, no point paying for the rest.
       if (outcome.status === "failed") break;
@@ -1322,7 +1350,7 @@ export class Harness {
   ): Promise<TaskInstanceRecord> {
     instance.error = reason;
     await this.transition(instance, "failed");
-    await this.audit(instance, "task.failed", { reason });
+    await this.audit(instance, "task.failed", { reason }, "failed");
     return instance;
   }
 
@@ -1357,11 +1385,21 @@ export class Harness {
     });
   }
 
+  /**
+   * 记一条审计。`outcome` 对结果不定的事件是必填的（见 OUTCOME_MUST_BE_STATED）：
+   * 缺省成 success 会让每一次拒绝都被记成通过。
+   */
   private audit(
     instance: TaskInstanceRecord,
     kind: string,
     payload: unknown,
+    outcome?: AuditOutcome,
   ): Promise<unknown> {
+    if (outcome === undefined && OUTCOME_MUST_BE_STATED.has(kind)) {
+      throw new Error(
+        `audit "${kind}": outcome must be stated - its result is not a foregone conclusion`,
+      );
+    }
     return emitAudit(
       this.deps.store,
       this.deps.crypto,
@@ -1372,6 +1410,8 @@ export class Harness {
         task_instance: instance.id,
         kind,
         actor: "harness",
+        actorId: RUNTIME_ACTOR,
+        outcome: outcome ?? "success",
         payload,
       },
     );
