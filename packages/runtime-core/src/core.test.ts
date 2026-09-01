@@ -27,6 +27,7 @@ import {
   TransientError,
   NoWorkspaceError,
   AlreadyAttributedError,
+  buildProjectExport,
   type Harness,
   type CapabilityTurnRequest,
   type RuntimePorts,
@@ -755,6 +756,155 @@ test("gate: a context_item reference must be in this task's context set", () => 
   assert.match(foreign.ok === false ? foreign.reason : "", /context set/);
 });
 
+test("gate: a parameter's declared type is enforced, not just its presence", () => {
+  const accepted = validateToolCall({
+    tool: bidTool("search_knowledge"),
+    args: { query: "招标", limit: 10 },
+    grants: [],
+    contextSet: [],
+  });
+  assert.equal(accepted.ok, true);
+
+  const wrongType = validateToolCall({
+    tool: bidTool("search_knowledge"),
+    args: { query: "招标", limit: "10" }, // limit 应为 integer，这里给了字符串
+    grants: [],
+    contextSet: [],
+  });
+  assert.equal(wrongType.ok, false);
+  assert.match(
+    wrongType.ok === false ? wrongType.reason : "",
+    /must be integer, got string/,
+  );
+
+  // integer 不只是 number 的别名：3.5 是 number，不是 integer。
+  const notAnInteger = validateToolCall({
+    tool: bidTool("search_knowledge"),
+    args: { query: "招标", limit: 3.5 },
+    grants: [],
+    contextSet: [],
+  });
+  assert.equal(notAnInteger.ok, false);
+});
+
+test("gate: a path array is checked element-by-element, not just its first entry", () => {
+  const grants = [
+    { id: "g1", path: "C:/work", mode: "readwrite" as const, createdAt: "" },
+  ];
+  const empty = validateToolCall({
+    tool: bidTool("export_result"),
+    args: { path: "C:/work/out.docx", format: "docx", sources: [] },
+    grants,
+    contextSet: [],
+  });
+  assert.equal(empty.ok, false);
+  assert.match(empty.ok === false ? empty.reason : "", /is empty/);
+
+  const nonString = validateToolCall({
+    tool: bidTool("export_result"),
+    args: { path: "C:/work/out.docx", format: "docx", sources: ["C:/work/a.md", 42] },
+    grants,
+    contextSet: [],
+  });
+  assert.equal(nonString.ok, false);
+  assert.match(nonString.ok === false ? nonString.reason : "", /must be a path string/);
+
+  // 第二条在授权外：注释里写着「只查第一条，剩下的就是没查」——这条用例钉的
+  // 正是这句话，不是它旁边随便一句形容。
+  const secondOutside = validateToolCall({
+    tool: bidTool("export_result"),
+    args: {
+      path: "C:/work/out.docx",
+      format: "docx",
+      sources: ["C:/work/a.md", "C:/elsewhere/b.md"],
+    },
+    grants,
+    contextSet: [],
+  });
+  assert.equal(secondOutside.ok, false);
+  assert.match(
+    secondOutside.ok === false ? secondOutside.reason : "",
+    /granted folder/,
+  );
+});
+
+function syntheticTool(properties: Record<string, Record<string, unknown>>): Tool {
+  return {
+    id: "synthetic_probe",
+    category: "local_read",
+    risk: "low",
+    default: "allow",
+    input_schema: { type: "object", properties },
+  };
+}
+
+test("gate: matchesType covers boolean/array/object too, not only the string/path cases bid happens to use", () => {
+  const tool = syntheticTool({
+    active: { type: "boolean" },
+    tags: { type: "array" },
+    meta: { type: "object" },
+    weird: { type: "null" },
+    score: { type: "number" },
+  });
+
+  assert.equal(
+    validateToolCall({ tool, args: { score: 3.5 }, grants: [], contextSet: [] }).ok,
+    true,
+  );
+  assert.equal(
+    validateToolCall({ tool, args: { score: "3.5" }, grants: [], contextSet: [] }).ok,
+    false,
+  );
+
+  assert.equal(
+    validateToolCall({ tool, args: { active: true }, grants: [], contextSet: [] }).ok,
+    true,
+  );
+  const badBoolean = validateToolCall({
+    tool,
+    args: { active: "yes" },
+    grants: [],
+    contextSet: [],
+  });
+  assert.equal(badBoolean.ok, false);
+  assert.match(badBoolean.ok === false ? badBoolean.reason : "", /must be boolean/);
+
+  assert.equal(
+    validateToolCall({ tool, args: { tags: ["a", "b"] }, grants: [], contextSet: [] }).ok,
+    true,
+  );
+  assert.equal(
+    validateToolCall({ tool, args: { tags: "a,b" }, grants: [], contextSet: [] }).ok,
+    false,
+  );
+
+  assert.equal(
+    validateToolCall({ tool, args: { meta: { k: 1 } }, grants: [], contextSet: [] }).ok,
+    true,
+  );
+  // object 的判据是三个条件相与：非 null、typeof 是 object、不是数组。
+  // 每一个都得真的排除对应的那个反例，不是凑巧被前一个挡住。
+  assert.equal(
+    validateToolCall({ tool, args: { meta: [1, 2] }, grants: [], contextSet: [] }).ok,
+    false,
+    "数组被当成了对象",
+  );
+  assert.equal(
+    validateToolCall({ tool, args: { meta: null }, grants: [], contextSet: [] }).ok,
+    false,
+    "null 被当成了对象",
+  );
+
+  // 契约里声明了一个本运行时不认识的类型：不该被悄悄放行。
+  const unknown = validateToolCall({
+    tool,
+    args: { weird: null },
+    grants: [],
+    contextSet: [],
+  });
+  assert.equal(unknown.ok, false);
+});
+
 test("harness: an ask-class tool suspends on tool_ask, then runs on approval", async () => {
   const ports = makePorts();
   const executed: string[] = [];
@@ -1445,6 +1595,57 @@ test("导出：同样的输入产出逐字节相同的信封", async () => {
   const b = await runtime.exportProject(meta.id, { runtimeVersion: "test" });
   // subject 排过序，所以两次导出可以直接比对。exportedAt 会变，statement 不比。
   assert.deepEqual(a.statement.subject, b.statement.subject);
+});
+
+test("导出：没有 meta 的存储拒绝导出，而不是产出一份缺了主体的信封", async () => {
+  const ports = makePorts();
+  const store = await ports.storage.createProjectStore("prj_empty");
+  await assert.rejects(
+    buildProjectExport(store, ports.crypto, "prj_empty", {
+      runtimeVersion: "test",
+      exportedAt: ports.clock.now(),
+    }),
+    /has no meta/,
+  );
+});
+
+/**
+ * 待导入的项目（attribution 之前，ADR-015）没有 workspaceId —— 这不是异常
+ * 状态，是它当下就长这样，而 §18.5 允许在导入前先导出。predicate.project 里
+ * 不该出现一个 `workspaceId: undefined`，那种半有半无的字段比干脆没有更容易
+ * 被下游误读成"归属了但是空字符串"。同一个空存储也顺带钉住了另一半：零条
+ * 审计事件时，链头退回创世锚，而不是读 `events[-1]` 崩掉。
+ */
+test("导出：无归属项目省略 workspaceId 字段；零审计事件时链头是创世锚", async () => {
+  const ports = makePorts();
+  const store = await ports.storage.createProjectStore("prj_legacy_export");
+  await store.putMeta({
+    id: "prj_legacy_export",
+    productId: "vxture.bid",
+    productVersion: "1.0.0",
+    contractVersion: "0.1",
+    name: "老项目",
+    projectType: "project",
+    createdAt: "2026-01-01T00:00:00Z",
+  });
+  await store.putContract(JSON.stringify(bidContract));
+  await store.setBusinessState("draft");
+
+  const bundle = await buildProjectExport(store, ports.crypto, "prj_legacy_export", {
+    runtimeVersion: "test",
+    exportedAt: ports.clock.now(),
+  });
+  assert.ok(
+    !("workspaceId" in bundle.statement.predicate.project),
+    "无归属项目的导出不该带一个 undefined 的 workspaceId 字段",
+  );
+  const events = await store.listAuditEvents();
+  assert.equal(events.length, 0);
+  assert.equal(
+    bundle.statement.predicate.auditChain.head,
+    bundle.statement.predicate.auditChain.genesis,
+    "零事件时链头应退回创世锚，不是读最后一条事件崩掉",
+  );
 });
 
 /**
