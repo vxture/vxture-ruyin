@@ -167,8 +167,13 @@ void test("渲染：产出的是真能打开的 .docx，而且每种构件都进
     assert.ok(hit, `${what} 没有出现在 word/document.xml 里`);
   }
 
-  // 链接文字必须在，否则读者拿到的是一个没有锚文本的链接。
-  assert.ok(unzip(bytes, "word/_rels/document.xml.rels").includes("example.com"));
+  // 超链接的地址落在 rels 里，且必须标成外部链接 —— 少了 TargetMode，Word 会
+  // 把它当成包内相对路径，点开是一个找不到的文件。整份 rels 里「出现过这个
+  // 域名」不算数：断言要钉到这一条关系上。
+  assert.match(
+    unzip(bytes, "word/_rels/document.xml.rels"),
+    /Target="https:\/\/example\.com\/a" TargetMode="External"/,
+  );
 
   // 中文字体落在 styles.xml 的 docDefaults 上。少了 eastAsia，一篇中文标书
   // 会用西文字体的兜底字形排版 —— 打得开，但没法交。
