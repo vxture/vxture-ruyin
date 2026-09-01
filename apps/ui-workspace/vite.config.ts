@@ -26,18 +26,19 @@ export default defineConfig({
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/**/*.test.{ts,tsx}", "src/main.tsx", "src/vitest.setup.ts"],
-      // TD-031 第四批：login.tsx / user.tsx / settings.tsx / home.tsx 到了
-      // 90–100%。还剩 workbench.tsx / workspace.tsx 两个最大的组件没动。阈值
-      // 照实按这批的全量基线（约 46%/49%/39%）留个小余量——见提交信息里的
-      // 具体数字。后续每批把某个大组件测完，阈值跟着抬。
+      // TD-031 第五批：login.tsx / user.tsx / settings.tsx / home.tsx /
+      // workbench.tsx 全到了 90–100%。只剩 workspace.tsx（本仓最大的组件，
+      // ProjectPanel）没动。阈值照实按这批的全量基线（statements 65.75% /
+      // branches 65.43% / functions 58.59% / lines 67.84%）留个小余量。
+      // workspace.tsx 测完后这些数字会大幅跳一次，阈值跟着抬。
       //
       // main.tsx 排除在外：纯挂载代码，同 local-host/main.ts 的先例，不为它
       // 硬凑一个假覆盖率。
       thresholds: {
-        statements: 44,
-        lines: 44,
-        branches: 46,
-        functions: 36,
+        statements: 64,
+        lines: 66,
+        branches: 64,
+        functions: 57,
       },
     },
   },
