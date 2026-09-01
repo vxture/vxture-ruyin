@@ -467,3 +467,57 @@ body {
   color: var(--color-muted-foreground);
 }
 .proj-summary-meta code { font-size: inherit; }
+
+/* ---------- 面板内的列表与表格密度 ---------- */
+
+/* 一行就是一行：一条授权 / 一条绑定不该各配一张卡、一道边框、16px 内边距。 */
+.row-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.row-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-card);
+}
+.row-item + .row-item { border-top: 1px solid var(--color-border); }
+.row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-body-sm);
+}
+.row-tag {
+  flex: 0 0 auto;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted-foreground);
+}
+
+/* 审计：一条记录一行。撑开行高的三个元凶——完整 ISO 时间、会换行的动作名、
+   无长度上限的 payload——各自钉住。 */
+.audit-row td { padding-block: var(--spacing-2xs); vertical-align: middle; }
+.audit-idx { text-align: right; font-variant-numeric: tabular-nums; width: 3em; }
+.audit-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted-foreground);
+}
+.audit-action { white-space: nowrap; }
+.audit-payload {
+  max-width: 0; /* 与 table-layout 协作：让省略号真的生效，而不是把表撑宽 */
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted-foreground);
+}
