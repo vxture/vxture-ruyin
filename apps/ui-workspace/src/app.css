@@ -209,20 +209,9 @@ body {
 .sel-lang { max-width: 200px; width: 100%; }
 
 /* ---------- settings ---------- */
-.settings {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: var(--spacing-lg);
-  align-items: start;
-}
-.settings-nav {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-2xs);
-  position: sticky;
-  top: var(--spacing-lg);
-}
-.settings-content { min-width: 0; }
+/* （.settings / .settings-nav / .settings-content 已随页内那根竖直导航一并
+   删除：设置有了自己的框架，分区在侧栏里。留着这些规则，下一个人会以为页面
+   里还该有第二根导航。） */
 .setting-row {
   display: grid;
   grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);

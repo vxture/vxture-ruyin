@@ -19,18 +19,24 @@ import { Api, type SystemInfo, type UpdateCheck } from "./api";
 
 const UI_VERSION = "0.2.0";
 
-type SectionId = "account" | "general" | "privacy" | "updates" | "about";
+export type SectionId = "account" | "general" | "privacy" | "updates" | "about";
 
-const SECTIONS: Array<{ id: SectionId; label: string }> = [
-  { id: "account", label: "账户" },
-  { id: "general", label: "通用" },
-  { id: "privacy", label: "数据与隐私" },
-  { id: "updates", label: "软件更新" },
-  { id: "about", label: "关于" },
+/**
+ * 设置的分区。**这是设置自己的导航，所以它属于侧栏。**
+ *
+ * 原本它是页面内的第二根竖直导航栏 —— 于是设置页上并排站着两根：工作台的
+ * 256px 和这里的 180px，436px 全是导航，右边才是内容。设置是一个应用，应用有
+ * 自己的框架（和产品态同一套道理）。
+ */
+export const SETTINGS_SECTIONS: Array<{ id: SectionId; label: string; icon: string }> = [
+  { id: "account", label: "账户", icon: "role" },
+  { id: "general", label: "通用", icon: "settings" },
+  { id: "privacy", label: "数据与隐私", icon: "lock" },
+  { id: "updates", label: "软件更新", icon: "arrow-down" },
+  { id: "about", label: "关于", icon: "info" },
 ];
 
-export function SettingsView({ api }: { api: Api }) {
-  const [section, setSection] = useState<SectionId>("account");
+export function SettingsView({ api, section }: { api: Api; section: SectionId }) {
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,30 +48,14 @@ export function SettingsView({ api }: { api: Api }) {
   }, [api]);
 
   return (
-    <div className="flex flex-col gap-lg">
-      <SectionHeader level={1} icon="settings" title="设置" />
+    <div className="flex flex-col gap-md">
+      {/* 「设置」两个字已经在标题栏和侧栏里，这里不再写第三遍。 */}
       {error && <div className="error-box">{error}</div>}
-      <div className="settings">
-        <nav className="settings-nav" aria-label="设置分区">
-          {SECTIONS.map((s) => (
-            <Button
-              key={s.id}
-              variant={section === s.id ? "secondary" : "ghost"}
-              className="w-full justify-start"
-              onClick={() => setSection(s.id)}
-            >
-              {s.label}
-            </Button>
-          ))}
-        </nav>
-        <div className="settings-content">
-          {section === "account" && <AccountSection />}
-          {section === "general" && <GeneralSection />}
-          {section === "privacy" && <PrivacySection system={system} />}
-          {section === "updates" && <UpdatesSection system={system} api={api} />}
-          {section === "about" && <AboutSection system={system} />}
-        </div>
-      </div>
+      {section === "account" && <AccountSection />}
+      {section === "general" && <GeneralSection />}
+      {section === "privacy" && <PrivacySection system={system} />}
+      {section === "updates" && <UpdatesSection system={system} api={api} />}
+      {section === "about" && <AboutSection system={system} />}
     </div>
   );
 }

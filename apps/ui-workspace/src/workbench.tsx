@@ -28,7 +28,7 @@ import {
 import { Api, type ProductInfo, type ProjectMeta } from "./api";
 import { PROJECT_TABS, ProjectPanel, type TabId } from "./workspace";
 import { HomePage } from "./home";
-import { SettingsView } from "./settings";
+import { SETTINGS_SECTIONS, SettingsView, type SectionId } from "./settings";
 import { UserSlot } from "./user";
 import { PendingInbox, usePending } from "./pending";
 
@@ -54,7 +54,7 @@ export function useHostChrome(): HostChrome {
 
 type View =
   | { kind: "home" }
-  | { kind: "settings" }
+  | { kind: "settings"; section: SectionId }
   | { kind: "workspace"; id: string; tab: TabId };
 
 /** 分区图标。名字取自 DS 图标表，改名会在构建时被类型挡住。 */
@@ -66,7 +66,11 @@ const TAB_ICON = {
 } as const satisfies Record<TabId, string>;
 
 const viewHref = (v: View): string =>
-  v.kind === "workspace" ? `#ws/${v.id}/${v.tab}` : `#${v.kind}`;
+  v.kind === "workspace"
+    ? `#ws/${v.id}/${v.tab}`
+    : v.kind === "settings"
+      ? `#settings/${v.section}`
+      : `#${v.kind}`;
 
 const isTab = (s: string): s is TabId =>
   PROJECT_TABS.some((t) => t.id === s);
@@ -175,7 +179,15 @@ export function Workbench({ api }: { api: Api }) {
 
   const navigate = useCallback((href: string) => {
     if (href === "#home") setView({ kind: "home" });
-    else if (href === "#settings") setView({ kind: "settings" });
+    else if (href.startsWith("#settings")) {
+      const section = href.slice(10);
+      setView({
+        kind: "settings",
+        section: SETTINGS_SECTIONS.some((x) => x.id === section)
+          ? (section as SectionId)
+          : "account",
+      });
+    }
     else if (href.startsWith("#ws/")) {
       const [id, tab] = href.slice(4).split("/");
       if (id) setView({ kind: "workspace", id, tab: isTab(tab ?? "") ? (tab as TabId) : "overview" });
@@ -304,7 +316,7 @@ export function Workbench({ api }: { api: Api }) {
         key: "settings",
         label: "打开设置",
         icon: "settings" as const,
-        onSelect: () => navigate("#settings"),
+        onSelect: () => navigate("#settings/account"),
       },
     ].filter((a) => match(a.label));
     if (actions.length > 0) {
@@ -328,7 +340,7 @@ export function Workbench({ api }: { api: Api }) {
          * 产品名取自契约的 product.name —— 运行时展示的是产品声明过的事实，
          * 不是自己编的表达（ADR-011 的判据）。 */
         <span className="no-drag flex items-center gap-xs min-w-0">
-          {view.kind === "workspace" ? (
+          {view.kind !== "home" ? (
             <>
               <ShellIconButton
                 icon="arrow-left"
@@ -336,11 +348,17 @@ export function Workbench({ api }: { api: Api }) {
                 onClick={() => navigate("#home")}
               />
               <span className="app-ident min-w-0">
-                <span className="app-ident-product">{openProductName}</span>
-                <span className="app-ident-sep">·</span>
-                <span className="app-ident-doc">
-                  {openProjectMeta?.name ?? "项目"}
-                </span>
+                {view.kind === "settings" ? (
+                  <span className="app-ident-product">设置</span>
+                ) : (
+                  <>
+                    <span className="app-ident-product">{openProductName}</span>
+                    <span className="app-ident-sep">·</span>
+                    <span className="app-ident-doc">
+                      {openProjectMeta?.name ?? "项目"}
+                    </span>
+                  </>
+                )}
               </span>
             </>
           ) : (
@@ -391,7 +409,7 @@ export function Workbench({ api }: { api: Api }) {
             icon="settings"
             label="设置"
             active={view.kind === "settings"}
-            onClick={() => navigate("#settings")}
+            onClick={() => navigate("#settings/account")}
           />
           {chrome === "electron" && <span className="caption-spacer" aria-hidden />}
         </div>
@@ -435,10 +453,38 @@ export function Workbench({ api }: { api: Api }) {
     return list;
   }, [view, workspaces, openProjectMeta, projectPending]);
 
+  /** 设置的分区。和产品态同一套道理：它是设置自己的导航，所以它在侧栏 ——
+   *  页面里再放一根竖直导航，屏幕上就并排站着两根。 */
+  const settingsSections: ShellNavSection[] = useMemo(
+    () => [
+      {
+        title: "设置",
+        items: SETTINGS_SECTIONS.map((x) => ({
+          href: `#settings/${x.id}`,
+          label: x.label,
+          icon: x.icon as "settings",
+        })),
+      },
+    ],
+    [],
+  );
+
   const sidebar = (
     <ShellSidebarNav
-      domainName={view.kind === "workspace" ? (openProductName ?? "产品") : "工作台"}
-      sections={view.kind === "workspace" ? productSections : sections}
+      domainName={
+        view.kind === "workspace"
+          ? (openProductName ?? "产品")
+          : view.kind === "settings"
+            ? "设置"
+            : "工作台"
+      }
+      sections={
+        view.kind === "workspace"
+          ? productSections
+          : view.kind === "settings"
+            ? settingsSections
+            : sections
+      }
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed(!collapsed)}
       isActive={(href) => href === viewHref(view)}
@@ -463,7 +509,7 @@ export function Workbench({ api }: { api: Api }) {
             api={api}
             productIds={products.map((p) => p.id)}
             collapsed={collapsed}
-            onOpenSettings={() => navigate("#settings")}
+            onOpenSettings={() => navigate("#settings/account")}
           />
         </>
       }
@@ -481,7 +527,7 @@ export function Workbench({ api }: { api: Api }) {
       <ShellPageContainer width="wide-2xl" className="workbench-page">
         {error && <div className="error-box">{error}</div>}
         {view.kind === "settings" ? (
-          <SettingsView api={api} />
+          <SettingsView api={api} section={view.section} />
         ) : view.kind === "workspace" ? (
           <ProjectPanel
             key={view.id}
