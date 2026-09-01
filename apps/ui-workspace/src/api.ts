@@ -112,6 +112,15 @@ export interface TaskDef {
   unrunnable: string[];
 }
 
+/** 一次导出的结果。`signed` 是要照实说给用户的那一项。 */
+export interface ProjectExport {
+  path: string;
+  files: string[];
+  chain: { genesis: string; head: string; events: number };
+  /** 客户端零密钥，所以现在恒为 false：**可验篡改，不可归属**。 */
+  signed: boolean;
+}
+
 export interface StateItem {
   name: string;
   transitions: Array<{ to: string; confirm?: "human" }>;
@@ -296,6 +305,12 @@ export class Api {
   /** 把 attribution 之前的项目导入当前工作区（ADR-015）。 */
   importProject = (id: string) =>
     this.call<ProjectMeta>(`/projects/${id}/import`, "POST");
+  /**
+   * 导出项目记录（TD-020）。**§18.5 那句「本地数据仍可访问、可导出」，可导出
+   * 的那一半在此之前界面上无处可点** —— 端点在，用户够不着，等于没有。
+   */
+  exportProject = (id: string, path: string) =>
+    this.call<ProjectExport>(`/projects/${id}/export`, "POST", { path });
   workspace = (id: string) => this.call<ProjectView>(`/projects/${id}`);
   taskInstances = (id: string) =>
     this.call<TaskInstance[]>(`/projects/${id}/tasks`);
