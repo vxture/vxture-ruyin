@@ -20,6 +20,7 @@ import {
   pendingCheckpoint,
   toAuditView,
   verifyAuditChain,
+  runConformance,
   type FolderGrant,
   type RuntimePorts,
 } from "@vxture/ruyin-core";
@@ -1318,5 +1319,40 @@ test("导出：待导入的项目未登录时也导不走", async () => {
     server.close();
     storage.closeAll();
     for (const d of [dataDir, outDir]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Runtime Conformance C1–C7 在**本宿主的真实 ports** 上（SQLite + DPAPI 密钥）。
+ *
+ * 同一套检查已在 runtime-core 的内存 ports 上跑过一遍。**跑两遍才是它的意义**：
+ * 两个宿主用同一个内核、各写各的 ports，套件验的是它们说不说同一种话。只在
+ * 一边跑，验的还是那一边的实现 —— 而 Cloud Runtime 将来接的是第三套 ports。
+ */
+test("一致性：C1–C7 在 SQLite ports 上全过", async () => {
+  const dirs: string[] = [];
+  const opened: SqliteStoragePort[] = [];
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  assert.ok(bid);
+  try {
+    const results = await runConformance({
+      makePorts: async () => {
+        const dataDir = mkdtempSync(join(tmpdir(), "ruyin-conf-"));
+        dirs.push(dataDir);
+        const made = await makePorts(dataDir);
+        opened.push(made.storage);
+        return made.ports;
+      },
+      contract: bid.contract,
+    });
+    const failed = results.filter((r) => !r.passed);
+    assert.deepEqual(
+      failed.map((r) => `${r.id} ${r.title}\n    ${r.detail}`),
+      [],
+    );
+    assert.equal(results.length, 7);
+  } finally {
+    for (const s of opened) s.closeAll();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
   }
 });

@@ -53,5 +53,7 @@ export type {
   GateSource,
   ValidationInput,
 } from "./tool-gate.js";
+export { runConformance } from "./conformance.js";
+export type { ConformanceCheck, ConformanceInput } from "./conformance.js";
 export { MemoryStoragePort } from "./memory-storage.js";
 export { MemoryConnector } from "./memory-connector.js";
