@@ -33,6 +33,7 @@ import {
   type Binding,
   type ContextItemMeta,
   type FolderGrant,
+  type ProjectExport,
   type TaskDef,
   type TaskInstance,
   type ProjectView,
@@ -216,6 +217,8 @@ export function ProjectPanel({ api, id }: { api: Api; id: string }) {
 
       {tab === "overview" && (
         <OverviewTab
+          api={api}
+          projectId={id}
           view={view}
           instances={instances}
           onTransition={(to, c) => void guard(() => api.transition(id, to, c))}
@@ -249,10 +252,14 @@ export function ProjectPanel({ api, id }: { api: Api; id: string }) {
 /* ---------------- Overview ---------------- */
 
 function OverviewTab({
+  api,
+  projectId,
   view,
   instances,
   onTransition,
 }: {
+  api: Api;
+  projectId: string;
   view: ProjectView;
   instances: TaskInstance[];
   onTransition: (to: string, humanConfirmed: boolean) => void;
@@ -285,7 +292,70 @@ function OverviewTab({
           {view.meta.projectType} · 创建于 {view.meta.createdAt}
         </div>
       </div>
+      <SectionHeader level={2} title="导出项目记录" icon="folder-open" />
+      <ExportCard api={api} projectId={projectId} />
     </>
+  );
+}
+
+/**
+ * 导出项目记录（TD-020）。
+ *
+ * §18.5 承诺「本地数据仍可访问、可导出」，而在此之前**可导出的那一半界面上
+ * 无处可点**：端点在，用户够不着，等于没有。
+ */
+function ExportCard({ api, projectId }: { api: Api; projectId: string }) {
+  const [dir, setDir] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<ProjectExport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="card flex flex-col gap-sm">
+      <div className="text-body-sm text-muted-foreground">
+        导出项目档案、契约、业务状态、任务实例与完整审计链。产出文档不在其中
+        —— 那些本来就写在你自己的目录里。目录须已授权。
+      </div>
+      <div className="row">
+        <Input
+          value={dir}
+          placeholder="导出到（已授权的目录）"
+          onChange={(e) => setDir(e.target.value)}
+        />
+        <Button
+          disabled={!dir || busy}
+          onClick={() => {
+            setBusy(true);
+            setError(null);
+            setDone(null);
+            void api
+              .exportProject(projectId, dir)
+              .then(setDone)
+              .catch((e: Error) => setError(e.message))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy ? "导出中……" : "导出"}
+        </Button>
+      </div>
+      {error && <div className="error-box">{error}</div>}
+      {done && (
+        <div className="notice-box">
+          <div className="flex flex-col gap-2xs">
+            <strong>已导出 {done.files.length} 个文件到 {done.path}</strong>
+            <span className="text-body-sm text-muted-foreground">
+              审计链 {done.chain.events} 条记录，链头 {done.chain.head.slice(0, 12)}…
+            </span>
+            {/* 照实说：客户端零密钥，签不了。可验篡改，不可归属 —— 两件事
+                分开说，别让人以为这份导出已经带了身份。 */}
+            <span className="text-body-sm text-muted-foreground">
+              {done.signed
+                ? "已签名。"
+                : "尚未签名：收件人可以验出它有没有被改过，但无法据此确认它出自谁。"}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
