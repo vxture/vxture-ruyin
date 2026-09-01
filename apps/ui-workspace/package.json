@@ -13,7 +13,6 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
-    "@phosphor-icons/react": "^2.1.10",
     "@vxture/design-system": "^10.0.0",
     "next-themes": "^0.4.6",
     "react": "^19.0.0",
