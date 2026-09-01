@@ -290,6 +290,17 @@ export class Api {
   /** 立刻拉一次订阅（D5：用户付完款回到应用的那一刻）。 */
   refreshEntitlements = () =>
     this.call<ProductInfo[]>("/entitlements/refresh", "POST");
+  /**
+   * 本机生效开关（§18.5）。**不卸载，数据不动** —— 停用只是让这台机器上打不开
+   * 它；项目、审计、成果都还在，重新启用就回来。
+   *
+   * 通则 B-3：动作是 activate / deactivate，状态是一个 `state` 字符串，
+   * 不用布尔取反。
+   */
+  activateProduct = (id: string) =>
+    this.call<ProductInfo>(`/products/${id}/activate`, "POST");
+  deactivateProduct = (id: string) =>
+    this.call<ProductInfo>(`/products/${id}/deactivate`, "POST");
   checkUpdate = () => this.call<UpdateCheck>("/updates/check");
   /** 记下安装意图（策略 2：操作与时机都归用户）。守护进程会再判一次闸门。 */
   requestInstall = (version: string) =>

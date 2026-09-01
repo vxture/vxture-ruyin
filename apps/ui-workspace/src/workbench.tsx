@@ -371,6 +371,7 @@ export function Workbench({ api }: { api: Api }) {
             health={health}
             onOpen={(id) => setView({ kind: "workspace", id })}
             onCreated={openProject}
+            onRefresh={refreshSidebar}
             onError={setError}
           />
         )}
