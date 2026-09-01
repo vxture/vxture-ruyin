@@ -386,3 +386,11 @@ body {
 }
 .update-line--new { color: var(--foreground); font-weight: 600; }
 .update-line--warn { color: var(--warning, var(--destructive)); }
+.update-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  margin-top: var(--spacing-xs);
+  font-weight: 400;
+}

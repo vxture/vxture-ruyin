@@ -37,7 +37,14 @@ export interface ProjectMeta {
  * 更新检查结果（daemon /updates/check）。**`current` 只在真拉到 feed 并比对过
  * 之后才会出现**——查不到就是 `unreachable`，不是「已是最新」。
  */
-export type UpdateCheck =
+export interface InstallGate {
+  installable: boolean;
+  /** 不可安装时的人可读原因。 */
+  reason?: string;
+  runningTasks: number;
+}
+
+export type UpdateCheck = (
   | { status: "current"; current: string; latest: string; checkedAt: string }
   | {
       status: "available";
@@ -46,7 +53,8 @@ export type UpdateCheck =
       releasedAt?: string;
       checkedAt: string;
     }
-  | { status: "unreachable"; current: string; reason: string; checkedAt: string };
+  | { status: "unreachable"; current: string; reason: string; checkedAt: string }
+) & { gate: InstallGate };
 
 /**
  * `GET /projects` 的形状。`elsewhere` 只报**数量不报名字**：隔离要照做，但
@@ -245,6 +253,13 @@ export class Api {
 
   pending = () => this.call<PendingConfirmation[]>("/pending");
   checkUpdate = () => this.call<UpdateCheck>("/updates/check");
+  /** 记下安装意图（策略 2：操作与时机都归用户）。守护进程会再判一次闸门。 */
+  requestInstall = (version: string) =>
+    this.call<{ version: string; requestedAt: string }>(
+      "/updates/install",
+      "POST",
+      { version },
+    );
   products = () => this.call<ProductInfo[]>("/products");
   projects = () => this.call<ProjectList>("/projects");
   createProject = (product: string, name: string) =>

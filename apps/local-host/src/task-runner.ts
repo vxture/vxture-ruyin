@@ -30,6 +30,15 @@ export class TaskRunner {
   ) {}
 
   /** True while this runner is driving the instance. */
+  /**
+   * 现在有几个任务在跑。更新安装的闸门读它（TD-021 策略 1：**有任务在跑就
+   * 不装**）——重启守护进程会打断正在跑的回合，虽然能恢复，但人在回路的确认
+   * 会被扰，而用户没要求这件事发生。
+   */
+  get runningCount(): number {
+    return this.inFlight.size;
+  }
+
   isRunning(taskInstanceId: string): boolean {
     return this.inFlight.has(taskInstanceId);
   }

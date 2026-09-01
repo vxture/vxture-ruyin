@@ -117,3 +117,69 @@ function unreachable(
 ): UpdateCheck {
   return { status: "unreachable", current, reason, checkedAt };
 }
+
+/**
+ * 安装闸门与意图（TD-021 策略 1、2，owner 定 2026-09-01）。
+ *
+ * **策略 1：有任务在跑就不装。** 安装要重启，重启会打断正在跑的回合——虽然
+ * 恢复得回来，但人在回路的确认会被扰，而用户并没有要求这件事发生。
+ *
+ * **策略 2：操作权归用户。** 运行时只做两件事——告诉用户有新版本、在他点了之后
+ * 记下这个意图。**绝不自行下载、绝不自行安装、绝不自行挑时机。**
+ *
+ * 闸门放在守护进程，因为**只有它知道有没有任务在跑**。壳在真正安装前会再问一次
+ * ——用户点下去到壳开始装之间任务可能刚起来，只在按钮上禁用是不够的。
+ */
+export interface InstallGate {
+  installable: boolean;
+  /** 不可安装时的人可读原因；可安装时缺省。 */
+  reason?: string;
+  runningTasks: number;
+}
+
+export function installGate(runningTasks: number): InstallGate {
+  if (runningTasks > 0) {
+    return {
+      installable: false,
+      reason: `有 ${runningTasks} 个任务正在运行；安装需要重启，会打断它们`,
+      runningTasks,
+    };
+  }
+  return { installable: true, runningTasks };
+}
+
+/** 用户已请求安装的版本，或 null。壳轮询它。 */
+export interface InstallIntent {
+  version: string;
+  requestedAt: string;
+}
+
+/**
+ * 用户的安装意图，只存在内存里。
+ *
+ * 不落盘是刻意的：**这是一次点击，不是一条设置。** 守护进程重启后意图就没了，
+ * 而那正对——用户是在看着「有新版本」那一刻点的，不是在授权一条长期规则。
+ */
+export class InstallIntentBox {
+  private intent: InstallIntent | null = null;
+
+  request(version: string, at: string): InstallIntent {
+    this.intent = { version, requestedAt: at };
+    return this.intent;
+  }
+
+  peek(): InstallIntent | null {
+    return this.intent;
+  }
+
+  /** 壳取走它去执行；取走即清，避免重启后重复触发。 */
+  take(): InstallIntent | null {
+    const held = this.intent;
+    this.intent = null;
+    return held;
+  }
+
+  clear(): void {
+    this.intent = null;
+  }
+}
