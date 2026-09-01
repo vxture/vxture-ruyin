@@ -1,23 +1,36 @@
 @echo off
 REM ============================================================
-REM  Ruyin 一键启动（dev 模式）
+REM  Ruyin 启动（开发模式）
 REM  ------------------------------------------------------------
-REM  daemon 用 Node 拉起（SAC 放行）。窗口分两种：
-REM   · 首次：普通 Edge 标签页打开 —— header 右上会出现「安装桌面应用」，
-REM     点一次装成 PWA，从此得到「合并单条标题栏」（系统窗口按钮悬浮在应用
-REM     header 右角，与 Claude/VS Code 同款）。
-REM   · 装过之后：直接双击开始菜单/桌面的「如影 Ruyin」图标即可，无需本脚本
-REM     的浏览器（daemon 仍需在跑，即本命令行窗口开着）。
-REM  关掉本命令行窗口 = 停 daemon。
+REM  这个脚本只做一件事：**以桌面应用的方式启动如影**。
+REM
+REM  如影的主体是本地运行时（守护进程）。桌面应用（Electron 壳）会自己
+REM  拉起它、也会在退出时带走它——所以入口只有这一个。
+REM
+REM  正式安装包：apps\shell\release\Ruyin-Setup-<version>.exe
+REM  装过之后从开始菜单启动，不需要本脚本。
+REM
+REM  浏览器访问仍然可用（守护进程在跑时打开 http://127.0.0.1:7420/），
+REM  那是**访问方式**，不是第二个应用：它不启动运行时。
 REM ============================================================
 setlocal
-set "PATH=C:\nvm4w\nodejs;%PATH%"
 set "REPO=%~dp0"
-set "RUYIN_PORT=7420"
-set "RUYIN_TOKEN=ruyin-local"
-set "RUYIN_PRODUCTS_DIR=%REPO%products"
-set "RUYIN_UI_DIR=%REPO%apps\ui-workspace\dist"
+cd /d "%REPO%"
 
-echo [ruyin] daemon starting on http://127.0.0.1:%RUYIN_PORT% ...
-start "" /min cmd /c "timeout /t 2 /nobreak >nul & start "" "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" http://127.0.0.1:%RUYIN_PORT%/?token=%RUYIN_TOKEN% --no-proxy-server"
-node "%REPO%apps\local-host\dist\main.js"
+if not exist "%REPO%apps\shell\dist\main.js" goto :notbuilt
+if not exist "%REPO%apps\local-host\dist\main.js" goto :notbuilt
+if not exist "%REPO%apps\ui-workspace\dist\index.html" goto :notbuilt
+
+echo [ruyin] 正在以桌面应用方式启动...
+call pnpm --filter @vxture/ruyin-shell start
+goto :eof
+
+:notbuilt
+echo.
+echo [ruyin] 还没构建过，先执行一次：
+echo.
+echo     pnpm install
+echo     pnpm -r build
+echo.
+echo 然后重新运行本脚本。
+exit /b 1

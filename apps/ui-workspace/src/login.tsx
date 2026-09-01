@@ -11,7 +11,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@vxture/design-system";
 import { Api, type SessionInfo } from "./api";
 import { Workbench, useHostChrome } from "./workbench";
-import { useInstallPrompt } from "./install";
 
 /**
  * 单条标题栏模式（Electron 无边框 / PWA-WCO）下，登录页与加载页没有 header，
@@ -88,8 +87,6 @@ function LoginScreen({
   const [busy, setBusy] = useState(false);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
   const pollRef = useRef<number | undefined>(undefined);
-  const chrome = useHostChrome();
-  const { canInstall, install } = useInstallPrompt();
 
   useEffect(
     () => () => {
@@ -161,15 +158,9 @@ function LoginScreen({
             </a>
           </div>
         )}
-        {chrome === "browser" && canInstall && (
-          <Button
-            variant="outline"
-            className="login-btn"
-            onClick={() => void install()}
-          >
-            安装桌面应用
-          </Button>
-        )}
+        {/* 这里曾有一个「安装桌面应用」按钮，装的是 PWA。已移除：它长得像
+            桌面应用入口，行为却是浏览器窗口，而且**不启动运行时**——守护进程
+            没跑时点开就是「未连接」。桌面应用只有一个，就是 Electron 壳。 */}
         <button className="login-local" onClick={onLocal}>
           暂不登录，先本地使用 →
         </button>

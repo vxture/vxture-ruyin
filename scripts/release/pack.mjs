@@ -8,10 +8,11 @@
  *     -> scripts/native/sqlite-electron-binding.mjs: electron-ABI prebuilt of
  *        better-sqlite3-multiple-ciphers into that tree (TD-010)
  *     -> electron-builder (nsis, or --dir for an unpacked smoke build)
+ *     -> launch the packaged app with --smoke: it must actually start
  *
  * Usage: node scripts/release/pack.mjs [--dir]
- *   --dir  build the unpacked win-unpacked/ tree only (fast; used by the
- *          packaged smoke check) instead of the NSIS installer.
+ *   --dir  build the unpacked win-unpacked/ tree only (fast) instead of the
+ *          NSIS installer. The packaged smoke check runs either way.
  *
  * GFW note: local runs may need ELECTRON_MIRROR and
  * ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
@@ -54,6 +55,14 @@ run(
     "deploy",
     "--prod",
     "--legacy",
+    // Hoisted, so the deployed tree contains no symlinks. pnpm's default
+    // isolated layout puts every real package under .pnpm/ and links to it;
+    // electron-builder copies extraResources by dereferencing, so each linked
+    // package lands as a plain directory OUTSIDE its .pnpm home - and its
+    // siblings, which is where its own dependencies lived, do not come with
+    // it. The app then starts and dies on "Cannot find package 'ajv'".
+    // A tree with no links copies the same either way.
+    "--config.node-linker=hoisted",
     daemonOut,
   ],
   repoRoot,
@@ -86,5 +95,30 @@ run(
   ["exec", "electron-builder", "--win", ...(dirOnly ? ["--dir"] : [])],
   shellDir,
 );
+
+// Prove the thing we just built actually starts.
+//
+// Everything above this line can succeed while producing an app that dies on
+// launch: the deployed dependency tree, the native binding ABI and the
+// resource layout are all only exercised by running it. This exact check is
+// what a missing transitive dependency looks like from the outside - the
+// installer builds, installs, and the window never appears.
+//
+// The unpacked tree is produced by both modes, so this runs either way.
+const packagedExe = join(shellDir, "release", "win-unpacked", "Ruyin.exe");
+console.log(`[pack] smoke: ${packagedExe} --smoke`);
+const smoke = spawnSync(packagedExe, ["--smoke"], {
+  cwd: shellDir,
+  encoding: "utf8",
+});
+const smokeOut = `${smoke.stdout ?? ""}${smoke.stderr ?? ""}`;
+process.stdout.write(smokeOut);
+if (!smokeOut.includes("[shell-smoke] OK")) {
+  console.error(
+    "[pack] FAILED: the packaged app did not start. It builds but does not run;" +
+      " see the output above.",
+  );
+  process.exit(1);
+}
 
 console.log(`[pack] done -> ${join(shellDir, "release")}`);

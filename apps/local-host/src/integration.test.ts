@@ -476,15 +476,36 @@ test("the pre-rename layout migrates in place, ids untouched", async () => {
     const legacyDir = join(dataDir, "workspaces", legacyId);
     mkdirSync(legacyDir, { recursive: true });
     writeFileSync(join(legacyDir, "workspace.db"), "not-a-real-db");
+    // A live WAL-mode container has these two beside its database. They are
+    // the part that used to be left behind.
+    writeFileSync(join(legacyDir, "workspace.db-wal"), "pending-commits");
+    writeFileSync(join(legacyDir, "workspace.db-shm"), "shared-index");
 
     // Opening storage performs the move.
     const { storage } = await makePorts(dataDir);
     try {
       assert.ok(!existsSync(join(dataDir, "workspaces")), "old dir is gone");
+      const moved = join(dataDir, "projects", legacyId);
       assert.ok(
-        existsSync(join(dataDir, "projects", legacyId, "project.db")),
+        existsSync(join(moved, "project.db")),
         "container moved under its ORIGINAL id",
       );
+      // The WAL must travel with its database. SQLite locates it by the
+      // database's name, so a rename that leaves it behind silently drops
+      // every committed-but-uncheckpointed write - the database still opens,
+      // just missing its most recent contents.
+      assert.equal(
+        readFileSync(join(moved, "project.db-wal"), "utf8"),
+        "pending-commits",
+        "the WAL came along, contents intact",
+      );
+      assert.ok(
+        !existsSync(join(moved, "workspace.db-wal")),
+        "no orphaned WAL under the old name",
+      );
+      // -shm is a rebuildable shared-memory index; a stale one is worse than
+      // none, so it is dropped rather than carried.
+      assert.ok(!existsSync(join(moved, "workspace.db-shm")));
       // The id is what the audit chain's genesis hash is built from, so a
       // migration that rewrote ids would invalidate every chain on disk.
       assert.deepEqual(await storage.listProjectIds(), [legacyId]);
