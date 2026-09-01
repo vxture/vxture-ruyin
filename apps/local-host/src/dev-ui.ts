@@ -1,9 +1,11 @@
 ﻿/**
- * Dev workspace console served by the daemon at GET / - a deliberately plain
- * HTML page so the Local Web access mode (60 section 4.2) works from day one:
- * the Electron shell AND any browser open the same URL. The real Workspace UI
- * (React, apps/ui-workspace) replaces this in a later batch; this page only
- * needs to exercise the Phase A API surface.
+ * 开发用工作台控制台：**没有构建好的 Workspace UI 时**由守护进程挂在 GET /，
+ * 有的时候退到 /dev。刻意是一张朴素的 HTML —— Local Web 访问模式
+ * （60 section 4.2）从第一天起就成立：Electron 壳和任何浏览器打开的是同一个
+ * 地址。
+ *
+ * 真正的 Workspace UI（React，apps/ui-workspace）已经在了；这一页留着是给
+ * 「UI 没构建」和排查用的，不是一个等着被替换的占位。
  *
  * The session token arrives via ?token= and is held in memory only.
  */
