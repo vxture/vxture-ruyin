@@ -28,7 +28,6 @@ const LOGIN_POLL_MAX_MS = 5 * 60 * 1000;
 /** Decides the first surface once the daemon is reachable: login vs product. */
 export function SessionGate({ api }: { api: Api }) {
   const [session, setSession] = useState<SessionInfo | "loading">("loading");
-  const [localMode, setLocalMode] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -60,13 +59,15 @@ export function SessionGate({ api }: { api: Api }) {
       </div>
     );
   }
-  if (!session.signedIn && !localMode) {
+  // 未登录就只有登录。订阅与权益在平台，没有登录态就没有工作区，
+  // 也就没有可跑的产品 —— 把人放进去只是让他对着一个什么都做不了
+  // 的界面。「离线继续」是另一回事，它靠会话恢复，不靠这个入口。
+  if (!session.signedIn) {
     return (
       <LoginScreen
         api={api}
         consoleBase={session.consoleBase}
         onSignedIn={refresh}
-        onLocal={() => setLocalMode(true)}
       />
     );
   }
@@ -77,12 +78,10 @@ function LoginScreen({
   api,
   consoleBase,
   onSignedIn,
-  onLocal,
 }: {
   api: Api;
   consoleBase: string;
   onSignedIn: () => void;
-  onLocal: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
@@ -158,12 +157,16 @@ function LoginScreen({
             </a>
           </div>
         )}
-        {/* 这里曾有一个「安装桌面应用」按钮，装的是 PWA。已移除：它长得像
-            桌面应用入口，行为却是浏览器窗口，而且**不启动运行时**——守护进程
-            没跑时点开就是「未连接」。桌面应用只有一个，就是 Electron 壳。 */}
-        <button className="login-local" onClick={onLocal}>
-          暂不登录，先本地使用 →
-        </button>
+        {/* 这里曾有两个次级入口，都已移除，理由是同一条：入口不该承诺它
+            兑现不了的东西。
+
+            「安装桌面应用」装的是 PWA —— 长得像桌面应用，行为是浏览器窗口，
+            而且不启动运行时。桌面应用只有一个，就是 Electron 壳。
+
+            「暂不登录，先本地使用」在项目必须归属工作区之后就空了：不能新建、
+            看不到任何项目、产品点不开。而它名义上要保的「离线继续」根本不靠它
+            —— 会话（含 active_workspace）加密存盘，重启即恢复，网络失败也不会
+            登出，只有服务端明确拒绝 refresh 才清会话。 */}
       </div>
       <div className="login-foot">
         <a href={`${consoleBase}/privacy`} target="_blank" rel="noopener noreferrer">

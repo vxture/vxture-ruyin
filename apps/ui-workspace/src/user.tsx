@@ -143,13 +143,16 @@ export function UserSlot({
   };
 
   const signedIn = session?.signedIn === true;
+  // 未登录进不来工作台（登录页是唯一入口），所以走到这里只有一种情况：
+  // 会话在使用中失效了。那不是一种「模式」，是掉线 —— 说清楚它是什么，
+  // 用户才知道该重新登录，而不是以为自己在某个受支持的离线状态里。
   const displayName = signedIn
     ? session?.profile?.name ?? session?.profile?.email ?? "Vxture 用户"
-    : "本地用户";
+    : "会话已失效";
   const subLine = signedIn
     ? session?.profile?.email ?? session?.org?.name ?? "已登录"
     : online
-      ? "本地模式 · 运行中"
+      ? "请重新登录以继续"
       : "未连接";
 
   const subscriptionLine = () => {
@@ -207,8 +210,8 @@ export function UserSlot({
             avatarFallback={displayName.slice(0, 1)}
             title={displayName}
             titleAside={
-              <StatusBadge tone={signedIn ? "success" : "neutral"} dot>
-                {signedIn ? "已登录" : "本地模式"}
+              <StatusBadge tone={signedIn ? "success" : "warning"} dot>
+                {signedIn ? "已登录" : "需重新登录"}
               </StatusBadge>
             }
             metaRows={[
