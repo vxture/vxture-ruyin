@@ -17,8 +17,10 @@ import { Api, type SessionInfo } from "./api";
 
 let hostChrome: "electron" | "browser" = "browser";
 
-vi.mock("./workbench", () => ({
+vi.mock("./host-chrome", () => ({
   useHostChrome: () => hostChrome,
+}));
+vi.mock("./workbench", () => ({
   Workbench: () => <div data-testid="workbench-stub">workbench</div>,
 }));
 
