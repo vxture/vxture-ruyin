@@ -28,6 +28,7 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isRenderPdfRequest, renderPdf, type RenderPdfReply } from "./pdf.js";
 
 app.setName("Ruyin"); // userData path derives from this, not productName
 
@@ -53,6 +54,18 @@ const dataDir =
 
 let daemon: Electron.UtilityProcess | undefined;
 let stopping = false;
+/** 守护进程说过的话。冒烟要等它的自检标记（ADR-017）。 */
+let daemonOutput = "";
+/**
+ * 有没有开过给人看的窗口。
+ *
+ * 离屏 PDF 渲染窗（ADR-017）也是 BrowserWindow：它一销毁就会触发
+ * window-all-closed。冒烟里没有主窗口，于是第一份 PDF 排完、渲染窗一关，应用
+ * 就把自己关掉了——守护进程被 will-quit 顺手杀掉，自检结果永远等不到。
+ *
+ * 产品形态下同样成立：用户关掉主窗口之后再导出，应用会在导出完成的那一刻退出。
+ */
+let userWindowOpened = false;
 
 function stopDaemon(): void {
   stopping = true;
@@ -69,6 +82,8 @@ function startDaemon(): Electron.UtilityProcess {
       RUYIN_TOKEN: TOKEN,
       RUYIN_DATA_DIR: dataDir,
       RUYIN_PRODUCTS_DIR: productsDir,
+      // 冒烟时守护进程会真的排一份 PDF，走完整条 IPC + Chromium 链路。
+      ...(SMOKE ? { RUYIN_SMOKE: "1" } : {}),
       // Packaged: built Workspace UI travels in resources/ui. Dev: unset -
       // the daemon falls back to apps/ui-workspace/dist when built.
       ...(app.isPackaged
@@ -76,8 +91,42 @@ function startDaemon(): Electron.UtilityProcess {
         : {}),
     },
   });
-  child.stdout?.on("data", (d: Buffer) => process.stdout.write(d));
+  child.stdout?.on("data", (d: Buffer) => {
+    daemonOutput += d.toString();
+    process.stdout.write(d);
+  });
   child.stderr?.on("data", (d: Buffer) => process.stderr.write(d));
+  // 守护进程 -> 壳的请求/应答（ADR-017）。此前只有壳轮询守护进程的 HTTP，
+  // 而 PDF 是反方向的：Chromium 在这一侧，落盘的护栏在那一侧。
+  child.on("message", (message: unknown) => {
+    if (!isRenderPdfRequest(message)) return;
+    const { id, html } = message;
+    void renderPdf(html).then(
+      (bytes) => {
+        try {
+          child.postMessage({
+            kind: "render-pdf-result",
+            id,
+            ok: true,
+            bytes,
+          } satisfies RenderPdfReply);
+        } catch (cause) {
+          // 序列化不了就没人会来告诉守护进程 —— 它会一直等到超时。把原因留在
+          // 这里，否则那次超时是一条没有线索的超时。
+          console.error("[shell] could not hand the PDF back to the daemon:", cause);
+        }
+      },
+      (cause: unknown) => {
+        console.error("[shell] pdf render failed:", cause);
+        child.postMessage({
+          kind: "render-pdf-result",
+          id,
+          ok: false,
+          error: cause instanceof Error ? cause.message : String(cause),
+        } satisfies RenderPdfReply);
+      },
+    );
+  });
   child.on("exit", (code) => {
     daemon = undefined;
     if (stopping) return; // we asked for it (smoke done / quitting)
@@ -88,6 +137,26 @@ function startDaemon(): Electron.UtilityProcess {
     else if (!app.isPackaged) app.quit();
   });
   return child;
+}
+
+/**
+ * 等守护进程报出 PDF 自检结果（ADR-017）。
+ *
+ * 只在冒烟里用。等的是标记而不是固定时长：一条「等两秒然后宣布通过」的检查，
+ * 在机器慢的时候会通过，在链路断掉的时候也会通过。
+ */
+async function waitForPdfSelfCheck(timeoutMs = 60_000): Promise<void> {
+  const marker = /\[ruyin\] pdf self-check: (.+)/;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const hit = marker.exec(daemonOutput);
+    if (hit) {
+      if (hit[1]?.startsWith("ok")) return;
+      throw new Error(`pdf self-check did not pass: ${hit[1]}`);
+    }
+    await new Promise((ok) => setTimeout(ok, 200));
+  }
+  throw new Error("the daemon never reported a pdf self-check result");
 }
 
 async function waitForHealth(timeoutMs = 15_000): Promise<void> {
@@ -302,6 +371,7 @@ function watchUpdateIntent(win: BrowserWindow): void {
 }
 
 function openWindow(): void {
+  userWindowOpened = true;
   const win = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -349,6 +419,10 @@ app.whenReady().then(async () => {
     daemon = startDaemon();
     await waitForHealth();
     if (SMOKE) {
+      // PDF 那条链（守护进程 -> 壳 -> Chromium -> 字节回去）只有在真的跑一遍
+      // 时才算验过（ADR-017）。守护进程在 RUYIN_SMOKE=1 下会排一份，标记打在
+      // 它的 stdout 上 —— 等它，别在它之前就宣布通过。
+      await waitForPdfSelfCheck();
       console.log("[shell-smoke] OK: daemon healthy, shell wiring verified");
       stopDaemon();
       app.exit(0);
@@ -363,6 +437,9 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  // 只有开过用户窗口、而且它们都关了，才是「没事可做了」。离屏渲染窗关掉不算
+  // —— 它本来就不该把应用带走。
+  if (!userWindowOpened) return;
   app.quit();
 });
 

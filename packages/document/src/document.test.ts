@@ -7,6 +7,7 @@ import {
   isLossy,
   parseDocument,
   renderDocx,
+  renderHtml,
 } from "./index.js";
 
 /**
@@ -185,4 +186,59 @@ void test("渲染：产出的是真能打开的 .docx，而且每种构件都进
 void test("渲染：空文档也要能打开", async () => {
   const bytes = await renderDocx(parseDocument(""));
   assert.match(unzip(bytes, "word/document.xml"), /<w:body>/);
+});
+
+/**
+ * HTML 渲染（ADR-017 的中间态）。这份 HTML 会被送进一个 BrowserWindow，所以
+ * 最要紧的一条是：**模型写的字进不去执行位置**。
+ */
+void test("HTML：模型写的字全部转义，不给它变成标记的机会", () => {
+  const doc = parseDocument(
+    "# <script>alert(1)</script>\n\n" +
+      "正文里也有 <img onerror=x> 和 `<b>代码</b>`。\n",
+  );
+  // 正文里的原始 HTML 在解析层就被判 lossy，所以这些尖括号只会以文本存在。
+  const { html } = renderHtml(doc);
+  assert.ok(!html.includes("<script>"), "转义漏了 —— 这是最不该漏的一处");
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(html, /&lt;img onerror=x&gt;/);
+});
+
+void test("HTML：只放行 http/https/mailto/锚点的链接", () => {
+  const { html } = renderHtml(
+    parseDocument(
+      "[正常](https://example.com/a) 与 [伪协议](javascript:alert(1))\n",
+    ),
+  );
+  assert.match(html, /<a href="https:\/\/example\.com\/a">正常<\/a>/);
+  // 伪协议降级为纯文本：在 PDF 里它同样是可点的，而链接文字是模型写的。
+  assert.ok(!/javascript:/i.test(html), "伪协议进了 href");
+  assert.match(html, /伪协议/);
+});
+
+void test("HTML：分页与目录，目录没有页码这件事要说出来", () => {
+  const doc = parseDocument(
+    "::ry-toc{depth=2}\n\n# 一\n\n::ry-pagebreak\n\n## 二\n\n### 三\n",
+  );
+  const { html, notes } = renderHtml(doc);
+  assert.match(html, /class="ry-pagebreak"/);
+  // depth=2：三级标题不进目录。
+  assert.match(html, /<a href="#一">一<\/a>/);
+  assert.match(html, /<a href="#二">二<\/a>/);
+  assert.ok(!html.includes(">三</a>"), "depth 没起作用");
+  // 目录项指向的锚点必须真的存在于正文标题上。
+  assert.match(html, /<h1 id="一">/);
+  assert.match(html, /<h2 id="二">/);
+
+  const note = notes.find((n) => n.message.includes("页码"));
+  assert.ok(note, "PDF 目录没页码是降级，不说出来读的人会以为本来就长这样");
+  assert.equal(note.severity, "degraded");
+});
+
+void test("HTML：同名标题的锚点不互相抢", () => {
+  const { html } = renderHtml(parseDocument("::ry-toc\n\n# 概述\n\n# 概述\n"));
+  assert.match(html, /<h1 id="概述">/);
+  assert.match(html, /<h1 id="概述-1">/);
+  assert.match(html, /href="#概述"/);
+  assert.match(html, /href="#概述-1"/);
 });

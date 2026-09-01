@@ -34,6 +34,7 @@ import { createLocalApi } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
+import { shellPdfRenderer } from "./pdf.js";
 import { LocalToolExecutor } from "./tool-executor.js";
 import { CapabilityClient } from "./capability-client.js";
 import { fetchContract } from "./contract-fetch.js";
@@ -82,8 +83,11 @@ const cancelledTasks = new Set<string>();
 
 // 同一个执行器：任务写产出与导出写记录走同一套授权护栏。检索接的是本机 FTS
 // 索引，范围由调用方给的上下文集限定（TD-022）。
-const toolExecutor = new LocalToolExecutor((projectId, query, scope, limit) =>
-  searchContext(storage, projectId, query, scope, limit),
+// PDF 排版在壳里（ADR-017）：这里拿到的是通往壳的通道，脱离壳跑时为 undefined。
+const toolExecutor = new LocalToolExecutor(
+  (projectId, query, scope, limit) =>
+    searchContext(storage, projectId, query, scope, limit),
+  shellPdfRenderer(),
 );
 
 const runtime = new ProjectRuntime({
@@ -230,6 +234,32 @@ void tasks
     console.error("[ruyin] task recovery sweep failed:", cause);
   });
 
+/**
+ * 打包冒烟时真的排一份 PDF（ADR-017）。
+ *
+ * 走的是生产上那条完整链路：守护进程 -> parentPort -> 壳 -> Chromium ->
+ * 字节回来。这条链只有在打包形态下才是完整的，单元测试到不了它 —— 而它断掉
+ * 的症状是用户导出时拿到一个错误，那时才发现太晚。
+ *
+ * **不能放在顶层 await 里。** utilityProcess 要等入口模块求值完才投递消息，
+ * 而顶层 await 恰恰把求值挂在那里 —— 于是守护进程等壳的应答，应答等模块求值
+ * 完，模块求值等守护进程：一个静静挂住、什么也不打印的死锁。所以它跑在 listen
+ * 回调里，由壳等它的标记。
+ */
+async function pdfSelfCheck(): Promise<void> {
+  const render = toolExecutor.pdfRenderer;
+  if (!render) {
+    console.log("[ruyin] pdf self-check: no shell attached");
+    return;
+  }
+  const bytes = await render(
+    "<!doctype html><html><head><meta charset=\"utf-8\"></head><body><p>如影</p></body></html>",
+  );
+  const ok = [0x25, 0x50, 0x44, 0x46, 0x2d].every((b, i) => bytes[i] === b);
+  if (!ok) throw new Error("the shell returned something that is not a PDF");
+  console.log(`[ruyin] pdf self-check: ok (${bytes.byteLength} bytes)`);
+}
+
 server.listen(port, "127.0.0.1", () => {
   console.log(`[ruyin] local runtime ${VERSION}`);
   console.log(`[ruyin] data dir: ${dataDir}`);
@@ -241,4 +271,10 @@ server.listen(port, "127.0.0.1", () => {
   );
   console.log(`[ruyin] listening on http://127.0.0.1:${port}`);
   console.log(`[ruyin] session token: ${token}`);
+  if (process.env["RUYIN_SMOKE"] === "1") {
+    void pdfSelfCheck().catch((cause) => {
+      console.error("[ruyin] pdf self-check failed:", cause);
+      process.exit(1);
+    });
+  }
 });

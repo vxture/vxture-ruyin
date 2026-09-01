@@ -113,6 +113,24 @@ const smoke = spawnSync(packagedExe, ["--smoke"], {
 });
 const smokeOut = `${smoke.stdout ?? ""}${smoke.stderr ?? ""}`;
 process.stdout.write(smokeOut);
+
+// 起不来和不许起，是两件事。
+//
+// spawn 本身失败（Windows 上 errno UNKNOWN）说明这个 exe 连被执行的机会都
+// 没拿到 —— 应用控制策略（WDAC / 智能应用控制）会拦下新构建的未签名程序。
+// 把它报成「应用起不来」是一句错的诊断，会把人送去查依赖树和原生绑定，而
+// 那里什么问题都没有。
+if (smoke.error) {
+  const blocked = smoke.error.code === "UNKNOWN";
+  console.error(
+    blocked
+      ? "[pack] FAILED: 这台机器不允许运行这个 exe（应用控制策略拦下了未签名\n" +
+          "       程序）。这不是构建出的问题 —— 打包产物本身没被验证过，请在\n" +
+          "       未启用该策略的机器上跑，或先完成代码签名（TD-001）。"
+      : `[pack] FAILED: could not launch the packaged app: ${smoke.error.message}`,
+  );
+  process.exit(1);
+}
 if (!smokeOut.includes("[shell-smoke] OK")) {
   console.error(
     "[pack] FAILED: the packaged app did not start. It builds but does not run;" +
