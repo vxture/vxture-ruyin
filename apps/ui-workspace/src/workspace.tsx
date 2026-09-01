@@ -57,6 +57,18 @@ export const PROJECT_TABS: Array<{ id: TabId; label: string }> = [
   { id: "audit", label: "审计" },
 ];
 
+/**
+ * 审计时间的短形式：`MM-DD HH:mm:ss`。
+ *
+ * 存的是完整 ISO（带毫秒、带时区），那是**记录**该有的样子，不动。这里只改
+ * 呈现：毫秒在人读的时候没有用，年份在同一个项目里也不承载信息，而完整串会
+ * 把表格行撑到三行高。全量值仍在 title 里。
+ */
+function shortTime(iso: string): string {
+  const m = /^\d{4}-(\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/.exec(iso);
+  return m ? `${m[1]} ${m[2]}` : iso;
+}
+
 /** 审计结果的呈现。`unknown` 是 X-3 之前的记录，**不知道就是不知道**。 */
 const OUTCOME_LABEL: Record<string, string> = {
   success: "成功",
@@ -546,12 +558,18 @@ function ContextTab({
           description="Runtime 只能访问你显式授权的目录。"
         />
       )}
-      {grants.map((g) => (
-        <div key={g.id} className="card mono">
-          {g.path}{" "}
-          <span className="text-body-sm text-muted-foreground">({g.mode})</span>
-        </div>
-      ))}
+      {/* 一条授权是一行字（路径 + 读写模式）。一条一张卡，等于给一行字配
+          16px 内边距和一道边框 —— 三条授权就吃掉小半屏。 */}
+      {grants.length > 0 && (
+        <ul className="row-list">
+          {grants.map((g) => (
+            <li key={g.id} className="row-item">
+              <code className="row-main" title={g.path}>{g.path}</code>
+              <span className="row-tag">{g.mode}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="row">
         <Input
           value={grantPath}
@@ -962,18 +980,26 @@ function AuditTab({
           </TableHeader>
           <TableBody>
             {rows.map((e, i) => (
-              <TableRow key={e.eventId}>
-                <TableCell>{i + 1}</TableCell>
-                <TableCell>{e.occurredAt}</TableCell>
-                <TableCell>{e.action}</TableCell>
+              <TableRow key={e.eventId} className="audit-row">
+                <TableCell className="audit-idx">{i + 1}</TableCell>
+                {/* 完整 ISO 带毫秒会换到三行，而毫秒在这里没有用；同一个项目里
+                    年份也不承载信息。鼠标悬停仍给全量值。 */}
+                <TableCell className="audit-time" title={e.occurredAt}>
+                  {shortTime(e.occurredAt)}
+                </TableCell>
+                <TableCell className="audit-action">{e.action}</TableCell>
                 <TableCell>
                   {/* 旧记录的结果是 unknown —— 显示成 unknown，不显示成成功。 */}
                   <StatusBadge tone={OUTCOME_TONE[e.outcome] ?? "neutral"}>
                     {OUTCOME_LABEL[e.outcome] ?? e.outcome}
                   </StatusBadge>
                 </TableCell>
-                <TableCell>{e.actor}</TableCell>
-                <TableCell>{JSON.stringify(e.payload)}</TableCell>
+                <TableCell className="audit-action">{e.actor}</TableCell>
+                {/* payload 是原始 JSON，长度无上限。一行显示、溢出省略，全量在
+                    title 里 —— 让它撑开行高，等于让八条记录占满一屏。 */}
+                <TableCell className="audit-payload" title={JSON.stringify(e.payload)}>
+                  {JSON.stringify(e.payload)}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
