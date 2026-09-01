@@ -45,17 +45,11 @@ import {
   type ProjectView,
 } from "./api";
 import { verifyChain } from "./chain";
-
-export type TabId = "overview" | "context" | "tasks" | "audit";
-
-/** 项目内的分区。**这是产品自己的导航**，所以它属于侧栏而不是一条 32px 的
- *  横条 —— 进了产品就是进了另一套框架（macOS 的应用源列表就是这么回事）。 */
-export const PROJECT_TABS: Array<{ id: TabId; label: string }> = [
-  { id: "overview", label: "概览" },
-  { id: "context", label: "上下文" },
-  { id: "tasks", label: "任务" },
-  { id: "audit", label: "审计" },
-];
+// TabId/PROJECT_TABS live in their own module (workspace-tabs.ts) so the
+// sidebar can know the tab list without pulling in this file's DS-heavy
+// ProjectPanel - see that file's header comment (TD-011②).
+export { PROJECT_TABS, type TabId } from "./workspace-tabs";
+import type { TabId } from "./workspace-tabs";
 
 /**
  * 审计时间的短形式：`MM-DD HH:mm:ss`。

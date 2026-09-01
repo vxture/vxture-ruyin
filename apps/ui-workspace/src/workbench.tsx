@@ -20,6 +20,8 @@
  */
 
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -39,31 +41,26 @@ import {
   type ShellSearchGroup,
 } from "@vxture/design-system";
 import { Api, type ProductInfo, type ProjectMeta } from "./api";
-import { PROJECT_TABS, ProjectPanel, type TabId } from "./workspace";
-import { HomePage } from "./home";
-import { SETTINGS_SECTIONS, SettingsView, type SectionId } from "./settings";
+import { PROJECT_TABS, type TabId } from "./workspace-tabs";
+import { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
 import { UserSlot } from "./user";
 import { PendingInbox, usePending } from "./pending";
+import { useHostChrome } from "./host-chrome";
 
-/** Caption-overlay clearance only applies inside the Electron shell. */
-const IS_ELECTRON = navigator.userAgent.includes("Electron");
-
-/**
- * 窗口 chrome 由谁提供。**两种，不是三种：**
- *  - electron：桌面应用。无边框壳，本 header 就是标题栏（拖拽区 + Windows
- *    按钮避让）。**这是唯一的应用入口**——它自己拉起运行时。
- *  - browser：浏览器访问。窗口自带标题栏，header 退化为应用工具条，不假装
- *    标题栏（无拖拽、无避让），避免双标题栏。
- *
- * 曾有第三种 `wco`：装成 PWA 后 Window Controls Overlay 生效，外观与 electron
- * 同构。已随 PWA 一并去掉——**它长得像桌面应用，却不启动运行时**，守护进程没跑
- * 时点开就是「未连接」。一个永远不会出现的分支只会让读代码的人以为它被处理了。
- */
-export type HostChrome = "electron" | "browser";
-
-export function useHostChrome(): HostChrome {
-  return IS_ELECTRON ? "electron" : "browser";
-}
+// 首页/设置/项目面板各自懒加载（TD-011②）——三个都不小（各自的 DS 组件面
+// 加起来是这个应用体量的大头），而任一时刻至多一个在屏幕上。静态导入等于
+// 让登录后的第一屏等三份都下载完，哪怕用户落地就只看首页。PROJECT_TABS/
+// SETTINGS_SECTIONS 是纯数据（侧栏分区要用），照常静态导入——没有理由为几个
+// 字符串常量拖出一整个异步边界。
+const HomePage = lazy(() =>
+  import("./home").then((m) => ({ default: m.HomePage })),
+);
+const SettingsView = lazy(() =>
+  import("./settings").then((m) => ({ default: m.SettingsView })),
+);
+const ProjectPanel = lazy(() =>
+  import("./workspace").then((m) => ({ default: m.ProjectPanel })),
+);
 
 type View =
   | { kind: "home" }
@@ -539,28 +536,34 @@ export function Workbench({ api }: { api: Api }) {
     >
       <ShellPageContainer width="wide-2xl" className="workbench-page">
         {error && <div className="error-box">{error}</div>}
-        {view.kind === "settings" ? (
-          <SettingsView api={api} section={view.section} />
-        ) : view.kind === "workspace" ? (
-          <ProjectPanel
-            key={view.id}
-            api={api}
-            id={view.id}
-            tab={view.tab}
-            onPending={setProjectPending}
-          />
-        ) : (
-          <HomePage
-            api={api}
-            products={products}
-            workspaces={workspaces}
-            health={health}
-            onOpen={(id) => setView({ kind: "workspace", id, tab: "overview" })}
-            onCreated={openProject}
-            onRefresh={refreshSidebar}
-            onError={setError}
-          />
-        )}
+        <Suspense
+          fallback={
+            <p className="text-body-md text-muted-foreground">加载中……</p>
+          }
+        >
+          {view.kind === "settings" ? (
+            <SettingsView api={api} section={view.section} />
+          ) : view.kind === "workspace" ? (
+            <ProjectPanel
+              key={view.id}
+              api={api}
+              id={view.id}
+              tab={view.tab}
+              onPending={setProjectPending}
+            />
+          ) : (
+            <HomePage
+              api={api}
+              products={products}
+              workspaces={workspaces}
+              health={health}
+              onOpen={(id) => setView({ kind: "workspace", id, tab: "overview" })}
+              onCreated={openProject}
+              onRefresh={refreshSidebar}
+              onError={setError}
+            />
+          )}
+        </Suspense>
       </ShellPageContainer>
     </ShellViewport>
   );

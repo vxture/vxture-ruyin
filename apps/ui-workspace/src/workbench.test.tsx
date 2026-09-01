@@ -33,7 +33,11 @@ vi.mock("./home", () => ({
     </div>
   ),
 }));
-vi.mock("./settings", () => ({
+// SETTINGS_SECTIONS/PROJECT_TABS now live in their own tiny modules (so the
+// sidebar doesn't drag in the lazy-loaded SettingsView/ProjectPanel just to
+// read the section/tab list - see workspace-tabs.ts's header comment) -
+// mocked separately from the components themselves, with the same real data.
+vi.mock("./settings-sections", () => ({
   SETTINGS_SECTIONS: [
     { id: "account", label: "账户", icon: "role" },
     { id: "general", label: "通用", icon: "settings" },
@@ -41,17 +45,21 @@ vi.mock("./settings", () => ({
     { id: "updates", label: "软件更新", icon: "arrow-down" },
     { id: "about", label: "关于", icon: "info" },
   ],
+}));
+vi.mock("./settings", () => ({
   SettingsView: ({ section }: { section: string }) => (
     <div data-testid="settings-stub">settings:{section}</div>
   ),
 }));
-vi.mock("./workspace", () => ({
+vi.mock("./workspace-tabs", () => ({
   PROJECT_TABS: [
     { id: "overview", label: "概览" },
     { id: "context", label: "上下文" },
     { id: "tasks", label: "任务" },
     { id: "audit", label: "审计" },
   ],
+}));
+vi.mock("./workspace", () => ({
   ProjectPanel: (props: { id: string; tab: string; onPending: (n: number) => void }) => (
     <div data-testid="project-panel-stub">
       project:{props.id}:{props.tab}
