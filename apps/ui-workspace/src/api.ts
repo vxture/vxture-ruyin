@@ -199,16 +199,76 @@ export interface Binding {
   connector: string;
 }
 
+/**
+ * 审计记录，**存储里的原样**（X-3 词表）。
+ *
+ * 不是投影后的视图：界面要在本地重算哈希链，而链的哈希是按存进去时的字段名
+ * 算的 —— 投影一次字段名就变一次，重算必然对不上。
+ */
 export interface AuditEvent {
+  eventId: string;
+  occurredAt: string;
+  actorId: string;
+  actorConsole: null;
+  actor: string;
+  objectType: string;
+  objectId: string;
+  action: string;
+  outcome: "success" | "rejected" | "failed" | "unknown";
+  workspace: string;
+  taskId?: string;
+  prevHash: string;
+  hash: string;
+  payload: unknown;
+}
+
+/**
+ * X-3 改名之前写下的记录。**读得出来，绝不回写** —— 改写既有记录会作废每一条链。
+ */
+export interface LegacyAuditEvent {
   event_id: string;
   workspace: string;
+  task_instance?: string;
   kind: string;
   actor: string;
   timestamp: string;
-  task_instance?: string;
   prev_hash: string;
   hash: string;
   payload: unknown;
+}
+
+export type StoredAuditEvent = AuditEvent | LegacyAuditEvent;
+
+export function isLegacyAuditEvent(
+  event: StoredAuditEvent,
+): event is LegacyAuditEvent {
+  return typeof (event as LegacyAuditEvent).event_id === "string";
+}
+
+/** 两种形状统一成一套字段名，**只用于显示**，绝不用于重算哈希。 */
+export function auditView(event: StoredAuditEvent): {
+  eventId: string;
+  occurredAt: string;
+  action: string;
+  actor: string;
+  outcome: string;
+  taskId?: string;
+  hash: string;
+  payload: unknown;
+} {
+  if (!isLegacyAuditEvent(event)) return event;
+  return {
+    eventId: event.event_id,
+    occurredAt: event.timestamp,
+    action: event.kind,
+    actor: event.actor,
+    // 旧记录不知道结果。**不猜** —— 把一条不知道结果的记录标成成功，正是审计
+    // 存在的意义所要防的那种事。
+    outcome: "unknown",
+    ...(event.task_instance !== undefined ? { taskId: event.task_instance } : {}),
+    hash: event.hash,
+    payload: event.payload,
+  };
 }
 
 export interface SessionInfo {
@@ -356,7 +416,7 @@ export class Api {
       "POST",
       { type, root },
     );
-  audit = (id: string) => this.call<AuditEvent[]>(`/projects/${id}/audit`);
+  audit = (id: string) => this.call<StoredAuditEvent[]>(`/projects/${id}/audit`);
   contextItems = (id: string, type: string) =>
     this.call<ContextItemMeta[]>(`/projects/${id}/context/${type}`);
   system = () => this.call<SystemInfo>("/system");

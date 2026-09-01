@@ -29,7 +29,8 @@ import {
 import {
   Api,
   pendingCheckpoint,
-  type AuditEvent,
+  auditView,
+  type StoredAuditEvent,
   type Binding,
   type ContextItemMeta,
   type FolderGrant,
@@ -41,6 +42,20 @@ import {
 import { verifyChain } from "./chain";
 
 type TabId = "overview" | "context" | "tasks" | "audit";
+
+/** 审计结果的呈现。`unknown` 是 X-3 之前的记录，**不知道就是不知道**。 */
+const OUTCOME_LABEL: Record<string, string> = {
+  success: "成功",
+  rejected: "被拒",
+  failed: "失败",
+  unknown: "结果未记录",
+};
+const OUTCOME_TONE: Record<string, StatusBadgeTone> = {
+  success: "success",
+  rejected: "warning",
+  failed: "danger",
+  unknown: "neutral",
+};
 
 /** Task states that will never change again on their own. */
 const TERMINAL_TASK_STATES = new Set(["completed", "failed", "cancelled"]);
@@ -79,7 +94,7 @@ export function ProjectPanel({ api, id }: { api: Api; id: string }) {
   const [instances, setInstances] = useState<TaskInstance[]>([]);
   const [grants, setGrants] = useState<FolderGrant[]>([]);
   const [bindings, setBindings] = useState<Binding[]>([]);
-  const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [audit, setAudit] = useState<StoredAuditEvent[]>([]);
   const [chainOk, setChainOk] = useState<boolean | null>(null);
   /**
    * 两种错误分开存，因为它们的寿命不一样。
@@ -809,15 +824,19 @@ function AuditTab({
   audit,
   chainOk,
 }: {
-  audit: AuditEvent[];
+  audit: StoredAuditEvent[];
   chainOk: boolean | null;
 }) {
   const [kindFilter, setKindFilter] = useState("");
+  // 显示走投影，重算走原样 —— 链的哈希是按存进去时的字段名算的。
+  const views = useMemo(() => audit.map(auditView), [audit]);
   const kinds = useMemo(
-    () => Array.from(new Set(audit.map((e) => e.kind))).sort(),
-    [audit],
+    () => Array.from(new Set(views.map((e) => e.action))).sort(),
+    [views],
   );
-  const rows = kindFilter ? audit.filter((e) => e.kind === kindFilter) : audit;
+  const rows = kindFilter
+    ? views.filter((e) => e.action === kindFilter)
+    : views;
   return (
     <>
       <SectionHeader
@@ -855,16 +874,25 @@ function AuditTab({
           <TableHeader>
             <TableRow>
               <TableHead>#</TableHead>
-              <TableHead>kind</TableHead>
-              <TableHead>actor</TableHead>
+              <TableHead>时间</TableHead>
+              <TableHead>动作</TableHead>
+              <TableHead>结果</TableHead>
+              <TableHead>操作者</TableHead>
               <TableHead>payload</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.map((e, i) => (
-              <TableRow key={e.event_id}>
+              <TableRow key={e.eventId}>
                 <TableCell>{i + 1}</TableCell>
-                <TableCell>{e.kind}</TableCell>
+                <TableCell>{e.occurredAt}</TableCell>
+                <TableCell>{e.action}</TableCell>
+                <TableCell>
+                  {/* 旧记录的结果是 unknown —— 显示成 unknown，不显示成成功。 */}
+                  <StatusBadge tone={OUTCOME_TONE[e.outcome] ?? "neutral"}>
+                    {OUTCOME_LABEL[e.outcome] ?? e.outcome}
+                  </StatusBadge>
+                </TableCell>
                 <TableCell>{e.actor}</TableCell>
                 <TableCell>{JSON.stringify(e.payload)}</TableCell>
               </TableRow>

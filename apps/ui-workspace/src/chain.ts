@@ -7,7 +7,7 @@
  * right in the UI.
  */
 
-import type { AuditEvent } from "./api";
+import { isLegacyAuditEvent, type StoredAuditEvent } from "./api";
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest(
@@ -21,11 +21,14 @@ async function sha256Hex(input: string): Promise<string> {
 
 export async function verifyChain(
   projectId: string,
-  events: AuditEvent[],
+  events: StoredAuditEvent[],
 ): Promise<boolean> {
   let prev = await sha256Hex(`genesis:${projectId}`);
   for (const event of events) {
-    if (event.prev_hash !== prev) return false;
+    // X-3 之前是 prev_hash，之后是 prevHash。**两种都要认**：链里可以同时躺着
+    // 两种形状的记录，只认一种等于对另一种谎报断裂。
+    const linked = isLegacyAuditEvent(event) ? event.prev_hash : event.prevHash;
+    if (linked !== prev) return false;
     const { hash, ...body } = event;
     if ((await sha256Hex(JSON.stringify(body))) !== hash) return false;
     prev = hash;
