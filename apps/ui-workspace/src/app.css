@@ -375,3 +375,14 @@ body {
   font-size: var(--body-sm-font-size);
   font-variant-numeric: tabular-nums;
 }
+
+/* 更新检查结果行。`--warn` 用于「没查到」——它绝不能看起来像「已是最新」，
+   那正是这个功能上一版的毛病。 */
+.update-line {
+  margin-top: 6px;
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+  line-height: 1.6;
+}
+.update-line--new { color: var(--foreground); font-weight: 600; }
+.update-line--warn { color: var(--warning, var(--destructive)); }

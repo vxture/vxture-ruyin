@@ -13,6 +13,7 @@
  *   RUYIN_OIDC_CLIENT_ID     public client id (default ruyin; beta: ruyin-beta)
  *   RUYIN_PLATFORM_API_BASE  entitlements API base (unset = C2 disabled)
  *   RUYIN_CONSOLE_BASE       console deep-link base (default https://vxture.com)
+ *   RUYIN_UPDATE_FEED        update feed base (default: stable channel on dl)
  *   RUYIN_CAPABILITY_BASE    business-product capability surface (unset = mock);
  *                            also the source for contract fetch (ADR-012)
  */
@@ -132,6 +133,9 @@ const server = createLocalApi({
   platform,
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
   requireSignedPackages: process.env["RUYIN_ALLOW_UNSIGNED_PACKAGES"] !== "1",
+  ...(process.env["RUYIN_UPDATE_FEED"]
+    ? { updateFeedBase: process.env["RUYIN_UPDATE_FEED"] }
+    : {}),
   // 一级供给：与能力调用同一条通路、同一个设置（ADR-012）。未配置能力面就没有
   // 可拉的地方，此时不注入——服务端据此如实回答，而不是静默无事发生。
   ...(capabilityBase

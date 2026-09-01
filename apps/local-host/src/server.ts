@@ -22,6 +22,7 @@ import type { TaskRunner } from "./task-runner.js";
 import { installPackage } from "./installer.js";
 import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
+import { checkForUpdate } from "./updates.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -53,6 +54,8 @@ export interface LocalApiDeps {
    * POST /products/:id/fetch 如实回答「没有可拉的地方」，不假装拉过。
    */
   fetchContract?: (productId: string) => Promise<FetchOutcome>;
+  /** 更新 feed 基址覆盖（dl 主机未落地前可指向测试 feed）；缺省见 updates.ts。 */
+  updateFeedBase?: string;
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -85,11 +88,10 @@ const STATIC_MIME: Record<string, string> = {
   ".webmanifest": "application/manifest+json; charset=utf-8",
 };
 
-/** Root-level UI files the daemon serves besides index.html (PWA identity:
- *  manifest enables the installed-app window with Window Controls Overlay,
- *  collapsing the browser title bar so the app header is THE title bar -
- *  the same single-bar contract as the Electron shell). */
-const UI_ROOT_FILES = new Set(["manifest.webmanifest", "icon.svg", "favicon.ico"]);
+/** 守护进程在 index.html 之外还提供的根级 UI 文件。**不含 web app manifest**：
+ *  它已随 PWA 一并移除——装成 PWA 会得到一个不启动运行时的应用图标，而桌面
+ *  应用只有 Electron 壳一个入口。 */
+const UI_ROOT_FILES = new Set(["icon.svg", "favicon.ico"]);
 
 function serveStatic(res: ServerResponse, root: string, rel: string): void {
   // Normalize and refuse traversal outside the UI root.
@@ -292,6 +294,20 @@ async function handle(
       send(res, 200, await deps.platform.entitlements(products));
       return;
     }
+  }
+
+  // GET /updates/check - 拉渠道 feed 比版本（TD-021）。**只回答有没有新版本**，
+  // 不下载不安装：那一半在壳里，且前置未落（签名 TD-001 + 策略未定）。
+  if (method === "GET" && path === "/updates/check") {
+    send(
+      res,
+      200,
+      await checkForUpdate({
+        currentVersion: deps.version,
+        ...(deps.updateFeedBase ? { feedBase: deps.updateFeedBase } : {}),
+      }),
+    );
+    return;
   }
 
   // GET /pending - 跨项目的「在等我」清单（50-harness §6）。
