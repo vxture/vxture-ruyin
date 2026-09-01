@@ -13,6 +13,7 @@
  */
 
 import type { ProjectRuntime } from "@vxture/ruyin-core";
+import type { EventBus } from "./events.js";
 
 export class TaskRunner {
   /** Instances currently being driven, so a retry does not double-drive. */
@@ -27,6 +28,8 @@ export class TaskRunner {
   constructor(
     private readonly runtime: ProjectRuntime,
     private readonly cancelled: Set<string> = new Set(),
+    /** 任务动了就说一声（TD-027）；不接也能跑，只是回到轮询。 */
+    private readonly events?: EventBus,
   ) {}
 
   /** True while this runner is driving the instance. */
@@ -90,9 +93,18 @@ export class TaskRunner {
   ): void {
     if (this.inFlight.has(taskInstanceId)) return;
     this.inFlight.add(taskInstanceId);
+    this.announce(projectId, taskInstanceId);
     void this.drive(projectId, taskInstanceId, mode).finally(() => {
       this.inFlight.delete(taskInstanceId);
+      // 落定时再说一次 —— 起来和停下是两个时刻，只报一个，另一个就得靠等。
+      this.announce(projectId, taskInstanceId);
     });
+  }
+
+  /** 任务动了；「在等我」的清单也可能因此变了。 */
+  private announce(projectId: string, taskInstance: string): void {
+    this.events?.publish({ kind: "task", projectId, taskInstance });
+    this.events?.publish({ kind: "pending" });
   }
 
   private async drive(

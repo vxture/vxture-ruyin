@@ -39,6 +39,7 @@ import { LocalToolExecutor } from "./tool-executor.js";
 import { CapabilityClient } from "./capability-client.js";
 import { fetchContract } from "./contract-fetch.js";
 import { InstallIntentBox } from "./updates.js";
+import { EventBus } from "./events.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
 
@@ -134,7 +135,9 @@ console.log(
   }`,
 );
 
-const tasks = new TaskRunner(runtime, cancelledTasks);
+// 事件总线（TD-027）：任务动了就通知订阅者，替掉界面那几处轮询。
+const events = new EventBus();
+const tasks = new TaskRunner(runtime, cancelledTasks, events);
 
 // 用户点「安装更新」后的意图，壳轮询取走（TD-021）。只在内存里：这是一次点击，
 // 不是一条设置——守护进程重启后它该消失。
@@ -152,6 +155,7 @@ const server = createLocalApi({
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
   requireSignedPackages: process.env["RUYIN_ALLOW_UNSIGNED_PACKAGES"] !== "1",
   updateIntent,
+  events,
   writeArtifact: (path, bytes, grants) =>
     toolExecutor.writeArtifact(path, bytes, grants),
   supportsTool: (tool) => toolExecutor.supports(tool),

@@ -1,0 +1,46 @@
+/**
+ * 运行时事件总线（TD-027）。
+ *
+ * 在此之前界面和壳各自轮询：项目面板 1–5 秒，待办 / 用户 / 工作台各 5 秒，
+ * 壳里还有待确认与更新意图两个。静止时是纯浪费，跑动时又慢得能被看出来 ——
+ * 一个刚落定的任务要等最多一秒才在屏幕上变样。
+ *
+ * **单向、进程内、只说「什么变了」，不说「变成了什么」。** 事件里不带业务
+ * 数据：带了就等于开出第二条数据通路，而那条路上的护栏（授权、工作区边界、
+ * 审计）要重新写一遍。收到事件的人回头照常查一次，走的还是原来那条路。
+ */
+
+export type RuntimeEvent =
+  /** 某个任务实例动了（起来了、落定了、停在等人那一刻）。 */
+  | { kind: "task"; projectId: string; taskInstance: string }
+  /** 「在等我」的清单变了。 */
+  | { kind: "pending" };
+
+type Listener = (event: RuntimeEvent) => void;
+
+export class EventBus {
+  private readonly listeners = new Set<Listener>();
+
+  subscribe(listener: Listener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  publish(event: RuntimeEvent): void {
+    // 复制一份再遍历：监听者在回调里退订是正常操作（连接断了就该退），
+    // 边遍历边删会漏掉后面的人。
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(event);
+      } catch {
+        // 一个订阅者炸了不该带走别人。它自己的连接会在下一次写入时收摊。
+      }
+    }
+  }
+
+  get subscriberCount(): number {
+    return this.listeners.size;
+  }
+}

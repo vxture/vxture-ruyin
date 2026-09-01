@@ -130,6 +130,11 @@ export interface ProjectExport {
   signed: boolean;
 }
 
+/** 运行时事件（daemon /events）。只说什么变了，不带业务数据。 */
+export type RuntimeEvent =
+  | { kind: "task"; projectId: string; taskInstance: string }
+  | { kind: "pending" };
+
 export interface StateItem {
   name: string;
   transitions: Array<{ to: string; confirm?: "human" }>;
@@ -373,6 +378,53 @@ export class Api {
   /** 钉住生效版本（§18.4 回滚）。库里保留着旧版本，这是把它切回去的动作。 */
   pinProductVersion = (id: string, version: string) =>
     this.call<ProductInfo>(`/products/${id}/pin-version`, "POST", { version });
+  /**
+   * 订阅运行时事件（TD-027）。返回一个取消函数。
+   *
+   * 用 fetch + ReadableStream 而不是 EventSource：EventSource 设不了请求头，
+   * 会话令牌就只能塞进 URL —— 令牌不该出现在 URL 里。
+   *
+   * **调用方仍要保留一个慢轮询兜底**：流断了的样子是「一直没有事件」，
+   * 而那和「一切正常」长得一模一样。
+   */
+  subscribe = (onEvent: (event: RuntimeEvent) => void): (() => void) => {
+    const abort = new AbortController();
+    void (async () => {
+      try {
+        const res = await fetch("/events", {
+          headers: { authorization: `Bearer ${this.token}` },
+          signal: abort.signal,
+        });
+        if (!res.ok || !res.body) return;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          buffer += decoder.decode(value, { stream: true });
+          // SSE 的帧以空行分隔；半截的留在缓冲里等下一片。
+          let cut = buffer.indexOf("\n\n");
+          while (cut >= 0) {
+            const frame = buffer.slice(0, cut);
+            buffer = buffer.slice(cut + 2);
+            for (const line of frame.split("\n")) {
+              if (!line.startsWith("data:")) continue; // 心跳是注释行
+              try {
+                onEvent(JSON.parse(line.slice(5).trim()) as RuntimeEvent);
+              } catch {
+                // 半截或异常的帧：丢掉这一帧，别让它带走整条流。
+              }
+            }
+            cut = buffer.indexOf("\n\n");
+          }
+        }
+      } catch {
+        // 断了就断了：兜底轮询还在，界面不会停在旧数据上。
+      }
+    })();
+    return () => abort.abort();
+  };
   checkUpdate = () => this.call<UpdateCheck>("/updates/check");
   /** 记下安装意图（策略 2：操作与时机都归用户）。守护进程会再判一次闸门。 */
   requestInstall = (version: string) =>

@@ -26,6 +26,7 @@ import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import { apiError, REJECTION } from "./errors.js";
 import { join as joinPath } from "node:path";
+import type { EventBus } from "./events.js";
 import {
   checkForUpdate,
   installGate,
@@ -72,6 +73,8 @@ export interface LocalApiDeps {
   updateFeedBase?: string;
   /** 用户的安装意图；壳轮询取走。 */
   updateIntent: InstallIntentBox;
+  /** 运行时事件总线（TD-027）。不接就没有 /events，消费方回到轮询。 */
+  events?: EventBus;
   /**
    * 把字节写进授权目录。导出用它 —— **导出不是特权动作**，它写的仍然是用户
    * 授权过的目录，凭什么绕过同一套护栏。
@@ -291,6 +294,40 @@ async function handle(
   }
 
   const segments = path.split("/").filter((s) => s.length > 0);
+
+  // GET /events - 事件流（TD-027）。SSE 而不是 WebSocket：这些事件全是单向
+  // 的，服务端到客户端；WS 要多一套连接管理，换不来任何东西。
+  //
+  // 事件只说「什么变了」，不带业务数据 —— 带了就等于开出第二条数据通路，而
+  // 那条路上的护栏（授权、工作区边界、审计）要重新写一遍。
+  if (method === "GET" && path === "/events") {
+    if (!deps.events) {
+      send(res, 503, apiError("EVENTS_UNAVAILABLE", "此运行时未接事件流"));
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+      // 环回也可能经过缓冲代理；关掉它，否则事件会被攒着一起发。
+      "x-accel-buffering": "no",
+    });
+    res.write(": ok\n\n");
+    const unsubscribe = deps.events.subscribe((event) => {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    });
+    // 心跳：连接死了要让两边都知道。没有它，一条断掉的流看起来就是「一直
+    // 没有事件发生」—— 和「一切正常」长得一模一样。
+    const beat = setInterval(() => res.write(": beat\n\n"), 25_000);
+    beat.unref?.();
+    const stop = (): void => {
+      clearInterval(beat);
+      unsubscribe();
+    };
+    req.on("close", stop);
+    res.on("close", stop);
+    return;
+  }
 
   // GET /system - runtime transparency for the settings panel
   if (method === "GET" && path === "/system") {
