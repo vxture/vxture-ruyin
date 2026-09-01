@@ -37,6 +37,13 @@ export {
   isPathGranted,
 } from "./project.js";
 export type { ProjectView, PendingConfirmation } from "./project.js";
+export { buildProjectExport } from "./export.js";
+export type {
+  DsseEnvelope,
+  InTotoStatement,
+  ProjectExport,
+  RuyinExportPredicate,
+} from "./export.js";
 export { decideTool, validateToolCall } from "./tool-gate.js";
 export type {
   CallValidation,

@@ -104,9 +104,8 @@ void test("availabilityOf: 订阅未知按可用（不因查不到而锁死用�
 void test("availabilityOf: 明确未订阅 → 不可打开（§18.5）", () => {
   const r = availabilityOf(true, false);
   assert.equal(r.availability, "not_entitled");
-  assert.match(r.reason ?? "", /本地数据仍可访问/);
-  // 导出尚未实现（TD-020）：在它落地之前，这句话不许承诺它。
-  assert.ok(!(r.reason ?? "").includes("导出"));
+  // 导出已落地（TD-020），这句话现在说得全了。
+  assert.match(r.reason ?? "", /可访问、可导出/);
 });
 
 void test("availabilityOf: 本机停用 → 不可打开，与订阅无关", () => {

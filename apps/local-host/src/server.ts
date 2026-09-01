@@ -14,6 +14,7 @@ import {
   NeedsHumanConfirmationError,
   ProjectNotFoundError,
   type Binding,
+  type FolderGrant,
   type ProjectRuntime,
 } from "@vxture/ruyin-core";
 import { DEV_UI_HTML } from "./dev-ui.js";
@@ -23,6 +24,7 @@ import { installPackage } from "./installer.js";
 import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import { apiError, REJECTION } from "./errors.js";
+import { join as joinPath } from "node:path";
 import {
   checkForUpdate,
   installGate,
@@ -69,6 +71,15 @@ export interface LocalApiDeps {
   updateFeedBase?: string;
   /** 用户的安装意图；壳轮询取走。 */
   updateIntent: InstallIntentBox;
+  /**
+   * 把字节写进授权目录。导出用它 —— **导出不是特权动作**，它写的仍然是用户
+   * 授权过的目录，凭什么绕过同一套护栏。
+   */
+  writeArtifact: (
+    path: string,
+    bytes: Uint8Array,
+    grants: FolderGrant[],
+  ) => { content: string; isError?: boolean };
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -592,6 +603,77 @@ async function handle(
   // /projects/:id[...]
   if (segments[0] === "projects" && segments.length >= 2) {
     const projectId = segments[1]!;
+
+    // POST /projects/:id/export  { path } - 导出项目记录（TD-020）。
+    //
+    // 导的是**被锁在存储里的那部分**：meta / 契约 / 业务状态 / 任务实例 / 审计链。
+    // 产出文档由 writeArtifact 写进用户自己的目录，本来就在他手里。
+    //
+    // 落盘走 writeArtifact —— 授权护栏、大小上限、原子改名一个不少。**导出不是
+    // 特权动作**：它写的仍然是用户授权过的目录，凭什么例外。
+    if (
+      method === "POST" &&
+      segments.length === 3 &&
+      segments[2] === "export"
+    ) {
+      const body = await readJson(req);
+      const dir = String(body["path"] ?? "");
+      if (!dir) {
+        send(
+          res,
+          400,
+          apiError("REQUEST_MALFORMED", "缺少导出目录 path", { field: "path" }),
+        );
+        return;
+      }
+      const grants = await deps.runtime.listGrants(projectId);
+      const bundle = await deps.runtime.exportProject(projectId, {
+        runtimeVersion: deps.version,
+      });
+
+      const written = [];
+      const failed = [];
+      for (const [name, content] of Object.entries({
+        ...bundle.files,
+        "envelope.json": JSON.stringify(bundle.envelope, null, 2),
+      })) {
+        const r = deps.writeArtifact(
+          joinPath(dir, name),
+          Buffer.from(content, "utf8"),
+          grants,
+        );
+        if (r.isError) failed.push(`${name}: ${r.content}`);
+        else written.push(name);
+      }
+
+      // 一次导出是一次数据离开本机的事件，必须留痕 —— 成败都留。
+      await deps.runtime.auditExport(
+        projectId,
+        {
+          path: dir,
+          files: written,
+          events: bundle.statement.predicate.auditChain.events,
+        },
+        failed.length === 0 ? "success" : "failed",
+      );
+
+      if (failed.length > 0) {
+        send(res, 403, {
+          ...apiError(REJECTION.POLICY_DENIED, `导出未完成：${failed[0]}`),
+          written,
+          failed,
+        });
+        return;
+      }
+      send(res, 200, {
+        path: dir,
+        files: written,
+        chain: bundle.statement.predicate.auditChain,
+        // 明写：这份导出可验篡改，但还不可归属。
+        signed: false,
+      });
+      return;
+    }
 
     // POST /projects/:id/import - 把 attribution 之前的项目导入当前工作区。
     // 只填空白，不搬家：改变一个已有归属会把数据挪过订阅与权益边界，那是另一

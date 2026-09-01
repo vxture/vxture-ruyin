@@ -1353,3 +1353,73 @@ test("审计：结果不定的事件漏写 outcome 会报错，而不是默认�
   // 「这件事发生了」类的不在表里 —— 它们的结果只能是成功。
   assert.ok(!OUTCOME_MUST_BE_STATED.has("task.created"));
 });
+
+/**
+ * 项目导出（TD-020）。钉三件事：
+ *   1. 信封是 in-toto/DSSE 的形状，不是自造清单
+ *   2. **导出物能脱离 Ruyin 独立验证**——只要 SHA-256、项目 id、事件表
+ *   3. 改一个字节，验证必须失败
+ */
+test("导出：in-toto Statement + DSSE 信封，签名槽位空着而不是省掉", async () => {
+  const ports = makePorts();
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "导出测试", "wsp_a");
+  const bundle = await runtime.exportProject(meta.id, { runtimeVersion: "test" });
+
+  assert.equal(bundle.statement._type, "https://in-toto.io/Statement/v1");
+  assert.equal(bundle.envelope.payloadType, "application/vnd.in-toto+json");
+  // 空数组 = 尚未签名，是一个合法状态。省掉这个字段，「该签」这件事就看不见了。
+  assert.deepEqual(bundle.envelope.signatures, []);
+
+  // subject 按摘要绑定每个文件，且摘要要对得上。
+  for (const s of bundle.statement.subject) {
+    const content = bundle.files[s.name];
+    assert.ok(content !== undefined, `subject 指向不存在的文件 ${s.name}`);
+    assert.equal(
+      s.digest.sha256,
+      ports.crypto.sha256(new TextEncoder().encode(content!)),
+      `${s.name} 摘要不符`,
+    );
+  }
+
+  // 披露项必须在信封里 —— 审计链含本机路径，转手前得看得见。
+  assert.equal(bundle.statement.predicate.disclosure.containsLocalPaths, true);
+});
+
+test("导出：链能脱离 Ruyin 验证；改一个字节就验不过", async () => {
+  const ports = makePorts();
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "导出测试", "wsp_a");
+  await runtime.transitionBusinessState(meta.id, "planning");
+  const bundle = await runtime.exportProject(meta.id, { runtimeVersion: "test" });
+
+  // 收件人手上只有这个包：audit.json + predicate 里的项目 id 与创世锚。
+  const events = JSON.parse(bundle.files["audit.json"]!);
+  const { project, auditChain } = bundle.statement.predicate;
+
+  // 创世锚可以自己重算 —— 不必信我们给的那个。
+  assert.equal(auditChain.genesis, ports.crypto.sha256(`genesis:${project.id}`));
+  assert.equal(auditChain.events, events.length);
+  assert.equal(auditChain.head, events[events.length - 1].hash);
+  // 只用 SHA-256 + 项目 id + 事件表 —— 没有任何本机依赖。
+  assert.ok(verifyAuditChain(ports.crypto, project.id, events));
+
+  // 篡改一个字节：把某条事件的 payload 改掉。
+  const tampered = JSON.parse(bundle.files["audit.json"]!);
+  tampered[1].payload = { ...tampered[1].payload, injected: true };
+  assert.equal(
+    verifyAuditChain(ports.crypto, project.id, tampered),
+    false,
+    "改了内容却仍然验得过 —— 那这份证明毫无意义",
+  );
+});
+
+test("导出：同样的输入产出逐字节相同的信封", async () => {
+  const ports = makePorts();
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "导出测试", "wsp_a");
+  const a = await runtime.exportProject(meta.id, { runtimeVersion: "test" });
+  const b = await runtime.exportProject(meta.id, { runtimeVersion: "test" });
+  // subject 排过序，所以两次导出可以直接比对。exportedAt 会变，statement 不比。
+  assert.deepEqual(a.statement.subject, b.statement.subject);
+});

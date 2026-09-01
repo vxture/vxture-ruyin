@@ -20,6 +20,7 @@ import {
   pendingCheckpoint,
   toAuditView,
   verifyAuditChain,
+  type FolderGrant,
   type RuntimePorts,
 } from "@vxture/ruyin-core";
 import { SqliteStoragePort } from "./storage.js";
@@ -94,6 +95,9 @@ const testSystemInfo = {
   version: "test",
 
   updateIntent: new InstallIntentBox(),
+
+  writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+      new LocalToolExecutor().writeArtifact(p, b, g),
   platform: process.platform,
   arch: process.arch,
   dataDir: "(test)",
@@ -175,6 +179,9 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     version: "test",
 
     updateIntent: new InstallIntentBox(),
+
+    writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+      new LocalToolExecutor().writeArtifact(p, b, g),
     systemInfo: testSystemInfo,
     // 登录态替身：服务端只从会话里读当前工作区，绝不从请求体里读 —— 请求体里
     // 带工作区等于让调用方自己挑数据边界。
@@ -407,6 +414,9 @@ test("daemon serves the built workspace ui with traversal guard", async () => {
     version: "test",
 
     updateIntent: new InstallIntentBox(),
+
+    writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+      new LocalToolExecutor().writeArtifact(p, b, g),
     systemInfo: testSystemInfo,
     reindex: async () => 0,
     uiDir,
@@ -568,6 +578,9 @@ test("归属：未登录不能新建项目；老项目可导入当前工作区",
     version: "test",
 
     updateIntent: new InstallIntentBox(),
+
+    writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+      new LocalToolExecutor().writeArtifact(p, b, g),
     systemInfo: testSystemInfo,
     reindex: async () => 0,
   };
@@ -627,5 +640,101 @@ test("归属：未登录不能新建项目；老项目可导入当前工作区",
     signedIn.close();
     storage.closeAll();
     rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 导出端到端（TD-020）。
+ *
+ * 内核那边已经钉了信封形状与篡改检测；这里钉的是宿主这一半：**导出写的是用户
+ * 授权过的目录，走的是同一套护栏**——导出不是特权动作。
+ */
+test("导出：落进授权目录、留下审计、未授权目录一律拒绝", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-exp-"));
+  const outDir = mkdtempSync(join(tmpdir(), "ruyin-out-"));
+  const denied = mkdtempSync(join(tmpdir(), "ruyin-nope-"));
+  const { ports, storage } = await makePorts(dataDir);
+  const runtime = new ProjectRuntime(ports);
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  assert.ok(bid);
+  const meta = await runtime.createProject(bid.contract, "导出", "wsp_test");
+  await runtime.addGrant(meta.id, outDir, "readwrite");
+
+  const token = "exp-token";
+  const authed = { authorization: `Bearer ${token}` };
+  const json = { ...authed, "content-type": "application/json" };
+  const server = createLocalApi({
+    runtime,
+    registry: new ProductRegistry(productsDir, dataDir),
+    tasks: new TaskRunner(runtime),
+    token,
+    version: "test",
+    updateIntent: new InstallIntentBox(),
+    writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+      new LocalToolExecutor().writeArtifact(p, b, g),
+    systemInfo: testSystemInfo,
+    platform: signedInTo("wsp_test"),
+    reindex: async () => 0,
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  try {
+    const res = await fetch(`${base}/projects/${meta.id}/export`, {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ path: outDir }),
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      files: string[];
+      chain: { events: number; head: string };
+      signed: boolean;
+    };
+    // 明写「还没签」——可验篡改，不可归属。
+    assert.equal(body.signed, false);
+    assert.ok(body.files.includes("envelope.json"));
+    assert.ok(body.files.includes("audit.json"));
+
+    // 收件人只拿这个目录，就能自己走一遍链。
+    const events = JSON.parse(
+      readFileSync(join(outDir, "audit.json"), "utf8"),
+    ) as Parameters<typeof verifyAuditChain>[2];
+    assert.ok(verifyAuditChain(nodeCrypto, meta.id, events));
+
+    const envelope = JSON.parse(
+      readFileSync(join(outDir, "envelope.json"), "utf8"),
+    ) as { payload: string; payloadType: string; signatures: unknown[] };
+    assert.equal(envelope.payloadType, "application/vnd.in-toto+json");
+    assert.deepEqual(envelope.signatures, []);
+    // 信封里的 payload 就是 statement.json，base64 一致。
+    assert.equal(
+      Buffer.from(envelope.payload, "base64").toString("utf8"),
+      readFileSync(join(outDir, "statement.json"), "utf8"),
+    );
+
+    // 导出本身进了审计。
+    const after = (await runtime.listAuditEvents(meta.id)).map(toAuditView);
+    const exported = after.find((e) => e.action === "project.exported");
+    assert.ok(exported, "导出没有留痕 —— 一次数据离开本机的事件必须记");
+    assert.equal(exported.outcome, "success");
+
+    // 未授权的目录：同一套护栏，导出不例外。
+    const refused = await fetch(`${base}/projects/${meta.id}/export`, {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ path: denied }),
+    });
+    assert.equal(refused.status, 403);
+    assert.equal(
+      ((await refused.json()) as { code: string }).code,
+      "POLICY_DENIED",
+    );
+  } finally {
+    server.close();
+    storage.closeAll();
+    for (const d of [dataDir, outDir, denied]) {
+      rmSync(d, { recursive: true, force: true });
+    }
   }
 });
