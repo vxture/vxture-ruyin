@@ -43,10 +43,10 @@
 
 里程碑：**本地招标文件 → 需求矩阵 → 方案生成 → 人工确认 → 导出，全程审计可查。**
 
-- [x] Context Runtime：local-fs 连接器（Grant 域内、深度/数量/大小限额）+ Grant/Binding 模型（绑定校验 + 选择期 Grant 复核）+ FTS5 索引与相关性排序（CJK 分词粗糙已注记）+ Selection 管线（候选→排序→每类型限额）+ **context_confirm 门**（高敏上下文执行前人工确认）+ **transmission.inference 审计事件**（哈希不落内容，04 §7.3 落地）
+- [x] Context Runtime：local-fs 连接器（Grant 域内、深度/数量/大小限额）+ Grant/Binding 模型（绑定校验 + 选择期 Grant 复核）+ FTS5 索引与相关性排序（**CJK 分词已修，2026-09-01 · TD-022**：默认 unicode61 对中文实测四条查询全 0 命中，改 trigram 并迁移老库，两字词由 LIKE 子串扫描兜底）+ Selection 管线（候选→排序→每类型限额）+ **context_confirm 门**（高敏上下文执行前人工确认）+ **transmission.inference 审计事件**（哈希不落内容，04 §7.3 落地）
 - [ ] AI Gateway 真实对接（**前置：liaison L3 平台侧就绪**）+ Transmission Gate + 审计哈希链
 - [x] Workspace UI（`apps/ui-workspace`，React + Vite）：Checkpoint 卡片（context_confirm 展示 Context Set / verification_review 展示验证结论）、Grant/绑定面板、契约驱动的状态转换按钮（confirm:human 弹确认）、任务发起（自动选择 / 手动 JSON）、审计表；daemon 静态托管于 `/`（壳与浏览器同源同页），Dev Console 迁 `/dev`；打包进安装包 resources/ui
-- [ ] 验证修订轮 + 恢复重放（Harness 侧，随真实 Gateway 一并做）
+- [x] **验证修订轮 + 恢复重放**（Harness 侧）——**这条曾长期标着未做，而它其实早已实现**：`MAX_REVISIONS` 有界、末端恒为人（`verify: revisions are bounded and the end is always a person`），中断任务由 `interruptedResumePoint` + `recoverAll` 重入且不重做已完成的能力（`harness: recovery resumes an interrupted task without redoing finished work`）。同批还有瞬时错误退避挂起与取消。2026-09-01 复核用例后更正
 - [ ] `packages/product-sdk`：桥 API 面冻结（40-implementation/10 §6.2 基线）
 
 ## W4 · 发布基建（可与 W3 并行启动）
@@ -59,7 +59,7 @@
 - [ ] 签名步（**前置：TD-001 证书采购**；electron-builder 侧 `signAndEditExecutable` 待回开）。**注意签名不只挡下载**：electron-updater 在 Windows 默认校验更新包签名，不签名就得关掉那道校验——等于把更新通道的安全性一并降了
 - [ ] dl 主机上载（**前置：liaison L2**）——publish job 已留占位，L2 落地后换 tailnet-ssh-connect + rsync 原子切换
 - [ ] products/ 静态清单目录（流 C 的 MVP Registry）
-- [x] **接入 electron-updater（2026-09-01 · TD-021）**——检查 + 闸门 + 意图 + 下载安装流程全通，**余下只等 TD-001 证书**。三条策略见 30-design/70 §7.3。**检查那一半**：`GET /updates/check` 拉渠道 feed 比版本，`RUYIN_UPDATE_FEED` 可指向测试 feed，设置页真的会去问一次。**检查不需要 Electron**（一个 HTTP GET 而已），放守护进程还能保住「界面是纯 Web 客户端」这条边界。**下载与安装未做**：需 electron-updater + TD-001 证书 + 三条策略。原始记录：`latest.yml` 一直在产出，但**应用里没有消费者**。设置页的「检查更新」原本不发任何请求就断言「当前已是最新」并附时间戳——**没查过就说已是最新，比不提供这个按钮糟得多**；已于 2026-09-01 改为如实标注「尚未接通」，渠道开关一并收起（它只写 localStorage 无人读，用户切到 Beta 永远收不到 beta 包，只会以为坏了）。接入前需定三条策略：**有任务在跑时不装（等它停）**、自动下载还是询问、是否允许 stable↔beta 降级
+- [x] **接入 electron-updater（2026-09-01 · TD-021）**——检查 + 闸门 + 意图 + 下载安装流程全通，**余下只等 TD-001 证书**。三条策略见 30-design/70 §7.3。**检查那一半**：`GET /updates/check` 拉渠道 feed 比版本，`RUYIN_UPDATE_FEED` 可指向测试 feed，设置页真的会去问一次。**检查不需要 Electron**（一个 HTTP GET 而已），放守护进程还能保住「界面是纯 Web 客户端」这条边界。原始记录（**下面这段写于下载与安装尚未接入时；上面那句「全通」是后来的状态，两句曾并存于同一条，已在 2026-09-01 更正**）：`latest.yml` 一直在产出，但**应用里没有消费者**。设置页的「检查更新」原本不发任何请求就断言「当前已是最新」并附时间戳——**没查过就说已是最新，比不提供这个按钮糟得多**；已于 2026-09-01 改为如实标注「尚未接通」，渠道开关一并收起（它只写 localStorage 无人读，用户切到 Beta 永远收不到 beta 包，只会以为坏了）。接入前需定三条策略：**有任务在跑时不装（等它停）**、自动下载还是询问、是否允许 stable↔beta 降级
 
 ## W5 · npm 发布流
 
@@ -216,7 +216,13 @@
 
 并发与调度 · 上下文预算 · 本地资源治理 · 跨产品协作 · 契约版本升级路径 ·
 二级供给的签名与 Registry · Cloud Runtime 与一致性套件 · 同步 ·
-用户策略持久化 · **任何具体格式的解析与渲染技能**。
+用户策略持久化 · **具体格式的解析**（归 Atlas，TD-018）。
+
+> **渲染已不在此列。** 这一条原本写作「任何具体格式的解析与渲染技能」。渲染在
+> MVP 期间确实不做，但它是 ADR-013 选定的 C 的主体，由 TD-019 跟踪，并于
+> 2026-09-01（MVP 关闭之后）落地：`@vxture/ruyin-document` 交出 mdast 表示与
+> docx / PDF 渲染。**解析仍在此列，且归属未变** —— 解析要模型能力（ADR-008），
+> 渲染是确定性转换（ADR-006 的技能）。
 
 ### 外部依赖（本仓做不了，但决定 MVP 能否被真实使用）
 
@@ -228,3 +234,53 @@
 **注意 MVP 的验收方式随之改变**：不能拿某个产品的成品去验，只能验
 **接缝是否就位** —— 契约能拉到、非文本内容能进上下文、字节能落盘、等人时
 有通知、项目按工作区分隔、不可信内容被标出。承载哪个智能体，是之后的事。
+
+---
+
+## MVP 之后（2026-09-01 一批）
+
+> MVP 关闭之后做的这一批，此前**计划文档里一个字都没有**。补记于此，因为
+> 排下一步的依据就是这份文档 —— 依据过期，排出来的就是错的。
+
+### 落地
+
+| | 内容 |
+|---|---|
+| **ADR-016** | 结构化文档表示：内部 mdast，上线格式 Markdown，扩展走 `remark-directive`。**不违反 ADR-013 对 A 的否决** —— A 让模型转运它没创作的字节，C 让模型交出它本来就要创作的正文 |
+| **ADR-017** | PDF 由壳里的 Chromium 渲染，字节回守护进程落盘（`writeArtifact` 仍是唯一写入路径） |
+| **TD-019 / 023** | `@vxture/ruyin-document`：docx + PDF；表达不了的构件**拒渲而不是少渲** |
+| **TD-020** | 项目导出：in-toto Statement + DSSE 信封，`signatures: []` 是合法状态（客户端零密钥）—— **可验篡改，不可归属** |
+| **TD-022** | 检索落地，范围限定在**本任务的上下文集**；连带修掉 FTS 对中文零命中 |
+| **TD-026** | `sources: [project]` 兑现：任务产出登记后回流给下游任务 |
+| **TD-027 / 029** | 事件流（SSE）替掉界面与壳的七处轮询；轮询降为兜底 |
+| **TD-025 / 028** | CI 打包冒烟；界面补上导出 / 启停 / 版本回滚 / 装包四个入口 |
+| **R14** | 新契约规则：声明了 tools 的 task 必须有 capability |
+| **UI** | chrome 三态（工作台 / 产品 / 设置），规则是**谁的导航就放在谁的侧栏里** |
+
+### 这一批抓到的缺陷（都不是新写的功能，是既有的）
+
+按同一条判据找出来的 —— **「这里说了一件事，实际是不是那样？」**
+
+- `export_deliverable` 声明了工具却没有 capability，**零调用跑到 completed**，
+  中间还让人确认一份从未产出的交付物 → R14
+- **工作区边界只挡了列表**：`activeWorkspace()` 全服务端只用了三次，其余每条
+  `/projects/:id/*` 都不检查归属 —— 切换工作区后面板还开着，能把上一个工作区
+  的项目连审计链一起导出
+- 安装更新**在第一步就断**：`downloadUpdate()` 前从未 `checkForUpdates()`，库
+  直接 reject；`allowDowngrade` 吃默认值，而 `channel` setter 会把它翻成 true
+- 审计页对**每一条完好的链**都喊「哈希链断裂」：X-3 改名后界面那份类型没跟
+- 三处文件头说反了（改订轮次/瞬时挂起/取消都已实现却写着未做）
+
+### 守卫（六道，每道都故意弄坏验证过）
+
+`lint:contract`（R 系列）· `lint:api-shape`（X-1/B-3）· `lint:publish-order` ·
+`lint:shared-shapes`（跨进程类型 + 事件词表 + 标题栏高度）·
+`lint:update-policy`（owner 定的三条更新策略）· `lint:docs-numbering`；
+CI 另加 `packaged-smoke`（windows-latest，真启动 + 真排一份 PDF + 断言 DPAPI）。
+
+**咨询性，不是必需检查** —— 必需上下文恒为五个，加第六个属治理变更，待 owner 定。
+
+### 开发工具
+
+`pnpm dev:ui`：带登录桩的界面观察台。此前界面改动只能靠类型与构建，视觉从未
+过眼 —— 它只顶开登录这道门，服务端的授权护栏、工作区边界、审计全部照常。
