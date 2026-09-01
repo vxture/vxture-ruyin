@@ -1,8 +1,12 @@
 ﻿/**
- * Settings - runtime transparency and preferences. DS-native: ghost-button
- * section nav, SegmentedControl pickers over the ThemeProvider's three axes
- * (mode / density / font size - the user-preference axis of the DS sizing
- * model), StatusBadge for protection states.
+ * 设置 —— 运行时的透明度与偏好。
+ *
+ * **分区导航不在这里。** 设置是一个应用，应用有自己的框架：分区在侧栏
+ * （设置态 chrome，见 workbench.tsx）。这里曾经是页面内的第二根竖直导航栏，
+ * 于是屏幕左边并排站着两根，436px 全是导航。
+ *
+ * 剩下的 SegmentedControl 是**取值控件**不是导航：ThemeProvider 的三条轴
+ * （模式 / 密度 / 字号）与推理传输策略。StatusBadge 表示保护状态。
  */
 
 import { useEffect, useState } from "react";
