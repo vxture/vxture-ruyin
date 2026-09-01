@@ -327,3 +327,38 @@ test("R11: temporary data class sync policy is fixed to local_only", () => {
     ).includes("R11"),
   );
 });
+
+/**
+ * R14：声明了工具却没有能力的任务，永远调不到那些工具。
+ *
+ * 这不是洁癖。标书契约的 `export_deliverable` 原本就是这个形状 —— 目标是
+ * 「汇总并导出最终投标成果包」，tools 有两个，capabilities 是空的 —— 它跑到
+ * **completed**，零次提供方调用、零次工具调用、result 是空的，中间还让一个人
+ * 去「最终确认」一份从未产出的交付物。
+ */
+test("R14: a task with tools but no capability can never call them", () => {
+  const c = structuredClone(base);
+  const task = c.tasks.find((t) => t.id === "export_deliverable");
+  assert.ok(task);
+  // 先钉住现在是好的 —— 否则下面的断言证明不了是这条规则在起作用。
+  assert.ok(!rules(validateContract(structuredClone(c))).includes("R14"));
+
+  task.capabilities = [];
+  const result = validateContract(c);
+  assert.ok(rules(result).includes("R14"));
+  assert.match(
+    result.errors.find((e) => e.rule === "R14")?.message ?? "",
+    /export_result/,
+    "报错要点名是哪些工具会调不到",
+  );
+});
+
+test("R14: a task with neither tools nor capabilities is not flagged", () => {
+  const c = structuredClone(base);
+  const task = c.tasks.find((t) => t.id === "export_deliverable");
+  assert.ok(task);
+  // 纯人工检查点式的任务是合法的 —— 规则针对的是「声明了却用不上」。
+  task.capabilities = [];
+  task.tools = [];
+  assert.ok(!rules(validateContract(c)).includes("R14"));
+});

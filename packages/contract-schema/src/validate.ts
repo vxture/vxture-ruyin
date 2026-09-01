@@ -1,6 +1,6 @@
 /**
  * Contract validation entry points: YAML parsing + the layered validation
- * pipeline (L1 structural via ajv, then rules R1-R11). L4 signature checks
+ * pipeline (L1 structural via ajv, then the R-series semantic rules). L4 signature checks
  * live at the package layer, not here.
  */
 
@@ -60,7 +60,7 @@ export function parseContract(text: string): unknown {
   return parse(text);
 }
 
-/** Validate a parsed contract document through L1 structure + rules R1-R11. */
+/** Validate a parsed contract document through L1 structure + the R-series rules. */
 export function validateContract(raw: unknown): ValidationResult {
   const structural = structuralValidator();
   if (!structural(raw)) {

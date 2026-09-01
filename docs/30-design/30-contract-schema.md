@@ -355,6 +355,7 @@ sync:
 | R11 | temporary 类同步策略固定 local_only | L1 |
 | R12 | 包签名有效且签名身份与 product.publisher 一致 | L4 |
 | R13 | `input_schema.required` 中每个名字均已声明；`local_read`/`local_write`/`export` 类工具至少标注一个 `x-ruyin-ref: path` 参数 | L2 |
+| R14 | 声明了 tools 的 task 必须至少声明一条 capability——工具只在能力回合内被调用，`capabilities: []` 的任务一个回合都不跑，声明的工具永远调不到 | L2 |
 
 ---
 

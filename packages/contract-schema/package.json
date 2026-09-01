@@ -1,7 +1,7 @@
 {
   "name": "@vxture/ruyin-contract-schema",
   "version": "0.1.0",
-  "description": "Ruyin Runtime Contract - TypeScript types, JSON Schema, and the R1-R11 validator (design authority: docs/30-design/30-contract-schema.md).",
+  "description": "Ruyin Runtime Contract - TypeScript types, JSON Schema, and the R-series semantic validator (design authority: docs/30-design/30-contract-schema.md).",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
