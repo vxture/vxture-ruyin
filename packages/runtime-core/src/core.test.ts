@@ -86,6 +86,21 @@ function runTask(
     .then((created) => harness.advance(created.id));
 }
 
+/** 一路批准到落定：工具是 ask 类时，不批准它根本不会跑。 */
+async function approveThrough(
+  harness: Harness,
+  taskId: string,
+  inputs?: Record<string, unknown>,
+): Promise<TaskInstanceRecord> {
+  const created = await harness.startTask(taskId, inputs);
+  let instance = await harness.advance(created.id);
+  for (let i = 0; i < 8 && instance.state === "waiting_human"; i++) {
+    await harness.decideCheckpoint(instance.id, true);
+    instance = await harness.advance(instance.id);
+  }
+  return instance;
+}
+
 /** Decide a checkpoint, then let the task continue. */
 function decide(
   harness: Harness,
@@ -1466,4 +1481,99 @@ test("启动：宿主跑不了的工具，任务当场拒掉，不烧回合", as
     },
   );
   assert.equal(turns, 0, "拒之前不该向提供方发出任何一个回合");
+});
+
+/**
+ * 声明了输入却一份资料都没拿到的任务，不许开跑。
+ *
+ * 逐个类型看都是 `required: false`，所以已有的必需检查一个都不会响；而合起来
+ * 「一份资料都没有」是另一回事。`validate_coverage` 的目标是「逐条对照需求
+ * 矩阵与技术方案」，约束里写着「不得抽样」—— 它曾经就是在 context = [] 的
+ * 情况下跑完的，没有任何一处说过不对。
+ */
+test("选取：一份资料都没拿到，任务不许开跑", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "空手", "wsp_test");
+  const harness = await runtime.createHarness(meta.id);
+  const instance = await runTask(harness, "validate_coverage");
+  assert.equal(instance.state, "failed");
+  assert.match(String(instance.error), /no context at all/);
+  // 说清是哪几类空的 —— 否则读的人只知道「没资料」，不知道去绑哪个目录。
+  assert.match(String(instance.error), /requirement_matrix/);
+  assert.match(String(instance.error), /technical_proposal/);
+});
+
+/**
+ * 产出登记：类型来自产出它的那个任务的 output_types。
+ *
+ * 任务声明了不止一种产出时**不猜**：猜一个类型比不登记更糟，下游会拿到一份
+ * 被标错类别的资料，然后正常地用它。这种情况留一条审计，不留一个猜测。
+ */
+test("产出登记：单一产出类型据此定类，多种则不猜并留痕", async () => {
+  const ports = makePorts();
+  ports.tools = {
+    supports: () => true,
+    execute: async () => ({
+      content: "wrote 12 bytes",
+      artifact: { path: "C:/work/矩阵.md", bytes: 12 },
+    }),
+  };
+  let asked = false;
+  ports.gateway = {
+    turn: async () => {
+      if (asked) return { kind: "content" as const, content: "done" };
+      asked = true;
+      return {
+        kind: "tool_calls" as const,
+        calls: [
+          {
+            id: "c1",
+            tool: "write_document",
+            arguments: { path: "C:/work/矩阵.md", content: "x" },
+          },
+        ],
+      };
+    },
+  };
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "登记", "wsp_test");
+  await runtime.addGrant(meta.id, "C:/work", "readwrite");
+  const harness = await runtime.createHarness(meta.id);
+  // write_document 是 default: ask —— 先过检查点，工具才会真的跑。
+  await approveThrough(harness, "analyze_tender", { tender_document: { ref: "x" } });
+
+  const store = await ports.storage.openProjectStore(meta.id);
+  assert.ok(store);
+  const registry = JSON.parse((await store.getArtifacts()) ?? "[]") as Array<{
+    type: string;
+    path: string;
+  }>;
+  assert.equal(registry.length, 1);
+  // analyze_tender 只声明一种产出，所以这一份就是需求矩阵，不必问模型。
+  assert.equal(registry[0]?.type, "requirement_matrix");
+
+  // 产出类型不止一种：不登记，改为留一条审计说明为什么。
+  const two = structuredClone(bidContract) as RuyinContract;
+  const t = two.tasks.find((x) => x.id === "analyze_tender");
+  assert.ok(t);
+  t.output_types = ["requirement_matrix", "coverage_report"];
+  const ports2 = makePorts();
+  ports2.tools = ports.tools;
+  ports2.gateway = ports.gateway;
+  asked = false;
+  const runtime2 = new ProjectRuntime(ports2);
+  const meta2 = await runtime2.createProject(two, "含糊", "wsp_test");
+  await runtime2.addGrant(meta2.id, "C:/work", "readwrite");
+  await approveThrough(
+    await runtime2.createHarness(meta2.id),
+    "analyze_tender",
+    { tender_document: { ref: "x" } },
+  );
+  const store2 = await ports2.storage.openProjectStore(meta2.id);
+  assert.deepEqual(JSON.parse((await store2?.getArtifacts()) ?? "[]"), []);
+  const actions = (await runtime2.listAuditEvents(meta2.id)).map(toAuditView);
+  assert.ok(
+    actions.some((e) => e.action === "artifact.untyped"),
+    "没登记也没留痕 —— 那这份产出就凭空消失了",
+  );
 });

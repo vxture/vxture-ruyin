@@ -13,7 +13,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -63,12 +63,20 @@ const CAPABILITY_DOC = [
  */
 class ScriptedProvider implements AIGatewayPort {
   readonly seen: string[] = [];
+  /** 每个能力第一次被调用时看见的资料名。管道通没通，看这个。 */
+  readonly context = new Map<string, string[]>();
   private readonly used = new Set<string>();
 
   constructor(private readonly paths: { tender: string; matrix: string; proposal: string; coverage: string; out: string }) {}
 
   async turn(request: CapabilityTurnRequest): Promise<CapabilityTurn> {
     this.seen.push(request.capability);
+    if (!this.context.has(request.capability)) {
+      this.context.set(
+        request.capability,
+        request.context.map((c) => c.name),
+      );
+    }
     // 校验回合要的是裁决。给别的东西会被如实升级为人工复核（而不是当成通过），
     // 那条规矩另有用例，这里给正常答复。
     if (request.capability.startsWith("verify:")) {
@@ -275,6 +283,94 @@ void test("标书：四个任务连起来跑，最后落下一份真能打开的
       (e) => e.action === "tool.executed" && e.outcome === "success",
     );
     assert.ok(exported.length >= 5, "工具调用没有被完整记下来");
+  } finally {
+    storage.closeAll();
+    for (const d of [dataDir, work]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 下游任务要真的看得见上游的产出。
+ *
+ * 契约把这类上下文声明为 `sources: [project]`，而在此之前**没有任何东西兑现
+ * 它**：没有绑定 → 候选为空 → 该类型被跳过；这些类型多半 `required: false`，
+ * 所以连一句话都不会有。实测过的样子是：`coverage_verification` 的上下文是
+ * `[]` —— 一个专门做「逐条对照需求矩阵与技术方案」的任务，两份文档一份都没
+ * 拿到，照跑不误，约束里还写着「不得抽样」。
+ */
+void test("标书：下游任务看得见上游写出来的东西", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-flow-"));
+  const work = mkdtempSync(join(tmpdir(), "ruyin-flowwork-"));
+  const tenderDir = join(work, "招标");
+  const corpDir = join(work, "企业");
+  const outDir = join(work, "产出");
+  for (const d of [tenderDir, corpDir, outDir]) mkdirSync(d, { recursive: true });
+  const paths = {
+    tender: join(tenderDir, "招标文件.md"),
+    matrix: join(outDir, "需求矩阵.md"),
+    proposal: join(outDir, "技术方案.md"),
+    coverage: join(outDir, "覆盖报告.md"),
+    out: join(outDir, "投标成果.docx"),
+  };
+  writeFileSync(paths.tender, TENDER, "utf8");
+  writeFileSync(join(corpDir, "企业能力.md"), CAPABILITY_DOC, "utf8");
+
+  const storage = new SqliteStoragePort(dataDir, await KeyManager.open(dataDir));
+  const provider = new ScriptedProvider(paths);
+  const runtime = new ProjectRuntime({
+    storage,
+    clock: nodeClock,
+    id: nodeId,
+    crypto: nodeCrypto,
+    gateway: provider,
+    connectors: new Map([["local-fs", new LocalFsConnector()]]),
+    ranker: new FtsRanker(storage),
+    tools: new LocalToolExecutor((pid, q, scope, limit) =>
+      searchContext(storage, pid, q, scope, limit),
+    ),
+  });
+
+  try {
+    const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+    assert.ok(bid);
+    const meta = await runtime.createProject(bid.contract, "分目录", "wsp_test");
+    await runtime.addGrant(meta.id, work, "readwrite");
+    // 这一次每类资料各在各的目录里 —— 上一条用例把两类绑到同一个目录，
+    // 于是需求矩阵是「碰巧同在一个文件夹」才被看见的，那不算管道通了。
+    for (const [type, root] of [
+      ["tender_document", tenderDir],
+      ["enterprise_capability", corpDir],
+    ] as const) {
+      const binding = await runtime.setBinding(meta.id, { type, root });
+      await reindexBinding(storage, meta.id, binding, new LocalFsConnector());
+    }
+
+    const harness = await runtime.createHarness(meta.id);
+    for (const taskId of [
+      "analyze_tender",
+      "generate_proposal",
+      "validate_coverage",
+      "export_deliverable",
+    ]) {
+      const instance = await runToEnd(harness, taskId);
+      assert.equal(instance.state, "completed", `${taskId}：${instance.error ?? ""}`);
+    }
+
+    const saw = (capability: string): string[] => provider.context.get(capability) ?? [];
+    // 上游产出流到了下游。这两条是这个用例的全部意义。
+    assert.deepEqual(
+      saw("coverage_verification").sort(),
+      ["技术方案.md", "需求矩阵.md"],
+      "校验覆盖的任务没拿到要对照的两份文档",
+    );
+    assert.deepEqual(
+      saw("deliverable_assembly").sort(),
+      ["技术方案.md", "覆盖报告.md"],
+      "汇总的任务没拿到要汇总的东西",
+    );
+    // 招标文件只在它自己的目录里，仍然被 analyze_tender 拿到。
+    assert.deepEqual(saw("requirement_analysis"), ["招标文件.md"]);
+    assert.ok(existsSync(paths.out));
   } finally {
     storage.closeAll();
     for (const d of [dataDir, work]) rmSync(d, { recursive: true, force: true });

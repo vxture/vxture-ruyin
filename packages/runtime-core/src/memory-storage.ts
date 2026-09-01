@@ -36,6 +36,7 @@ class MemoryProjectStore implements ProjectStore {
 
   private grants: string | undefined;
   private bindings: string | undefined;
+  private artifacts: string | undefined;
   async putGrants(grantsJson: string): Promise<void> {
     this.grants = grantsJson;
   }
@@ -47,6 +48,12 @@ class MemoryProjectStore implements ProjectStore {
   }
   async getBindings(): Promise<string | undefined> {
     return this.bindings;
+  }
+  async putArtifacts(artifactsJson: string): Promise<void> {
+    this.artifacts = artifactsJson;
+  }
+  async getArtifacts(): Promise<string | undefined> {
+    return this.artifacts;
   }
 
   async setBusinessState(state: string): Promise<void> {
