@@ -59,7 +59,7 @@
 - [ ] 签名步（**前置：TD-001 证书采购**；electron-builder 侧 `signAndEditExecutable` 待回开）。**注意签名不只挡下载**：electron-updater 在 Windows 默认校验更新包签名，不签名就得关掉那道校验——等于把更新通道的安全性一并降了
 - [ ] dl 主机上载（**前置：liaison L2**）——publish job 已留占位，L2 落地后换 tailnet-ssh-connect + rsync 原子切换
 - [ ] products/ 静态清单目录（流 C 的 MVP Registry）
-- [ ] **接入 electron-updater（TD-021）**：`latest.yml` 一直在产出，但**应用里没有消费者**。设置页的「检查更新」原本不发任何请求就断言「当前已是最新」并附时间戳——**没查过就说已是最新，比不提供这个按钮糟得多**；已于 2026-09-01 改为如实标注「尚未接通」，渠道开关一并收起（它只写 localStorage 无人读，用户切到 Beta 永远收不到 beta 包，只会以为坏了）。接入前需定三条策略：**有任务在跑时不装（等它停）**、自动下载还是询问、是否允许 stable↔beta 降级
+- [~] **接入 electron-updater（TD-021）**——**检查那一半已通（2026-09-01）**：`GET /updates/check` 拉渠道 feed 比版本，`RUYIN_UPDATE_FEED` 可指向测试 feed，设置页真的会去问一次。**检查不需要 Electron**（一个 HTTP GET 而已），放守护进程还能保住「界面是纯 Web 客户端」这条边界。**下载与安装未做**：需 electron-updater + TD-001 证书 + 三条策略。原始记录：`latest.yml` 一直在产出，但**应用里没有消费者**。设置页的「检查更新」原本不发任何请求就断言「当前已是最新」并附时间戳——**没查过就说已是最新，比不提供这个按钮糟得多**；已于 2026-09-01 改为如实标注「尚未接通」，渠道开关一并收起（它只写 localStorage 无人读，用户切到 Beta 永远收不到 beta 包，只会以为坏了）。接入前需定三条策略：**有任务在跑时不装（等它停）**、自动下载还是询问、是否允许 stable↔beta 降级
 
 ## W5 · npm 发布流
 

@@ -34,6 +34,21 @@ export interface ProjectMeta {
 }
 
 /**
+ * 更新检查结果（daemon /updates/check）。**`current` 只在真拉到 feed 并比对过
+ * 之后才会出现**——查不到就是 `unreachable`，不是「已是最新」。
+ */
+export type UpdateCheck =
+  | { status: "current"; current: string; latest: string; checkedAt: string }
+  | {
+      status: "available";
+      current: string;
+      latest: string;
+      releasedAt?: string;
+      checkedAt: string;
+    }
+  | { status: "unreachable"; current: string; reason: string; checkedAt: string };
+
+/**
  * `GET /projects` 的形状。`elsewhere` 只报**数量不报名字**：隔离要照做，但
  * 「切换一下项目全没了」在用户那里和「数据丢了」分不开。
  */
@@ -229,6 +244,7 @@ export class Api {
   }
 
   pending = () => this.call<PendingConfirmation[]>("/pending");
+  checkUpdate = () => this.call<UpdateCheck>("/updates/check");
   products = () => this.call<ProductInfo[]>("/products");
   projects = () => this.call<ProjectList>("/projects");
   createProject = (product: string, name: string) =>

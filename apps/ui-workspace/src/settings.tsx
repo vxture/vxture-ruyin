@@ -15,7 +15,7 @@ import {
   StatusBadge,
   useTheme,
 } from "@vxture/design-system";
-import { Api, type SystemInfo } from "./api";
+import { Api, type SystemInfo, type UpdateCheck } from "./api";
 
 const UI_VERSION = "0.2.0";
 
@@ -62,7 +62,7 @@ export function SettingsView({ api }: { api: Api }) {
           {section === "account" && <AccountSection />}
           {section === "general" && <GeneralSection />}
           {section === "privacy" && <PrivacySection system={system} />}
-          {section === "updates" && <UpdatesSection system={system} />}
+          {section === "updates" && <UpdatesSection system={system} api={api} />}
           {section === "about" && <AboutSection system={system} />}
         </div>
       </div>
@@ -218,17 +218,42 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
 /* ---------------- 软件更新 ---------------- */
 
 /**
- * 在线更新尚未接通：`latest.yml` 一直在发布流水线里产出，但**应用里没有消费者**
- * （electron-updater 未接入）。所以这一节只报当前版本，不提供检查与渠道选择。
+ * 检查是真的（守护进程拉渠道 feed 比版本），**下载与安装尚未接入**。
  *
- * 原实现点「检查更新」会直接显示「当前已是最新（时:分:秒）」——一个网络请求都
- * 没发，却带着时间戳，看起来像真查过。**没查过就说已是最新，比不提供这个按钮
- * 糟得多**：用户会信它。渠道开关同理，它只写 localStorage，没有任何人读——
- * 用户切到 Beta 却永远收不到 beta 包，只会以为坏了。
+ * 分成两半是因为前置不同：检查只是一个 HTTP GET，现在就能做；下载与安装要
+ * electron-updater、要 TD-001 的签名证书（Windows 上 electron-updater 默认
+ * 校验更新包签名），还要三条尚未定的策略——有任务在跑时装不装、自动下载还是
+ * 询问、允不允许渠道降级。**未定的策略不该由实现替人默认掉**，所以这里不做
+ * 自动检查、不记住渠道，只有用户点一下才去问一次。
  *
- * 接入更新后，这两项一并放开。
+ * **查不到 ≠ 已是最新。** 这个功能的上一版不发请求就断言「当前已是最新」并附
+ * 时间戳；现在 `unreachable` 是一个正式状态，绝不折叠进「最新」。
  */
-function UpdatesSection({ system }: { system: SystemInfo | null }) {
+function UpdatesSection({
+  system,
+  api,
+}: {
+  system: SystemInfo | null;
+  api: Api;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<UpdateCheck | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const check = async () => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      setResult(await api.checkUpdate());
+    } catch (e) {
+      // 连守护进程都没问到，同样不能说成「最新」。
+      setResult(null);
+      setFailed(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="card">
       <SettingRow label="当前版本">
@@ -240,14 +265,47 @@ function UpdatesSection({ system }: { system: SystemInfo | null }) {
         <span className="mono">{system?.startedAt ?? "…"}</span>
       </SettingRow>
       <SettingRow
-        label="在线更新"
-        hint="发布服务与自动更新尚未接通；接通前请从官方渠道获取新版本安装包"
+        label="检查更新"
+        hint="向发布渠道询问是否有新版本；不会下载任何东西"
       >
-        <StatusBadge tone="neutral">尚未接通</StatusBadge>
+        <div>
+          <Button variant="outline" disabled={busy} onClick={() => void check()}>
+            {busy ? "正在检查…" : "检查更新"}
+          </Button>
+          {failed && (
+            <div className="update-line update-line--warn">
+              检查失败：{failed}
+            </div>
+          )}
+          {result?.status === "current" && (
+            <div className="update-line">
+              已是最新（{result.latest}）
+            </div>
+          )}
+          {result?.status === "available" && (
+            <div className="update-line update-line--new">
+              有新版本 <span className="mono">{result.latest}</span>
+              （当前 <span className="mono">{result.current}</span>）
+            </div>
+          )}
+          {result?.status === "unreachable" && (
+            <div className="update-line update-line--warn">
+              没查到——{result.reason}。
+              <br />
+              这不代表你已是最新，只代表这次没问到。
+            </div>
+          )}
+        </div>
+      </SettingRow>
+      <SettingRow
+        label="下载与安装"
+        hint="需要代码签名证书与更新策略（何时安装、是否自动下载）就位后开放"
+      >
+        <StatusBadge tone="neutral">尚未接入</StatusBadge>
       </SettingRow>
       <SettingRow
         label="更新渠道"
-        hint="随自动更新一并开放——现在设置它不会有任何效果，所以先不提供"
+        hint="随下载与安装一并开放——现在设置它不会有任何效果，所以先不提供"
       >
         <span className="text-body-sm text-muted-foreground">stable</span>
       </SettingRow>
