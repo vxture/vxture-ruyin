@@ -310,5 +310,6 @@ HTTP 打过；`pdf.ts`（壳渲染通道）与 `loadProducts`（开发态产品�
 
 五个包的 `test` 脚本各自加了 `--experimental-test-coverage` + 按包 scope 的
 行/分支/函数阈值（TD-030 已回收）。`apps/shell`（Electron 壳）与
-`apps/ui-workspace`（React 界面）仍无 `test` 脚本，不在这批范围内（TD-031，
-open）。
+`apps/ui-workspace`（React 界面）当时仍无 `test` 脚本，不在这批范围内
+（TD-031）；两者后续由 #82（壳）与 #83–#84（ui-workspace 六个大组件）补齐，
+TD-031 已回收。
