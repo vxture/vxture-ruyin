@@ -13,6 +13,7 @@ import {
   ProductRegistry,
   availabilityOf,
   commercialIntent,
+  projectSubscriptionFacts,
   type SubscriptionFacts,
 } from "./product-registry.js";
 
@@ -262,4 +263,51 @@ void test("registry: 信封保真 —— status 与到期日不被压掉", async
     rmSync(productsDir, { recursive: true, force: true });
     rmSync(dataDir, { recursive: true, force: true });
   }
+});
+
+/**
+ * projectSubscriptionFacts：平台线上信封 -> SubscriptionFacts 的投影本身。
+ * 原先揉在 main.ts 的 syncEntitlements 闭包里，脱离整个守护进程启动测不到；
+ * 挪到这里挨着它产出的类型放，字段改名/漏映射能在这一层就抓住。
+ */
+void test("projectSubscriptionFacts: 逐字段搬运，蛇形转驼峰", () => {
+  const out = projectSubscriptionFacts({
+    status: "trialing",
+    tier: "pro",
+    bundled: true,
+    trial_ends_at: "2026-10-01T00:00:00Z",
+    current_period_end: "2026-11-01T00:00:00Z",
+    cancel_at_period_end: true,
+  });
+  assert.deepEqual(out, {
+    status: "trialing",
+    tier: "pro",
+    bundled: true,
+    trialEndsAt: "2026-10-01T00:00:00Z",
+    currentPeriodEnd: "2026-11-01T00:00:00Z",
+    cancelAtPeriodEnd: true,
+  });
+});
+
+void test("projectSubscriptionFacts: 全空信封 -> 全 null/false，不是 undefined", () => {
+  const out = projectSubscriptionFacts({});
+  assert.deepEqual(out, {
+    status: null,
+    tier: null,
+    bundled: false,
+    trialEndsAt: null,
+    currentPeriodEnd: null,
+    cancelAtPeriodEnd: false,
+  });
+});
+
+void test("projectSubscriptionFacts: bundled / cancel_at_period_end 严格判等 true，含糊值一律按否", () => {
+  // 平台是外部系统；线上格式给一个非布尔的「像是真」的值时，安全缺省是否，
+  // 不是善意地当作 true —— 后果反过来才危险（该显示的订阅入口被当成已捆绑覆盖）。
+  const out = projectSubscriptionFacts({
+    bundled: 1 as unknown as boolean,
+    cancel_at_period_end: "true" as unknown as boolean,
+  });
+  assert.equal(out.bundled, false);
+  assert.equal(out.cancelAtPeriodEnd, false);
 });
