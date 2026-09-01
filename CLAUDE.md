@@ -46,12 +46,21 @@ npm packages -> GitHub Packages; installer + update feed -> website platform
 download (dl host, manifest.json contract); .ruyinpkg product packages ->
 static registry directory (real Registry service later).
 
-## Required checks (authoritative set of five)
+## Required checks (five org-wide, plus one for distribution repos)
 
-`quality-gate` / `build` / `test-coverage` / `audit` / `gitleaks`. CI job names
-must produce exactly these five contexts - renaming a job breaks branch
-protection. The ruleset (docs/50-deployment/rebuild/main-ruleset.json) is
-applied AFTER the first green CI run on main (TD-002 tracks this bootstrap).
+`quality-gate` / `build` / `test-coverage` / `audit` / `gitleaks` are the
+org-wide floor - no repo may drop one. CI job names must produce these contexts
+exactly: renaming a job breaks branch protection.
+
+Ruyin adds a sixth, `packaged-smoke`: it builds the installer and actually
+launches the packaged app. The other five can all be green while the shipped
+artifact does not start - a dependency missing from the deployed tree, a native
+module built for the wrong ABI, or one that silently degrades when it fails to
+resolve. Only running the packaged thing sees that. Governance basis: the
+distribution-repo clause in 140-repo-governance-standard.md (2026-09-01).
+
+The ruleset (docs/50-deployment/rebuild/main-ruleset.json) documents intent;
+GitHub only enforces what has been applied to it (TD-002 covers the bootstrap).
 
 ## Secret hygiene (four layers) and the client-zero-secrets rule
 
