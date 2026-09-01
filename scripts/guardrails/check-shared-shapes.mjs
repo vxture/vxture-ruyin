@@ -115,6 +115,66 @@ for (const [uiName, sourceName, from] of SHARED) {
   }
 }
 
+/**
+ * 事件种类：守护进程发、界面收、壳也收 —— **同一个词表抄了三份**。
+ *
+ * 抄多了就会漏。漏掉一种事件的后果不是报错，是那一类变化再也不会被察觉：
+ * 壳不再弹通知、界面不再刷新，而两者看起来都和「没有事情发生」一模一样。
+ */
+function eventKinds(source) {
+  const start = source.search(/(type RuntimeEvent|type DaemonEventKind)\s*=/);
+  if (start < 0) return null;
+  // 结尾是**深度为 0 的那个分号**：联合成员自己就带分号
+  // （`{ kind: "task"; projectId: string }`），只找第一个 `;` 会在第一个成员
+  // 里就停下 —— 于是守卫只看得见一种事件，然后对其余全部报「没人会发」。
+  let depth = 0;
+  let end = source.length;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") depth--;
+    else if (ch === ";" && depth === 0) {
+      end = i;
+      break;
+    }
+  }
+  return [
+    ...new Set(
+      [...source.slice(start, end).matchAll(/"([a-z][a-z-]*)"/g)].map(
+        (m) => m[1],
+      ),
+    ),
+  ].sort();
+}
+
+const EVENT_SOURCES = [
+  ["apps/local-host/src/events.ts", "守护进程（发）"],
+  ["apps/ui-workspace/src/api.ts", "界面（收）"],
+  ["apps/shell/src/main.ts", "壳（收）"],
+];
+const kindSets = EVENT_SOURCES.map(([file, who]) => {
+  const kinds = eventKinds(readFileSync(join(repoRoot, file), "utf8"));
+  if (!kinds) problems.push(`${file} 里找不到事件种类的声明`);
+  return [who, kinds];
+});
+const authoritative = kindSets[0]?.[1];
+if (authoritative) {
+  for (const [who, kinds] of kindSets.slice(1)) {
+    if (!kinds) continue;
+    const missing = authoritative.filter((k) => !kinds.includes(k));
+    const extra = kinds.filter((k) => !authoritative.includes(k));
+    if (missing.length) {
+      problems.push(
+        `事件种类：${who}少了 ${missing.join("、")} —— 那一类变化它再也不会察觉，` +
+          `而「察觉不到」和「没有发生」长得一模一样`,
+      );
+    }
+    if (extra.length) {
+      problems.push(`事件种类：${who}多出 ${extra.join("、")}（没人会发）`);
+    }
+  }
+}
+
 // 链校验必须认两种形状的链接字段，只认一种等于对另一种谎报断裂。
 const chain = readFileSync(
   join(repoRoot, "apps/ui-workspace/src/chain.ts"),
@@ -137,5 +197,5 @@ if (problems.length > 0) {
 }
 
 console.log(
-  `[shared-shapes] OK - ${SHARED.length} 个共享类型与源头一致，链校验两种链接字段都认。`,
+  `[shared-shapes] OK - ${SHARED.length} 个共享类型 + 事件词表与源头一致，链校验两种链接字段都认。`,
 );

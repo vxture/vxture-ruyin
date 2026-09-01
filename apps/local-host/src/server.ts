@@ -405,7 +405,10 @@ async function handle(
       );
       return;
     }
-    send(res, 202, deps.updateIntent.request(version, new Date().toISOString()));
+    const requested = deps.updateIntent.request(version, new Date().toISOString());
+    // 壳在等这个意图。发一声，它就不必每 5 秒问一次（TD-029）。
+    deps.events?.publish({ kind: "update-intent" });
+    send(res, 202, requested);
     return;
   }
 

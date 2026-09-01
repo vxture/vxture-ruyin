@@ -928,3 +928,56 @@ test("事件流：任务一动，订阅者就收到，而且只说什么变了",
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+/**
+ * 安装意图也要发事件（TD-029）。
+ *
+ * 壳原本每 5 秒问一次「有没有人要装更新」。用户按下按钮到壳动手之间的那段
+ * 空白，全是这个轮询周期。
+ */
+test("事件流：记下安装意图时发一声，壳不必每 5 秒问一次", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-intent-"));
+  const { ports, storage, executor } = await makePorts(dataDir);
+  const runtime = new ProjectRuntime(ports);
+  const token = "intent-token";
+  const events = new EventBus();
+  const seen: string[] = [];
+  events.subscribe((e) => seen.push(e.kind));
+
+  const server = createLocalApi({
+    runtime,
+    registry: new ProductRegistry(productsDir, dataDir),
+    tasks: new TaskRunner(runtime, new Set(), events),
+    token,
+    version: "test",
+    updateIntent: new InstallIntentBox(),
+    events,
+    writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+      executor.writeArtifact(p, b, g),
+    supportsTool: (t: string) => executor.supports(t),
+    systemInfo: testSystemInfo,
+    reindex: async () => 0,
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  try {
+    const res = await fetch(`${base}/updates/install`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ version: "9.9.9" }),
+    });
+    assert.equal(res.status, 202);
+    assert.ok(
+      seen.includes("update-intent"),
+      "意图记下了却没人被通知 —— 壳只能靠等",
+    );
+  } finally {
+    server.close();
+    storage.closeAll();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
