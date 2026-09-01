@@ -13,7 +13,11 @@ import {
   type RuyinContract,
   type ValidationError,
 } from "@vxture/ruyin-contract-schema";
-import { emitAudit } from "./audit.js";
+import {
+  emitAudit,
+  OUTCOME_MUST_BE_STATED,
+  RUNTIME_ACTOR,
+} from "./audit.js";
 import {
   Harness,
   interruptedResumePoint,
@@ -35,7 +39,9 @@ export interface PendingConfirmation {
 }
 import type {
   AuditEvent,
+  AuditOutcome,
   Binding,
+  StoredAuditEvent,
   ContextItemMeta,
   FolderGrant,
   RuntimePorts,
@@ -147,7 +153,9 @@ export class ProjectRuntime {
     await store.putMeta(meta);
     await store.putContract(JSON.stringify(contract));
     await store.setBusinessState(contract.states.initial);
-    await this.audit(store, id, "workspace.created", "user", {
+    // 事件名也是 action（X-3）。`workspace` 这个词已让给平台（ADR-007），
+    // 本地容器叫项目 —— 旧记录里的 workspace.created 不回写，新记录用新名字。
+    await this.audit(store, id, "project.created", "user", {
       product: contract.product.id,
       productVersion: contract.product.version,
       name,
@@ -324,7 +332,13 @@ export class ProjectRuntime {
     });
   }
 
-  async listAuditEvents(id: string): Promise<AuditEvent[]> {
+  /**
+   * 审计事件，**按存储原样返回**（可能含 X-3 之前的旧形状）。
+   *
+   * 链校验必须拿原样的记录 —— 哈希是按存进去时的字段名算的。要统一词表给
+   * 消费方看，用 `toAuditView` 投影，**别回写存储**。
+   */
+  async listAuditEvents(id: string): Promise<StoredAuditEvent[]> {
     const { store } = await this.load(id);
     return store.listAuditEvents();
   }
@@ -437,11 +451,19 @@ export class ProjectRuntime {
     kind: string,
     actor: "harness" | "user" | "system",
     payload: unknown,
+    outcome: AuditOutcome = "success",
   ): Promise<unknown> {
+    if (OUTCOME_MUST_BE_STATED.has(kind)) {
+      throw new Error(`audit "${kind}": outcome must be stated here`);
+    }
     return emitAudit(store, this.ports.crypto, this.ports.clock, this.ports.id, {
       workspace,
       kind,
       actor,
+      // 项目级写操作都由用户动作触发，但这一层拿不到会话身份 —— 宿主在
+      // API 边界上知道谁在调，内核不知道。填运行时常量而不是编一个 sub。
+      actorId: RUNTIME_ACTOR,
+      outcome,
       payload,
     });
   }

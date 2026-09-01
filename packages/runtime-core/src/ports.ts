@@ -322,7 +322,56 @@ export interface ProjectMeta {
   workspaceId?: string;
 }
 
+/**
+ * 一次操作的结果（《产品接入通则》X-3：**outcome 必须区分成功与被拒**）。
+ *
+ * `failed` 不折进 `rejected`：**出错不是被拒**——把一次内部失败记成「被拒」
+ * 等于说有谁拒绝了它，而根本没有人。`unknown` 只用于 X-3 之前写下的旧事件，
+ * 它们的结果无从回填，**也绝不许猜**。
+ */
+export type AuditOutcome = "success" | "rejected" | "failed" | "unknown";
+
+/**
+ * 审计事件（X-3 字段名）。
+ *
+ * `prevHash` / `hash` 是本地加项（哈希链），通则说属增量、不冲突。
+ *
+ * **`actor` 与 `actorId` 是两件事，都保留**：前者是角色（谁这一类），后者是
+ * 身份（具体是谁）。合并会重演 X-4 那种「一个名字两个意思」。
+ *
+ * **没有 costAmount / costUnit**：那是消费面字段，而 Ruyin 不计量——计量在
+ * Atlas 服务端，客户端永不自报。填上它就是自报计量。
+ */
 export interface AuditEvent {
+  eventId: string;
+  occurredAt: string;
+  /** 具体是谁：人做的填会话 sub，运行时自己做的填稳定常量。 */
+  actorId: string;
+  /**
+   * 铸造这次换票的工作台 RP。Ruyin 是桌面运行时，不属于任何控制台，
+   * 所以恒为 null —— 通则明说 **MUST NOT 硬编一个**。
+   */
+  actorConsole: null;
+  /** 角色（既有列，非 X-3）：harness / user / system。 */
+  actor: "harness" | "user" | "system";
+  objectType: string;
+  objectId: string;
+  action: string;
+  outcome: AuditOutcome;
+  /** 所属项目容器（本地加项）。 */
+  workspace: string;
+  /** X-2 聚合键；仅任务相关事件有。 */
+  taskId?: string;
+  prevHash: string;
+  hash: string;
+  payload: unknown;
+}
+
+/**
+ * X-3 之前写下的事件形状。**读得出来，但绝不回写**——链的哈希是按存进去时的
+ * 字段名算的，改写既有记录会作废每一条链。
+ */
+export interface LegacyAuditEvent {
   event_id: string;
   workspace: string;
   task_instance?: string;
@@ -333,6 +382,9 @@ export interface AuditEvent {
   hash: string;
   payload: unknown;
 }
+
+/** 存储里可能读到的两种形状。 */
+export type StoredAuditEvent = AuditEvent | LegacyAuditEvent;
 
 export interface JournalEntry {
   taskInstance: string;
@@ -366,7 +418,8 @@ export interface ProjectStore {
   listTaskInstances(): Promise<string[]>;
 
   appendAuditEvent(event: AuditEvent): Promise<void>;
-  listAuditEvents(): Promise<AuditEvent[]>;
+  /** 可能含 X-3 之前写下的旧形状记录。 */
+  listAuditEvents(): Promise<StoredAuditEvent[]>;
   lastAuditHash(): Promise<string | undefined>;
 
   appendJournal(entry: JournalEntry): Promise<void>;

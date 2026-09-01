@@ -228,7 +228,7 @@ export class SqliteProjectStore implements ProjectStore {
       .prepare(
         "INSERT INTO audit_events (event_id, hash, data) VALUES (?, ?, ?)",
       )
-      .run(event.event_id, event.hash, JSON.stringify(event));
+      .run(event.eventId, event.hash, JSON.stringify(event));
   }
   async listAuditEvents(): Promise<AuditEvent[]> {
     const rows = this.db

@@ -15,6 +15,8 @@ import {
   MemoryStoragePort,
   ProjectRuntime,
   verifyAuditChain,
+  toAuditView,
+  OUTCOME_MUST_BE_STATED,
   ContractInvalidError,
   NeedsHumanConfirmationError,
   interruptedResumePoint,
@@ -344,7 +346,7 @@ test("harness: recovery resumes an interrupted task without redoing finished wor
   );
 
   const events = await runtime.listAuditEvents(meta.id);
-  assert.ok(events.some((e) => e.kind === "task.resumed"));
+  assert.ok(events.map(toAuditView).some((e) => e.action === "task.resumed"));
 });
 
 test("harness: settled and waiting tasks are not treated as interrupted", async () => {
@@ -438,7 +440,7 @@ test("cancel: an idle task stops at once and keeps what it produced", async () =
   // what shows what happened (50-harness section 12).
   assert.ok(stopped.capabilityOutputs["requirement_analysis"]);
   const events = await runtime.listAuditEvents(meta.id);
-  assert.ok(events.some((e) => e.kind === "task.cancelled"));
+  assert.ok(events.map(toAuditView).some((e) => e.action === "task.cancelled"));
 
   // Cancelling twice is not an error, and a cancelled task is not recovered.
   assert.equal((await harness.cancel(waiting.id)).state, "cancelled");
@@ -975,7 +977,7 @@ test("selection pipeline: high sensitivity gates on context_confirm, then comple
 
   // Transmission audit: hashes + confirmed_by user, never content.
   const events = await runtime.listAuditEvents(meta.id);
-  const tx = events.find((e) => e.kind === "transmission.inference");
+  const tx = events.map(toAuditView).find((e) => e.action === "transmission.inference");
   assert.ok(tx);
   const payload = tx.payload as {
     context_items: Array<{ id: string; content_hash: string }>;
@@ -1065,7 +1067,7 @@ test("上下文承载：二进制以字节 + 媒体类型过线，不被降级�
 
   // 审计按真实字节算哈希，并记下媒体类型与外发量级（TD-018 的可见性要求）。
   const events = await runtime.listAuditEvents(meta.id);
-  const tx = events.find((e) => e.kind === "transmission.inference");
+  const tx = events.map(toAuditView).find((e) => e.action === "transmission.inference");
   const recorded = (tx?.payload as { context_items: Array<Record<string, unknown>> })
     .context_items[0];
   assert.equal(recorded?.["content_kind"], "binary");
@@ -1114,7 +1116,7 @@ test("上下文承载：读不了的资料如实标 unavailable，既不编内�
   assert.equal(fact?.content.kind, "unavailable");
 
   const events = await runtime.listAuditEvents(meta.id);
-  const tx = events.find((e) => e.kind === "transmission.inference");
+  const tx = events.map(toAuditView).find((e) => e.action === "transmission.inference");
   const recorded = (tx?.payload as { context_items: Array<Record<string, unknown>> })
     .context_items[0];
   assert.equal(recorded?.["content_kind"], "unavailable");
@@ -1276,4 +1278,78 @@ test("provenance: the confirm card says the material is data, and where it is", 
   // coarse origin travels to the provider.
   assert.ok(subject.items?.[0]?.ref);
   assert.equal(subject.items?.[0]?.origin, "local_file");
+});
+
+/**
+ * X-3 审计字段（TD-014 D6）。三件事：链跨新旧形状仍然可验、旧记录的结果**不猜**、
+ * 结果不定的事件漏写就报错。
+ */
+test("审计：X-3 字段齐备，拒绝被记成 rejected 而不是通过", async () => {
+  const ports = makePorts();
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  const harness = await runtime.createHarness(meta.id);
+  const instance = await runTask(harness, "analyze_tender", { tender_document: {} });
+  await decide(harness, instance.id, false); // 人拒绝
+
+  const events = (await runtime.listAuditEvents(meta.id)).map(toAuditView);
+  const decided = events.find((e) => e.action === "checkpoint.decided");
+  assert.ok(decided);
+  // 拒绝就是 rejected。记成 success，审计会把每一次否决写成通过。
+  assert.equal(decided.outcome, "rejected");
+  // X-3 的字段一个都不能少。
+  assert.ok(decided.eventId);
+  assert.ok(decided.occurredAt);
+  assert.ok(decided.actorId);
+  assert.equal(decided.actorConsole, null); // 不属于任何控制台，MUST NOT 硬编
+  assert.equal(decided.objectType, "checkpoint");
+  assert.equal(decided.objectId, instance.id);
+  assert.equal(decided.taskId, instance.id); // X-2 聚合键
+
+  const failed = events.find((e) => e.action === "task.failed");
+  // 出错不是被拒 —— 没有谁拒绝它。
+  assert.equal(failed?.outcome, "failed");
+});
+
+test("审计：链跨新旧形状仍可验，且旧记录的结果不许猜", async () => {
+  const ports = makePorts();
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+
+  // 手工追加一条 X-3 之前形状的记录，接在链尾 —— 模拟升级前写下的事件。
+  const store = (await ports.storage.openProjectStore(meta.id))!;
+  const events0 = await store.listAuditEvents();
+  const prev = events0[events0.length - 1]!.hash;
+  const legacyBody = {
+    event_id: "ev_legacy",
+    workspace: meta.id,
+    kind: "state.writeback",
+    actor: "user" as const,
+    timestamp: "2026-01-01T00:00:00Z",
+    payload: {},
+    prev_hash: prev,
+  };
+  await store.appendAuditEvent({
+    ...legacyBody,
+    hash: ports.crypto.sha256(JSON.stringify(legacyBody)),
+  } as never);
+
+  const all = await runtime.listAuditEvents(meta.id);
+  // 链跨两种形状仍然成立：哈希按存进去时的样子算，prev 只是个字符串。
+  assert.ok(verifyAuditChain(ports.crypto, meta.id, all));
+
+  const view = all.map(toAuditView).find((e) => e.eventId === "ev_legacy");
+  assert.ok(view);
+  assert.equal(view.action, "state.writeback");
+  // 旧记录的结果无从回填。标成 success 才是这里最危险的做法。
+  assert.equal(view.outcome, "unknown");
+});
+
+test("审计：结果不定的事件漏写 outcome 会报错，而不是默认成功", async () => {
+  // 护栏本身：OUTCOME_MUST_BE_STATED 里的种类必须由调用点说明。
+  assert.ok(OUTCOME_MUST_BE_STATED.has("checkpoint.decided"));
+  assert.ok(OUTCOME_MUST_BE_STATED.has("tool.decision"));
+  assert.ok(OUTCOME_MUST_BE_STATED.has("verification.result"));
+  // 「这件事发生了」类的不在表里 —— 它们的结果只能是成功。
+  assert.ok(!OUTCOME_MUST_BE_STATED.has("task.created"));
 });
