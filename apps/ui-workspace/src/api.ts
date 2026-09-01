@@ -38,6 +38,15 @@ export interface ProductInfo {
    * 不该给用户的订阅动作。
    */
   commercialIntent: "subscribe" | "renew" | null;
+  /** 库中并存的全部版本（§18.4 保留旧版本用于回滚）；内置产品为单版本。 */
+  versions: string[];
+  /** true = 来自受管产品库（拉取或安装）；false = 内置/开发目录。 */
+  managed: boolean;
+  /**
+   * 当前生效版本是怎么来的（ADR-012 两级供给）。「拉了一份契约」与「装了一个
+   * 含本地技能的包」在信任上不是一回事，界面与审计都需要分得开。
+   */
+  supply: "contract_fetch" | "package" | "builtin";
 }
 
 export interface ProjectMeta {
@@ -361,6 +370,9 @@ export class Api {
     this.call<ProductInfo>(`/products/${id}/activate`, "POST");
   deactivateProduct = (id: string) =>
     this.call<ProductInfo>(`/products/${id}/deactivate`, "POST");
+  /** 钉住生效版本（§18.4 回滚）。库里保留着旧版本，这是把它切回去的动作。 */
+  pinProductVersion = (id: string, version: string) =>
+    this.call<ProductInfo>(`/products/${id}/pin-version`, "POST", { version });
   checkUpdate = () => this.call<UpdateCheck>("/updates/check");
   /** 记下安装意图（策略 2：操作与时机都归用户）。守护进程会再判一次闸门。 */
   requestInstall = (version: string) =>
