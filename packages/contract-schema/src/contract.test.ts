@@ -62,6 +62,12 @@ test("L1: malformed YAML reports a parse error", () => {
   assert.equal(result.errors[0]?.rule, "L1");
 });
 
+test("validateContractYaml: the one-step parse+validate convenience also has a success path", () => {
+  const result = validateContractYaml(readFileSync(bidUrl, "utf8"));
+  assert.deepEqual(result.errors, []);
+  assert.ok(result.ok);
+});
+
 test("R1: unsupported contract version", () => {
   assert.ok(
     rules(
@@ -284,6 +290,14 @@ test("R8: task output class must be generated or derived", () => {
       }),
     ).includes("R8"),
   );
+});
+
+test("R8: task output must reference a declared context type (not just a wrong-class one)", () => {
+  const result = mutate((c) => {
+    task(c, "analyze_tender").output_types = ["bogus"];
+  });
+  assert.ok(rules(result).includes("R8"));
+  assert.match(result.errors[0]?.message ?? "", /unknown context type/);
 });
 
 test("R8: task capability and tool references must resolve", () => {
