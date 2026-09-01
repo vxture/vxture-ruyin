@@ -218,3 +218,53 @@ jobs:
         run: pnpm test
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+  # -- Packaged launch verification (advisory, not one of the five required
+  # contexts; see TD-025 and CLAUDE.md "Required checks").
+  #
+  # Everything else in this file can be green while producing an app that dies
+  # on launch: the deployed dependency tree, the native binding ABI, the
+  # resource layout and the shell<->daemon IPC are only exercised by running
+  # the packaged thing. This job is the only place that does.
+  #
+  # It runs on Windows because that is what ships. It cannot run on a developer
+  # machine with Windows application control enabled - an unsigned freshly
+  # built exe is refused execution there (TD-025), which is exactly why the
+  # gate has to live here.
+  packaged-smoke:
+    name: packaged-smoke
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+
+      # Electron and electron-builder's binaries are the bulk of the wall
+      # clock here; without this the job spends most of its time downloading
+      # the same ~200MB every run.
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      # pack.mjs is self-contained: install -> build -> deploy the daemon ->
+      # electron-ABI native binding -> electron-builder -> launch the packaged
+      # app with --smoke. The smoke step renders a real PDF through the shell
+      # (ADR-017), so a broken IPC path fails here rather than at a user's
+      # first export.
+      - name: Pack and launch the packaged app
+        run: node scripts/release/pack.mjs --dir
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
