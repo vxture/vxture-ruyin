@@ -3,6 +3,8 @@
  * ?token= (shell) or is pasted once (browser access) and is held in memory.
  */
 
+import { extractSseEvents } from "./sse";
+
 /**
  * 受管产品资产（daemon /products）。已安装 ≠ 可用：
  * availability = installed ∧ state=active ∧ entitled ≠ false（30-contract-schema §18.5）。
@@ -430,22 +432,10 @@ export class Api {
         for (;;) {
           const { done, value } = await reader.read();
           if (done) return;
-          buffer += decoder.decode(value, { stream: true });
-          // SSE 的帧以空行分隔；半截的留在缓冲里等下一片。
-          let cut = buffer.indexOf("\n\n");
-          while (cut >= 0) {
-            const frame = buffer.slice(0, cut);
-            buffer = buffer.slice(cut + 2);
-            for (const line of frame.split("\n")) {
-              if (!line.startsWith("data:")) continue; // 心跳是注释行
-              try {
-                onEvent(JSON.parse(line.slice(5).trim()) as RuntimeEvent);
-              } catch {
-                // 半截或异常的帧：丢掉这一帧，别让它带走整条流。
-              }
-            }
-            cut = buffer.indexOf("\n\n");
-          }
+          const chunk = decoder.decode(value, { stream: true });
+          const parsed = extractSseEvents<RuntimeEvent>(buffer, chunk);
+          buffer = parsed.buffer;
+          for (const event of parsed.events) onEvent(event);
         }
       } catch {
         // 断了就断了：兜底轮询还在，界面不会停在旧数据上。
