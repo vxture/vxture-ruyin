@@ -53,6 +53,7 @@ export function HomePage({
   health,
   onOpen,
   onCreated,
+  onRefresh,
   onError,
 }: {
   api: Api;
@@ -61,6 +62,8 @@ export function HomePage({
   health: { ok: boolean; version?: string };
   onOpen: (projectId: string) => void;
   onCreated: (projectId: string) => void | Promise<void>;
+  /** 重新拉一遍产品与项目。改了本机生效态之后要用它。 */
+  onRefresh: () => void | Promise<void>;
   onError: (msg: string) => void;
 }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
@@ -194,6 +197,7 @@ export function HomePage({
                   workspaceName={session?.workspace?.name}
                   onOpen={onOpen}
                   onCreated={onCreated}
+                  onRefresh={onRefresh}
                   onError={onError}
                 />
               ))}
@@ -232,6 +236,20 @@ export function HomePage({
                     <ProductIdent code={`${p.id}@${p.version}`} inset />
                     {/* 商业入口由 daemon 的 commercialIntent 决定：被捆绑覆盖
                         的产品没有属于他的商业动作，就不显示按钮。 */}
+                    {/* 本机停用的产品可以就地启用；未订阅的不行 —— 那不是
+                        这台机器能解决的事，按钮给了也只会失败。 */}
+                    {p.availability === "disabled" && (
+                      <Button
+                        onClick={() =>
+                          void api
+                            .activateProduct(p.id)
+                            .then(() => onRefresh())
+                            .catch((e: Error) => onError(e.message))
+                        }
+                      >
+                        启用
+                      </Button>
+                    )}
                     {p.commercialIntent && (
                       <div className="flex items-center gap-xs">
                         <Button
@@ -268,6 +286,7 @@ function InstalledProductCard({
   workspaceName,
   onOpen,
   onCreated,
+  onRefresh,
   onError,
 }: {
   api: Api;
@@ -277,6 +296,7 @@ function InstalledProductCard({
   workspaceName?: string | undefined;
   onOpen: (projectId: string) => void;
   onCreated: (projectId: string) => void | Promise<void>;
+  onRefresh: () => void | Promise<void>;
   onError: (msg: string) => void;
 }) {
   const [creating, setCreating] = useState(false);
@@ -347,6 +367,19 @@ function InstalledProductCard({
                   无从新建 —— 说清缺的是什么，而不是让按钮没反应。 */}
               <Button disabled={!workspaceName} onClick={() => setCreating(true)}>
                 新建项目
+              </Button>
+              {/* §18.5 的本机生效开关。停用不卸载、不动数据 —— 之前这个状态
+                  在「不可用的产品」里显示得好好的，却没有任何地方能改它。 */}
+              <Button
+                variant="outline"
+                onClick={() =>
+                  void api
+                    .deactivateProduct(product.id)
+                    .then(() => onRefresh())
+                    .catch((e: Error) => onError(e.message))
+                }
+              >
+                停用
               </Button>
               <span className="text-body-sm text-muted-foreground">
                 {!workspaceName
