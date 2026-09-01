@@ -161,7 +161,9 @@ tools:
   # 目录里了，把正文再贴进调用参数等于让整篇文档二次流经对话（ADR-016）。
   # 顺序由模型定 —— 哪几份、按什么次序汇总，只有它知道。
   # format 只列宿主真渲染得出来的：声明一个没人实现的格式，就是 export_result
-  # 这条工具原本的毛病（契约里有、宿主没有、任务因此无路可走）。
+  # 这条工具原本的毛病（契约里有、宿主没有、任务因此无路可走）。pdf 由壳里的
+  # Chromium 排版（ADR-017），发布形态下总在；守护进程脱离壳单独跑（开发时）
+  # 会如实报「本宿主没有接 PDF 渲染器」。
   - id: export_result
     category: export
     risk: high
@@ -170,7 +172,7 @@ tools:
       type: object
       properties:
         path:    { type: string, x-ruyin-ref: path }
-        format:  { type: string, enum: [docx] }
+        format:  { type: string, enum: [docx, pdf] }
         sources: { type: array, x-ruyin-ref: path }
       required: [path, format, sources]
 

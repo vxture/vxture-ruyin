@@ -291,3 +291,57 @@ void test("导出：只降级不丢内容时照常出成品，但把降级说出
 void test("导出：export_result 现在真的在工具面上", () => {
   assert.equal(exec.supports("export_result"), true);
 });
+
+/**
+ * PDF 导出（ADR-017）。Chromium 那一跳在壳里，用例到不了它——打包冒烟才走完整
+ * 条链。这里钉的是宿主这一半：**没接上时不假装，接上了也不盲信它的返回**。
+ */
+void test("导出 PDF：没接壳时说清是这套装配没有，不是这个格式做不了", async () => {
+  const { dir, grants } = grantedDir();
+  writeFileSync(join(dir, "a.md"), "# 方案\n", "utf8");
+  const out = join(dir, "x.pdf");
+
+  const r = await new LocalToolExecutor().execute(
+    call("export_result", { path: out, format: "pdf", sources: [join(dir, "a.md")] }, grants),
+  );
+  assert.equal(r.isError, true);
+  assert.match(r.content, /needs the Ruyin shell/);
+  assert.equal(existsSync(out), false);
+});
+
+void test("导出 PDF：壳返回的不是 PDF 就不落盘", async () => {
+  const { dir, grants } = grantedDir();
+  writeFileSync(join(dir, "a.md"), "# 方案\n", "utf8");
+  const out = join(dir, "x.pdf");
+  // 一堆长度正常、头不对的字节。写下去用户会得到一个打不开的文件，而文件名、
+  // 大小、修改时间都很正常。
+  const bogus = new LocalToolExecutor(undefined, async () =>
+    new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]),
+  );
+  const r = await bogus.execute(
+    call("export_result", { path: out, format: "pdf", sources: [join(dir, "a.md")] }, grants),
+  );
+  assert.equal(r.isError, true);
+  assert.match(r.content, /not a PDF/);
+  assert.equal(existsSync(out), false);
+});
+
+void test("导出 PDF：接上之后落盘，并把目录没页码这件事一起报出来", async () => {
+  const { dir, grants } = grantedDir();
+  writeFileSync(join(dir, "a.md"), "::ry-toc\n\n# 方案\n\n正文\n", "utf8");
+  const out = join(dir, "投标.pdf");
+  let seenHtml = "";
+  const exec2 = new LocalToolExecutor(undefined, async (html) => {
+    seenHtml = html;
+    return new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]);
+  });
+
+  const r = await exec2.execute(
+    call("export_result", { path: out, format: "pdf", sources: [join(dir, "a.md")] }, grants),
+  );
+  assert.equal(r.isError, undefined, r.content);
+  assert.ok(existsSync(out));
+  // 送给壳的确实是渲染好的 HTML，不是 Markdown 原文。
+  assert.match(seenHtml, /<h1 id="方案">方案<\/h1>/);
+  assert.match(r.content, /页码/);
+});

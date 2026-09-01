@@ -27,7 +27,9 @@ import {
   isLossy,
   parseDocument,
   renderDocx,
+  renderHtml,
 } from "@vxture/ruyin-document";
+import type { Diagnostic } from "@vxture/ruyin-document";
 import type { SearchOutcome } from "./fts.js";
 import type {
   ContextItemMeta,
@@ -59,10 +61,9 @@ const TEXT_EXTENSIONS = new Set([
 const SOURCE_EXTENSIONS = new Set([".md", ".markdown", ".txt"]);
 
 /**
- * Formats this host renders. Checked per call rather than assumed from the
- * contract: a contract may legitimately declare a format some other host
- * produces, and answering that request with the wrong file type would be
- * worse than refusing it.
+ * 无条件渲染得出来的格式。`pdf` 不在里面，因为它要壳里的 Chromium
+ * （ADR-017）——守护进程脱离壳单独跑时就没有，那时如实说没有，而不是给一份
+ * 空文件或悄悄换成 docx。
  */
 const RENDERERS = new Set(["docx"]);
 
@@ -93,11 +94,25 @@ export class LocalToolExecutor implements ToolExecutorPort {
    * 到东西。两者的差别是：前者让任务在启动时就被明确拒绝（说清缺什么），后者
    * 让任务跑起来、每次检索都返回「没找到」，然后交出一份查无实据的方案。
    */
-  constructor(private readonly search?: ContextSearch) {}
+  constructor(
+    private readonly search?: ContextSearch,
+    /** 壳提供的 PDF 排版（ADR-017）；脱离壳运行时缺省。 */
+    private readonly renderPdfBytes?: (html: string) => Promise<Uint8Array>,
+  ) {}
+
+  /** 打包冒烟的自检要走这条真实通道，所以它是可读的。 */
+  get pdfRenderer(): ((html: string) => Promise<Uint8Array>) | undefined {
+    return this.renderPdfBytes;
+  }
 
   supports(tool: string): boolean {
     if (tool === "search_knowledge") return this.search !== undefined;
     return IMPLEMENTED.has(tool);
+  }
+
+  /** 这台机器此刻真渲染得出来的格式。 */
+  private formats(): string[] {
+    return this.renderPdfBytes ? [...RENDERERS, "pdf"] : [...RENDERERS];
   }
 
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
@@ -279,11 +294,16 @@ export class LocalToolExecutor implements ToolExecutorPort {
   ): Promise<ToolExecutionResult> {
     const path = String(request.arguments["path"] ?? "");
     const format = String(request.arguments["format"] ?? "");
-    if (!RENDERERS.has(format)) {
+    const formats = this.formats();
+    if (!formats.includes(format)) {
       return {
         content:
-          `this host does not render "${format}"; it renders ` +
-          `${[...RENDERERS].join(", ")}`,
+          `this host does not render "${format}"; it renders ${formats.join(", ")}` +
+          // 脱离壳跑的守护进程没有 Chromium。说清是「这套装配没有」，不是
+          // 「这个格式做不了」——两句话指向的排查方向完全不同。
+          (format === "pdf"
+            ? " (pdf needs the Ruyin shell; this daemon is running on its own)"
+            : ""),
         isError: true,
       };
     }
@@ -334,22 +354,47 @@ export class LocalToolExecutor implements ToolExecutorPort {
         isError: true,
       };
     }
+    const title = basename(path, `.${format}`);
     let bytes: Uint8Array;
+    // 某个目标格式特有的降级 —— 同一棵树渲染成 docx 没损失、渲染成 pdf 有的
+    // 那些（比如 PDF 的目录没有页码）。和文档级诊断合在一起报。
+    const notes: Diagnostic[] = [];
     try {
-      bytes = await renderDocx(document, { title: basename(path, ".docx") });
+      if (format === "pdf") {
+        const page = renderHtml(document, { title });
+        notes.push(...page.notes);
+        bytes = await this.renderPdfBytes!(page.html);
+        // 壳返回了，但返回的不是 PDF。写下去用户会得到一个打不开的文件，而
+        // 文件名、大小、修改时间都很正常 —— 在这里断掉。
+        if (!startsWithPdfHeader(bytes)) {
+          return {
+            content: "the shell returned something that is not a PDF",
+            isError: true,
+          };
+        }
+      } else {
+        bytes = await renderDocx(document, { title });
+      }
     } catch (cause) {
       return { content: describe(cause), isError: true };
     }
     const written = this.writeArtifact(path, bytes, request.grants);
-    if (written.isError || !document.diagnostics.length) return written;
+    const reservations = [...document.diagnostics, ...notes];
+    if (written.isError || !reservations.length) return written;
     // Degraded, not lossy: the content is all there at lower fidelity. Say so
     // anyway - the caller should know what it is handing over.
     return {
       content:
         `${written.content}\nrendered with reservations:\n` +
-        describeDiagnostics(document.diagnostics),
+        describeDiagnostics(reservations),
     };
   }
+}
+
+/** `%PDF-`。一份长度对、头不对的文件，是一份打不开的交付物。 */
+function startsWithPdfHeader(bytes: Uint8Array): boolean {
+  const magic = [0x25, 0x50, 0x44, 0x46, 0x2d];
+  return magic.every((b, i) => bytes[i] === b);
 }
 
 /**
