@@ -246,7 +246,17 @@ export function HomePage({
                 订阅状态尚未接通，以下为本地运行时已安装的产品。
               </p>
             )}
-            <div className="grid gap-md md:grid-cols-2 xl:grid-cols-3">
+            {/* 列数跟着实际数量走。写死三列、只装一个产品时，右边 596px 是
+                被分配掉的、不是被用掉的 —— 那正是「可用范围」变小的来源。 */}
+            <div
+              className={`grid gap-md ${
+                usable.length === 1
+                  ? "max-w-md"
+                  : usable.length === 2
+                    ? "md:grid-cols-2"
+                    : "md:grid-cols-2 xl:grid-cols-3"
+              }`}
+            >
               {usable.map((p) => (
                 <InstalledProductCard
                   key={p.id}
@@ -277,7 +287,15 @@ export function HomePage({
       {/* §18.5：退订/停用的产品不可打开，但仍列出——本地数据可访问、可导出。 */}
       {blocked.length > 0 && (
         <Section title="不可用的产品" icon="lock" level={2}>
-          <div className="grid gap-md md:grid-cols-2 xl:grid-cols-3">
+          <div
+            className={`grid gap-md ${
+              blocked.length === 1
+                ? "max-w-md"
+                : blocked.length === 2
+                  ? "md:grid-cols-2"
+                  : "md:grid-cols-2 xl:grid-cols-3"
+            }`}
+          >
             {blocked.map((p) => (
               <ListCard
                 key={p.id}

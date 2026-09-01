@@ -175,6 +175,33 @@ if (authoritative) {
   }
 }
 
+/**
+ * 标题栏高度在两处各写一遍，必须相等。
+ *
+ * 界面用 ShellHeader 的 `height` 档位，壳用 Electron 的
+ * `titleBarOverlay.height` 给 Windows 的窗口按钮留位。**两个数不一致，按钮
+ * 就会错位或压住内容 —— 而这只在打包形态下看得见**，开发时怎么点都正常。
+ */
+const HEADER_PX = { sm: 40, md: 48, lg: 56, xl: 64 };
+const workbench = readFileSync(
+  join(repoRoot, "apps/ui-workspace/src/workbench.tsx"),
+  "utf8",
+);
+const shellMain = readFileSync(join(repoRoot, "apps/shell/src/main.ts"), "utf8");
+const band = /height="(sm|md|lg|xl)"/.exec(workbench)?.[1];
+const overlay = /titleBarOverlay:\s*\{[^}]*height:\s*(\d+)/s.exec(shellMain)?.[1];
+if (!band) {
+  problems.push("workbench.tsx 里读不到 ShellHeader 的 height 档位");
+} else if (!overlay) {
+  problems.push("shell/main.ts 里读不到 titleBarOverlay.height");
+} else if (Number(overlay) !== HEADER_PX[band]) {
+  problems.push(
+    `标题栏高度对不上：界面是 ${band}（${HEADER_PX[band]}px），壳的 ` +
+      `titleBarOverlay 是 ${overlay}px —— Windows 的窗口按钮会错位，而这只在` +
+      "打包形态下看得见",
+  );
+}
+
 // 链校验必须认两种形状的链接字段，只认一种等于对另一种谎报断裂。
 const chain = readFileSync(
   join(repoRoot, "apps/ui-workspace/src/chain.ts"),
@@ -197,5 +224,5 @@ if (problems.length > 0) {
 }
 
 console.log(
-  `[shared-shapes] OK - ${SHARED.length} 个共享类型 + 事件词表与源头一致，链校验两种链接字段都认。`,
+  `[shared-shapes] OK - ${SHARED.length} 个共享类型 + 事件词表 + 标题栏高度一致。`,
 );
