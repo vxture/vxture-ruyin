@@ -150,7 +150,10 @@ function eventKinds(source) {
 const EVENT_SOURCES = [
   ["apps/local-host/src/events.ts", "守护进程（发）"],
   ["apps/ui-workspace/src/api.ts", "界面（收）"],
-  ["apps/shell/src/main.ts", "壳（收）"],
+  // 壳的词表本来声明在 main.ts；那一半改由 daemon-events.ts 声明并被
+  // main.ts 引入，因为 main.ts 顶层 import "electron"，node:test 加载不了
+  // 它——SSE 解析要能被直接测，就不能和事件种类的声明挤在同一个文件里。
+  ["apps/shell/src/daemon-events.ts", "壳（收）"],
 ];
 const kindSets = EVENT_SOURCES.map(([file, who]) => {
   const kinds = eventKinds(readFileSync(join(repoRoot, file), "utf8"));
