@@ -1,0 +1,42 @@
+{
+  "name": "@vxture/ruyin-document",
+  "version": "0.1.0",
+  "description": "Ruyin structured document representation (mdast + ry: directives) and the preset renderers that turn it into deliverables (design authority: docs/30-design/decisions/ADR-013, ADR-016).",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test dist/document.test.js"
+  },
+  "dependencies": {
+    "docx": "^9.7.1",
+    "mdast-util-to-string": "^4.0.0",
+    "remark-directive": "^4.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
+  },
+  "devDependencies": {
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^22.10.0",
+    "@types/unist": "^3.0.3",
+    "typescript": "^5.7.2"
+  }
+}

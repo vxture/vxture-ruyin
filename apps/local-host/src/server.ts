@@ -11,6 +11,7 @@ import { resolve as resolvePath } from "node:path";
 import {
   ContractInvalidError,
   HarnessError,
+  unrunnableTools,
   NeedsHumanConfirmationError,
   ProjectNotFoundError,
   type Binding,
@@ -80,6 +81,12 @@ export interface LocalApiDeps {
     bytes: Uint8Array,
     grants: FolderGrant[],
   ) => { content: string; isError?: boolean };
+  /**
+   * 本宿主实现了哪些工具。任务列表用它标出「这台机器跑不了的任务」——
+   * 判据与 startTask 的拒绝判据是同一个（`unrunnableTools`），所以列表上
+   * 能启动的，启动时不会再被拒。
+   */
+  supportsTool: (tool: string) => boolean;
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -719,6 +726,9 @@ async function handle(
           id: t.id,
           objective: t.objective,
           input_types: t.input_types,
+          // 本宿主跑不了的工具。列出来，是为了让「启动不了」在点击之前就看得
+          // 见 —— 而不是点下去之后拿到一个错误。判据和 startTask 是同一个。
+          unrunnable: unrunnableTools(t.tools, deps.supportsTool),
         })),
         states: view.contract.states,
       });

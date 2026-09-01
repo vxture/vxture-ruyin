@@ -14,6 +14,7 @@ export {
   HarnessError,
   interruptedResumePoint,
   pendingCheckpoint,
+  unrunnableTools,
 } from "./harness.js";
 export type {
   Checkpoint,

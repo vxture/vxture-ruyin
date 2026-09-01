@@ -98,6 +98,7 @@ const testSystemInfo = {
 
   writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       new LocalToolExecutor().writeArtifact(p, b, g),
+    supportsTool: (t: string) => new LocalToolExecutor().supports(t),
   platform: process.platform,
   arch: process.arch,
   dataDir: "(test)",
@@ -182,6 +183,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
 
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       new LocalToolExecutor().writeArtifact(p, b, g),
+    supportsTool: (t: string) => new LocalToolExecutor().supports(t),
     systemInfo: testSystemInfo,
     // 登录态替身：服务端只从会话里读当前工作区，绝不从请求体里读 —— 请求体里
     // 带工作区等于让调用方自己挑数据边界。
@@ -417,6 +419,7 @@ test("daemon serves the built workspace ui with traversal guard", async () => {
 
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       new LocalToolExecutor().writeArtifact(p, b, g),
+    supportsTool: (t: string) => new LocalToolExecutor().supports(t),
     systemInfo: testSystemInfo,
     reindex: async () => 0,
     uiDir,
@@ -581,6 +584,7 @@ test("归属：未登录不能新建项目；老项目可导入当前工作区",
 
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       new LocalToolExecutor().writeArtifact(p, b, g),
+    supportsTool: (t: string) => new LocalToolExecutor().supports(t),
     systemInfo: testSystemInfo,
     reindex: async () => 0,
   };
@@ -672,6 +676,7 @@ test("导出：落进授权目录、留下审计、未授权目录一律拒绝",
     updateIntent: new InstallIntentBox(),
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       new LocalToolExecutor().writeArtifact(p, b, g),
+    supportsTool: (t: string) => new LocalToolExecutor().supports(t),
     systemInfo: testSystemInfo,
     platform: signedInTo("wsp_test"),
     reindex: async () => 0,
@@ -736,5 +741,77 @@ test("导出：落进授权目录、留下审计、未授权目录一律拒绝",
     for (const d of [dataDir, outDir, denied]) {
       rmSync(d, { recursive: true, force: true });
     }
+  }
+});
+
+/**
+ * 任务列表要在**点击之前**说清哪些任务这台机器跑不了（TD-019 / ADR-016）。
+ *
+ * 真正要钉的是两处判据不许漂移：**列表上没标红的，启动时不能被拒**。若哪天
+ * 有人只改了其中一处，这条会断。
+ */
+test("任务列表：跑不了的标出来，标了的确实启动不了，没标的确实能启动", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-unrun-"));
+  const { ports, storage } = await makePorts(dataDir);
+  const runtime = new ProjectRuntime(ports);
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  assert.ok(bid);
+  const meta = await runtime.createProject(bid.contract, "任务面", "wsp_test");
+
+  const token = "unrun-token";
+  const executor = new LocalToolExecutor();
+  const server = createLocalApi({
+    runtime,
+    registry: new ProductRegistry(productsDir, dataDir),
+    tasks: new TaskRunner(runtime),
+    token,
+    version: "test",
+    updateIntent: new InstallIntentBox(),
+    writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+      executor.writeArtifact(p, b, g),
+    supportsTool: (t: string) => executor.supports(t),
+    systemInfo: testSystemInfo,
+    platform: signedInTo("wsp_test"),
+    reindex: async () => 0,
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const headers = { authorization: `Bearer ${token}` };
+
+  try {
+    const view = (await (
+      await fetch(`${base}/projects/${meta.id}`, { headers })
+    ).json()) as { tasks: Array<{ id: string; unrunnable: string[] }> };
+
+    const byId = new Map(view.tasks.map((t) => [t.id, t.unrunnable]));
+    // export_deliverable 曾经是「契约里有、宿主没有」的那一个 —— 现在它能跑了。
+    assert.deepEqual(byId.get("export_deliverable"), []);
+    // generate_proposal 还缺 search_knowledge（TD-022）。说出来，别让人点。
+    assert.deepEqual(byId.get("generate_proposal"), ["search_knowledge"]);
+
+    for (const [taskId, unrunnable] of byId) {
+      const res = await fetch(`${base}/projects/${meta.id}/tasks`, {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ task: taskId }),
+      });
+      if (unrunnable.length) {
+        assert.equal(res.status, 400, `${taskId} 标了跑不了，却被受理了`);
+        const body = (await res.json()) as { code: string; message: string };
+        assert.equal(body.code, "TASK_REJECTED");
+        assert.match(body.message, new RegExp(unrunnable[0] ?? ""));
+      } else {
+        // 202 而不是 201：任务在请求之外推进，受理即返回。
+        assert.equal(
+          res.status,
+          202,
+          `${taskId} 列表上说能启动，启动时却被拒 —— 两处判据漂了`,
+        );
+      }
+    }
+  } finally {
+    server.close();
+    storage.closeAll();
+    rmSync(dataDir, { recursive: true, force: true });
   }
 });
