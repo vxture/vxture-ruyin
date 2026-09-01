@@ -11,7 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -1138,5 +1138,185 @@ test("安装包：字节直接 POST，回来的形状就是界面声明的那个
     server.close();
     storage.closeAll();
     rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 工作区边界要在**每一条**按 id 访问的路由上成立，不只在列表上。
+ *
+ * `GET /projects` 一直很小心地按当前工作区过滤，然后任何一个项目凭 id 就能被
+ * 完整读写 —— 那不是边界，那是一层遮挡。可达的场景不用假设攻击者：用户切换
+ * 工作区时项目面板还开着，它会继续操作旧工作区的项目，**包括把它导出**。
+ */
+test("工作区边界：别的工作区的项目，凭 id 也打不开", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-bound-"));
+  const outDir = mkdtempSync(join(tmpdir(), "ruyin-bound-out-"));
+  const { ports, storage, executor } = await makePorts(dataDir);
+  const runtime = new ProjectRuntime(ports);
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  assert.ok(bid);
+
+  const mine = await runtime.createProject(bid.contract, "我的", "wsp_test");
+  const theirs = await runtime.createProject(bid.contract, "别处的", "wsp_other");
+  // attribution 之前的记录：待导入队列，任何工作区下都看得见。
+  const legacyStore = await ports.storage.createProjectStore("prj_legacy");
+  await legacyStore.putMeta({
+    id: "prj_legacy",
+    productId: "vxture.bid",
+    productVersion: "1.0.0",
+    contractVersion: "0.1",
+    name: "老项目",
+    projectType: "project",
+    createdAt: "2026-01-01T00:00:00Z",
+  });
+  await legacyStore.putContract(JSON.stringify(bid.contract));
+  await legacyStore.setBusinessState("draft");
+  await runtime.addGrant(mine.id, outDir, "readwrite");
+
+  const token = "bound-token";
+  const deps = {
+    runtime,
+    registry: new ProductRegistry(productsDir, dataDir),
+    tasks: new TaskRunner(runtime),
+    token,
+    version: "test",
+    updateIntent: new InstallIntentBox(),
+    writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+      executor.writeArtifact(p, b, g),
+    supportsTool: (t: string) => executor.supports(t),
+    systemInfo: testSystemInfo,
+    reindex: async () => 0,
+  };
+  const server = createLocalApi({ ...deps, platform: signedInTo("wsp_test") });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const headers = { authorization: `Bearer ${token}` };
+  const json = { ...headers, "content-type": "application/json" };
+
+  // 未登录的那一套，单独起一个 —— 导出是认证过的操作。
+  const anon = createLocalApi(deps);
+  await new Promise<void>((ok) => anon.listen(0, "127.0.0.1", ok));
+  const anonBase = `http://127.0.0.1:${(anon.address() as AddressInfo).port}`;
+
+  try {
+    // 自己工作区的：照常。
+    assert.equal((await fetch(`${base}/projects/${mine.id}`, { headers })).status, 200);
+    // 没有归属的：放行 —— 挡住它，导入这条路就没了。
+    assert.equal(
+      (await fetch(`${base}/projects/prj_legacy`, { headers })).status,
+      200,
+      "待导入的项目被挡住了，那用户永远导不进来",
+    );
+
+    // 别的工作区的：读不到，也导不走。
+    for (const path of [
+      `/projects/${theirs.id}`,
+      `/projects/${theirs.id}/audit`,
+      `/projects/${theirs.id}/tasks`,
+    ]) {
+      const res = await fetch(`${base}${path}`, { headers });
+      assert.equal(res.status, 403, `${path} 没有挡住`);
+      assert.equal(((await res.json()) as { code: string }).code, "POLICY_DENIED");
+    }
+    const stolen = await fetch(`${base}/projects/${theirs.id}/export`, {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ path: outDir }),
+    });
+    assert.equal(stolen.status, 403, "别的工作区的项目被导出了");
+    // 说的是「在别处」不是「不存在」：这是用户自己的数据，报 404 会让人以为
+    // 数据丢了。
+    assert.match(
+      ((await stolen.json()) as { message: string }).message,
+      /另一个工作区/,
+    );
+
+    // 导出是认证过的操作（owner 定）：没有账号就不导。
+    const offline = await fetch(`${anonBase}/projects/${mine.id}/export`, {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ path: outDir }),
+    });
+    assert.equal(offline.status, 409);
+    assert.equal(
+      ((await offline.json()) as { code: string }).code,
+      "WORKSPACE_REQUIRED",
+    );
+  } finally {
+    server.close();
+    anon.close();
+    storage.closeAll();
+    for (const d of [dataDir, outDir]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 没有归属的项目（待导入队列）在未登录时也导不走。
+ *
+ * 它不受工作区边界的挡 —— 因为它不属于任何工作区，挡住它导入这条路就没了。
+ * 但导出是**认证过的操作**（owner 定）：一份带完整审计链的项目档案离开本机，
+ * 不该在没有账号的情况下发生。注销本身就该先备份、导完再注销，而不是反过来
+ * 给「离线随便导」开一条路。
+ */
+test("导出：待导入的项目未登录时也导不走", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-anon-"));
+  const outDir = mkdtempSync(join(tmpdir(), "ruyin-anon-out-"));
+  const { ports, storage, executor } = await makePorts(dataDir);
+  const runtime = new ProjectRuntime(ports);
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  assert.ok(bid);
+  const store = await ports.storage.createProjectStore("prj_orphan");
+  await store.putMeta({
+    id: "prj_orphan",
+    productId: "vxture.bid",
+    productVersion: "1.0.0",
+    contractVersion: "0.1",
+    name: "无主",
+    projectType: "project",
+    createdAt: "2026-01-01T00:00:00Z",
+  });
+  await store.putContract(JSON.stringify(bid.contract));
+  await store.setBusinessState("draft");
+
+  const token = "anon-token";
+  const server = createLocalApi({
+    runtime,
+    registry: new ProductRegistry(productsDir, dataDir),
+    tasks: new TaskRunner(runtime),
+    token,
+    version: "test",
+    updateIntent: new InstallIntentBox(),
+    writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+      executor.writeArtifact(p, b, g),
+    supportsTool: (t: string) => executor.supports(t),
+    systemInfo: testSystemInfo,
+    reindex: async () => 0,
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const headers = { authorization: `Bearer ${token}` };
+
+  try {
+    // 读得到：它得能被看见，才谈得上导入。
+    assert.equal(
+      (await fetch(`${base}/projects/prj_orphan`, { headers })).status,
+      200,
+    );
+    // 但导不走。
+    const res = await fetch(`${base}/projects/prj_orphan/export`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ path: outDir }),
+    });
+    assert.equal(res.status, 409);
+    assert.equal(
+      ((await res.json()) as { code: string }).code,
+      "WORKSPACE_REQUIRED",
+    );
+    assert.deepEqual(readdirSync(outDir), [], "拒绝了却还是落了盘");
+  } finally {
+    server.close();
+    storage.closeAll();
+    for (const d of [dataDir, outDir]) rmSync(d, { recursive: true, force: true });
   }
 });
