@@ -28,6 +28,7 @@ import { ProductRegistry } from "./product-registry.js";
 import { createLocalApi } from "./server.js";
 import type { PlatformService } from "./platform.js";
 import { TaskRunner } from "./task-runner.js";
+import { InstallIntentBox } from "./updates.js";
 
 interface PolledTask {
   id: string;
@@ -90,6 +91,8 @@ async function makePorts(dataDir: string): Promise<{
 
 const testSystemInfo = {
   version: "test",
+
+  updateIntent: new InstallIntentBox(),
   platform: process.platform,
   arch: process.arch,
   dataDir: "(test)",
@@ -169,6 +172,8 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     tasks: new TaskRunner(runtime),
     token,
     version: "test",
+
+    updateIntent: new InstallIntentBox(),
     systemInfo: testSystemInfo,
     // 登录态替身：服务端只从会话里读当前工作区，绝不从请求体里读 —— 请求体里
     // 带工作区等于让调用方自己挑数据边界。
@@ -394,6 +399,8 @@ test("daemon serves the built workspace ui with traversal guard", async () => {
     tasks: new TaskRunner(uiRuntime),
     token: "t",
     version: "test",
+
+    updateIntent: new InstallIntentBox(),
     systemInfo: testSystemInfo,
     reindex: async () => 0,
     uiDir,
@@ -553,6 +560,8 @@ test("归属：未登录不能新建项目；老项目可导入当前工作区",
     tasks: new TaskRunner(runtime),
     token,
     version: "test",
+
+    updateIntent: new InstallIntentBox(),
     systemInfo: testSystemInfo,
     reindex: async () => 0,
   };

@@ -22,7 +22,11 @@ import type { TaskRunner } from "./task-runner.js";
 import { installPackage } from "./installer.js";
 import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
-import { checkForUpdate } from "./updates.js";
+import {
+  checkForUpdate,
+  installGate,
+  type InstallIntentBox,
+} from "./updates.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -56,6 +60,8 @@ export interface LocalApiDeps {
   fetchContract?: (productId: string) => Promise<FetchOutcome>;
   /** 更新 feed 基址覆盖（dl 主机未落地前可指向测试 feed）；缺省见 updates.ts。 */
   updateFeedBase?: string;
+  /** 用户的安装意图；壳轮询取走。 */
+  updateIntent: InstallIntentBox;
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -296,17 +302,46 @@ async function handle(
     }
   }
 
-  // GET /updates/check - 拉渠道 feed 比版本（TD-021）。**只回答有没有新版本**，
-  // 不下载不安装：那一半在壳里，且前置未落（签名 TD-001 + 策略未定）。
+  // GET /updates/check - 拉渠道 feed 比版本，并附上此刻能不能装（TD-021）。
+  // **只回答问题，不下载不安装**：操作权归用户（策略 2）。
   if (method === "GET" && path === "/updates/check") {
-    send(
-      res,
-      200,
-      await checkForUpdate({
-        currentVersion: deps.version,
-        ...(deps.updateFeedBase ? { feedBase: deps.updateFeedBase } : {}),
-      }),
-    );
+    const check = await checkForUpdate({
+      currentVersion: deps.version,
+      ...(deps.updateFeedBase ? { feedBase: deps.updateFeedBase } : {}),
+    });
+    send(res, 200, { ...check, gate: installGate(deps.tasks.runningCount) });
+    return;
+  }
+
+  // POST /updates/install - 记下用户要装的意图。壳轮询取走它去执行。
+  // 闸门在这里再判一次：按钮禁用只挡误触，用户点下去到壳动手之间任务可能刚起来。
+  if (method === "POST" && path === "/updates/install") {
+    const gate = installGate(deps.tasks.runningCount);
+    if (!gate.installable) {
+      send(res, 409, { error: "install_blocked", ...gate });
+      return;
+    }
+    const body = await readJson(req);
+    const version = String(body["version"] ?? "");
+    if (!version) {
+      send(res, 400, { error: "version_required", message: "缺少要安装的版本号" });
+      return;
+    }
+    send(res, 202, deps.updateIntent.request(version, new Date().toISOString()));
+    return;
+  }
+
+  // GET /updates/intent - 壳取走待执行的安装意图（取走即清）。
+  if (method === "GET" && path === "/updates/intent") {
+    const gate = installGate(deps.tasks.runningCount);
+    // 任务在此期间起来了：不交给壳，把意图丢掉。用户可以在任务停后再点一次；
+    // 悄悄留着它等会儿再装，等于替用户挑了时机（策略 2 不允许）。
+    if (!gate.installable) {
+      deps.updateIntent.clear();
+      send(res, 200, { intent: null, ...gate });
+      return;
+    }
+    send(res, 200, { intent: deps.updateIntent.take(), ...gate });
     return;
   }
 

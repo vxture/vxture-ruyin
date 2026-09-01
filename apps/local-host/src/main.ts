@@ -34,6 +34,7 @@ import { FtsRanker, reindexBinding } from "./fts.js";
 import { LocalToolExecutor } from "./tool-executor.js";
 import { CapabilityClient } from "./capability-client.js";
 import { fetchContract } from "./contract-fetch.js";
+import { InstallIntentBox } from "./updates.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
 
@@ -122,6 +123,10 @@ console.log(
 
 const tasks = new TaskRunner(runtime, cancelledTasks);
 
+// 用户点「安装更新」后的意图，壳轮询取走（TD-021）。只在内存里：这是一次点击，
+// 不是一条设置——守护进程重启后它该消失。
+const updateIntent = new InstallIntentBox();
+
 const server = createLocalApi({
   runtime,
   registry,
@@ -133,6 +138,7 @@ const server = createLocalApi({
   platform,
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
   requireSignedPackages: process.env["RUYIN_ALLOW_UNSIGNED_PACKAGES"] !== "1",
+  updateIntent,
   ...(process.env["RUYIN_UPDATE_FEED"]
     ? { updateFeedBase: process.env["RUYIN_UPDATE_FEED"] }
     : {}),

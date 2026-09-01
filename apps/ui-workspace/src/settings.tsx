@@ -239,10 +239,23 @@ function UpdatesSection({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<UpdateCheck | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [requested, setRequested] = useState(false);
+
+  const install = async (version: string) => {
+    setFailed(null);
+    try {
+      await api.requestInstall(version);
+      setRequested(true);
+    } catch (e) {
+      // 守护进程可能刚判出有任务在跑 —— 说出原因，不要静默。
+      setFailed(String((e as Error).message));
+    }
+  };
 
   const check = async () => {
     setBusy(true);
     setFailed(null);
+    setRequested(false);
     try {
       setResult(await api.checkUpdate());
     } catch (e) {
@@ -286,6 +299,27 @@ function UpdatesSection({
             <div className="update-line update-line--new">
               有新版本 <span className="mono">{result.latest}</span>
               （当前 <span className="mono">{result.current}</span>）
+              <div className="update-actions">
+                {/* 操作权归用户（策略 2）：只有点了才装。
+                    有任务在跑时禁用（策略 1），并说清为什么——防误触，
+                    也免得按了没反应。真正的闸门在守护进程，这里只是不让人白点。 */}
+                <Button
+                  disabled={!result.gate.installable || requested}
+                  onClick={() => void install(result.latest)}
+                >
+                  {requested ? "已请求安装" : "下载并安装"}
+                </Button>
+                {!result.gate.installable && (
+                  <span className="text-body-sm text-muted-foreground">
+                    {result.gate.reason}
+                  </span>
+                )}
+                {requested && (
+                  <span className="text-body-sm text-muted-foreground">
+                    下载完成后会问你是否现在重启安装
+                  </span>
+                )}
+              </div>
             </div>
           )}
           {result?.status === "unreachable" && (
@@ -296,12 +330,6 @@ function UpdatesSection({
             </div>
           )}
         </div>
-      </SettingRow>
-      <SettingRow
-        label="下载与安装"
-        hint="需要代码签名证书与更新策略（何时安装、是否自动下载）就位后开放"
-      >
-        <StatusBadge tone="neutral">尚未接入</StatusBadge>
       </SettingRow>
       <SettingRow
         label="更新渠道"
