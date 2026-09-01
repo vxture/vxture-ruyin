@@ -204,7 +204,8 @@ export function HomePage({
         )}
       </Section>
 
-      {/* §18.5：退订/停用的产品不可打开，但仍列出——本地数据可访问、可导出。 */}
+      {/* §18.5：退订/停用的产品不可打开，但仍列出——本地数据可访问。
+          （导出是 §18.5 的另一半，实现未落地，见 TD-020。） */}
       {blocked.length > 0 && (
         <Section title="不可用的产品" icon="lock" level={2}>
           <div className="grid gap-md md:grid-cols-2 xl:grid-cols-3">
