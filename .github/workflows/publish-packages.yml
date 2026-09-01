@@ -1,0 +1,67 @@
+name: publish-packages
+
+# npm 包发布（W5；设计 30-design/70-repo-organization.md §6）。
+#
+# packages/ 里的东西是**给本仓之外消费的**——云端运行时以 npm 包的形式用
+# runtime-core 与 contract-schema，而不是引本仓源码（CLAUDE.md）。在这条流水线
+# 之前，它们根本没有到达消费方的路径。
+#
+# 与安装包发布（release.yml）刻意用**两套 tag**：`packages-v*` 与 `v*`。库的版本
+# 不该被应用版本牵着走——runtime-core 的版本是「规范实现版本」（08 OQ-2），它和
+# 桌面应用发到第几版没有关系。
+#
+# **发布不可撤销**：npm 上的版本是不可变的。所以这里与 release.yml 不同——那边
+# 「tag 发的是 main 已验过的东西」，不重跑门禁；这里重跑构建与测试，因为发错了
+# 收不回来。
+
+on:
+  push:
+    tags:
+      - "packages-v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+
+      - name: Enable corepack (pnpm from packageManager)
+        run: corepack enable
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Build
+        run: pnpm --recursive build
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      # 发布不可撤销，所以这一步不是形式：这是最后一次能拦住的地方。
+      - name: Test
+        run: pnpm --recursive test
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Publish
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release/publish-packages.mjs
