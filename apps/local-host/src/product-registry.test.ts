@@ -9,7 +9,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ProductRegistry, availabilityOf } from "./product-registry.js";
+import {
+  ProductRegistry,
+  availabilityOf,
+  commercialIntent,
+  type SubscriptionFacts,
+} from "./product-registry.js";
 
 const CONTRACT = `contract: "0.1"
 product:
@@ -128,7 +133,16 @@ void test("registry: 平台判定未订阅 → 不可打开，但产品仍在列
   const { productsDir, dataDir } = makeDirs();
   try {
     const reg = new ProductRegistry(productsDir, dataDir);
-    await reg.refreshEntitlements(() => ({ "test.demo": false }));
+    await reg.refreshEntitlements(() => ({
+      "test.demo": {
+        status: "expired",
+        tier: null,
+        bundled: false,
+        trialEndsAt: null,
+        currentPeriodEnd: null,
+        cancelAtPeriodEnd: false,
+      },
+    }));
     const [p] = reg.list();
     assert.equal(p?.entitled, false);
     assert.equal(p?.availability, "not_entitled");
@@ -182,6 +196,69 @@ void test("registry: 未安装的产品一律被挡", () => {
       reg.blockedReason("nope.missing")?.availability,
       "not_installed",
     );
+  } finally {
+    rmSync(productsDir, { recursive: true, force: true });
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * C2 信封保真（TD-014 D4）。这些用例钉的是同一件事：**压成布尔会让界面永远
+ * 显示同一个错的行动入口** —— 该引导首购的地方显示续费，或者反过来。
+ */
+function facts(over: Partial<SubscriptionFacts> = {}): SubscriptionFacts {
+  return {
+    status: null,
+    tier: null,
+    bundled: false,
+    trialEndsAt: null,
+    currentPeriodEnd: null,
+    cancelAtPeriodEnd: false,
+    ...over,
+  };
+}
+
+void test("行动入口：从未订阅 → 首购", () => {
+  assert.equal(commercialIntent(facts({ status: null })), "subscribe");
+});
+
+void test("行动入口：曾有已失效 → 续费，不是首购", () => {
+  for (const status of ["expired", "cancelled", "canceled", "suspended"]) {
+    assert.equal(commercialIntent(facts({ status })), "renew", status);
+  }
+});
+
+void test("行动入口：已订阅且在有效期内 → 不显示商业入口", () => {
+  assert.equal(commercialIntent(facts({ status: "active", tier: "pro" })), null);
+});
+
+void test("行动入口：被捆绑覆盖且无独立 tier → 不显示（界面公式 ≠ 数据面公式）", () => {
+  const bundled = facts({ status: null, tier: null, bundled: true });
+  // 数据面：能打开（tier != null || bundled）。
+  // 界面：**不该给他一个订阅动作** —— 这正是两个公式混用时踩的坑。
+  assert.equal(commercialIntent(bundled), null);
+});
+
+void test("行动入口：订阅未知 → 不猜，不显示", () => {
+  assert.equal(commercialIntent(null), null);
+});
+
+void test("registry: 信封保真 —— status 与到期日不被压掉", async () => {
+  const { productsDir, dataDir } = makeDirs();
+  try {
+    const reg = new ProductRegistry(productsDir, dataDir);
+    await reg.refreshEntitlements(() => ({
+      "test.demo": facts({
+        status: "trialing",
+        tier: "pro",
+        trialEndsAt: "2026-10-01T00:00:00Z",
+      }),
+    }));
+    const view = reg.list()[0];
+    assert.equal(view?.subscription?.status, "trialing");
+    assert.equal(view?.subscription?.trialEndsAt, "2026-10-01T00:00:00Z");
+    // 试用中是有权益的，数据面放行。
+    assert.equal(view?.entitled, true);
   } finally {
     rmSync(productsDir, { recursive: true, force: true });
     rmSync(dataDir, { recursive: true, force: true });

@@ -82,10 +82,16 @@ export function HomePage({
   }, [api]);
 
   const consoleBase = session?.consoleBase ?? "https://vxture.com";
-  // 主体在平台：订阅动作一律回 console，仅显式点击触发。
-  const subscribeUrl = (productId?: string) =>
+  // 主体在平台：订阅动作一律回 console，**仅显式点击触发，永不自动跳转**。
+  // intent 由 daemon 依 C2 信封判定 —— 从未订阅是首购，曾有已失效是续费。
+  // 写死 intent=subscribe 会把续费的用户引去首购页（TD-014 D4）。
+  // 深链不带工作区 id：console 从会话解析。
+  const subscribeUrl = (
+    productId?: string,
+    intent: "subscribe" | "renew" = "subscribe",
+  ) =>
     productId
-      ? `${consoleBase}/subscribe?product=${encodeURIComponent(productId)}&intent=subscribe`
+      ? `${consoleBase}/subscribe?product=${encodeURIComponent(productId)}&intent=${intent}`
       : `${consoleBase}/subscribe`;
 
   // 可用性由 runtime 判定（daemon 的 ProductRegistry，§18.5）——UI 不重算规则。
@@ -225,15 +231,23 @@ export function HomePage({
                 meta={
                   <div className="flex flex-col gap-xs">
                     <ProductIdent code={`${p.id}@${p.version}`} inset />
-                    {p.availability === "not_entitled" && (
+                    {/* 商业入口由 daemon 的 commercialIntent 决定：被捆绑覆盖
+                        的产品没有属于他的商业动作，就不显示按钮。 */}
+                    {p.commercialIntent && (
                       <div className="flex items-center gap-xs">
                         <Button
                           variant="outline"
                           onClick={() =>
-                            window.open(subscribeUrl(p.id), "_blank", "noopener")
+                            window.open(
+                              subscribeUrl(p.id, p.commercialIntent!),
+                              "_blank",
+                              "noopener",
+                            )
                           }
                         >
-                          去平台订阅 ↗
+                          {p.commercialIntent === "renew"
+                            ? "去平台续费 ↗"
+                            : "去平台订阅 ↗"}
                         </Button>
                       </div>
                     )}

@@ -32,6 +32,58 @@ import { sourceOf } from "./contract-fetch.js";
 /** 平台订阅对某产品的判定；null = 未知（未登录 / 订阅面未接通）。 */
 export type Entitled = boolean | null;
 
+/**
+ * C2 信封里与订阅有关的事实，原样保留（TD-014 D4）。
+ *
+ * **压成布尔会丢掉四种互不相同的处境**，而它们各自对应不同的行动入口：
+ *
+ *   status: null                      从未订阅   → 首购  intent=subscribe
+ *   expired / cancelled / suspended   曾有已失效 → 续费  intent=renew
+ *   trialing                          试用中     → 显示 trial_ends_at
+ *   active + cancelAtPeriodEnd        已计划失效 → 提示到期日
+ *
+ * 压扁之后这四种全变成「否」，界面**永远显示同一个错的入口**——该引导首购的
+ * 地方显示续费，或者反过来。
+ *
+ * **不含 limits / quota_pools**：配额归 SaaS，Ruyin 不读、不执行、不展示
+ * （ADR-006）。把它们放进来，下一个人就会想去用。
+ */
+export interface SubscriptionFacts {
+  status: string | null;
+  tier: string | null;
+  bundled: boolean;
+  trialEndsAt: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+}
+
+/** 曾经有过、现在失效了的状态——这些该引导续费，不是首购。 */
+const LAPSED = new Set(["expired", "cancelled", "canceled", "suspended"]);
+
+/**
+ * 该给用户哪个商业入口，或者不给。
+ *
+ * **界面门控与数据面门控是两个公式**，这是 D4 的另一半：
+ *
+ *   数据面（能不能打开）  tier != null || bundled
+ *   界面（显不显示入口）  tier != null
+ *
+ * 混用后果落在**被捆绑组件覆盖的产品**上：它没有独立 tier，本不该显示商业
+ * 入口，却因为数据面公式为真而按「有权益」渲染——用户看到一个不该给他的
+ * 订阅动作。
+ */
+export function commercialIntent(
+  facts: SubscriptionFacts | null,
+): "subscribe" | "renew" | null {
+  // 未知不是「没有」：未登录 / 订阅面未接通时不猜，也就不显示任何入口。
+  if (!facts) return null;
+  // 捆绑覆盖且无独立 tier —— 有权益，但没有属于他的商业动作。
+  if (facts.tier === null && facts.bundled) return null;
+  if (facts.status && LAPSED.has(facts.status)) return "renew";
+  if (facts.tier !== null) return null; // 已订阅且在有效期内
+  return "subscribe";
+}
+
 export type Availability = "available" | "disabled" | "not_entitled";
 
 /**
@@ -57,6 +109,10 @@ export interface ProductView {
    */
   state: "active" | "inactive";
   entitled: Entitled;
+  /** C2 信封的订阅事实；null = 未知。界面据此选行动入口。 */
+  subscription: SubscriptionFacts | null;
+  /** 该显示哪个商业入口，或 null = 不显示。见 commercialIntent。 */
+  commercialIntent: "subscribe" | "renew" | null;
   availability: Availability;
   /** 不可用时的人可读原因；可用时缺省。 */
   reason?: string;
@@ -72,12 +128,16 @@ export interface ProductView {
   supply: "contract_fetch" | "package" | "builtin";
 }
 
-/** 解析某产品的订阅状态。抛错或返回 null 一律按「未知」处理。 */
+/**
+ * 解析某产品的订阅事实。抛错或返回 null 一律按「未知」处理。
+ *
+ * **交回信封而不是布尔**（D4）：由这一层压扁，界面就再也拿不到它需要的事实。
+ */
 export type EntitlementResolver = (
   productIds: string[],
 ) =>
-  | Promise<Record<string, boolean> | null>
-  | Record<string, boolean>
+  | Promise<Record<string, SubscriptionFacts> | null>
+  | Record<string, SubscriptionFacts>
   | null;
 
 interface PersistedState {
@@ -115,7 +175,7 @@ export class ProductRegistry {
   private storeVersions = new Map<string, string[]>();
   private disabled: Set<string>;
   private active: Record<string, string>;
-  private entitlements = new Map<string, boolean>();
+  private entitlements = new Map<string, SubscriptionFacts>();
   private readonly statePath: string;
   /** 受管产品库根目录：<dataDir>/products。 */
   readonly storeDir: string;
@@ -227,16 +287,28 @@ export class ProductRegistry {
       const result = await resolve(ids);
       if (!result) return;
       this.entitlements.clear();
-      for (const [id, ok] of Object.entries(result)) {
-        this.entitlements.set(id, ok);
+      for (const [id, facts] of Object.entries(result)) {
+        this.entitlements.set(id, facts);
       }
     } catch {
       // 未知即未知：不写入判定，不锁死用户。
     }
   }
 
+  private factsOf(id: string): SubscriptionFacts | null {
+    return this.entitlements.get(id) ?? null;
+  }
+
+  /**
+   * 数据面门控：能不能打开、能不能新建。
+   *
+   * 公式是 `tier != null || bundled` —— **与界面门控不是同一个公式**
+   * （见 commercialIntent）。未知返回 null，不猜。
+   */
   private entitledOf(id: string): Entitled {
-    return this.entitlements.has(id) ? this.entitlements.get(id)! : null;
+    const facts = this.factsOf(id);
+    if (!facts) return null;
+    return facts.tier !== null || facts.bundled;
   }
 
   /**
@@ -258,6 +330,7 @@ export class ProductRegistry {
     return this.scan.loaded.map((p) => {
       const enabled = !this.disabled.has(p.id);
       const entitled = this.entitledOf(p.id);
+      const facts = this.factsOf(p.id);
       const { availability, reason } = availabilityOf(enabled, entitled);
       const versions = this.storeVersions.get(p.id);
       return {
@@ -267,6 +340,8 @@ export class ProductRegistry {
         installed: true as const,
         state: enabled ? "active" : "inactive",
         entitled,
+        subscription: facts,
+        commercialIntent: commercialIntent(facts),
         availability,
         ...(reason ? { reason } : {}),
         versions: versions ?? [p.version],
