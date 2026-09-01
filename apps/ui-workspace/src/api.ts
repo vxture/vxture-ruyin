@@ -133,7 +133,8 @@ export interface ProjectExport {
 /** 运行时事件（daemon /events）。只说什么变了，不带业务数据。 */
 export type RuntimeEvent =
   | { kind: "task"; projectId: string; taskInstance: string }
-  | { kind: "pending" };
+  | { kind: "pending" }
+  | { kind: "update-intent" };
 
 export interface StateItem {
   name: string;

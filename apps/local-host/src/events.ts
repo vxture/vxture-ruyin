@@ -14,7 +14,9 @@ export type RuntimeEvent =
   /** 某个任务实例动了（起来了、落定了、停在等人那一刻）。 */
   | { kind: "task"; projectId: string; taskInstance: string }
   /** 「在等我」的清单变了。 */
-  | { kind: "pending" };
+  | { kind: "pending" }
+  /** 用户按了「安装更新」，壳该来取走这个意图了。 */
+  | { kind: "update-intent" };
 
 type Listener = (event: RuntimeEvent) => void;
 

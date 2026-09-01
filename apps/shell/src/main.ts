@@ -140,6 +140,68 @@ function startDaemon(): Electron.UtilityProcess {
 }
 
 /**
+ * 订阅守护进程的事件流（TD-029）。
+ *
+ * 壳没有「页面刷新」这种天然重连 —— 界面那边流断了，用户刷一下就回来了，壳
+ * 不会。所以这里显式重连，而且**轮询一条都没删，只是降速**：断流期间必须还
+ * 有人在问，否则壳会安静地不再通知，而「没有通知」和「没有事情」在用户那里
+ * 是同一件事。
+ *
+ * 一条连接，多个消费者：待确认与更新意图看的是同一条流。
+ */
+type DaemonEventKind = "task" | "pending" | "update-intent";
+const eventListeners = new Set<(kind: DaemonEventKind) => void>();
+
+function onDaemonEvent(listener: (kind: DaemonEventKind) => void): () => void {
+  eventListeners.add(listener);
+  return () => eventListeners.delete(listener);
+}
+
+async function streamDaemonEvents(): Promise<void> {
+  // 重连退避：守护进程重启期间不要每毫秒敲一次门。上限 10 秒 —— 再久，用户
+  // 会先注意到通知停了。
+  let backoff = 500;
+  for (;;) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/events`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      if (!res.ok || !res.body) throw new Error(`events: HTTP ${res.status}`);
+      backoff = 500;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let cut = buffer.indexOf("\n\n");
+        while (cut >= 0) {
+          const frame = buffer.slice(0, cut);
+          buffer = buffer.slice(cut + 2);
+          for (const line of frame.split("\n")) {
+            if (!line.startsWith("data:")) continue; // 心跳是注释行
+            try {
+              const event = JSON.parse(line.slice(5).trim()) as {
+                kind: DaemonEventKind;
+              };
+              for (const listener of [...eventListeners]) listener(event.kind);
+            } catch {
+              // 半截或异常的帧：丢这一帧，别让它带走整条流。
+            }
+          }
+          cut = buffer.indexOf("\n\n");
+        }
+      }
+    } catch {
+      // 守护进程还没起来、或者刚被换掉。下面退避重试。
+    }
+    await new Promise((ok) => setTimeout(ok, backoff));
+    backoff = Math.min(backoff * 2, 10_000);
+  }
+}
+
+/**
  * 等守护进程报出 PDF 自检结果（ADR-017）。
  *
  * 只在冒烟里用。等的是标记而不是固定时长：一条「等两秒然后宣布通过」的检查，
@@ -266,9 +328,16 @@ function watchPending(win: BrowserWindow): void {
     }
   };
 
-  const timer = setInterval(() => void poll(), 10_000);
+  // 事件到了立刻查；轮询降为兜底（TD-029）。
+  const stop = onDaemonEvent((kind) => {
+    if (kind === "pending" || kind === "task") void poll();
+  });
+  const timer = setInterval(() => void poll(), 60_000);
   timer.unref?.();
-  win.on("closed", () => clearInterval(timer));
+  win.on("closed", () => {
+    stop();
+    clearInterval(timer);
+  });
   void poll();
 }
 
@@ -365,9 +434,15 @@ function watchUpdateIntent(win: BrowserWindow): void {
     }
   };
 
-  const timer = setInterval(() => void poll(), 5_000);
+  const stop = onDaemonEvent((kind) => {
+    if (kind === "update-intent") void poll();
+  });
+  const timer = setInterval(() => void poll(), 60_000);
   timer.unref?.();
-  win.on("closed", () => clearInterval(timer));
+  win.on("closed", () => {
+    stop();
+    clearInterval(timer);
+  });
 }
 
 function openWindow(): void {
@@ -410,6 +485,7 @@ function openWindow(): void {
     return { action: "allow" };
   });
   void win.loadURL(`http://127.0.0.1:${PORT}/?token=${TOKEN}`);
+  void streamDaemonEvents();
   watchPending(win);
   watchUpdateIntent(win);
 }
