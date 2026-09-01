@@ -80,6 +80,9 @@ const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
 // running loop cannot overwrite it on its next persist.
 const cancelledTasks = new Set<string>();
 
+// 同一个执行器：任务写产出与导出写记录走同一套授权护栏。
+const toolExecutor = new LocalToolExecutor();
+
 const runtime = new ProjectRuntime({
   storage,
   clock: nodeClock,
@@ -95,7 +98,7 @@ const runtime = new ProjectRuntime({
     : new MockAIGateway(),
   connectors,
   ranker: new FtsRanker(storage),
-  tools: new LocalToolExecutor(),
+  tools: toolExecutor,
   isCancelled: (id) => cancelledTasks.has(id),
 });
 
@@ -142,6 +145,8 @@ const server = createLocalApi({
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
   requireSignedPackages: process.env["RUYIN_ALLOW_UNSIGNED_PACKAGES"] !== "1",
   updateIntent,
+  writeArtifact: (path, bytes, grants) =>
+    toolExecutor.writeArtifact(path, bytes, grants),
   refreshEntitlements: () => syncEntitlements(),
   ...(process.env["RUYIN_UPDATE_FEED"]
     ? { updateFeedBase: process.env["RUYIN_UPDATE_FEED"] }

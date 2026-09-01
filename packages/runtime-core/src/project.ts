@@ -18,6 +18,7 @@ import {
   OUTCOME_MUST_BE_STATED,
   RUNTIME_ACTOR,
 } from "./audit.js";
+import { buildProjectExport, type ProjectExport } from "./export.js";
 import {
   Harness,
   interruptedResumePoint,
@@ -378,6 +379,36 @@ export class ProjectRuntime {
     await store.putMeta(updated);
     await this.audit(store, id, "project.imported", "user", { workspaceId });
     return updated;
+  }
+
+  /**
+   * 组装一份项目导出，并把这次导出记进审计（TD-020）。
+   *
+   * 内核出包、宿主落盘：装什么、怎么绑定摘要、留什么痕，都是运行时的规矩；
+   * 把字节写到哪个目录是宿主的事（内核不许引 Node API）。
+   *
+   * **导出本身是一次数据离开本机的事件**，所以它自己也要进链——成败都记。
+   */
+  async exportProject(
+    id: string,
+    opts: { runtimeVersion: string },
+  ): Promise<ProjectExport> {
+    const { store } = await this.load(id);
+    const bundle = await buildProjectExport(store, this.ports.crypto, id, {
+      runtimeVersion: opts.runtimeVersion,
+      exportedAt: this.ports.clock.now(),
+    });
+    return bundle;
+  }
+
+  /** 记一条导出结果。宿主写完盘才知道成没成，所以分两步。 */
+  async auditExport(
+    id: string,
+    detail: { path: string; files: string[]; events: number },
+    outcome: AuditOutcome,
+  ): Promise<void> {
+    const { store } = await this.load(id);
+    await this.audit(store, id, "project.exported", "user", detail, outcome);
   }
 
   async listInterruptedTasks(id: string): Promise<TaskInstanceRecord[]> {
