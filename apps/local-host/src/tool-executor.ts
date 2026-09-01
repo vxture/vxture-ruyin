@@ -28,7 +28,9 @@ import {
   parseDocument,
   renderDocx,
 } from "@vxture/ruyin-document";
+import type { SearchOutcome } from "./fts.js";
 import type {
+  ContextItemMeta,
   FolderGrant,
   ToolExecutionRequest,
   ToolExecutionResult,
@@ -67,10 +69,34 @@ const RENDERERS = new Set(["docx"]);
 /** Cap on what one export reads in, before rendering multiplies it. */
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 
-const IMPLEMENTED = new Set(["read_file", "write_document", "export_result"]);
+const IMPLEMENTED = new Set([
+  "read_file",
+  "write_document",
+  "export_result",
+  "search_knowledge",
+]);
+
+/** 在给定范围内检索的能力。宿主注入，因为它要碰存储，而执行器本身不该碰。 */
+export type ContextSearch = (
+  projectId: string,
+  query: string,
+  scope: ContextItemMeta[],
+  limit: number,
+) => SearchOutcome;
+
+/** 一次检索最多回多少条。回太多等于把整份资料塞进对话。 */
+const MAX_SEARCH_RESULTS = 20;
 
 export class LocalToolExecutor implements ToolExecutorPort {
+  /**
+   * `search` 缺省时 `search_knowledge` **不在支持列表里**，而不是支持了却查不
+   * 到东西。两者的差别是：前者让任务在启动时就被明确拒绝（说清缺什么），后者
+   * 让任务跑起来、每次检索都返回「没找到」，然后交出一份查无实据的方案。
+   */
+  constructor(private readonly search?: ContextSearch) {}
+
   supports(tool: string): boolean {
+    if (tool === "search_knowledge") return this.search !== undefined;
     return IMPLEMENTED.has(tool);
   }
 
@@ -82,6 +108,8 @@ export class LocalToolExecutor implements ToolExecutorPort {
         return this.writeDocument(request);
       case "export_result":
         return this.exportResult(request);
+      case "search_knowledge":
+        return this.searchKnowledge(request);
       default:
         return {
           content: `tool "${request.tool}" is not implemented by this host`,
@@ -183,6 +211,56 @@ export class LocalToolExecutor implements ToolExecutorPort {
       Buffer.from(content, "utf8"),
       request.grants,
     );
+  }
+
+  /**
+   * 在本任务的上下文集内检索（TD-022）。
+   *
+   * 范围就是上下文集，不是整个项目索引 —— 那是这次任务选出来、必要时经用户
+   * 确认过的那一批资料；让检索伸到它之外，那道确认就成了摆设。
+   *
+   * 回的是**摘录加 id**，不是整篇：整篇的位置在上下文通路，从这里回传等于
+   * 让资料按全价流经对话。
+   */
+  private searchKnowledge(
+    request: ToolExecutionRequest,
+  ): ToolExecutionResult {
+    if (!this.search) {
+      return { content: "search is not wired on this host", isError: true };
+    }
+    const query = String(request.arguments["query"] ?? "").trim();
+    if (!query) return { content: "no query was given", isError: true };
+    const asked = Number(request.arguments["limit"] ?? 8);
+    const limit = Math.min(
+      Number.isFinite(asked) && asked > 0 ? Math.floor(asked) : 8,
+      MAX_SEARCH_RESULTS,
+    );
+
+    const { hits, outOfScope } = this.search(
+      request.workspace,
+      query,
+      request.contextSet,
+      limit,
+    );
+    if (hits.length === 0) {
+      // 空结果要能区分「范围内没有」和「范围本身是空的」——后者是选取阶段的
+      // 问题，不是资料的问题，而两者报成同一句话，查的人会往错的方向找。
+      const why = request.contextSet.length
+        ? `no match for "${query}" in this task's ${request.contextSet.length} context item(s)`
+        : "this task has no context items to search";
+      return {
+        content: outOfScope
+          ? `${why}; ${outOfScope} match(es) exist outside this task's context set`
+          : why,
+      };
+    }
+    const lines = hits.map((h) => `- [${h.id}] ${h.name}: ${h.excerpt}`);
+    if (outOfScope) {
+      lines.push(
+        `(${outOfScope} further match(es) are outside this task's context set)`,
+      );
+    }
+    return { content: lines.join("\n") };
   }
 
   /**

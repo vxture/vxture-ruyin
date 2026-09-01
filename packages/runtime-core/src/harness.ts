@@ -1168,6 +1168,7 @@ export class Harness {
           workspace: this.deps.projectId,
           taskId: instance.id,
           grants,
+          contextSet: instance.contextSet ?? [],
         });
       } catch (cause) {
         result = {

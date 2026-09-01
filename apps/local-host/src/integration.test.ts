@@ -61,7 +61,7 @@ async function pollTask(
   throw new Error(`task ${taskId} never settled`);
 }
 import { LocalFsConnector } from "./connector-fs.js";
-import { FtsRanker, reindexBinding } from "./fts.js";
+import { searchContext, FtsRanker, reindexBinding } from "./fts.js";
 import { LocalToolExecutor } from "./tool-executor.js";
 import { KeyManager } from "./keys.js";
 
@@ -73,9 +73,15 @@ const productsDir = new URL("../../../products", import.meta.url).pathname
 async function makePorts(dataDir: string): Promise<{
   ports: RuntimePorts;
   storage: SqliteStoragePort;
+  executor: LocalToolExecutor;
 }> {
   const keys = await KeyManager.open(dataDir);
   const storage = new SqliteStoragePort(dataDir, keys);
+  // 照 main.ts 的样子接上检索，并且**只造一个执行器**：生产上任务执行与任务
+  // 列表用的是同一个，测试里造两个就会验出一套现实中不存在的装配。
+  const executor = new LocalToolExecutor((projectId, query, scope, limit) =>
+    searchContext(storage, projectId, query, scope, limit),
+  );
   return {
     ports: {
       storage,
@@ -85,9 +91,10 @@ async function makePorts(dataDir: string): Promise<{
       gateway: new MockAIGateway(),
       connectors: new Map([["local-fs", new LocalFsConnector()]]),
       ranker: new FtsRanker(storage),
-      tools: new LocalToolExecutor(),
+      tools: executor,
     },
     storage,
+    executor,
   };
 }
 
@@ -752,14 +759,13 @@ test("导出：落进授权目录、留下审计、未授权目录一律拒绝",
  */
 test("任务列表：跑不了的标出来，标了的确实启动不了，没标的确实能启动", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-unrun-"));
-  const { ports, storage } = await makePorts(dataDir);
+  const { ports, storage, executor } = await makePorts(dataDir);
   const runtime = new ProjectRuntime(ports);
   const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
   assert.ok(bid);
   const meta = await runtime.createProject(bid.contract, "任务面", "wsp_test");
 
   const token = "unrun-token";
-  const executor = new LocalToolExecutor();
   const server = createLocalApi({
     runtime,
     registry: new ProductRegistry(productsDir, dataDir),
@@ -784,10 +790,12 @@ test("任务列表：跑不了的标出来，标了的确实启动不了，没�
     ).json()) as { tasks: Array<{ id: string; unrunnable: string[] }> };
 
     const byId = new Map(view.tasks.map((t) => [t.id, t.unrunnable]));
-    // export_deliverable 曾经是「契约里有、宿主没有」的那一个 —— 现在它能跑了。
-    assert.deepEqual(byId.get("export_deliverable"), []);
-    // generate_proposal 还缺 search_knowledge（TD-022）。说出来，别让人点。
-    assert.deepEqual(byId.get("generate_proposal"), ["search_knowledge"]);
+    // 这两个曾经是「契约里有、宿主没有」的：export_result（TD-019）与
+    // search_knowledge（TD-022）。标书产品的四个任务现在一个不缺。
+    for (const [taskId, unrunnable] of byId) {
+      assert.deepEqual(unrunnable, [], `${taskId} 仍有跑不了的工具`);
+    }
+    assert.equal(byId.size, 4);
 
     for (const [taskId, unrunnable] of byId) {
       const res = await fetch(`${base}/projects/${meta.id}/tasks`, {
