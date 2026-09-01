@@ -1,9 +1,22 @@
 ﻿/**
- * Workbench - the signed-in/local product surface on the DS shell system (L3
- * portal experience). Frameless titlebar: the ShellHeader adapts to the host
- * (electron / installed-PWA WCO / plain browser) for a single title-bar
- * contract. Views (home / workspace / settings) are state-routed - the daemon
- * serves a single page, no URL router.
+ * 工作台 —— 建在 DS shell 之上的宿主外壳。视图按状态路由（守护进程只发一个
+ * 页面，没有 URL router），无边框标题栏按宿主（Electron / 浏览器）适配。
+ *
+ * **chrome 有三态，规则只有一条：谁的导航就放在谁的侧栏里。**
+ *
+ *   工作台  如影 RUYIN            总览 / 项目
+ *   产品    ← ｜ 产品名 · 项目名   产品的分区 + 同产品其他项目
+ *   设置    ← ｜ 设置             设置的分区
+ *
+ * 参照 macOS：应用名在菜单栏，文档名在标题栏，宿主退到一侧。进了产品就是进了
+ * 另一套框架，所以那条 32px 的页内 tab 横条与设置页内那根竖直导航都不该存在
+ * —— 它们本来就是各自应用的导航。
+ *
+ * 产品名取自契约的 product.name：运行时展示的是产品声明过的事实，不是自己编的
+ * 表达（ADR-011 的判据）。
+ *
+ * 当前工作区常驻标题栏：项目、订阅、权益、数据边界全按工作区划分，跨工作区
+ * 访问会被服务端拒绝 —— 看不到自己在哪个工作区，那句拒绝就无从理解。
  */
 
 import {

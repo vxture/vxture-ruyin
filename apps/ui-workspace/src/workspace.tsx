@@ -1,10 +1,15 @@
 ﻿/**
- * Workspace panel - sectioned into functional tabs (概览 / 上下文 / 任务 /
- * 审计) per the runtime-owned control surfaces of
- * docs/40-implementation/10-product-integration-guide.md section 6.3.
- * Pending checkpoints stay pinned above the tabs: human decisions outrank
- * navigation (50-harness section 6). Presentation is DS-native: SectionHeader
- * ladder, SegmentedControl tab switch, StatusBadge tones, Table family.
+ * 项目面板 —— 运行时自持的那几个控制面（概览 / 上下文 / 任务 / 审计，见
+ * docs/40-implementation/10-product-integration-guide.md section 6.3）。
+ *
+ * **分区导航不在这里。** 它是产品自己的导航，所以它在侧栏（产品态 chrome，
+ * 见 workbench.tsx）—— 页面里再放一根，屏幕上就并排站着两根。这个文件只按
+ * 传进来的 `tab` 渲染对应的分区。
+ *
+ * 未决确认钉在分区之上：人的决定压过导航（50-harness section 6）。摘要带在
+ * 最顶上，把散在四个分区里的事实并成一行。
+ *
+ * 呈现全部走 DS：SectionHeader、StatusBadge、Table 族。
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
