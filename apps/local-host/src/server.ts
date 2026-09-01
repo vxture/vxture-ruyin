@@ -22,6 +22,7 @@ import type { TaskRunner } from "./task-runner.js";
 import { installPackage } from "./installer.js";
 import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
+import { apiError, REJECTION } from "./errors.js";
 import {
   checkForUpdate,
   installGate,
@@ -103,7 +104,7 @@ function serveStatic(res: ServerResponse, root: string, rel: string): void {
   // Normalize and refuse traversal outside the UI root.
   const full = resolvePath(root, rel);
   if (!full.startsWith(resolvePath(root)) || !existsSync(full)) {
-    send(res, 404, { error: "not_found" });
+    send(res, 404, apiError("NOT_FOUND", "资源不存在"));
     return;
   }
   const ext = full.slice(full.lastIndexOf("."));
@@ -132,38 +133,43 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 
 function errorStatus(cause: unknown): { status: number; body: unknown } {
   if (cause instanceof ContractInvalidError) {
-    return { status: 400, body: { error: "contract_invalid", details: cause.errors } };
+    return {
+      status: 400,
+      body: { ...apiError("CONTRACT_INVALID", "契约校验未通过"), details: cause.errors },
+    };
   }
   if (cause instanceof ProjectNotFoundError) {
-    return { status: 404, body: { error: "workspace_not_found", message: cause.message } };
+    return { status: 404, body: apiError("PROJECT_NOT_FOUND", cause.message) };
   }
   if (cause instanceof NeedsHumanConfirmationError) {
-    return { status: 409, body: { error: "needs_human_confirmation", message: cause.message } };
+    // X-1 词表：这是一条出路，不是一个错误 —— 引导去确认，别当失败展示。
+    return { status: 409, body: apiError(REJECTION.APPROVAL_REQUIRED, cause.message) };
   }
   if (cause instanceof HarnessError) {
-    return { status: 400, body: { error: "harness_error", message: cause.message } };
+    return { status: 400, body: apiError("TASK_REJECTED", cause.message) };
   }
   if (cause instanceof SyntaxError) {
-    return { status: 400, body: { error: "bad_json", message: cause.message } };
+    return { status: 400, body: apiError("REQUEST_MALFORMED", cause.message) };
   }
   if (cause instanceof NotSignedInError) {
-    return { status: 401, body: { error: "not_signed_in", message: cause.message } };
+    return { status: 401, body: apiError("AUTH_REQUIRED", cause.message) };
   }
   if (cause instanceof PlatformNotConfiguredError) {
-    return { status: 503, body: { error: "platform_not_configured", message: cause.message } };
+    return { status: 503, body: apiError("PLATFORM_NOT_CONFIGURED", cause.message) };
   }
   const message = cause instanceof Error ? cause.message : String(cause);
   if (/illegal state transition/.test(message)) {
-    return { status: 409, body: { error: "illegal_transition", message } };
+    return { status: 409, body: apiError("STATE_TRANSITION_ILLEGAL", message) };
   }
   if (
     /outside every granted folder|not declared in the contract|does not allow the local source/.test(
       message,
     )
   ) {
-    return { status: 400, body: { error: "binding_invalid", message } };
+    return { status: 400, body: apiError("BINDING_INVALID", message) };
   }
-  return { status: 500, body: { error: "internal", message } };
+  // 内部错误可能是瞬时的（磁盘忙、锁竞争），所以它是少数几个 retryable 之一。
+  return { status: 500, body: apiError("INTERNAL", message, { retryable: true }) };
 }
 
 export function createLocalApi(deps: LocalApiDeps): Server {
@@ -256,7 +262,7 @@ async function handle(
 
   const auth = req.headers.authorization ?? "";
   if (auth !== `Bearer ${deps.token}`) {
-    send(res, 401, { error: "unauthorized" });
+    send(res, 401, apiError("AUTH_REQUIRED", "缺少或无效的会话令牌"));
     return;
   }
 
@@ -292,8 +298,9 @@ async function handle(
         .filter((s) => s.length > 0);
       if (products.length === 0) {
         send(res, 400, {
-          error: "bad_request",
-          message: "products query parameter required",
+          ...apiError("REQUEST_MALFORMED", "缺少 products 查询参数", {
+            field: "products",
+          }),
         });
         return;
       }
@@ -318,13 +325,23 @@ async function handle(
   if (method === "POST" && path === "/updates/install") {
     const gate = installGate(deps.tasks.runningCount);
     if (!gate.installable) {
-      send(res, 409, { error: "install_blocked", ...gate });
+      // 可重试：任务结束后它就变成可装了 —— 这正是 retryable 要传达的东西。
+      send(res, 409, {
+        ...apiError("UPDATE_INSTALL_BLOCKED", gate.reason ?? "现在不能安装", {
+          retryable: true,
+        }),
+        ...gate,
+      });
       return;
     }
     const body = await readJson(req);
     const version = String(body["version"] ?? "");
     if (!version) {
-      send(res, 400, { error: "version_required", message: "缺少要安装的版本号" });
+      send(
+        res,
+        400,
+        apiError("REQUEST_MALFORMED", "缺少要安装的版本号", { field: "version" }),
+      );
       return;
     }
     send(res, 202, deps.updateIntent.request(version, new Date().toISOString()));
@@ -376,10 +393,14 @@ async function handle(
         signed: result.signed,
       });
     } catch (cause) {
-      send(res, 400, {
-        error: "install_rejected",
-        message: cause instanceof Error ? cause.message : String(cause),
-      });
+      send(
+        res,
+        400,
+        apiError(
+          "PACKAGE_REJECTED",
+          cause instanceof Error ? cause.message : String(cause),
+        ),
+      );
     }
     return;
   }
@@ -392,11 +413,14 @@ async function handle(
     segments[2] === "fetch"
   ) {
     if (!deps.fetchContract) {
-      send(res, 503, {
-        error: "capability_base_not_configured",
-        message:
+      send(
+        res,
+        503,
+        apiError(
+          "CAPABILITY_BASE_NOT_CONFIGURED",
           "契约拉取需要已配置的产品能力面（RUYIN_CAPABILITY_BASE）；当前未配置",
-      });
+        ),
+      );
       return;
     }
     try {
@@ -406,49 +430,64 @@ async function handle(
       send(res, outcome.status === "fetched" ? 201 : 200, outcome);
     } catch (cause) {
       // 契约本身不可接受 —— 产品的问题，说清楚是哪一条不过。
-      send(res, cause instanceof ContractFetchError ? 422 : 500, {
-        error: "contract_rejected",
-        message: cause instanceof Error ? cause.message : String(cause),
-      });
+      send(
+        res,
+        cause instanceof ContractFetchError ? 422 : 500,
+        apiError(
+          "CONTRACT_INVALID",
+          cause instanceof Error ? cause.message : String(cause),
+        ),
+      );
     }
     return;
   }
 
-  // POST /products/:id/activate  { version } - 切换生效版本（§18.4 回滚）
+  // POST /products/:id/pin-version  { version } - 钉住生效版本（§18.4 回滚）。
+  // 曾叫 activate —— 与通则 B-3 撞名（那里 activate/deactivate 是生效开关）。
+  // X-4：撞名必须改名，不得靠上下文区分。
   if (
     method === "POST" &&
     segments[0] === "products" &&
     segments.length === 3 &&
-    segments[2] === "activate"
+    segments[2] === "pin-version"
   ) {
     const body = await readJson(req);
     try {
       deps.registry.activate(segments[1]!, String(body["version"] ?? ""));
     } catch (cause) {
-      send(res, 404, {
-        error: "version_not_installed",
-        message: cause instanceof Error ? cause.message : String(cause),
-      });
+      send(
+        res,
+        404,
+        apiError(
+          "PRODUCT_VERSION_NOT_FOUND",
+          cause instanceof Error ? cause.message : String(cause),
+        ),
+      );
       return;
     }
     send(res, 200, deps.registry.list().find((p) => p.id === segments[1]));
     return;
   }
 
-  // POST /products/:id/enable|disable - 本机启用/停用（不卸载，数据不动）
+  // POST /products/:id/activate|deactivate - 本机生效开关（不卸载，数据不动）。
+  // 通则 B-3 规定二元开关就叫这两个名字；本仓原本叫 enable/disable。
   if (
     method === "POST" &&
     segments[0] === "products" &&
     segments.length === 3 &&
-    (segments[2] === "enable" || segments[2] === "disable")
+    (segments[2] === "activate" || segments[2] === "deactivate")
   ) {
     try {
-      deps.registry.setEnabled(segments[1]!, segments[2] === "enable");
+      deps.registry.setActive(segments[1]!, segments[2] === "activate");
     } catch (cause) {
-      send(res, 404, {
-        error: "product_not_found",
-        message: cause instanceof Error ? cause.message : String(cause),
-      });
+      send(
+        res,
+        404,
+        apiError(
+          "PRODUCT_NOT_FOUND",
+          cause instanceof Error ? cause.message : String(cause),
+        ),
+      );
       return;
     }
     send(res, 200, deps.registry.list().find((p) => p.id === segments[1]));
@@ -460,24 +499,41 @@ async function handle(
     const body = await readJson(req);
     const product = deps.registry.find(String(body["product"] ?? ""));
     if (!product) {
-      send(res, 404, { error: "product_not_found", product: body["product"] });
+      send(res, 404, {
+        ...apiError("PRODUCT_NOT_FOUND", `产品未安装：${String(body["product"] ?? "")}`),
+        product: body["product"],
+      });
       return;
     }
     // §18.5：退订 / 停用的产品不可打开；已有工作空间的数据仍可读可导出。
     const blocked = deps.registry.blockedReason(product.id);
     if (blocked) {
-      send(res, 403, { error: "product_unavailable", message: blocked });
+      // D2：两种「不可用」用两个码。未订阅 → 引导去 console 订阅；本机停用 →
+      // 本地策略，去设置里重新启用。同一个码会让界面永远显示错的那个入口。
+      send(
+        res,
+        403,
+        apiError(
+          blocked.availability === "not_entitled"
+            ? REJECTION.NOT_ENTITLED
+            : REJECTION.POLICY_DENIED,
+          blocked.reason,
+        ),
+      );
       return;
     }
     // 项目必须归属工作区（ADR-015）。没有登录态就没有工作区，也就无从新建 ——
     // 这不是把功能藏起来，是这个动作缺少它的主体。
     const workspaceId = activeWorkspace(deps);
     if (!workspaceId) {
-      send(res, 409, {
-        error: "no_active_workspace",
-        message:
+      send(
+        res,
+        409,
+        apiError(
+          "WORKSPACE_REQUIRED",
           "项目须归属于一个工作区；请先登录 Vxture 账号并选择工作区后再新建",
-      });
+        ),
+      );
       return;
     }
     const name = typeof body["name"] === "string" && body["name"].length > 0
@@ -528,22 +584,26 @@ async function handle(
     ) {
       const workspaceId = activeWorkspace(deps);
       if (!workspaceId) {
-        send(res, 409, {
-          error: "no_active_workspace",
-          message: "请先登录并选择工作区，再把该项目导入其中",
-        });
+        send(
+          res,
+          409,
+          apiError("WORKSPACE_REQUIRED", "请先登录并选择工作区，再把该项目导入其中"),
+        );
         return;
       }
       try {
         send(res, 200, await deps.runtime.importProject(projectId, workspaceId));
       } catch (cause) {
-        send(res, cause instanceof AlreadyAttributedError ? 409 : 404, {
-          error:
+        send(
+          res,
+          cause instanceof AlreadyAttributedError ? 409 : 404,
+          apiError(
             cause instanceof AlreadyAttributedError
-              ? "already_attributed"
-              : "project_not_found",
-          message: cause instanceof Error ? cause.message : String(cause),
-        });
+              ? "PROJECT_ALREADY_ATTRIBUTED"
+              : "PROJECT_NOT_FOUND",
+            cause instanceof Error ? cause.message : String(cause),
+          ),
+        );
       }
       return;
     }
@@ -627,7 +687,10 @@ async function handle(
       const instances = await deps.runtime.listTaskInstances(projectId);
       const found = instances.find((t) => t.id === segments[3]);
       if (!found) {
-        send(res, 404, { error: "task_not_found", task: segments[3] });
+        send(res, 404, {
+          ...apiError("TASK_NOT_FOUND", `任务不存在：${segments[3]}`),
+          task: segments[3],
+        });
         return;
       }
       send(res, 200, { ...found, running: deps.tasks.isRunning(found.id) });
@@ -699,5 +762,5 @@ async function handle(
     }
   }
 
-  send(res, 404, { error: "not_found", path });
+  send(res, 404, { ...apiError("NOT_FOUND", `无此路由：${path}`), path });
 }

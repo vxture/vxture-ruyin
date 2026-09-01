@@ -5,7 +5,7 @@
 
 /**
  * 受管产品资产（daemon /products）。已安装 ≠ 可用：
- * availability = installed ∧ enabled ∧ entitled ≠ false（30-contract-schema §18.5）。
+ * availability = installed ∧ state=active ∧ entitled ≠ false（30-contract-schema §18.5）。
  * entitled 为 null 表示未知（未登录或订阅数据面未接通），此时按可用处理。
  */
 export interface ProductInfo {
@@ -13,7 +13,8 @@ export interface ProductInfo {
   name: string;
   version: string;
   installed: boolean;
-  enabled: boolean;
+  /** 本机生效态（通则 B-3：单一 state 字符串枚举，不用布尔）。 */
+  state: "active" | "inactive";
   entitled: boolean | null;
   availability: "available" | "disabled" | "not_entitled";
   reason?: string;

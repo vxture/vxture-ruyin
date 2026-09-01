@@ -161,10 +161,10 @@ void test("registry: 停用状态持久化，重启后仍停用", () => {
   const { productsDir, dataDir } = makeDirs();
   try {
     const first = new ProductRegistry(productsDir, dataDir);
-    first.setEnabled("test.demo", false);
+    first.setActive("test.demo", false);
     assert.equal(first.list()[0]?.availability, "disabled");
     const reopened = new ProductRegistry(productsDir, dataDir);
-    assert.equal(reopened.list()[0]?.enabled, false);
+    assert.equal(reopened.list()[0]?.state, "inactive");
     assert.equal(reopened.list()[0]?.availability, "disabled");
   } finally {
     rmSync(productsDir, { recursive: true, force: true });
@@ -176,7 +176,12 @@ void test("registry: 未安装的产品一律被挡", () => {
   const { productsDir, dataDir } = makeDirs();
   try {
     const reg = new ProductRegistry(productsDir, dataDir);
-    assert.match(reg.blockedReason("nope.missing") ?? "", /未安装/);
+    assert.match(reg.blockedReason("nope.missing")?.reason ?? "", /未安装/);
+    // 未装的产品必须也被挡住 —— 忘了先 find 的调用方不该拿到「没挡」。
+    assert.equal(
+      reg.blockedReason("nope.missing")?.availability,
+      "not_installed",
+    );
   } finally {
     rmSync(productsDir, { recursive: true, force: true });
     rmSync(dataDir, { recursive: true, force: true });

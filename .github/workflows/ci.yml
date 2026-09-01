@@ -99,6 +99,11 @@ jobs:
       - name: Docs numbering guardrail (strict)
         run: node scripts/guardrails/check-docs-numbering.mjs --strict
 
+      # 通则 D-3：可自动判定的部分（错误码大小写、封套形状、拒绝词表）
+      # 由仓内守卫脚本校验，而不是靠人记得。
+      - name: Local API shape guardrail (integration standard X-1 / B-3)
+        run: node scripts/guardrails/check-api-shape.mjs
+
   # -- Contract lint (feed quality-gate) --------------------------------------
   # Runs rules R1-R11 over every products/*/ruyin.product.yaml via the ruyin
   # CLI (design authority: docs/30-design/30-contract-schema.md section 15).
