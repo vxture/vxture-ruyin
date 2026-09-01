@@ -25,7 +25,7 @@ import {
 import { Api, type PendingConfirmation } from "./api";
 
 /** 轮询间隔。检查点由后台任务推进，界面这边没有推送通道。 */
-const POLL_MS = 5000;
+const POLL_MS = 30_000;
 
 const KIND_LABEL: Record<PendingConfirmation["kind"], string> = {
   context_confirm: "确认要送出的资料",
@@ -47,9 +47,13 @@ export function usePending(api: Api): PendingConfirmation[] {
         // 那比暂时旧一点危险得多。
         .catch(() => {});
     void tick();
+    // 事件到了就重拉（TD-027）；轮询留着兜底 —— 流断掉的样子是「一直没有事件」，
+    // 而那和「一切正常」长得一模一样。
+    const stop = api.subscribe(() => void tick());
     const timer = setInterval(tick, POLL_MS);
     return () => {
       alive = false;
+      stop();
       clearInterval(timer);
     };
   }, [api]);

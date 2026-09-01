@@ -31,6 +31,7 @@ import { createLocalApi } from "./server.js";
 import type { PlatformService } from "./platform.js";
 import { TaskRunner } from "./task-runner.js";
 import { InstallIntentBox } from "./updates.js";
+import { EventBus } from "./events.js";
 
 interface PolledTask {
   id: string;
@@ -818,6 +819,110 @@ test("任务列表：跑不了的标出来，标了的确实启动不了，没�
       }
     }
   } finally {
+    server.close();
+    storage.closeAll();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 事件流（TD-027）。
+ *
+ * 在此之前界面只能轮询：静止时纯浪费，跑动时一个刚落定的任务要等最多一秒才在
+ * 屏幕上变样。这条用例钉的是**事件真的会到**——一个连上流却收不到任何东西的
+ * 端点，和没有这个端点长得一模一样。
+ */
+test("事件流：任务一动，订阅者就收到，而且只说什么变了", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-sse-"));
+  const { ports, storage, executor } = await makePorts(dataDir);
+  const runtime = new ProjectRuntime(ports);
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  assert.ok(bid);
+  const meta = await runtime.createProject(bid.contract, "事件", "wsp_test");
+
+  const token = "sse-token";
+  const events = new EventBus();
+  const server = createLocalApi({
+    runtime,
+    registry: new ProductRegistry(productsDir, dataDir),
+    tasks: new TaskRunner(runtime, new Set(), events),
+    token,
+    version: "test",
+    updateIntent: new InstallIntentBox(),
+    events,
+    writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+      executor.writeArtifact(p, b, g),
+    supportsTool: (t: string) => executor.supports(t),
+    systemInfo: testSystemInfo,
+    platform: signedInTo("wsp_test"),
+    reindex: async () => 0,
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const headers = { authorization: `Bearer ${token}` };
+  const controller = new AbortController();
+
+  try {
+    const res = await fetch(`${base}/events`, { headers, signal: controller.signal });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
+    assert.ok(res.body);
+
+    const received: Array<Record<string, unknown>> = [];
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const pump = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buffer += decoder.decode(value, { stream: true });
+        let cut = buffer.indexOf("\n\n");
+        while (cut >= 0) {
+          const frame = buffer.slice(0, cut);
+          buffer = buffer.slice(cut + 2);
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("data:")) {
+              received.push(JSON.parse(line.slice(5).trim()));
+            }
+          }
+          cut = buffer.indexOf("\n\n");
+        }
+      }
+    })();
+
+    const started = await fetch(`${base}/projects/${meta.id}/tasks`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ task: "analyze_tender", inputs: { tender_document: { ref: "x" } } }),
+    });
+    assert.equal(started.status, 202);
+
+    for (let i = 0; i < 200 && received.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.ok(received.length > 0, "连上了流却什么也没收到 —— 和没有这个端点一样");
+    const task = received.find((e) => e["kind"] === "task");
+    assert.ok(task, "任务动了，却没有 task 事件");
+    assert.equal(task["projectId"], meta.id);
+    // 事件只说什么变了。带上业务数据就等于开出第二条数据通路，而那条路上的
+    // 护栏（授权、工作区边界、审计）要重新写一遍。
+    assert.deepEqual(
+      Object.keys(task).sort(),
+      ["kind", "projectId", "taskInstance"],
+      "事件里多出了业务数据",
+    );
+    assert.ok(received.some((e) => e["kind"] === "pending"));
+
+    controller.abort();
+    await pump.catch(() => {});
+    // 订阅者走了，服务端要把它摘掉 —— 否则每开一次页面就漏一个监听者。
+    for (let i = 0; i < 100 && events.subscriberCount > 0; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.equal(events.subscriberCount, 0, "连接断了，监听者还挂着");
+  } finally {
+    controller.abort();
     server.close();
     storage.closeAll();
     rmSync(dataDir, { recursive: true, force: true });

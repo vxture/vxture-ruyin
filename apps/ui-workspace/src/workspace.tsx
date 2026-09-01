@@ -128,23 +128,24 @@ export function ProjectPanel({ api, id }: { api: Api; id: string }) {
     }
   }, [api, id]);
 
-  // Tasks now run outside the request that started them, so the only way to
-  // see progress is to ask. Poll fast while something is actually moving,
-  // slowly when nothing is - a five-second lag on a running task reads as
-  // "nothing happened".
-  const active = useMemo(
-    () =>
-      instances.some(
-        (t) => !TERMINAL_TASK_STATES.has(t.state) && t.state !== "waiting_human",
-      ),
-    [instances],
-  );
-
+  // 任务在请求之外推进，所以进度要靠运行时告诉我们（TD-027）。事件到了就refresh，
+  // 于是一个刚落定的任务立刻在屏幕上变样，而不是等下一次轮询。
+  //
+  // **轮询没有删掉，降成了兜底**：流断掉的样子是「一直没有事件」，而那和
+  // 「一切正常」长得一模一样。30 秒一次，静止时几乎不花什么，流断了也不会
+  // 让界面停在旧数据上。
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => void refresh(), active ? 1000 : 5000);
-    return () => clearInterval(timer);
-  }, [refresh, active]);
+    const stop = api.subscribe((event) => {
+      if (event.kind === "task" && event.projectId !== id) return;
+      void refresh();
+    });
+    const timer = setInterval(() => void refresh(), 30_000);
+    return () => {
+      stop();
+      clearInterval(timer);
+    };
+  }, [api, id, refresh]);
 
   const guard = useCallback(
     async (fn: () => Promise<unknown>) => {
