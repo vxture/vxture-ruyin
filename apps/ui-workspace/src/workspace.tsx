@@ -204,7 +204,16 @@ export function ProjectPanel({
   );
   useEffect(() => onPending?.(pending.length), [onPending, pending.length]);
 
-  if (!view) return <p className="text-body-md text-muted-foreground">加载中……</p>;
+  // 首次加载失败时 view 永远是 null——错误盒子在下面 view 非空的分支里，
+  // 之前这条路一直卡在"加载中……"，错误说了也白说（`error` 一直有值，用户
+  // 却永远看不到）。这里补一条出口：加载不出来就说清，不再无限转圈。
+  if (!view) {
+    return error ? (
+      <div className="error-box">{error}</div>
+    ) : (
+      <p className="text-body-md text-muted-foreground">加载中……</p>
+    );
+  }
   return (
     <div className="flex flex-col gap-lg">
       {/* 项目名与产品名已经在标题栏和侧栏里常驻，这里不再重复一遍 —— 重复的
@@ -232,12 +241,9 @@ export function ProjectPanel({
             </span>
           </div>
           <Button
-            onClick={() =>
-              void guard(async () => {
-                await api.importProject(id);
-                await refresh();
-              })
-            }
+            // guard() 本身成功后就会 refresh()——这里不用再手动追加一次，
+            // 不然一次点击悄悄拉两遍全部五个端点。
+            onClick={() => void guard(() => api.importProject(id))}
           >
             导入当前工作区
           </Button>

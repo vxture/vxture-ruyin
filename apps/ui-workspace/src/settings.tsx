@@ -233,22 +233,28 @@ function UpdatesSection({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<UpdateCheck | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  // 单独一个状态，不与 check() 的失败共用：曾经共用一个 `failed`，界面只有一处
+  // 出口、写死「检查失败」——检查其实成功了，是随后点「下载并安装」时
+  // requestInstall 失败，用户看到的却是「检查失败：<安装错误>」，一句指错
+  // 了哪一步的话。
+  const [installFailed, setInstallFailed] = useState<string | null>(null);
   const [requested, setRequested] = useState(false);
 
   const install = async (version: string) => {
-    setFailed(null);
+    setInstallFailed(null);
     try {
       await api.requestInstall(version);
       setRequested(true);
     } catch (e) {
       // 守护进程可能刚判出有任务在跑 —— 说出原因，不要静默。
-      setFailed(String((e as Error).message));
+      setInstallFailed(String((e as Error).message));
     }
   };
 
   const check = async () => {
     setBusy(true);
     setFailed(null);
+    setInstallFailed(null);
     setRequested(false);
     try {
       setResult(await api.checkUpdate());
@@ -311,6 +317,11 @@ function UpdatesSection({
                 {requested && (
                   <span className="text-body-sm text-muted-foreground">
                     下载完成后会问你是否现在重启安装
+                  </span>
+                )}
+                {installFailed && (
+                  <span className="text-body-sm update-line--warn">
+                    安装请求失败：{installFailed}
                   </span>
                 )}
               </div>

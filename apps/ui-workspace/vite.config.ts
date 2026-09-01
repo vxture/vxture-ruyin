@@ -26,19 +26,23 @@ export default defineConfig({
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/**/*.test.{ts,tsx}", "src/main.tsx", "src/vitest.setup.ts"],
-      // 这是引入这套工具链的第一批：App.tsx / chain.ts / sse.ts / pending.tsx
-      // 到了 90%+，api.ts 部分覆盖，五个大组件（home/login/settings/user/
-      // workbench/workspace）还没动。阈值照实按这批实测的全量基线（约
-      // 16%/7%/12%）留个小余量，不是压在一个虚高的目标上假装做完了——见提交
-      // 信息里的具体数字。后续每批把某个大组件测完，阈值跟着抬。
+      // TD-031 第六批，六个大组件全部测完：login.tsx / user.tsx /
+      // settings.tsx / home.tsx / workbench.tsx / workspace.tsx 全到了
+      // 90–100%（workspace.tsx，本仓最大的组件，99.43%/98.72%/98.76%/
+      // 100%）。阈值照实按这批的全量基线（statements 88% / branches 92.3% /
+      // functions 86.66% / lines 90.25%）留个小余量。
+      //
+      // 剩下拖累聚合数字的是 api.ts（HTTP 客户端外壳，21%）/ chain.ts /
+      // sse.ts——都不在 TD-031 "六个大组件"这份原始清单里，是否值得单独立项
+      // 留给以后判断，这里不代它们编个数。
       //
       // main.tsx 排除在外：纯挂载代码，同 local-host/main.ts 的先例，不为它
       // 硬凑一个假覆盖率。
       thresholds: {
-        statements: 15,
-        lines: 15,
-        branches: 6,
-        functions: 10,
+        statements: 86,
+        lines: 88,
+        branches: 90,
+        functions: 84,
       },
     },
   },
