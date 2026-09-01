@@ -169,7 +169,12 @@ export class LocalToolExecutor implements ToolExecutorPort {
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(staging, bytes);
       renameSync(staging, path);
-      return { content: `wrote ${bytes.byteLength} bytes to ${path}` };
+      return {
+        content: `wrote ${bytes.byteLength} bytes to ${path}`,
+        // 事实带出来，别让上层从这句话里正则出路径 —— 改一次文案就断一次，
+        // 而断了之后它安静。
+        artifact: { path, bytes: bytes.byteLength },
+      };
     } catch (cause) {
       rmSync(staging, { force: true });
       return { content: describe(cause), isError: true };

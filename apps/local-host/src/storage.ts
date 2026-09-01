@@ -188,6 +188,12 @@ export class SqliteProjectStore implements ProjectStore {
   async getBindings(): Promise<string | undefined> {
     return this.kvGet("bindings");
   }
+  async putArtifacts(artifactsJson: string): Promise<void> {
+    this.kvPut("artifacts", artifactsJson);
+  }
+  async getArtifacts(): Promise<string | undefined> {
+    return this.kvGet("artifacts");
+  }
 
   // -- FTS index (host-specific surface, 04 section 5.1) --------------------
 

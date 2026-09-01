@@ -48,7 +48,9 @@ import type {
   IdPort,
   RankerPort,
   ContextFact,
+  ProjectArtifact,
   ToolCall,
+  ToolExecutionResult,
   ToolExecutorPort,
   ToolOffer,
   TurnMessage,
@@ -759,10 +761,30 @@ export class Harness {
       contract.context.types.filter((t) => t.required).map((t) => t.id),
     );
 
+    const artifacts = jsonArray<ProjectArtifact>(await store.getArtifacts());
+    const empty: string[] = [];
+
     const selected: ContextItemMeta[] = [];
     for (const type of definition.input_types) {
       const binding = bindings.find((b) => b.type === type);
       let candidates: ContextItemMeta[] = [];
+      // 本项目自己产出的成果。契约把这类上下文声明为 `sources: [project]`，
+      // 而在此之前没有任何东西兑现它 —— 于是「校验技术方案对需求矩阵的覆盖」
+      // 这种任务，会在两份文档一份都没拿到的情况下照跑，而且不说一个字。
+      for (const a of artifacts) {
+        if (a.type !== type) continue;
+        // 授权可能已经变了：产出时在授权目录里，不代表现在还在。
+        if (!isPathGranted(a.path, grants)) continue;
+        candidates.push({
+          id: `art_${a.type}_${a.path}`,
+          type,
+          source: "project",
+          ref: a.path,
+          name: a.path.split(/[\\/]/).pop() ?? a.path,
+          bytes: a.bytes,
+          modifiedAt: a.producedAt,
+        });
+      }
       if (binding) {
         // Grants may have changed since the binding was created - revalidate
         // (04 section 4.3: the runtime never reads outside granted folders).
@@ -779,7 +801,7 @@ export class Harness {
             reason: `connector "${binding.connector}" is not available`,
           };
         }
-        candidates = await connector.discover(binding);
+        candidates.push(...(await connector.discover(binding)));
       }
       if (candidates.length === 0) {
         if (requiredIds.has(type)) {
@@ -788,6 +810,7 @@ export class Harness {
             reason: `required context "${type}" has no binding or no items - task cannot start`,
           };
         }
+        empty.push(type);
         continue;
       }
       const ranked = ranker
@@ -797,7 +820,28 @@ export class Harness {
           );
       selected.push(...ranked.slice(0, MAX_ITEMS_PER_TYPE));
     }
-    return { ok: true, items: selected };
+    // 声明了输入、却一份都没拿到 —— 这个任务达不成它的目标。
+    //
+    // 每个类型单看都是 `required: false`，所以逐个检查一个都不会响；而合起来
+    // 「一份资料都没有」是另一回事。`validate_coverage` 的目标是「逐条对照
+    // 需求矩阵与技术方案」，它曾经就是在 context = [] 的情况下跑完的，没有
+    // 任何一处说过不对。
+    if (definition.input_types.length > 0 && selected.length === 0) {
+      return {
+        ok: false,
+        reason:
+          `task has no context at all: ${empty.join(", ")} produced no items - ` +
+          `bind a folder for them, or run the task that produces them first`,
+      };
+    }
+    // 同一份文件可能同时落在两个类型下（本项目的产出，又恰好在某个绑定目录
+    // 里）。同样的字节送两遍，成本翻倍而信息没多 —— 按 input_types 的先后保留
+    // 第一次出现的那个类型。
+    const byRef = new Map<string, ContextItemMeta>();
+    for (const item of selected) {
+      if (!byRef.has(item.ref)) byRef.set(item.ref, item);
+    }
+    return { ok: true, items: [...byRef.values()] };
   }
 
   private async executePhase(
@@ -1041,6 +1085,52 @@ export class Harness {
     };
   }
 
+  /**
+   * 记下一份任务产出，让下游任务能把它当上下文用（`sources: [project]`）。
+   *
+   * 类型来自**产出它的那个任务的 `output_types`**：契约已经说了这个任务产出
+   * 什么类别，没必要让模型再说一遍（说了还可能说错）。
+   *
+   * 只在任务恰好声明一种产出类型时登记。声明了多种就无从判断这一份是哪一种，
+   * 而**猜一个类型比不登记更糟**：下游会拿到一份被标错类别的资料，然后正常地
+   * 用它。这种情况留一条审计，不留一个猜测。
+   */
+  private async registerArtifact(
+    instance: TaskInstanceRecord,
+    artifact: { path: string; bytes: number },
+  ): Promise<void> {
+    const types = instance.definition.output_types;
+    if (types.length !== 1 || !types[0]) {
+      await this.audit(
+        instance,
+        "artifact.untyped",
+        {
+          path: artifact.path,
+          declared: types,
+          reason:
+            types.length === 0
+              ? "task declares no output type"
+              : "task declares more than one output type",
+        },
+        "success",
+      );
+      return;
+    }
+    const registry = jsonArray<ProjectArtifact>(
+      await this.deps.store.getArtifacts(),
+    );
+    // 同一路径重写就是同一份成果的新版本，不是第二份。
+    const rest = registry.filter((a) => a.path !== artifact.path);
+    rest.push({
+      type: types[0],
+      path: artifact.path,
+      bytes: artifact.bytes,
+      producedAt: this.deps.clock.now(),
+      taskInstance: instance.id,
+    });
+    await this.deps.store.putArtifacts(JSON.stringify(rest));
+  }
+
   /** Tools this task may use, as declared by the contract for this task. */
   private toolOffers(instance: TaskInstanceRecord): ToolOffer[] {
     const declared = new Set(instance.definition.tools);
@@ -1159,7 +1249,7 @@ export class Harness {
       // journal-before-write (50-harness 8.2): the intent is on record before
       // the effect, so recovery can tell "never ran" from "ran, unrecorded".
       await this.journal(instance, "tool", { tool: call.tool, callId: call.id });
-      let result: { content: string; isError?: boolean };
+      let result: ToolExecutionResult;
       try {
         if (!this.deps.tools) throw new Error("no tool executor is configured");
         result = await this.deps.tools.execute({
@@ -1177,6 +1267,9 @@ export class Harness {
         };
       }
       await this.journal(instance, "tool.done", { tool: call.tool, callId: call.id });
+      if (!result.isError && result.artifact) {
+        await this.registerArtifact(instance, result.artifact);
+      }
       await this.audit(
         instance,
         "tool.executed",
@@ -1457,7 +1550,11 @@ function jsonArray<T>(raw: string | undefined): T[] {
 
 /** Connector id an item was discovered through (by source convention). */
 function metaConnector(meta: ContextItemMeta): string {
-  return meta.source === "local" ? "local-fs" : meta.source;
+  // 项目产出（`project`）就是落在授权目录里的本地文件，读它和读用户绑定的
+  // 文件是同一条路。source 仍旧记成 project，因为审计要说得清出处 —— 一份
+  // 我们自己写出来的文档，和用户给的资料，来路不是一回事。
+  if (meta.source === "local" || meta.source === "project") return "local-fs";
+  return meta.source;
 }
 
 /**

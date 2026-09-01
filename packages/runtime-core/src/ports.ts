@@ -226,6 +226,25 @@ export interface FolderGrant {
 }
 
 /** Binding of a contract context type to an actual source (04 section 3). */
+/**
+ * 一份由本项目的任务产出、并因此可以作为下游任务上下文的文档。
+ *
+ * 契约把这类上下文声明为 `sources: [project]`。在此之前**没有任何东西兑现
+ * 它**：没有绑定 → 候选为空 → 该类型被跳过，而它多半 `required: false`，
+ * 所以连一句话都不会有。于是「校验技术方案对需求矩阵的覆盖情况」这种任务，
+ * 会在两份文档一份都没拿到的情况下照跑。
+ */
+export interface ProjectArtifact {
+  /** 契约里的上下文类型 id（来自产出它的那个任务的 output_types）。 */
+  type: string;
+  /** 绝对路径。它落在用户授权过的目录里，所以按本地文件读即可。 */
+  path: string;
+  bytes: number;
+  producedAt: string;
+  /** 产出它的任务实例，用于追溯。 */
+  taskInstance: string;
+}
+
 export interface Binding {
   type: string;
   source: "local";
@@ -279,6 +298,13 @@ export interface ToolExecutionRequest {
 export interface ToolExecutionResult {
   content: string;
   isError?: boolean;
+  /**
+   * 这次调用在磁盘上留下的产物。
+   *
+   * 显式带出来，而不是让上层去解析 content 里的那句「wrote N bytes to ...」——
+   * 一条要靠正则从人话里抠事实的通路，改一次文案就断一次，而断了之后它安静。
+   */
+  artifact?: { path: string; bytes: number };
 }
 
 export interface ToolExecutorPort {
@@ -414,6 +440,9 @@ export interface ProjectStore {
   getGrants(): Promise<string | undefined>;
   putBindings(bindingsJson: string): Promise<void>;
   getBindings(): Promise<string | undefined>;
+  /** 本项目已产出的成果登记（`sources: [project]` 的上下文由它兑现）。 */
+  putArtifacts(artifactsJson: string): Promise<void>;
+  getArtifacts(): Promise<string | undefined>;
 
   setBusinessState(state: string): Promise<void>;
   getBusinessState(): Promise<string | undefined>;
