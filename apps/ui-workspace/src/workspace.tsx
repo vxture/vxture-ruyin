@@ -41,7 +41,16 @@ import {
 } from "./api";
 import { verifyChain } from "./chain";
 
-type TabId = "overview" | "context" | "tasks" | "audit";
+export type TabId = "overview" | "context" | "tasks" | "audit";
+
+/** 项目内的分区。**这是产品自己的导航**，所以它属于侧栏而不是一条 32px 的
+ *  横条 —— 进了产品就是进了另一套框架（macOS 的应用源列表就是这么回事）。 */
+export const PROJECT_TABS: Array<{ id: TabId; label: string }> = [
+  { id: "overview", label: "概览" },
+  { id: "context", label: "上下文" },
+  { id: "tasks", label: "任务" },
+  { id: "audit", label: "审计" },
+];
 
 /** 审计结果的呈现。`unknown` 是 X-3 之前的记录，**不知道就是不知道**。 */
 const OUTCOME_LABEL: Record<string, string> = {
@@ -88,8 +97,18 @@ const TASK_STATE_LABEL: Record<string, string> = {
   cancelled: "已取消",
 };
 
-export function ProjectPanel({ api, id }: { api: Api; id: string }) {
-  const [tab, setTab] = useState<TabId>("overview");
+export function ProjectPanel({
+  api,
+  id,
+  tab,
+  onPending,
+}: {
+  api: Api;
+  id: string;
+  tab: TabId;
+  /** 未决数上报给侧栏：徽章挂在导航条目上，不再另开一条横条。 */
+  onPending?: (count: number) => void;
+}) {
   const [view, setView] = useState<ProjectView | null>(null);
   const [instances, setInstances] = useState<TaskInstance[]>([]);
   const [grants, setGrants] = useState<FolderGrant[]>([]);
@@ -166,20 +185,21 @@ export function ProjectPanel({ api, id }: { api: Api; id: string }) {
     () => instances.filter((t) => t.state === "waiting_human"),
     [instances],
   );
+  useEffect(() => onPending?.(pending.length), [onPending, pending.length]);
 
   if (!view) return <p className="text-body-md text-muted-foreground">加载中……</p>;
   return (
     <div className="flex flex-col gap-lg">
-      <SectionHeader
-        level={1}
-        icon="cube"
-        title={view.meta.name}
-        titleSuffix={
-          <StatusBadge tone={stateTone(view.businessState)}>
-            {view.businessState}
-          </StatusBadge>
-        }
-        description={`${view.product.name} ${view.product.version} · ${view.meta.id}`}
+      {/* 项目名与产品名已经在标题栏和侧栏里常驻，这里不再重复一遍 —— 重复的
+          身份信息不提供任何东西，只占掉首屏。留下的是**只有这里才说得清**的
+          那部分：现在处在哪个业务阶段，以及这个项目的标识。 */}
+      <ProjectSummary
+        view={view}
+        instances={instances}
+        grants={grants}
+        bindings={bindings}
+        audit={audit}
+        chainOk={chainOk}
       />
       {error && <div className="error-box">{error}</div>}
 
@@ -215,22 +235,6 @@ export function ProjectPanel({ api, id }: { api: Api; id: string }) {
         />
       ))}
 
-      <SegmentedControl<TabId>
-        ariaLabel="项目板块"
-        items={[
-          { value: "overview", label: "概览" },
-          { value: "context", label: "上下文" },
-          {
-            value: "tasks",
-            label: "任务",
-            ...(pending.length > 0 ? { count: pending.length } : {}),
-          },
-          { value: "audit", label: "审计" },
-        ]}
-        value={tab}
-        onChange={setTab}
-      />
-
       {tab === "overview" && (
         <OverviewTab
           api={api}
@@ -265,6 +269,83 @@ export function ProjectPanel({ api, id }: { api: Api; id: string }) {
   );
 }
 
+/**
+ * 项目摘要带。
+ *
+ * 概览页原本最空：真正要看的事实散在四个 tab 后面 —— 有几个任务、几个在等我、
+ * 绑了几类资料、授权了几个目录、审计多少条、链完不完整。要知道这些得点四次。
+ *
+ * 一行讲完。**每一格都是可点的**，点进去就是那个分区 —— 摘要不是一个只能看的
+ * 装饰条，它同时是入口。
+ */
+function ProjectSummary({
+  view,
+  instances,
+  grants,
+  bindings,
+  audit,
+  chainOk,
+}: {
+  view: ProjectView;
+  instances: TaskInstance[];
+  grants: FolderGrant[];
+  bindings: Binding[];
+  audit: StoredAuditEvent[];
+  chainOk: boolean | null;
+}) {
+  const waiting = instances.filter((t) => t.state === "waiting_human").length;
+  const running = instances.filter(
+    (t) => !TERMINAL_TASK_STATES.has(t.state) && t.state !== "waiting_human",
+  ).length;
+  return (
+    <div className="proj-summary">
+      <div className="proj-summary-row">
+      <div className="proj-summary-cell">
+        <span className="proj-summary-k">阶段</span>
+        <StatusBadge tone={stateTone(view.businessState)}>
+          {view.businessState}
+        </StatusBadge>
+      </div>
+      <div className="proj-summary-cell">
+        <span className="proj-summary-k">任务</span>
+        <span className="proj-summary-v">
+          {instances.length}
+          {waiting > 0 && <em className="proj-summary-flag">{waiting} 待确认</em>}
+          {running > 0 && <em className="proj-summary-run">{running} 运行中</em>}
+        </span>
+      </div>
+      <div className="proj-summary-cell">
+        <span className="proj-summary-k">资料</span>
+        <span className="proj-summary-v">
+          {bindings.length} 类 · {grants.length} 个授权目录
+        </span>
+      </div>
+      <div className="proj-summary-cell">
+        <span className="proj-summary-k">审计</span>
+        <span className="proj-summary-v">
+          {audit.length} 条
+          {/* 链状态就摆在条数旁边：一个数字不说自己可不可信，等于没说。 */}
+          <em className={chainOk === false ? "proj-summary-flag" : "proj-summary-ok"}>
+            {chainOk === null ? "校验中" : chainOk ? "链完整" : "链断裂"}
+          </em>
+        </span>
+      </div>
+      </div>
+      {/* 第二行是**不需要一眼看到、但需要能看到**的那些：产品与版本（决定契约
+          与能力）、容器类型、建于何时、项目标识（报障时要用）。原本它们各占
+          一个 45px 的标题加一张 74px 的卡。 */}
+      <div className="proj-summary-meta">
+        <span>
+          {view.product.name} {view.product.version}
+        </span>
+        <span>{view.meta.projectType}</span>
+        <span>建于 {view.meta.createdAt.slice(0, 10)}</span>
+        <code>{view.meta.id}</code>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Overview ---------------- */
 
 function OverviewTab({
@@ -283,7 +364,7 @@ function OverviewTab({
   const recent = [...instances].reverse().slice(0, 5);
   return (
     <>
-      <SectionHeader level={2} title="业务阶段" icon="workflow" />
+      {/* 没有标题：阶段名就写在阶梯上，再加一行「业务阶段」四个字是纯损耗。 */}
       <StateStepper view={view} onTransition={onTransition} />
       <SectionHeader level={2} title="最近任务" icon="clock-counter-clockwise" />
       {recent.length === 0 && (
@@ -300,14 +381,6 @@ function OverviewTab({
           </span>
         </div>
       ))}
-      <SectionHeader level={2} title="产品" icon="package" />
-      <div className="card">
-        <div className="ws-name">{view.product.name}</div>
-        <div className="ws-meta-line">
-          {view.product.id}@{view.product.version} · workspace 类型{" "}
-          {view.meta.projectType} · 创建于 {view.meta.createdAt}
-        </div>
-      </div>
       <SectionHeader level={2} title="导出项目记录" icon="folder-open" />
       <ExportCard api={api} projectId={projectId} />
     </>

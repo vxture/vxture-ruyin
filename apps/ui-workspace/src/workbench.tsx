@@ -26,7 +26,7 @@ import {
   type ShellSearchGroup,
 } from "@vxture/design-system";
 import { Api, type ProductInfo, type ProjectMeta } from "./api";
-import { ProjectPanel } from "./workspace";
+import { PROJECT_TABS, ProjectPanel, type TabId } from "./workspace";
 import { HomePage } from "./home";
 import { SettingsView } from "./settings";
 import { UserSlot } from "./user";
@@ -55,10 +55,50 @@ export function useHostChrome(): HostChrome {
 type View =
   | { kind: "home" }
   | { kind: "settings" }
-  | { kind: "workspace"; id: string };
+  | { kind: "workspace"; id: string; tab: TabId };
+
+/** 分区图标。名字取自 DS 图标表，改名会在构建时被类型挡住。 */
+const TAB_ICON = {
+  overview: "home",
+  context: "folder-open",
+  tasks: "list-checks",
+  audit: "fingerprint",
+} as const satisfies Record<TabId, string>;
 
 const viewHref = (v: View): string =>
-  v.kind === "workspace" ? `#ws/${v.id}` : `#${v.kind}`;
+  v.kind === "workspace" ? `#ws/${v.id}/${v.tab}` : `#${v.kind}`;
+
+const isTab = (s: string): s is TabId =>
+  PROJECT_TABS.some((t) => t.id === s);
+
+/**
+ * 当前会话的工作区名。
+ *
+ * 界面上原本一个字都没有 —— 而项目、订阅、权益、数据边界全按工作区划分
+ * （ADR-015），跨工作区访问会被服务端拒绝。用户看着屏幕却不知道自己在哪个
+ * 工作区，那句拒绝就无从理解。
+ */
+function useWorkspaceName(api: Api): string | undefined {
+  const [name, setName] = useState<string | undefined>();
+  useEffect(() => {
+    let alive = true;
+    const read = async () => {
+      try {
+        const s = await api.session();
+        if (alive) setName(s.signedIn ? s.workspace?.name : undefined);
+      } catch {
+        /* 未接通时不显示，而不是显示一个猜的名字 */
+      }
+    };
+    void read();
+    const timer = setInterval(() => void read(), 30_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [api]);
+  return name;
+}
 
 function useRuntimeHealth() {
   const [health, setHealth] = useState<{ ok: boolean; version?: string }>({
@@ -137,14 +177,15 @@ export function Workbench({ api }: { api: Api }) {
     if (href === "#home") setView({ kind: "home" });
     else if (href === "#settings") setView({ kind: "settings" });
     else if (href.startsWith("#ws/")) {
-      setView({ kind: "workspace", id: href.slice(4) });
+      const [id, tab] = href.slice(4).split("/");
+      if (id) setView({ kind: "workspace", id, tab: isTab(tab ?? "") ? (tab as TabId) : "overview" });
     }
   }, []);
 
   const openProject = useCallback(
     async (id: string) => {
       await refreshSidebar();
-      setView({ kind: "workspace", id });
+      setView({ kind: "workspace", id, tab: "overview" });
     },
     [refreshSidebar],
   );
@@ -176,6 +217,16 @@ export function Workbench({ api }: { api: Api }) {
   // One dimension per band: brand lives in the header, the sidebar's domain
   // row says 工作台, sections navigate surfaces only. 设置 is a utility
   // (header gear + account menu), not a sibling of navigation.
+  const openProjectMeta =
+    view.kind === "workspace"
+      ? workspaces.find((w) => w.id === view.id)
+      : undefined;
+  const openProductName =
+    products.find((p) => p.id === openProjectMeta?.productId)?.name ??
+    openProjectMeta?.productId;
+  const [projectPending, setProjectPending] = useState(0);
+  const workspaceName = useWorkspaceName(api);
+
   const sections: ShellNavSection[] = useMemo(() => {
     const list: ShellNavSection[] = [
       {
@@ -192,7 +243,7 @@ export function Workbench({ api }: { api: Api }) {
         title: "项目",
         dividerBefore: true,
         items: mine.map((w) => ({
-          href: `#ws/${w.id}`,
+          href: `#ws/${w.id}/overview`,
           label: w.name,
           icon: "cube" as const,
         })),
@@ -203,7 +254,7 @@ export function Workbench({ api }: { api: Api }) {
         title: "待导入工作区",
         dividerBefore: true,
         items: pendingImport.map((w) => ({
-          href: `#ws/${w.id}`,
+          href: `#ws/${w.id}/overview`,
           label: w.name,
           icon: "cube" as const,
         })),
@@ -265,15 +316,41 @@ export function Workbench({ api }: { api: Api }) {
   const header = (
     <ShellHeader
       className={chrome === "browser" ? "app-topbar" : `app-topbar titlebar titlebar-${chrome}`}
-      height="md"
+      height="sm"
       leading={
-        <span className="no-drag">
-          <ShellBrand
-            label="如影 RUYIN"
-            tag="Workspace"
-            href="#home"
-            className="cursor-pointer"
-          />
+        /* 两套 chrome。
+         *
+         * 工作台态：如影自己的身份。
+         * 产品态：**进了产品就是进了另一套框架** —— 标题栏交给产品，写它的名字
+         * 和当前项目，左边留一条回工作台的路。macOS 的做法：应用名在菜单栏，
+         * 文档名在标题栏，宿主退到一侧。
+         *
+         * 产品名取自契约的 product.name —— 运行时展示的是产品声明过的事实，
+         * 不是自己编的表达（ADR-011 的判据）。 */
+        <span className="no-drag flex items-center gap-xs min-w-0">
+          {view.kind === "workspace" ? (
+            <>
+              <ShellIconButton
+                icon="arrow-left"
+                label="回到工作台"
+                onClick={() => navigate("#home")}
+              />
+              <span className="app-ident min-w-0">
+                <span className="app-ident-product">{openProductName}</span>
+                <span className="app-ident-sep">·</span>
+                <span className="app-ident-doc">
+                  {openProjectMeta?.name ?? "项目"}
+                </span>
+              </span>
+            </>
+          ) : (
+            <ShellBrand
+              label="如影 RUYIN"
+              tag="Workspace"
+              href="#home"
+              className="cursor-pointer"
+            />
+          )}
         </span>
       }
       center={
@@ -292,11 +369,19 @@ export function Workbench({ api }: { api: Api }) {
       }
       trailing={
         <div className="no-drag flex items-center gap-xs">
+          {/* 当前工作区常驻。**此前它一个字都没有出现在项目面板上**，而项目、
+              订阅、权益、数据边界全按工作区划分，跨工作区访问会被服务端拒绝
+              —— 用户看着屏幕却不知道自己在哪个工作区，那句拒绝就无从理解。 */}
+          {workspaceName && (
+            <span className="app-workspace" title="当前工作区">
+              {workspaceName}
+            </span>
+          )}
           {/* 常驻：未决确认在哪个视图都看得见。放进某个页面里等于又要求
               用户先找对地方，而那正是这条要修的问题。 */}
           <PendingInbox
             rows={pending}
-            onOpen={(id) => setView({ kind: "workspace", id })}
+            onOpen={(id) => setView({ kind: "workspace", id, tab: "overview" })}
           />
           <StatusBadge tone={health.ok ? "success" : "danger"} dot>
             {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
@@ -314,10 +399,46 @@ export function Workbench({ api }: { api: Api }) {
     />
   );
 
+  /* 产品态的侧栏：**这个项目自己的分区**，加上同产品的其他项目。
+   * 原本那条 32px 的横 tab 条就此消失 —— 它本来就是产品的导航，属于源列表。 */
+  const productSections: ShellNavSection[] = useMemo(() => {
+    if (view.kind !== "workspace") return [];
+    const siblings = workspaces.filter(
+      (w) => w.productId === openProjectMeta?.productId && w.id !== view.id,
+    );
+    const list: ShellNavSection[] = [
+      {
+        title: openProjectMeta?.name ?? "项目",
+        items: PROJECT_TABS.map((t) => ({
+          href: `#ws/${view.id}/${t.id}`,
+          // 未决数挂在「任务」上：徽章跟着它要指向的东西走，才省得下那条
+          // 32px 的横条。
+          label:
+            t.id === "tasks" && projectPending > 0
+              ? `${t.label}（${projectPending}）`
+              : t.label,
+          icon: TAB_ICON[t.id],
+        })),
+      },
+    ];
+    if (siblings.length > 0) {
+      list.push({
+        title: "同产品的其他项目",
+        dividerBefore: true,
+        items: siblings.map((w) => ({
+          href: `#ws/${w.id}/overview`,
+          label: w.name,
+          icon: "cube" as const,
+        })),
+      });
+    }
+    return list;
+  }, [view, workspaces, openProjectMeta, projectPending]);
+
   const sidebar = (
     <ShellSidebarNav
-      domainName="工作台"
-      sections={sections}
+      domainName={view.kind === "workspace" ? (openProductName ?? "产品") : "工作台"}
+      sections={view.kind === "workspace" ? productSections : sections}
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed(!collapsed)}
       isActive={(href) => href === viewHref(view)}
@@ -362,14 +483,20 @@ export function Workbench({ api }: { api: Api }) {
         {view.kind === "settings" ? (
           <SettingsView api={api} />
         ) : view.kind === "workspace" ? (
-          <ProjectPanel key={view.id} api={api} id={view.id} />
+          <ProjectPanel
+            key={view.id}
+            api={api}
+            id={view.id}
+            tab={view.tab}
+            onPending={setProjectPending}
+          />
         ) : (
           <HomePage
             api={api}
             products={products}
             workspaces={workspaces}
             health={health}
-            onOpen={(id) => setView({ kind: "workspace", id })}
+            onOpen={(id) => setView({ kind: "workspace", id, tab: "overview" })}
             onCreated={openProject}
             onRefresh={refreshSidebar}
             onError={setError}

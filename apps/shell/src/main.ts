@@ -496,7 +496,7 @@ function openWindow(): void {
     titleBarOverlay: {
       color: "#0a0a0a",
       symbolColor: "#a3a3a3",
-      height: 48,
+      height: 40,
     },
     backgroundColor: "#0a0a0a",
     webPreferences: {

@@ -170,7 +170,13 @@ body {
   flex-direction: column;
   gap: var(--spacing-xl);
 }
-.workbench-page { padding-block: var(--spacing-lg); }
+/* 左右 41px 是 DS 容器的默认留白；在只有一个内容列的工作台里那是纯损耗。
+   纵向同理：header 之下立刻是内容，不需要再垫一段。 */
+.workbench-page {
+  padding-block: var(--spacing-md);
+  padding-inline: var(--spacing-lg);
+  max-width: none;
+}
 
 /* ---------- workspace: business-state stepper ---------- */
 .stepper {
@@ -394,3 +400,81 @@ body {
   margin-top: var(--spacing-xs);
   font-weight: 400;
 }
+
+/* ---------- 项目摘要带（把四个 tab 后面的事实并到一行） ---------- */
+.proj-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-md) var(--spacing-xl);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card);
+}
+.proj-summary-cell { display: flex; align-items: baseline; gap: var(--spacing-xs); }
+.proj-summary-k {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted-foreground);
+  white-space: nowrap;
+}
+.proj-summary-v {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--spacing-xs);
+  font-variant-numeric: tabular-nums;
+}
+.proj-summary-flag { font-style: normal; color: var(--color-warning, #d97706); }
+.proj-summary-run { font-style: normal; color: var(--color-info, #2563eb); }
+.proj-summary-ok { font-style: normal; color: var(--color-muted-foreground); }
+/* 标识挤到最后，宽度不够时第一个换行 —— 它是最不需要一眼看到的那个。 */
+.proj-summary-id { margin-inline-start: auto; }
+.proj-summary-id code {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted-foreground);
+}
+
+/* ---------- 产品态标题栏身份（进了产品就是进了另一套框架） ---------- */
+.app-ident {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+.app-ident-product {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.app-ident-sep { color: var(--color-muted-foreground); }
+/* 项目名可以被截断，产品名不行：产品是身份，项目是文档。 */
+.app-ident-doc {
+  color: var(--color-muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 当前工作区：常驻，两态都在。 */
+.app-workspace {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted-foreground);
+  padding-inline: var(--spacing-xs);
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.proj-summary { flex-direction: column; align-items: stretch; gap: var(--spacing-xs); }
+.proj-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm) var(--spacing-lg);
+}
+.proj-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs) var(--spacing-md);
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted-foreground);
+}
+.proj-summary-meta code { font-size: inherit; }
