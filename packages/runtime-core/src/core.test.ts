@@ -20,6 +20,7 @@ import {
   ContractInvalidError,
   NeedsHumanConfirmationError,
   interruptedResumePoint,
+  runConformance,
   pendingCheckpoint,
   decideTool,
   validateToolCall,
@@ -1576,4 +1577,24 @@ test("产出登记：单一产出类型据此定类，多种则不猜并留痕",
     actions.some((e) => e.action === "artifact.untyped"),
     "没登记也没留痕 —— 那这份产出就凭空消失了",
   );
+});
+
+/**
+ * Runtime Conformance C1–C7（50-harness §10）在**内存 ports** 上的一遍。
+ *
+ * 同一套检查还要在 SQLite ports 上跑一遍（apps/local-host）—— 那才是它的意义：
+ * 两个宿主用同一份内核，套件验的是它们说不说同一种话。只在一边跑，验的还是
+ * 那一边的实现。
+ */
+test("一致性：C1–C7 在内存 ports 上全过", async () => {
+  const results = await runConformance({
+    makePorts: () => makePorts(),
+    contract: bidContract as RuyinContract,
+  });
+  const failed = results.filter((r) => !r.passed);
+  assert.deepEqual(
+    failed.map((r) => `${r.id} ${r.title}\n    ${r.detail}`),
+    [],
+  );
+  assert.equal(results.length, 7, "清单是七条，少一条就是漏了一项要求");
 });

@@ -91,7 +91,10 @@
     吊销退出）+ C2 权益客户端（45s TTL 不落库，`RUYIN_PLATFORM_API_BASE` 注入）
     + 账户弹层/开通深链 UI + 壳外链走系统浏览器；8 项鉴权单测。
     **闭环待平台侧登记回调 / ruyin-beta / 权益基址**（80-liaison/40，附实测）
-- [ ] Conformance 测试套件（50-harness §10 C1–C7）
+- [x] **Conformance 测试套件 C1–C7**（2026-09-01 · `runtime-core/src/conformance.ts`）
+      —— 不依赖平台、不依赖任何具体产品，因此**不必等 W6 的其余部分**。
+      导出 `runConformance()`，当前在内存 ports 与 SQLite ports 上各跑一遍；
+      Cloud Runtime 接第三套 ports 时直接复用。七条均反证过抓得到
 
 ## Liaison（平台侧依赖，函件在 80-liaison/）
 
