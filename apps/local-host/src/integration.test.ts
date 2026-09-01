@@ -212,10 +212,15 @@ test("local api: token gate, product listing, workspace + task flow", async () =
       headers: json,
     });
     assert.equal(noBase.status, 503);
-    assert.equal(
-      ((await noBase.json()) as { error: string }).error,
-      "capability_base_not_configured",
-    );
+    // X-1 封套：code + message + retryable 三件必到（TD-014 D1）。
+    const noBaseBody = (await noBase.json()) as {
+      code: string;
+      message: string;
+      retryable: boolean;
+    };
+    assert.equal(noBaseBody.code, "CAPABILITY_BASE_NOT_CONFIGURED");
+    assert.ok(noBaseBody.message.length > 0);
+    assert.equal(noBaseBody.retryable, false);
 
     // 「在等我」入口的数据面（M4）。桌面壳与界面看的是同一份事实，所以它必须
     // 在任何项目之外也能查得到——那正是原先看不见未决确认的原因。
@@ -578,8 +583,8 @@ test("归属：未登录不能新建项目；老项目可导入当前工作区",
     });
     assert.equal(refused.status, 409);
     assert.equal(
-      ((await refused.json()) as { error: string }).error,
-      "no_active_workspace",
+      ((await refused.json()) as { code: string }).code,
+      "WORKSPACE_REQUIRED",
     );
 
     // 未归属的老项目在任何工作区下都看得见 —— 那是待导入队列，不能因为过滤
@@ -614,8 +619,8 @@ test("归属：未登录不能新建项目；老项目可导入当前工作区",
     });
     assert.equal(again.status, 409);
     assert.equal(
-      ((await again.json()) as { error: string }).error,
-      "already_attributed",
+      ((await again.json()) as { code: string }).code,
+      "PROJECT_ALREADY_ATTRIBUTED",
     );
   } finally {
     signedIn.close();

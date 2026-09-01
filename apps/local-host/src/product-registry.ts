@@ -6,9 +6,9 @@
  * 因此「本地装了」与「现在能不能打开」是两件事：
  *
  *   installed  契约在本地且校验通过
- *   enabled    用户在本机启用（可停用而不卸载）
+ *   state      本机生效态 active / inactive（可停用而不卸载）
  *   entitled   平台订阅允许 —— true / false / null(未知)
- *   available  = installed ∧ enabled ∧ entitled ≠ false
+ *   available  = installed ∧ state=active ∧ entitled ≠ false
  *
  * §18.5 的硬规则：退订 / 宽限期外 → 产品不可打开，**但本地数据始终可访问、
  * 可导出**（数据主权底线，与 40-context §9.2 一致）。所以「不可用」只挡打开与
@@ -34,12 +34,28 @@ export type Entitled = boolean | null;
 
 export type Availability = "available" | "disabled" | "not_entitled";
 
+/**
+ * 为什么打不开。not_installed 不进 Availability —— 那是产品资产视图的取值，
+ * 而没装的产品根本不在那份列表里。
+ */
+export interface BlockedReason {
+  availability: "not_installed" | "disabled" | "not_entitled";
+  reason: string;
+}
+
 export interface ProductView {
   id: string;
   name: string;
   version: string;
   installed: true;
-  enabled: boolean;
+  /**
+   * 是否在本机生效（通则 B-3：单一字段名 state，字符串枚举）。
+   *
+   * **不用布尔**，理由通则写得很直白：布尔装不下真实存在的中间态——
+   * 比如 deprecated（仍可解析、不再推荐）不是 true/false 能表达的。
+   * 最小词表 active / inactive，需要时往里加，不必改字段类型。
+   */
+  state: "active" | "inactive";
   entitled: Entitled;
   availability: Availability;
   /** 不可用时的人可读原因；可用时缺省。 */
@@ -249,7 +265,7 @@ export class ProductRegistry {
         name: p.name,
         version: p.version,
         installed: true as const,
-        enabled,
+        state: enabled ? "active" : "inactive",
         entitled,
         availability,
         ...(reason ? { reason } : {}),
@@ -269,18 +285,31 @@ export class ProductRegistry {
     return this.scan.loaded.find((p) => p.id === id);
   }
 
-  /** 打开/新建工作空间前的准入判定；不可用时返回原因，可用返回 null。 */
-  blockedReason(id: string): string | null {
+  /**
+   * 打开/新建项目前的准入判定；可用返回 null。
+   *
+   * **返回结构而不是一句话**：「本机停用」与「平台未订阅」在通则 X-1 里是两个
+   * 不同的拒绝码（POLICY_DENIED / NOT_ENTITLED），混成一个字符串，调用方就只能
+   * 显示同一个行动入口 —— 该引导首购的地方显示续费，或者反过来。这是通则
+   * 「十个坑」的第二条。
+   */
+  blockedReason(id: string): BlockedReason | null {
     const p = this.find(id);
-    if (!p) return "产品未安装";
+    // 未安装也算「挡住」。返回 null 会让下一个忘了先 find 的调用方拿到「没挡」——
+    // 一道只在某一个调用点成立的护栏，不是护栏。
+    if (!p) return { availability: "not_installed", reason: "产品未安装" };
     const enabled = !this.disabled.has(id);
     const { availability, reason } = availabilityOf(enabled, this.entitledOf(id));
-    return availability === "available" ? null : (reason ?? "产品当前不可用");
+    if (availability === "available") return null;
+    return { availability, reason: reason ?? "产品当前不可用" };
   }
 
-  setEnabled(id: string, enabled: boolean): void {
+  /**
+   * 切换本机生效态（通则 B-3：二元开关必须提供 activate / deactivate）。
+   */
+  setActive(id: string, active: boolean): void {
     if (!this.find(id)) throw new Error(`product not installed: ${id}`);
-    if (enabled) this.disabled.delete(id);
+    if (active) this.disabled.delete(id);
     else this.disabled.add(id);
     this.persist();
   }
