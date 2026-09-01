@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json && node --test \"dist/**/*.test.js\"",
+    "test": "tsc -p tsconfig.json && node --experimental-test-coverage --test-coverage-include=\"dist/**/*.js\" --test-coverage-exclude=\"dist/**/*.test.js\" --test-coverage-exclude=\"dist/pkg-testkit.js\" --test-coverage-lines=90 --test-coverage-branches=78 --test-coverage-functions=88 --test \"dist/**/*.test.js\"",
     "start": "node dist/main.js"
   },
   "dependencies": {
