@@ -139,4 +139,24 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
   process.exit(1);
 }
 
+// 打包形态下主密钥必须由 DPAPI 保护。
+//
+// KeyManager 在 DPAPI 不可用时会退到明文文件 —— 开发机上这是对的（那台机器
+// 可能不是 Windows），但**装到用户机器上的那一份不该有这条退路**：
+// `@primno/dpapi` 是原生模块，它在部署树里解析不到的样子和「这台机器没有
+// DPAPI」一模一样，而后果是每一个新安装都拿到一把明文主密钥。
+//
+// 启动时那行日志一直都在打，只是从来没有人断言过它。跑起来了不等于跑对了。
+if (process.platform === "win32") {
+  const protection = /\[ruyin\] master key protection: (\w+)/.exec(smokeOut);
+  if (protection?.[1] !== "dpapi") {
+    console.error(
+      `[pack] FAILED: 打包后的主密钥保护是 ${protection?.[1] ?? "(没报)"}，不是 dpapi。\n` +
+        "       多半是 @primno/dpapi 在部署树里解析不到 —— 那看起来就像「这台\n" +
+        "       机器没有 DPAPI」，而每一个新安装都会拿到一把明文主密钥。",
+    );
+    process.exit(1);
+  }
+}
+
 console.log(`[pack] done -> ${join(shellDir, "release")}`);
