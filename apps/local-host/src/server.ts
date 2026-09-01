@@ -651,6 +651,32 @@ async function handle(
   if (segments[0] === "projects" && segments.length >= 2) {
     const projectId = segments[1]!;
 
+    // 工作区边界要在**每一条**按 id 访问的路由上成立，不只在列表上。
+    //
+    // `GET /projects` 一直很小心地按当前工作区过滤，然后任何一个项目凭 id 就能
+    // 被完整读写 —— 那不是边界，那是一层遮挡。可达的场景不用假设攻击者：用户
+    // 切换工作区时项目面板还开着，它会继续操作旧工作区的项目，**包括把它导出**。
+    //
+    // 没有归属的项目是 attribution 之前的记录，属**待导入队列**，任何工作区下
+    // 都看得见（ADR-015），所以这里放行 —— 挡住它，导入这条路就没了。
+    const owner = (await deps.runtime.listProjects()).find(
+      (p) => p.id === projectId,
+    )?.workspaceId;
+    const active = activeWorkspace(deps);
+    if (owner && owner !== active) {
+      // 同样是拒绝，理由要分清楚 —— 没登录时说「属于另一个工作区」不是实话，
+      // 而一句不实的拒绝会把人送去切工作区，那里什么也解决不了。
+      //
+      // 两种都说清是「在别处 / 还没登录」而不是「不存在」：这是用户自己的
+      // 数据，报 404 会让人以为数据丢了 —— 正是列表那边「只报数量不报名字」
+      // 要避免的那种误解。
+      const [status, body] = active
+        ? [403, apiError(REJECTION.POLICY_DENIED, "该项目属于另一个工作区；切换过去再打开")]
+        : [409, apiError("WORKSPACE_REQUIRED", "请先登录并选择工作区，再打开这个项目")];
+      send(res, status, body);
+      return;
+    }
+
     // POST /projects/:id/export  { path } - 导出项目记录（TD-020）。
     //
     // 导的是**被锁在存储里的那部分**：meta / 契约 / 业务状态 / 任务实例 / 审计链。
@@ -663,6 +689,17 @@ async function handle(
       segments.length === 3 &&
       segments[2] === "export"
     ) {
+      // 导出是**认证过的操作**（owner 定）：一份带完整审计链的项目档案离开
+      // 本机，不该在没有账号的情况下发生。注销本身就该先备份、导完再注销，
+      // 而不是反过来给「离线随便导」开一条路。
+      if (!activeWorkspace(deps)) {
+        send(
+          res,
+          409,
+          apiError("WORKSPACE_REQUIRED", "请先登录并选择工作区，再导出项目"),
+        );
+        return;
+      }
       const body = await readJson(req);
       const dir = String(body["path"] ?? "");
       if (!dir) {
