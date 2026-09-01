@@ -10,13 +10,14 @@
  * 降级——展示本地运行时已装的产品，并标明订阅状态未接通，而不是虚构一份清单。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import {
   Button,
   EmptyState,
   Input,
   ListCard,
   MetricGrid,
+  NativeSelect,
   Section,
   SectionHeader,
   StatusBadge,
@@ -368,6 +369,26 @@ function InstalledProductCard({
               <Button disabled={!workspaceName} onClick={() => setCreating(true)}>
                 新建项目
               </Button>
+              {/* 版本回滚（§18.4）。**只在真有第二个版本时才出现** ——
+                  一个只有一个选项的下拉框不是选择，是噪音。 */}
+              {product.versions.length > 1 && (
+                <NativeSelect
+                  value={product.version}
+                  wrapperClassName="sel-narrow"
+                  onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+                    void api
+                      .pinProductVersion(product.id, e.target.value)
+                      .then(() => onRefresh())
+                      .catch((err: Error) => onError(err.message))
+                  }
+                >
+                  {product.versions.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </NativeSelect>
+              )}
               {/* §18.5 的本机生效开关。停用不卸载、不动数据 —— 之前这个状态
                   在「不可用的产品」里显示得好好的，却没有任何地方能改它。 */}
               <Button
