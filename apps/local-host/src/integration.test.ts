@@ -32,6 +32,8 @@ import type { PlatformService } from "./platform.js";
 import { TaskRunner } from "./task-runner.js";
 import { InstallIntentBox } from "./updates.js";
 import { EventBus } from "./events.js";
+import { CHECKSUMS_ENTRY, MANIFEST_ENTRY, sha256 as pkgSha256 } from "./pkg.js";
+import { makeTestZip } from "./pkg-testkit.js";
 
 interface PolledTask {
   id: string;
@@ -97,6 +99,97 @@ async function makePorts(dataDir: string): Promise<{
     storage,
     executor,
   };
+}
+
+
+/** 一个能装上的 .ruyinpkg：契约 + CHECKSUMS，未签名（开发口径放行）。 */
+function pkgContractYaml(version = "1.0.0", minimum = "0.1.0"): string {
+  return `contract: "0.1"
+product:
+  id: test.pkg
+  name: 打包演示
+  version: ${version}
+  publisher: vxture
+  runtime:
+    minimum: ${minimum}
+project:
+  type: project
+
+  operations: [create, open]
+objects:
+  - id: root
+    name: 根对象
+    primary: true
+states:
+  object: root
+  initial: draft
+  items:
+    - name: draft
+      transitions: []
+context:
+  types:
+    - id: doc
+      name: 文档
+      required: true
+      sources: [local]
+      class: source
+      sensitivity: low
+    - id: report
+      name: 报告
+      required: false
+      sources: [project]
+      class: generated
+      sensitivity: low
+capabilities:
+  - id: analyze
+    kind: analysis
+    description: 分析
+tools:
+  - id: read_file
+    category: local_read
+    risk: low
+    default: allow
+    input_schema:
+      type: object
+      properties:
+        path: { type: string, x-ruyin-ref: path }
+      required: [path]
+tasks:
+  - id: run
+    objective: 跑一次
+    input_types: [doc]
+    output_types: [report]
+    capabilities: [analyze]
+    tools: [read_file]
+    verification:
+      - { id: check, kind: automated }
+      - { id: human_review, kind: human }
+permissions:
+  local_read: allow
+  local_write: ask
+  delete: ask
+  external_send: ask
+  sync_to_cloud: ask
+sync:
+  default: local_only
+  classes:
+    - { class: source,    policy: local_only }
+    - { class: generated, policy: manual }
+`;
+}
+
+function installablePackage(): Buffer {
+  const files: Array<[string, Buffer]> = [
+    [MANIFEST_ENTRY, Buffer.from(pkgContractYaml(), "utf8")],
+  ];
+  const checksums = Buffer.from(
+    files.map(([n, d]) => `${pkgSha256(d)}  ${n}`).join("\n") + "\n",
+    "utf8",
+  );
+  return makeTestZip([
+    ...files.map(([name, data]) => ({ name, data })),
+    { name: CHECKSUMS_ENTRY, data: checksums },
+  ]);
 }
 
 const testSystemInfo = {
@@ -974,6 +1067,72 @@ test("事件流：记下安装意图时发一声，壳不必每 5 秒问一次",
     assert.ok(
       seen.includes("update-intent"),
       "意图记下了却没人被通知 —— 壳只能靠等",
+    );
+  } finally {
+    server.close();
+    storage.closeAll();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 装一个 .ruyinpkg（TD-028）。
+ *
+ * 端点一直在，界面上没有入口 —— 现在补上了 file input，那就得确认它 POST 的
+ * 那个形状服务端真的收，而且回来的东西和界面声明的 `InstalledPackage` 对得上。
+ */
+test("安装包：字节直接 POST，回来的形状就是界面声明的那个", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-inst-"));
+  const { ports, storage, executor } = await makePorts(dataDir);
+  const runtime = new ProjectRuntime(ports);
+  const token = "inst-token";
+  const registry = new ProductRegistry(productsDir, dataDir);
+  const server = createLocalApi({
+    runtime,
+    registry,
+    tasks: new TaskRunner(runtime),
+    token,
+    version: "0.1.0",
+    updateIntent: new InstallIntentBox(),
+    // 开发口径：未签名包放行。生产缺省要求副署（§18.2 / TD-012）。
+    requireSignedPackages: false,
+    writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+      executor.writeArtifact(p, b, g),
+    supportsTool: (t: string) => executor.supports(t),
+    systemInfo: testSystemInfo,
+    reindex: async () => 0,
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const post = (body: Buffer) =>
+    fetch(`${base}/products/install`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/octet-stream",
+      },
+      body: body as unknown as BodyInit,
+    });
+
+  try {
+    const res = await post(installablePackage());
+    // 先把 body 读出来再断言：把 `await res.text()` 当断言信息会先消费掉它，
+    // 后面的 res.json() 就只能拿到「Body has already been read」。
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(res.status, 201, JSON.stringify(body));
+    // 界面的 InstalledPackage 就是这三个字段；多一个少一个它都读不对。
+    assert.deepEqual(Object.keys(body).sort(), ["productId", "signed", "version"]);
+    assert.equal(body["productId"], "test.pkg");
+    // 未签名要如实说，不能和签过的长一个样。
+    assert.equal(body["signed"], false);
+    assert.ok(registry.installed().some((p) => p.id === "test.pkg"));
+
+    // 坏包必须被挡，而且给的是 X-1 封套 —— 这是安装未知来源内容的入口。
+    const junk = await post(Buffer.from("not a zip"));
+    assert.equal(junk.status, 400);
+    assert.equal(
+      ((await junk.json()) as { code: string }).code,
+      "PACKAGE_REJECTED",
     );
   } finally {
     server.close();
