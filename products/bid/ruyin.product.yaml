@@ -1,5 +1,5 @@
 ﻿# Bid product runtime contract - the canonical example from
-# docs/30-design/30-contract-schema.md section 16. Passes rules R1-R11;
+# docs/30-design/30-contract-schema.md section 16. Passes the R-series rules;
 # the contract-schema test suite uses this file as its primary fixture.
 contract: "0.1"
 
@@ -119,6 +119,11 @@ capabilities:
   - id: consistency_analysis
     kind: verification
     description: 校验方案内部与资料间的一致性
+  # 汇总是要动手的：读回各部分、决定次序、调用导出。没有这条能力，
+  # export_deliverable 连一个回合都不会跑，工具声明了也调不到（R14）。
+  - id: deliverable_assembly
+    kind: generation
+    description: 汇总技术方案与覆盖报告，组装并导出最终投标成果包
 
 tools:
   # input_schema 必填：闸门校验不了参数的工具，就是放行不了的工具。
@@ -220,7 +225,7 @@ tasks:
     output_types: [deliverable_package]
     constraints:
       - 导出前必须通过覆盖校验
-    capabilities: []
+    capabilities: [deliverable_assembly]
     tools: [read_file, export_result]
     verification:
       - { id: final_confirmation, kind: human }

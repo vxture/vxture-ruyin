@@ -1,5 +1,9 @@
 ﻿/**
- * Semantic validation rules R1-R11 (L2 referential + L3 compatibility layers).
+ * Semantic validation rules (L2 referential + L3 compatibility layers).
+ *
+ * 编号是稀疏的：R2 已退役且编号不复用，R6/R12 属于别的层。**权威清单是
+ * docs/30-design/30-contract-schema.md 的规则表**，不是这里的某个区间写法 ——
+ * 写成区间的地方每加一条规则就会过期一次，而过期的注释读起来和正确的一样。
  * Design authority: docs/30-design/30-contract-schema.md section 15.
  *
  * R6 (no model/provider binding on capabilities) is enforced structurally by
@@ -319,7 +323,37 @@ const r13: Rule = (c, errors) => {
   });
 };
 
-const RULES: Rule[] = [r1, r3, r4, r5, r7, r8, r9, r10, r11, r13];
+/**
+ * R14 - a task that declares tools must declare a capability to call them with.
+ *
+ * Tools are only ever invoked from inside a capability turn: the runtime runs
+ * one loop per declared capability, and the provider asks for tools from
+ * within it. A task with `capabilities: []` therefore never takes a turn and
+ * never calls a tool, no matter how many it declares.
+ *
+ * This is not a tidiness rule. The bid contract's `export_deliverable` had
+ * exactly this shape - objective "汇总并导出最终投标成果包", tools
+ * `[read_file, export_result]`, capabilities `[]` - and it ran to
+ * **completed** having made zero provider calls, zero tool calls, and an empty
+ * result, after asking a person to sign off on a deliverable that was never
+ * produced. Nothing in the system said otherwise; the task simply succeeded at
+ * doing nothing.
+ */
+const r14: Rule = (c, errors) => {
+  c.tasks.forEach((task, i) => {
+    if (task.tools.length > 0 && task.capabilities.length === 0) {
+      err(
+        errors,
+        "R14",
+        `tasks[${i}].capabilities`,
+        `task "${task.id}" declares tools (${task.tools.join(", ")}) but no capability to call them from - ` +
+          `tools only run inside a capability turn, so this task would complete without using any of them`,
+      );
+    }
+  });
+};
+
+const RULES: Rule[] = [r1, r3, r4, r5, r7, r8, r9, r10, r11, r13, r14];
 
 export function runRules(contract: RuyinContract): ValidationError[] {
   const errors: ValidationError[] = [];

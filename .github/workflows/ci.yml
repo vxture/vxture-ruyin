@@ -83,7 +83,7 @@ jobs:
 
   # -- Static checks (feed quality-gate) --------------------------------------
   # Pure-node, zero-dependency checks that run without a pnpm install. W2 adds
-  # the contract-lint guardrail (R1-R11 over products/*/ruyin.product.yaml,
+  # the contract-lint guardrail (the R-series semantic rules over
   # TD-004) here as it becomes real.
   static-checks:
     name: static-checks
@@ -110,7 +110,7 @@ jobs:
         run: node scripts/guardrails/check-publish-order.mjs
 
   # -- Contract lint (feed quality-gate) --------------------------------------
-  # Runs rules R1-R11 over every products/*/ruyin.product.yaml via the ruyin
+  # Runs the R-series semantic rules over every products/*/ruyin.product.yaml via the ruyin
   # CLI (design authority: docs/30-design/30-contract-schema.md section 15).
   contract-lint:
     name: contract-lint
@@ -133,7 +133,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
-      - name: Contract lint (R1-R11)
+      - name: Contract lint (R-series semantic rules)
         run: pnpm lint:contract
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}

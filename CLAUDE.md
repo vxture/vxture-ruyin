@@ -71,7 +71,7 @@ user tokens live only in the user's OS credential store.
   by the client (30-design/70 section 2.1).
 - runtime-core stays host-agnostic: no Node/Electron APIs in the kernel, hosts
   implement the ports (30-design/60 section 6).
-- Contract validation rules R1-R12 are the single authority
+- Contract validation rules R1-R14 are the single authority
   (30-design/30-contract-schema.md); the `lint:contract` guardrail enforces
   them once the CLI lands (TD-004).
 

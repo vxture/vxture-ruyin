@@ -233,7 +233,7 @@ export class ProductRegistry {
     for (const [productId, versions] of this.storeVersions) {
       const chosen = this.activeVersionOf(productId, versions);
       const dir = join(this.storeDir, productId, chosen);
-      // 复用同一套解析 + R1-R12 校验：库里的产品与开发目录同等对待。
+      // 复用同一套解析 + R 系列校验：库里的产品与开发目录同等对待。
       const one = loadProducts(join(dir, ".."));
       const hit = one.loaded.find(
         (p) => p.id === productId && p.version === chosen,
