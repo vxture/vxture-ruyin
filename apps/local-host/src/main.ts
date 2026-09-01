@@ -33,7 +33,7 @@ import {
 import { createLocalApi } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
 import { LocalFsConnector } from "./connector-fs.js";
-import { FtsRanker, reindexBinding } from "./fts.js";
+import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
 import { LocalToolExecutor } from "./tool-executor.js";
 import { CapabilityClient } from "./capability-client.js";
 import { fetchContract } from "./contract-fetch.js";
@@ -80,8 +80,11 @@ const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
 // running loop cannot overwrite it on its next persist.
 const cancelledTasks = new Set<string>();
 
-// 同一个执行器：任务写产出与导出写记录走同一套授权护栏。
-const toolExecutor = new LocalToolExecutor();
+// 同一个执行器：任务写产出与导出写记录走同一套授权护栏。检索接的是本机 FTS
+// 索引，范围由调用方给的上下文集限定（TD-022）。
+const toolExecutor = new LocalToolExecutor((projectId, query, scope, limit) =>
+  searchContext(storage, projectId, query, scope, limit),
+);
 
 const runtime = new ProjectRuntime({
   storage,

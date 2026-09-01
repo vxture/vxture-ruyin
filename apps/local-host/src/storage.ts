@@ -90,9 +90,24 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5(
   item_id UNINDEXED,
   type UNINDEXED,
   name,
-  content
+  content,
+  tokenize='trigram'
 );
 `;
+
+/**
+ * `trigram` 而不是默认的 `unicode61`，因为默认分词器**对中文是零命中**。
+ *
+ * 这不是推断，是量出来的：一段含「储能项目」的中文正文，用 unicode61 索引后
+ * 查「储能」「储能项目」「电化学储能」「案例」，四条全是 0 命中 —— unicode61
+ * 把一整串连续汉字当成一个 token，除非查询词与它逐字相同，否则永远不匹配。
+ * 也就是说这个索引对中文资料一直是死的，而唯一的症状是排序悄悄退化成按时间，
+ * 看起来和「就是没有更相关的」一模一样。
+ *
+ * trigram 的代价要说清：**它需要至少 3 个字符**。「储能」「案例」这类两字词
+ * MATCH 不到，由 `fts.ts` 用 LIKE 扫描兜底。索引也比词级分词更大。
+ */
+const FTS_TOKENIZER = "trigram";
 
 const require = createRequire(import.meta.url);
 
@@ -194,6 +209,55 @@ export class SqliteProjectStore implements ProjectStore {
       )
       .all(matchQuery, limit) as Array<{ item_id: string }>;
     return rows.map((r) => r.item_id);
+  }
+
+  /**
+   * 命中 + 命中处的摘录，按相关度排序。
+   *
+   * 摘录由 FTS5 的 `snippet()` 从索引里取，**不回读源文件**：索引里存的就是
+   * 当时读到的正文，回读一遍既慢又可能读到已经变了的内容。
+   */
+  searchExcerpts(
+    matchQuery: string,
+    limit: number,
+  ): Array<{ id: string; name: string; excerpt: string }> {
+    const rows = this.db
+      .prepare(
+        `SELECT item_id, name, snippet(fts_index, 3, '', '', '…', 20) AS excerpt
+           FROM fts_index WHERE fts_index MATCH ? ORDER BY rank LIMIT ?`,
+      )
+      .all(matchQuery, limit) as Array<{
+      item_id: string;
+      name: string;
+      excerpt: string;
+    }>;
+    return rows.map((r) => ({ id: r.item_id, name: r.name, excerpt: r.excerpt }));
+  }
+
+  /**
+   * 子串扫描兜底。trigram 需要至少 3 个字符，而「储能」「案例」这类两字词在
+   * 中文里恰恰是最常查的 —— 少了这条兜底，它们会一律返回「没找到」。
+   */
+  scanIndex(
+    substring: string,
+    limit: number,
+  ): Array<{ id: string; name: string; excerpt: string }> {
+    const like = `%${substring.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+    const rows = this.db
+      .prepare(
+        `SELECT item_id, name, content FROM fts_index
+           WHERE content LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\' LIMIT ?`,
+      )
+      .all(like, like, limit) as Array<{
+      item_id: string;
+      name: string;
+      content: string;
+    }>;
+    return rows.map((r) => ({
+      id: r.item_id,
+      name: r.name,
+      excerpt: around(r.content, substring),
+    }));
   }
 
   async setBusinessState(state: string): Promise<void> {
@@ -320,6 +384,7 @@ export class SqliteStoragePort implements StoragePort {
     }
     db.pragma("journal_mode = WAL");
     db.exec(DDL);
+    migrateFtsTokenizer(db, projectId);
     const store = new SqliteProjectStore(db);
     this.open.set(projectId, { store, db });
     return store;
@@ -359,4 +424,62 @@ export class SqliteStoragePort implements StoragePort {
       .filter((name) => existsSync(join(root, name, PROJECT_DB)))
       .sort();
   }
+}
+
+/** LIKE 兜底没有 snippet()，自己在命中处切一段。 */
+function around(content: string, needle: string, span = 40): string {
+  const at = content.indexOf(needle);
+  if (at < 0) return content.slice(0, span * 2);
+  const from = Math.max(0, at - span);
+  const to = Math.min(content.length, at + needle.length + span);
+  return `${from > 0 ? "…" : ""}${content.slice(from, to)}${to < content.length ? "…" : ""}`;
+}
+
+/**
+ * 把已存在的 fts_index 换成 trigram 分词器（见 FTS_TOKENIZER 上的说明）。
+ *
+ * `CREATE VIRTUAL TABLE IF NOT EXISTS` 碰上已存在的表什么也不做，所以老库会
+ * 一直留着那个对中文零命中的索引 —— 而它不报错，只是永远查不到东西。
+ *
+ * 迁移**不回读源文件**：索引行里本来就存着 name 与 content，原样搬过去即可。
+ * 回读要连接器、要磁盘、还可能读到已经变了的内容，而这里要的只是换个分词器。
+ */
+function migrateFtsTokenizer(db: Database.Database, projectId: string): void {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE name = 'fts_index'")
+    .get() as { sql?: string } | undefined;
+  const sql = row?.sql ?? "";
+  if (!sql || sql.includes(FTS_TOKENIZER)) return;
+
+  const rows = db
+    .prepare("SELECT item_id, type, name, content FROM fts_index")
+    .all() as Array<{
+    item_id: string;
+    type: string;
+    name: string;
+    content: string;
+  }>;
+  // 一个事务：迁移中途崩了，要么还是旧表，要么已经是新表，不会留下一张空的
+  // 新表 —— 那种状态下检索会安静地返回「没找到」。
+  db.exec("BEGIN");
+  try {
+    db.exec("DROP TABLE fts_index");
+    db.exec(
+      `CREATE VIRTUAL TABLE fts_index USING fts5(
+         item_id UNINDEXED, type UNINDEXED, name, content,
+         tokenize='${FTS_TOKENIZER}'
+       )`,
+    );
+    const insert = db.prepare(
+      "INSERT INTO fts_index (item_id, type, name, content) VALUES (?, ?, ?, ?)",
+    );
+    for (const r of rows) insert.run(r.item_id, r.type, r.name, r.content);
+    db.exec("COMMIT");
+  } catch (cause) {
+    db.exec("ROLLBACK");
+    throw cause;
+  }
+  console.log(
+    `[ruyin] ${projectId}: 检索索引已换用 ${FTS_TOKENIZER} 分词器（${rows.length} 条）`,
+  );
 }

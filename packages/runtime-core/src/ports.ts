@@ -269,6 +269,11 @@ export interface ToolExecutionRequest {
   taskId: string;
   /** Folders the user granted; path arguments have already been checked. */
   grants: FolderGrant[];
+  /**
+   * 这次任务选出来的资料。**检索类工具的范围上限就是它**——上下文集是经过
+   * 选取、必要时经用户确认的那一批；让工具伸到它之外，那道确认就成了摆设。
+   */
+  contextSet: ContextItemMeta[];
 }
 
 export interface ToolExecutionResult {

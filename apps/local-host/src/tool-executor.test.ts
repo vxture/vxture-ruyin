@@ -21,7 +21,11 @@ import { tmpdir } from "node:os";
 import { inflateRawSync } from "node:zlib";
 import { join } from "node:path";
 import test from "node:test";
-import type { FolderGrant, ToolExecutionRequest } from "@vxture/ruyin-core";
+import type {
+  ContextItemMeta,
+  FolderGrant,
+  ToolExecutionRequest,
+} from "@vxture/ruyin-core";
 import { LocalToolExecutor } from "./tool-executor.js";
 
 const exec = new LocalToolExecutor();
@@ -43,8 +47,16 @@ function call(
   tool: string,
   args: Record<string, unknown>,
   grants: FolderGrant[],
+  contextSet: ContextItemMeta[] = [],
 ): ToolExecutionRequest {
-  return { tool, arguments: args, workspace: "prj_1", taskId: "ti_1", grants };
+  return {
+    tool,
+    arguments: args,
+    workspace: "prj_1",
+    taskId: "ti_1",
+    grants,
+    contextSet,
+  };
 }
 
 void test("落盘：字节原样写入，不经 UTF-8 往返", async () => {
