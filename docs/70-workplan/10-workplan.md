@@ -63,8 +63,21 @@
 
 ## W5 · npm 发布流
 
-- [ ] publish-packages.yml：contract-schema / runtime-core / product-sdk / cli → GitHub Packages
-- [ ] 版本策略定案（changesets vs 手动；runtime-core 版本 = 规范实现版本，08 OQ-2）
+- [x] publish-packages.yml（2026-09-01）：contract-schema / runtime-core / cli → GitHub Packages。
+      `product-sdk` 尚不存在（W3，待契约冻结），到时排进 ORDER 即可——**守卫会提醒**。
+      - **两套 tag**：`packages-v*` 与安装包的 `v*` 分开。库的版本不该被应用版本牵着走——
+        runtime-core 的版本是「规范实现版本」（OQ-2），与桌面应用发到第几版无关。
+      - **与 release.yml 不同，这里重跑构建与测试**：npm 版本不可变，**发错了收不回来**，
+        这是最后一次能拦住的地方。
+      - **已发布的版本跳过，但逐个报告；一个都没发成则整体失败**——「流水线全绿、
+        其实什么都没发」是这里最坏的结局。
+      - **发布顺序是必需的，不是好习惯**：实测 `pnpm pack` 把 `workspace:*` 重写成了
+        `"@vxture/ruyin-contract-schema": "0.1.0"`，依赖没先发，包在注册表上就指向一个
+        不存在的版本。`check-publish-order.mjs` 按真实依赖拓扑校验，接入 static-checks，
+        顺序颠倒与漏排包两种失败均反证可抓。
+- [ ] 版本策略定案（changesets vs 手动，08 OQ-2）。**当前口径**：版本写在各包的
+      package.json，推 `packages-v*` tag 触发；已存在的版本跳过，所以「发布」= 先改版本号。
+      是否引入 changesets 尚未定。
 
 ## W6 · Phase C：双端与同步
 

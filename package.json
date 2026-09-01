@@ -15,6 +15,7 @@
     "lint:docs-numbering": "node scripts/guardrails/check-docs-numbering.mjs --strict",
     "native:electron": "node scripts/native/sqlite-electron-binding.mjs",
     "lint:contract": "pnpm --recursive build && node packages/cli/dist/main.js lint products",
-    "lint:api-shape": "node scripts/guardrails/check-api-shape.mjs"
+    "lint:api-shape": "node scripts/guardrails/check-api-shape.mjs",
+    "lint:publish-order": "node scripts/guardrails/check-publish-order.mjs"
   }
 }

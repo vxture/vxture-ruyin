@@ -104,6 +104,11 @@ jobs:
       - name: Local API shape guardrail (integration standard X-1 / B-3)
         run: node scripts/guardrails/check-api-shape.mjs
 
+      # 发布顺序：pnpm 会把 workspace:* 重写成具体版本，依赖没先发，包在注册表
+      # 上就指向一个不存在的版本，而消费方要到 npm install 才发现。
+      - name: Package publish order guardrail
+        run: node scripts/guardrails/check-publish-order.mjs
+
   # -- Contract lint (feed quality-gate) --------------------------------------
   # Runs rules R1-R11 over every products/*/ruyin.product.yaml via the ruyin
   # CLI (design authority: docs/30-design/30-contract-schema.md section 15).
