@@ -26,7 +26,10 @@ import { fileURLToPath } from "node:url";
 import { ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
-import { ProductRegistry } from "./product-registry.js";
+import {
+  ProductRegistry,
+  type SubscriptionFacts,
+} from "./product-registry.js";
 import { createLocalApi } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
 import { LocalFsConnector } from "./connector-fs.js";
@@ -139,6 +142,7 @@ const server = createLocalApi({
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
   requireSignedPackages: process.env["RUYIN_ALLOW_UNSIGNED_PACKAGES"] !== "1",
   updateIntent,
+  refreshEntitlements: () => syncEntitlements(),
   ...(process.env["RUYIN_UPDATE_FEED"]
     ? { updateFeedBase: process.env["RUYIN_UPDATE_FEED"] }
     : {}),
@@ -165,20 +169,41 @@ const server = createLocalApi({
   },
 });
 
+/** C2 信封里 Ruyin 会读的那几项（limits / quota_pools 有意不列）。 */
+interface C2Envelope {
+  status?: string | null;
+  tier?: string | null;
+  bundled?: boolean;
+  trial_ends_at?: string | null;
+  current_period_end?: string | null;
+  cancel_at_period_end?: boolean;
+}
+
 // 订阅 → 本地可用（owner 口径：平台订阅了本地可用，0 订阅本地无可用产品，
 // 环境仍在）。订阅数据面未接通时 refreshEntitlements 保持「未知」，不锁用户。
 async function syncEntitlements(): Promise<void> {
   await registry.refreshEntitlements(async (ids) => {
     const batch = (await platform.entitlements(ids)) as {
-      entitlements?: Record<string, { tier: string | null; bundled: boolean }>;
+      entitlements?: Record<string, C2Envelope>;
     } | null;
     if (!batch?.entitlements) return null;
-    return Object.fromEntries(
-      ids.map((id) => {
-        const env = batch.entitlements![id];
-        return [id, env ? env.tier !== null || env.bundled : false];
-      }),
-    );
+    // 信封原样投影，**不在这里压成布尔**（TD-014 D4）：压扁之后界面就再也
+    // 分不出「从未订阅」与「已失效」，只能永远显示同一个错的行动入口。
+    // limits / quota_pools 刻意不取：配额归 SaaS，Ruyin 不读不执行不展示。
+    const out: Record<string, SubscriptionFacts> = {};
+    for (const id of ids) {
+      const env = batch.entitlements![id];
+      if (!env) continue; // 平台没给这个产品的信封 = 未知，别当成「没有」
+      out[id] = {
+        status: env.status ?? null,
+        tier: env.tier ?? null,
+        bundled: env.bundled === true,
+        trialEndsAt: env.trial_ends_at ?? null,
+        currentPeriodEnd: env.current_period_end ?? null,
+        cancelAtPeriodEnd: env.cancel_at_period_end === true,
+      };
+    }
+    return out;
   });
 }
 void syncEntitlements().catch(() => {});

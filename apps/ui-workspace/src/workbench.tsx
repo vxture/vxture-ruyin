@@ -114,6 +114,25 @@ export function Workbench({ api }: { api: Api }) {
     void refreshSidebar();
   }, [refreshSidebar]);
 
+  /**
+   * 窗口重新获得焦点时立刻拉一次订阅（TD-014 D5）。
+   *
+   * **这一刻正是用户付完款回到应用的那一刻**——订阅轮询是 5 分钟一次，让他对着
+   * 一个「未订阅」的界面等上几分钟，是这条最难解释的失败。C2 自身有 45 秒缓存，
+   * 所以频繁切窗口不会打爆平台。
+   */
+  useEffect(() => {
+    const onFocus = () => {
+      void api
+        .refreshEntitlements()
+        .then((list) => setProducts(list))
+        // 拉不到就沿用现有判定（ADR-003），不把用户锁住，也不报错打扰他。
+        .catch(() => {});
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [api]);
+
   const navigate = useCallback((href: string) => {
     if (href === "#home") setView({ kind: "home" });
     else if (href === "#settings") setView({ kind: "settings" });

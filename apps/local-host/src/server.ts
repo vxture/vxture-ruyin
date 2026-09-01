@@ -59,6 +59,12 @@ export interface LocalApiDeps {
    * POST /products/:id/fetch 如实回答「没有可拉的地方」，不假装拉过。
    */
   fetchContract?: (productId: string) => Promise<FetchOutcome>;
+  /**
+   * 强制拉一次订阅（TD-014 D5）。轮询周期 5 分钟，而用户付完款回到应用时
+   * **不该等 5 分钟**；C2 的 45 秒缓存仍然生效，所以频繁调用不会打爆平台。
+   * 未接通订阅面时缺省。
+   */
+  refreshEntitlements?: () => Promise<void>;
   /** 更新 feed 基址覆盖（dl 主机未落地前可指向测试 feed）；缺省见 updates.ts。 */
   updateFeedBase?: string;
   /** 用户的安装意图；壳轮询取走。 */
@@ -369,6 +375,15 @@ async function handle(
     return;
   }
 
+  // POST /entitlements/refresh - 立刻拉一次订阅（D5 的时点之一：窗口重新
+  // 获得焦点，也就是用户付完款回到应用的那一刻）。失败不报错：拉不到就沿用
+  // 上一次的判定（ADR-003），而不是把用户锁住。
+  if (method === "POST" && path === "/entitlements/refresh") {
+    await deps.refreshEntitlements?.().catch(() => {});
+    send(res, 200, deps.registry.list());
+    return;
+  }
+
   // GET /products - 受管资产视图：已装 + 启用态 + 订阅可用性（§18.5）
   if (method === "GET" && path === "/products") {
     send(res, 200, deps.registry.list());
@@ -505,6 +520,10 @@ async function handle(
       });
       return;
     }
+    // D5 的另一个时点：**打开产品前**先拉一次。判定就发生在下一行，用一份
+    // 最多 5 分钟旧的快照挡住刚付完款的用户，是这条最难解释的失败。
+    // 拉不到不阻塞（ADR-003），沿用现有判定。
+    await deps.refreshEntitlements?.().catch(() => {});
     // §18.5：退订 / 停用的产品不可打开；已有工作空间的数据仍可读可导出。
     const blocked = deps.registry.blockedReason(product.id);
     if (blocked) {

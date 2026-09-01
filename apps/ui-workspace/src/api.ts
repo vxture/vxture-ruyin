@@ -18,6 +18,26 @@ export interface ProductInfo {
   entitled: boolean | null;
   availability: "available" | "disabled" | "not_entitled";
   reason?: string;
+  /**
+   * C2 信封的订阅事实（daemon 保真投影，TD-014 D4）。null = 未知。
+   * **不含配额**：配额归 SaaS，Ruyin 不读不执行不展示。
+   */
+  subscription: {
+    status: string | null;
+    tier: string | null;
+    bundled: boolean;
+    trialEndsAt: string | null;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+  } | null;
+  /**
+   * 该显示哪个商业入口，或 null = 不显示。
+   *
+   * **由 daemon 判定，界面不重算**：界面门控（tier != null）与数据面门控
+   * （tier != null || bundled）是两个公式，混用会让被捆绑覆盖的产品显示一个
+   * 不该给用户的订阅动作。
+   */
+  commercialIntent: "subscribe" | "renew" | null;
 }
 
 export interface ProjectMeta {
@@ -253,6 +273,9 @@ export class Api {
   }
 
   pending = () => this.call<PendingConfirmation[]>("/pending");
+  /** 立刻拉一次订阅（D5：用户付完款回到应用的那一刻）。 */
+  refreshEntitlements = () =>
+    this.call<ProductInfo[]>("/entitlements/refresh", "POST");
   checkUpdate = () => this.call<UpdateCheck>("/updates/check");
   /** 记下安装意图（策略 2：操作与时机都归用户）。守护进程会再判一次闸门。 */
   requestInstall = (version: string) =>
