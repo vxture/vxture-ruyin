@@ -4,9 +4,9 @@
  *
  *   <dataDir>/projects/<id>/project.db
  *
- * Phase A: plain SQLite; at-rest encryption (SQLCipher + OS keychain, 60
- * section 7.3) is TD-009. Tables are the Phase A subset of 60 section 7.2 -
- * kv (meta/contract/business state), task_instances, audit_events, journal.
+ * 落盘即加密（TD-009 已回收）：SQLCipher 方案，每个项目一把密钥，密钥由
+ * KeyManager 保管（Windows 上走 DPAPI）。表：kv（meta / 契约 / 业务状态 /
+ * 授权 / 绑定 / 成果登记）、task_instances、audit_events、journal、fts_index。
  */
 
 import Database from "better-sqlite3-multiple-ciphers";

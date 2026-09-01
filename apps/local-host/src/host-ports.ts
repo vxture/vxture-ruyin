@@ -1,7 +1,11 @@
 /**
- * Node host implementations of the kernel ports (clock / id / crypto) and the
- * Phase A mock AI gateway. The real gateway client (Vxture AI Gateway, 60
- * section T10) replaces MockAIGateway in Phase B - nothing else changes.
+ * Node host implementations of the kernel ports (clock / id / crypto), plus a
+ * stand-in gateway.
+ *
+ * MockAIGateway **不是"以后会被替换掉的东西"**：真正的
+ * `CapabilityClient` 已经在了，配置了能力面就用它。这个替身是没有配置时的
+ * 那条分支，而守护进程启动时会明说自己在用哪一条 —— 「没接上」绝不能看起来
+ * 像「在工作」。
  */
 
 import { createHash, randomUUID } from "node:crypto";

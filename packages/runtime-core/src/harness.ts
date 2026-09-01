@@ -7,22 +7,32 @@
  * budget (04 section 6.1), grant revalidation at selection time, the
  * context_confirm checkpoint for high-sensitivity context (04 section 6.2),
  * the inference-transmission audit event with content hashes (04 section
- * 7.3), capability invocation through the AIGatewayPort (mock in Phase A/B
- * until liaison L3 lands), the verification pipeline with the
- * verification_review checkpoint, journal entries, and audit emission for
- * every step. A fresh Harness per call: decideCheckpoint on a new instance
- * IS the rebuild-on-resume semantics of 50-harness section 8.
+ * 7.3), capability invocation through the AIGatewayPort, the turn-based
+ * capability loop with tool offers, the Tool Gate (decision synthesis +
+ * argument validation + task-scoped ask cache), the verification pipeline
+ * with the verification_review checkpoint and bounded revision rounds, the
+ * checkpoint queue with modify, transient-error suspension with backoff,
+ * cancellation between capabilities, project-produced context
+ * (`sources: [project]`), interrupted-task recovery, journal entries, and
+ * audit emission for every step.
+ *
+ * A fresh Harness per call: decideCheckpoint on a new instance IS the
+ * rebuild-on-resume semantics of 50-harness section 8.
+ *
+ * The gateway is a port: `CapabilityClient` talks to the product's real
+ * capability surface when one is configured, `MockAIGateway` stands in when
+ * none is (and the daemon says which at startup - "not wired up" must never
+ * look like "working").
  *
  * A caller may still pass explicit `inputs` (dev console manual mode /
  * tests): that path skips selection and marks the transmission as
  * caller-supplied context.
  *
- * Also implemented: the turn-based capability loop with tool offers, the Tool
- * Gate (decision synthesis + argument validation + task-scoped ask cache), the
- * checkpoint queue with modify, and interrupted-task recovery.
+ * **Still missing: redaction hooks.** That is the whole list.
  *
- * Not yet implemented: revision rounds on failed verification, redaction
- * hooks, transient-error suspension, and cancellation.
+ * 这一段是给下一个读这个文件的人看的，所以它必须是真的。它曾经声称改订轮次、
+ * 瞬时挂起、取消三项都还没实现 —— 三项都实现了，而且各自有用例。一段说反了
+ * 的说明，和一段正确的说明长得一模一样。
  */
 
 import type { RuyinContract, TaskDefinition } from "@vxture/ruyin-contract-schema";
