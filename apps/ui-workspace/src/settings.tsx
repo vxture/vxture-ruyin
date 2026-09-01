@@ -217,15 +217,18 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
 
 /* ---------------- 软件更新 ---------------- */
 
+/**
+ * 在线更新尚未接通：`latest.yml` 一直在发布流水线里产出，但**应用里没有消费者**
+ * （electron-updater 未接入）。所以这一节只报当前版本，不提供检查与渠道选择。
+ *
+ * 原实现点「检查更新」会直接显示「当前已是最新（时:分:秒）」——一个网络请求都
+ * 没发，却带着时间戳，看起来像真查过。**没查过就说已是最新，比不提供这个按钮
+ * 糟得多**：用户会信它。渠道开关同理，它只写 localStorage，没有任何人读——
+ * 用户切到 Beta 却永远收不到 beta 包，只会以为坏了。
+ *
+ * 接入更新后，这两项一并放开。
+ */
 function UpdatesSection({ system }: { system: SystemInfo | null }) {
-  const [channel, setChannel] = useState(
-    localStorage.getItem("ruyin-update-channel") ?? "stable",
-  );
-  const [checked, setChecked] = useState<string | null>(null);
-  const pickChannel = (c: string) => {
-    localStorage.setItem("ruyin-update-channel", c);
-    setChannel(c);
-  };
   return (
     <div className="card">
       <SettingRow label="当前版本">
@@ -236,38 +239,17 @@ function UpdatesSection({ system }: { system: SystemInfo | null }) {
       <SettingRow label="启动时间">
         <span className="mono">{system?.startedAt ?? "…"}</span>
       </SettingRow>
-      <SettingRow label="更新渠道" hint="stable 稳定 / beta 尝鲜；自动更新随发布服务上线">
-        <SegmentedControl
-          ariaLabel="更新渠道"
-          items={[
-            { value: "stable", label: "稳定版" },
-            { value: "beta", label: "Beta" },
-          ]}
-          value={channel}
-          onChange={pickChannel}
-        />
+      <SettingRow
+        label="在线更新"
+        hint="发布服务与自动更新尚未接通；接通前请从官方渠道获取新版本安装包"
+      >
+        <StatusBadge tone="neutral">尚未接通</StatusBadge>
       </SettingRow>
-      <SettingRow label="检查更新">
-        <div>
-          <Button
-            variant="outline"
-            onClick={() =>
-              setChecked(
-                `当前已是最新（${new Date().toLocaleTimeString()}）· 在线更新随发布服务上线后启用`,
-              )
-            }
-          >
-            检查更新
-          </Button>
-          {checked && (
-            <div
-              className="text-body-sm text-muted-foreground"
-              style={{ marginTop: 6 }}
-            >
-              {checked}
-            </div>
-          )}
-        </div>
+      <SettingRow
+        label="更新渠道"
+        hint="随自动更新一并开放——现在设置它不会有任何效果，所以先不提供"
+      >
+        <span className="text-body-sm text-muted-foreground">stable</span>
       </SettingRow>
     </div>
   );

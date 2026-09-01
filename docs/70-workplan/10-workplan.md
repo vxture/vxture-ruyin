@@ -55,9 +55,11 @@
 
 - [x] release.yml + 打包链（2026-07-24）：`pack.mjs`（pnpm deploy --legacy 自包含 daemon → electron-builder NSIS）→ exe + blockmap + latest.yml + manifest.json + SHA256SUMS；本地实测产出 **123MB 安装包**，打包版 `Ruyin.exe --smoke` 通过（daemon 从 resources 启动、DPAPI 生效）
 - [x] beta / production Environment 已建，production 必审人已配（tag→渠道审批拓扑就位）
-- [ ] 签名步（**前置：TD-001 证书采购**；electron-builder 侧 `signAndEditExecutable` 待回开）
+- [x] tag↔版本一致性闸（2026-09-01）：`v*` tag 与 `apps/shell/package.json` 不符即 release 失败。此前版本只取自 package.json——**推 `v0.2.0` 而包里还是 `0.1.0`，会产出 `Ruyin-Setup-0.1.0.exe` 并当作 v0.2.0 发布，产物、更新 feed、下载清单全都带着一个没人发布过的版本号，而没有任何东西会报错**
+- [ ] 签名步（**前置：TD-001 证书采购**；electron-builder 侧 `signAndEditExecutable` 待回开）。**注意签名不只挡下载**：electron-updater 在 Windows 默认校验更新包签名，不签名就得关掉那道校验——等于把更新通道的安全性一并降了
 - [ ] dl 主机上载（**前置：liaison L2**）——publish job 已留占位，L2 落地后换 tailnet-ssh-connect + rsync 原子切换
 - [ ] products/ 静态清单目录（流 C 的 MVP Registry）
+- [ ] **接入 electron-updater（TD-021）**：`latest.yml` 一直在产出，但**应用里没有消费者**。设置页的「检查更新」原本不发任何请求就断言「当前已是最新」并附时间戳——**没查过就说已是最新，比不提供这个按钮糟得多**；已于 2026-09-01 改为如实标注「尚未接通」，渠道开关一并收起（它只写 localStorage 无人读，用户切到 Beta 永远收不到 beta 包，只会以为坏了）。接入前需定三条策略：**有任务在跑时不装（等它停）**、自动下载还是询问、是否允许 stable↔beta 降级
 
 ## W5 · npm 发布流
 

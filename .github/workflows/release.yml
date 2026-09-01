@@ -51,14 +51,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          PKG_VERSION="$(node -p "require('./apps/shell/package.json').version")"
           if [[ "${GITHUB_REF_NAME}" == v* ]]; then
-            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            CHANNEL=stable
+            # A v-tag names the version, so the two must agree. Without this
+            # check, tagging v0.2.0 while the package still says 0.1.0 builds
+            # Ruyin-Setup-0.1.0.exe and publishes it AS v0.2.0 — the artifact,
+            # the update feed and the download manifest would all carry a
+            # version nobody released, and nothing would say so.
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [[ "${TAG_VERSION}" != "${PKG_VERSION}" ]]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match apps/shell/package.json version ${PKG_VERSION}." \
+                   "Bump the package version and re-tag, or tag the version that is in the tree." >&2
+              exit 1
+            fi
           else
-            echo "channel=beta" >> "$GITHUB_OUTPUT"
+            # beta-YYYYMMDD.N carries a date, not a version, so the package is
+            # the only source. Nothing to cross-check.
+            CHANNEL=beta
           fi
-          # Installer version comes from the shell package (W5 decides the
-          # tag<->version discipline, workplan OQ-2).
-          echo "version=$(node -p "require('./apps/shell/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+          echo "version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build installer
         run: node scripts/release/pack.mjs
