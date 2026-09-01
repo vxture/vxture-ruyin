@@ -109,6 +109,9 @@ jobs:
       - name: Shared type shape guardrail (server <-> UI)
         run: node scripts/guardrails/check-shared-shapes.mjs
 
+      - name: Update policy guardrail (TD-021, owner decisions)
+        run: node scripts/guardrails/check-update-policy.mjs
+
       - name: Package publish order guardrail
         run: node scripts/guardrails/check-publish-order.mjs
 

@@ -359,6 +359,13 @@ function watchUpdateIntent(win: BrowserWindow): void {
   autoUpdater.autoDownload = false;
   // 退出时静默安装不是用户选的时机（策略 2）。
   autoUpdater.autoInstallOnAppQuit = false;
+  // 策略 3：渠道不允许降级。**显式写，不吃默认值。**
+  //
+  // 库的默认确实是 false，但它的 `channel` setter 会把这个字段翻成 true
+  // （文档原话：设 channel 后 allowDowngrade 会自动变 true，不合适就自己再设
+  // 回来）。而 channel 正是 beta/stable 切换要用的那个东西 —— 也就是说，未来
+  // 谁加渠道切换，这条策略会在没人察觉的情况下自己反过来。
+  autoUpdater.allowDowngrade = false;
   autoUpdater.logger = null;
   const feed = process.env["RUYIN_UPDATE_FEED"];
   if (feed) autoUpdater.setFeedURL({ provider: "generic", url: feed });
@@ -380,6 +387,32 @@ function watchUpdateIntent(win: BrowserWindow): void {
 
   const run = async (version: string): Promise<void> => {
     try {
+      // **先 checkForUpdates 再 downloadUpdate。** 少了这一步，库直接 reject
+      // 「Please check update first」—— downloadUpdate 用的是上一次检查留下的
+      // updateInfo，没检查过就没有那个东西。整条安装路径原本在第一步就断，
+      // 而用户看到的是「更新下载失败」，一句指不向任何地方的话。
+      const found = await autoUpdater.checkForUpdates();
+      const offered = found?.updateInfo.version;
+      if (!offered) {
+        await dialog.showMessageBox(win, {
+          type: "info",
+          title: "没有可安装的更新",
+          message: `渠道里现在没有 ${version}`,
+          detail: "稍后在设置里再检查一次。",
+        });
+        return;
+      }
+      // 用户点的是某一个版本。下载前 feed 可能已经动了 —— 装另一个版本不是
+      // 「顺手更新到更新的那个」，是装了一个他没有同意过的东西（策略 2）。
+      if (offered !== version) {
+        await dialog.showMessageBox(win, {
+          type: "info",
+          title: "版本已变化",
+          message: `你要装的是 ${version}，而渠道现在提供的是 ${offered}`,
+          detail: "没有安装。请在设置里重新检查更新，再决定装哪一个。",
+        });
+        return;
+      }
       await autoUpdater.downloadUpdate();
     } catch (cause) {
       await dialog.showMessageBox(win, {
