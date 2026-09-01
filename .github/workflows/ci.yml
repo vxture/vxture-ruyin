@@ -196,9 +196,19 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
   # -- Test coverage (required check) -----------------------------------------
-  # Runs recursive `test` across the workspace. With no packages yet this is a
-  # green no-op occupying the required context (TD-003); runtime-core unit
-  # tests (state machine / tool gate / contract validator) make it real in W2.
+  # Runs recursive `test` across the workspace. Coverage is measured and
+  # thresholded INSIDE each package's own `test` script
+  # (--experimental-test-coverage + --test-coverage-lines/-branches/-functions,
+  # scoped to that package's own dist/ via --test-coverage-include so a change
+  # in a dependency cannot flip an unrelated package's gate) - not here, so a
+  # package with no threshold set is not silently assumed covered.
+  #
+  # TD-030: from TD-003's closure (2026-07-24) until 2026-09-02 this job ran
+  # tests with no coverage measurement at all - "test-coverage" was, for
+  # months, just "test" under a more reassuring name.
+  #
+  # apps/shell and apps/ui-workspace have no `test` script yet (TD-031);
+  # `--if-present` skips them silently and this job does not check their code.
   test-coverage:
     name: test-coverage
     runs-on: ubuntu-latest

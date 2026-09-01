@@ -23,7 +23,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json && node --test dist/contract.test.js"
+    "test": "tsc -p tsconfig.json && node --experimental-test-coverage --test-coverage-include=\"dist/**/*.js\" --test-coverage-exclude=\"dist/**/*.test.js\" --test-coverage-lines=98 --test-coverage-branches=90 --test-coverage-functions=98 --test dist/contract.test.js"
   },
   "dependencies": {
     "ajv": "^8.17.1",
