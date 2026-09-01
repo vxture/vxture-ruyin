@@ -26,7 +26,7 @@ import { join } from "node:path";
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 /** 依赖在前。改动这个顺序前先想清楚谁依赖谁。 */
-const ORDER = ["contract-schema", "runtime-core", "cli"];
+const ORDER = ["contract-schema", "document", "runtime-core", "cli"];
 
 function pkg(dir) {
   return JSON.parse(

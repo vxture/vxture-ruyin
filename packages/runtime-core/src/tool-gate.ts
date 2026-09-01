@@ -168,14 +168,25 @@ export function validateToolCall(input: ValidationInput): CallValidation {
 
     const ref = spec["x-ruyin-ref"];
     if (ref === "path") {
-      if (typeof value !== "string") {
-        return { ok: false, reason: `parameter "${name}" must be a path string` };
+      // 一个参数可以是一条路径，也可以是一组路径（导出要按顺序汇总多份文档）。
+      // 一组里**每一条**都要过授权：只查第一条，剩下的就是没查。
+      const paths = Array.isArray(value) ? value : [value];
+      if (!paths.length) {
+        return { ok: false, reason: `parameter "${name}" is empty` };
       }
-      if (!isPathGranted(value, grants)) {
-        return {
-          ok: false,
-          reason: `path "${value}" is outside every granted folder`,
-        };
+      for (const one of paths) {
+        if (typeof one !== "string") {
+          return {
+            ok: false,
+            reason: `parameter "${name}" must be a path string`,
+          };
+        }
+        if (!isPathGranted(one, grants)) {
+          return {
+            ok: false,
+            reason: `path "${one}" is outside every granted folder`,
+          };
+        }
       }
     } else if (ref === "context_item") {
       if (!contextSet.some((item) => item.id === value)) {

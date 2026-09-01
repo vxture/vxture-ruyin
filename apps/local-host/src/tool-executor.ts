@@ -20,8 +20,14 @@ import {
   statSync,
 } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { dirname, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { isPathGranted } from "@vxture/ruyin-core";
+import {
+  describeDiagnostics,
+  isLossy,
+  parseDocument,
+  renderDocx,
+} from "@vxture/ruyin-document";
 import type {
   FolderGrant,
   ToolExecutionRequest,
@@ -47,7 +53,21 @@ const TEXT_EXTENSIONS = new Set([
   ".txt", ".md", ".markdown", ".yaml", ".yml", ".json", ".csv", ".xml", ".html",
 ]);
 
-const IMPLEMENTED = new Set(["read_file", "write_document"]);
+/** What `export_result` can take in. A `.docx` is not Markdown; say so. */
+const SOURCE_EXTENSIONS = new Set([".md", ".markdown", ".txt"]);
+
+/**
+ * Formats this host renders. Checked per call rather than assumed from the
+ * contract: a contract may legitimately declare a format some other host
+ * produces, and answering that request with the wrong file type would be
+ * worse than refusing it.
+ */
+const RENDERERS = new Set(["docx"]);
+
+/** Cap on what one export reads in, before rendering multiplies it. */
+const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
+
+const IMPLEMENTED = new Set(["read_file", "write_document", "export_result"]);
 
 export class LocalToolExecutor implements ToolExecutorPort {
   supports(tool: string): boolean {
@@ -60,6 +80,8 @@ export class LocalToolExecutor implements ToolExecutorPort {
         return this.readFile(request);
       case "write_document":
         return this.writeDocument(request);
+      case "export_result":
+        return this.exportResult(request);
       default:
         return {
           content: `tool "${request.tool}" is not implemented by this host`,
@@ -161,6 +183,94 @@ export class LocalToolExecutor implements ToolExecutorPort {
       Buffer.from(content, "utf8"),
       request.grants,
     );
+  }
+
+  /**
+   * Assemble the Markdown documents this task already wrote into one rendered
+   * deliverable (ADR-013 option C, ADR-016).
+   *
+   * The parts are named **by path**, not pasted into the call. They were
+   * written by `write_document` in an earlier turn, so they are already on
+   * disk inside a granted folder; re-emitting them here would send the whole
+   * document through the conversation a second time, at full token price, to
+   * produce bytes that never needed to be there. The model decides *which*
+   * parts and in *what order* - that is the part only it knows.
+   */
+  private async exportResult(
+    request: ToolExecutionRequest,
+  ): Promise<ToolExecutionResult> {
+    const path = String(request.arguments["path"] ?? "");
+    const format = String(request.arguments["format"] ?? "");
+    if (!RENDERERS.has(format)) {
+      return {
+        content:
+          `this host does not render "${format}"; it renders ` +
+          `${[...RENDERERS].join(", ")}`,
+        isError: true,
+      };
+    }
+    const raw = request.arguments["sources"];
+    const sources = (Array.isArray(raw) ? raw : [raw]).map((s) => String(s));
+    if (!sources.length || sources.some((s) => !s)) {
+      return { content: "no source documents were given", isError: true };
+    }
+
+    const parts: string[] = [];
+    let total = 0;
+    for (const source of sources) {
+      const denied = guard(source, request.grants, "read");
+      if (denied) return denied;
+      if (!SOURCE_EXTENSIONS.has(extname(source).toLowerCase())) {
+        return {
+          content:
+            `"${source}" is not a Markdown source; export assembles ` +
+            `${[...SOURCE_EXTENSIONS].join(", ")}`,
+          isError: true,
+        };
+      }
+      try {
+        const bytes = readFileSync(source);
+        total += bytes.byteLength;
+        if (total > MAX_SOURCE_BYTES) {
+          return {
+            content: `sources exceed ${MAX_SOURCE_BYTES} bytes`,
+            isError: true,
+          };
+        }
+        parts.push(bytes.toString("utf8"));
+      } catch (cause) {
+        return { content: describe(cause), isError: true };
+      }
+    }
+
+    const document = parseDocument(parts.join("\n\n"));
+    // A lossy document is refused rather than written. The model gets the
+    // line numbers and can fix its Markdown for one more turn; a deliverable
+    // that is quietly missing a figure looks exactly like a correct one, and
+    // nobody finds out until it is the thing that was submitted.
+    if (isLossy(document.diagnostics)) {
+      return {
+        content:
+          "cannot render; fix these and call again:\n" +
+          describeDiagnostics(document.diagnostics),
+        isError: true,
+      };
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = await renderDocx(document, { title: basename(path, ".docx") });
+    } catch (cause) {
+      return { content: describe(cause), isError: true };
+    }
+    const written = this.writeArtifact(path, bytes, request.grants);
+    if (written.isError || !document.diagnostics.length) return written;
+    // Degraded, not lossy: the content is all there at lower fidelity. Say so
+    // anyway - the caller should know what it is handing over.
+    return {
+      content:
+        `${written.content}\nrendered with reservations:\n` +
+        describeDiagnostics(document.diagnostics),
+    };
   }
 }
 

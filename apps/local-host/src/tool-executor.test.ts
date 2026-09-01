@@ -18,6 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { inflateRawSync } from "node:zlib";
 import { join } from "node:path";
 import test from "node:test";
 import type { FolderGrant, ToolExecutionRequest } from "@vxture/ruyin-core";
@@ -142,4 +143,139 @@ void test("读取：文本文件照常读出", async () => {
   const r = await exec.execute(call("read_file", { path: md }, grants));
   assert.equal(r.isError, undefined);
   assert.equal(r.content, "招标要点");
+});
+
+/** 解开 .docx 取 word/document.xml —— 只断言「有字节」等于什么都没断言。 */
+function docPart(bytes: Buffer): string {
+  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0; i--) {
+    if (v.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  assert.notEqual(eocd, -1, "没有中央目录 —— 这不是一个 zip");
+  let p = v.getUint32(eocd + 16, true);
+  for (let i = v.getUint16(eocd + 10, true); i > 0; i--) {
+    const method = v.getUint16(p + 10, true);
+    const comp = v.getUint32(p + 20, true);
+    const nl = v.getUint16(p + 28, true);
+    const el = v.getUint16(p + 30, true);
+    const cl = v.getUint16(p + 32, true);
+    const local = v.getUint32(p + 42, true);
+    const name = bytes.subarray(p + 46, p + 46 + nl).toString("utf8");
+    if (name === "word/document.xml") {
+      const at =
+        local + 30 + v.getUint16(local + 26, true) + v.getUint16(local + 28, true);
+      const raw = bytes.subarray(at, at + comp);
+      return (method === 0 ? raw : inflateRawSync(raw)).toString("utf8");
+    }
+    p += 46 + nl + el + cl;
+  }
+  throw new Error(".docx 里没有 word/document.xml");
+}
+
+/**
+ * 导出（TD-019 / ADR-016）。
+ *
+ * 契约一直声明着 export_result，宿主一直没实现它，于是 toolOffers 把它安静地
+ * 摘掉，export_deliverable 任务没有任何办法达成目标。这一组用例钉住的是它现在
+ * 真的能达成，以及它在什么情况下必须拒绝。
+ */
+
+void test("导出：按路径汇总多份 Markdown，产出真能打开的 .docx", async () => {
+  const { dir, grants } = grantedDir();
+  writeFileSync(join(dir, "a.md"), "# 技术方案\n\n第一部分\n", "utf8");
+  writeFileSync(join(dir, "b.md"), "::ry-pagebreak\n\n## 附录\n\n第二部分\n", "utf8");
+  const out = join(dir, "投标成果.docx");
+
+  const r = await exec.execute(
+    call(
+      "export_result",
+      { path: out, format: "docx", sources: [join(dir, "a.md"), join(dir, "b.md")] },
+      grants,
+    ),
+  );
+  assert.equal(r.isError, undefined, r.content);
+
+  const bytes = readFileSync(out);
+  assert.equal(bytes[0], 0x50, "不是 zip —— 那就不是 .docx");
+  assert.ok(bytes.byteLength > 1000);
+  // 两份都进去了，而且是按给定顺序 —— 顺序由模型定，运行时不许自作主张。
+  const xml = docPart(bytes);
+  assert.ok(xml.indexOf("第一部分") < xml.indexOf("第二部分"));
+  assert.match(xml, /<w:br w:type="page"/);
+});
+
+void test("导出：正文里有渲染不了的东西，宁可失败也不交半份成品", async () => {
+  const { dir, grants } = grantedDir();
+  writeFileSync(join(dir, "a.md"), "# 方案\n\n![架构图](arch.png)\n", "utf8");
+  const out = join(dir, "x.docx");
+
+  const r = await exec.execute(
+    call("export_result", { path: out, format: "docx", sources: [join(dir, "a.md")] }, grants),
+  );
+  assert.equal(r.isError, true);
+  assert.match(r.content, /第 3 行/);
+  assert.equal(existsSync(out), false, "拒绝了却还是落了盘 —— 那这次拒绝没有意义");
+});
+
+void test("导出：未授权目录里的来源读不到", async () => {
+  const { dir, grants } = grantedDir();
+  const outside = mkdtempSync(join(tmpdir(), "ruyin-nope-"));
+  writeFileSync(join(outside, "secret.md"), "# 别人的资料\n", "utf8");
+
+  const r = await exec.execute(
+    call(
+      "export_result",
+      { path: join(dir, "x.docx"), format: "docx", sources: [join(outside, "secret.md")] },
+      grants,
+    ),
+  );
+  assert.equal(r.isError, true);
+  assert.match(r.content, /outside every granted folder/);
+});
+
+void test("导出：渲染不出来的格式当场说清，而不是给一个名字对内容不对的文件", async () => {
+  const { dir, grants } = grantedDir();
+  writeFileSync(join(dir, "a.md"), "# 方案\n", "utf8");
+  const out = join(dir, "x.pdf");
+
+  const r = await exec.execute(
+    call("export_result", { path: out, format: "pdf", sources: [join(dir, "a.md")] }, grants),
+  );
+  assert.equal(r.isError, true);
+  assert.match(r.content, /does not render "pdf"/);
+  assert.equal(existsSync(out), false);
+});
+
+void test("导出：来源不是 Markdown 就直说，不硬当文本解", async () => {
+  const { dir, grants } = grantedDir();
+  writeFileSync(join(dir, "old.docx"), Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+
+  const r = await exec.execute(
+    call(
+      "export_result",
+      { path: join(dir, "x.docx"), format: "docx", sources: [join(dir, "old.docx")] },
+      grants,
+    ),
+  );
+  assert.equal(r.isError, true);
+  assert.match(r.content, /not a Markdown source/);
+});
+
+void test("导出：只降级不丢内容时照常出成品，但把降级说出来", async () => {
+  const { dir, grants } = grantedDir();
+  writeFileSync(join(dir, "a.md"), "::ry-toc{style=fancy}\n\n# 方案\n", "utf8");
+  const out = join(dir, "x.docx");
+
+  const r = await exec.execute(
+    call("export_result", { path: out, format: "docx", sources: [join(dir, "a.md")] }, grants),
+  );
+  assert.equal(r.isError, undefined, r.content);
+  assert.ok(existsSync(out));
+  assert.match(r.content, /reservations/);
+  assert.match(r.content, /style/);
+});
+
+void test("导出：export_result 现在真的在工具面上", () => {
+  assert.equal(exec.supports("export_result"), true);
 });

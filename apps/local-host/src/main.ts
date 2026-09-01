@@ -147,6 +147,7 @@ const server = createLocalApi({
   updateIntent,
   writeArtifact: (path, bytes, grants) =>
     toolExecutor.writeArtifact(path, bytes, grants),
+  supportsTool: (tool) => toolExecutor.supports(tool),
   refreshEntitlements: () => syncEntitlements(),
   ...(process.env["RUYIN_UPDATE_FEED"]
     ? { updateFeedBase: process.env["RUYIN_UPDATE_FEED"] }

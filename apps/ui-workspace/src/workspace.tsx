@@ -33,6 +33,7 @@ import {
   type Binding,
   type ContextItemMeta,
   type FolderGrant,
+  type TaskDef,
   type TaskInstance,
   type ProjectView,
 } from "./api";
@@ -540,23 +541,34 @@ function TaskLauncher({
   def,
   onLaunch,
 }: {
-  def: { id: string; objective: string; input_types: string[] };
+  def: TaskDef;
   onLaunch: (inputs?: Record<string, unknown>) => void;
 }) {
   const [manual, setManual] = useState(false);
   const [json, setJson] = useState("{}");
   const [jsonError, setJsonError] = useState<string | null>(null);
+  // 运行时会当场拒绝这个任务；那就别把「启动」摆在这里等人去点。
+  const blocked = def.unrunnable.length > 0;
   return (
     <div className="card">
       <div style={{ fontWeight: 600 }}>{def.id}</div>
       <div className="text-body-sm text-muted-foreground">
         {def.objective} · 输入类型: {def.input_types.join(", ") || "（无）"}
       </div>
+      {blocked && (
+        <div className="error-box">
+          本机跑不了这个任务：还没有实现 {def.unrunnable.join("、")}
+        </div>
+      )}
       <div className="row" style={{ marginTop: 6 }}>
-        <Button onClick={() => onLaunch(undefined)}>
+        <Button disabled={blocked} onClick={() => onLaunch(undefined)}>
           启动（自动选择上下文）
         </Button>
-        <Button variant="outline" onClick={() => setManual(!manual)}>
+        <Button
+          variant="outline"
+          disabled={blocked}
+          onClick={() => setManual(!manual)}
+        >
           {manual ? "收起手动模式" : "手动提供输入"}
         </Button>
       </div>

@@ -105,6 +105,11 @@ export interface TaskDef {
   id: string;
   objective: string;
   input_types: string[];
+  /**
+   * 本机跑不了的工具。非空 = 这个任务在这台机器上启动不了，运行时会当场拒绝。
+   * 界面据此提前禁用，而不是让人点下去才知道。
+   */
+  unrunnable: string[];
 }
 
 export interface StateItem {

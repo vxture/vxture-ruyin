@@ -311,6 +311,20 @@ const VERIFICATION_ORDER: Record<VerificationOutcome["kind"], number> = {
   human: 2,
 };
 
+/**
+ * Which of a task's declared tools this host cannot run.
+ *
+ * One rule, one implementation: `startTask` refuses on it, and the task list
+ * shows it before the user clicks. Two copies of this judgement would drift,
+ * and the drift would look like a task that is offered but cannot start.
+ */
+export function unrunnableTools(
+  tools: readonly string[],
+  supports: (tool: string) => boolean,
+): string[] {
+  return tools.filter((tool) => !supports(tool));
+}
+
 export class Harness {
   constructor(private readonly deps: HarnessDeps) {}
 
@@ -322,6 +336,24 @@ export class Harness {
     const definition = contract.tasks.find((t) => t.id === taskId);
     if (!definition) {
       throw new HarnessError(`task "${taskId}" is not declared in the contract`);
+    }
+    // A task whose tools this host cannot run is refused here, before a single
+    // provider turn is paid for.
+    //
+    // toolOffers already drops unsupported tools - correctly, since promising
+    // one and failing on use teaches the provider nothing. But dropping them
+    // silently left the task with no way to reach its objective, and the only
+    // symptom was "exceeded 12 turns without producing a result" twelve model
+    // calls later: expensive, slow, and it never named the cause. Same outcome,
+    // one twelfth the cost, and this time it says what is missing.
+    const unrunnable = unrunnableTools(definition.tools, (tool) =>
+      this.deps.tools?.supports(tool) ?? false,
+    );
+    if (unrunnable.length) {
+      throw new HarnessError(
+        `task "${taskId}" needs tools this host does not implement: ` +
+          `${unrunnable.join(", ")}`,
+      );
     }
     const instance: TaskInstanceRecord = {
       id: id.newId("ti"),
