@@ -34,12 +34,27 @@ import { extractDaemonEvents, type DaemonEventKind } from "./daemon-events.js";
 import { diffPending } from "./pending-notify.js";
 
 // userData 路径由它决定，而不是 productName。
-//
-// **它是无条件的，于是装机态和开发态共用同一个 Chromium 配置目录**
-// （`%APPDATA%\Ruyin`）。下面的 dataDir 只分了业务数据那一层，cookie、
-// Local/Session Storage、Preferences 两种形态是同一份 —— 也就是登录会话互相
-// 串。已实测确认并记为 TD-032；要分家得在开发态调 app.setPath("userData", ...)。
 app.setName("Ruyin");
+
+/**
+ * 开发态把**整个 Chromium 配置**也分出去（TD-032）。
+ *
+ * `setName` 是无条件的，所以在这一行之前，两种形态的 userData 都是
+ * `%APPDATA%\Ruyin`。下面的 dataDir 只分了业务数据那一层 —— cookie、
+ * Local/Session Storage、Preferences 仍是同一份，**也就是登录会话互相串**。
+ *
+ * 那不只是「省得重新登录」：开发态可能指着另一套平台环境，那份 token 会和正式
+ * 环境的躺在同一个 cookie jar 里；而项目归属是按会话里的工作区判定的
+ * （ADR-015），两边互相继承会话意味着**项目可能被记到另一个工作区名下**。
+ *
+ * 放在 `~/.ruyin/dev/chromium`，和业务数据同一个根：删掉 `~/.ruyin` 就等于把
+ * 开发态清干净，不必再记住「还有一份在 AppData 里」。
+ *
+ * 必须在 app ready 之前调用 —— 会话一旦建起来，路径就定了。
+ */
+if (!app.isPackaged) {
+  app.setPath("userData", join(homedir(), ".ruyin", "dev", "chromium"));
+}
 
 const SMOKE = process.argv.includes("--smoke");
 const PORT = Number(process.env["RUYIN_PORT"] ?? (SMOKE ? 17420 : 7420));

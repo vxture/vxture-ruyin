@@ -200,16 +200,22 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
 /* ---------------- 软件更新 ---------------- */
 
 /**
- * 检查是真的（守护进程拉渠道 feed 比版本），**下载与安装尚未接入**。
+ * 检查、下载与安装**都已接入**（2026-09-01，TD-021）。
  *
- * 分成两半是因为前置不同：检查只是一个 HTTP GET，现在就能做；下载与安装要
- * electron-updater、要 TD-001 的签名证书（Windows 上 electron-updater 默认
- * 校验更新包签名），还要三条尚未定的策略——有任务在跑时装不装、自动下载还是
- * 询问、允不允许渠道降级。**未定的策略不该由实现替人默认掉**，所以这里不做
- * 自动检查、不记住渠道，只有用户点一下才去问一次。
+ * 检查只是一个 HTTP GET，放在守护进程；下载与安装归壳（electron-updater）。
+ * 三条策略由 owner 定下并落进代码，`scripts/guardrails/check-update-policy.mjs`
+ * 逐条钉住：①有任务在跑就不装（闸门在守护进程，因为只有它知道有没有任务在跑；
+ * 壳在真正安装前会再问一次）②绝不自行下载、也不在退出时静默安装 ③渠道不允许
+ * 降级。**未定的策略不该由实现替人默认掉** —— 现在它们定了，于是写进了代码。
+ *
+ * 余下只等 TD-001 的证书：Windows 上 electron-updater 默认校验更新包签名，本仓
+ * 选择**不关掉那道校验**，所以没有签名就发不出能装的更新。
  *
  * **查不到 ≠ 已是最新。** 这个功能的上一版不发请求就断言「当前已是最新」并附
  * 时间戳；现在 `unreachable` 是一个正式状态，绝不折叠进「最新」。
+ *
+ * 这段注释本身出过一次反向的错：下载与安装接进来之后它还写着「尚未接入」、
+ * 「三条尚未定的策略」，读起来像没做、其实做了 —— 与 TD-015 记的那一类同科。
  */
 function UpdatesSection({
   system,
@@ -324,9 +330,14 @@ function UpdatesSection({
           )}
         </div>
       </SettingRow>
+      {/* 下载与安装已经开放了，渠道仍不提供 —— 原因换了，不是「还没做到那一步」：
+          electron-updater 的 `channel` setter 会把 `allowDowngrade` 自动翻成
+          true，而那正是 owner 定的策略 ③。加一个渠道开关就等于让策略在没人察觉
+          的情况下自己反过来（check-update-policy.mjs 盯着这一条）。要提供它，
+          得先处理这个副作用，而不是把开关摆上去。 */}
       <SettingRow
         label="更新渠道"
-        hint="随下载与安装一并开放——现在设置它不会有任何效果，所以先不提供"
+        hint="暂不提供：切换渠道会连带允许降级，而降级是明确禁止的——要开放它得先解掉这个副作用"
       >
         <span className="text-body-sm text-muted-foreground">stable</span>
       </SettingRow>
