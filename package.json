@@ -20,6 +20,7 @@
     "lint:shared-shapes": "node scripts/guardrails/check-shared-shapes.mjs",
     "lint:update-policy": "node scripts/guardrails/check-update-policy.mjs",
     "dev:ui": "node scripts/dev/ui-harness.mjs",
-    "lint:brand-assets": "node scripts/guardrails/check-brand-assets.mjs"
+    "lint:brand-assets": "node scripts/guardrails/check-brand-assets.mjs",
+    "gen:app-icon": "pnpm --filter @vxture/ruyin-shell exec electron ../../scripts/release/make-app-icon.mjs"
   }
 }

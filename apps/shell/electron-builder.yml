@@ -27,13 +27,29 @@ extraResources:
     filter:
       - "**/ruyin.product.yaml"
 win:
+  # 显式指路而不是靠 electron-builder 自动找 build/icon.ico —— `build/` 在
+  # .gitignore 里是整目录忽略的，图标放那儿就进不了仓库。**没有这一行的后果是
+  # 静默的**：electron-builder 找不到图标不会报错，它会安安静静地用 Electron
+  # 自带的默认图标，于是装出来的 Ruyin.exe 挂着 Electron 的原子标 —— 之前就是
+  # 这样，构建全绿，没有任何一处提示过。
+  # 重新生成：pnpm gen:app-icon（源是设计系统的品牌 SVG）。
+  icon: icons/icon.ico
   target:
     - target: nsis
       arch: [x64]
-  # Skips the winCodeSign toolchain (symlink extraction needs elevation on
-  # dev machines; also no cert yet, TD-001). Flip back on when signing lands
-  # in CI - elevated runners are unaffected by the symlink issue.
-  signAndEditExecutable: false
+  # 打开它是**图标能不能贴上去的前提**：electron-builder 是在「编辑可执行文件」
+  # 这一步里写入图标和版本信息的，而这个开关关掉的正是那一步。之前它是 false，
+  # 于是上面那行 icon 完全是空转 —— 配了图标、构建全绿、装出来还是 Electron 的
+  # 原子标，中间没有任何一处报错。**这就是那个错误的全貌**：不是路径写错，是那
+  # 一步压根没跑。
+  #
+  # 代价：它要下载并解压 winCodeSign 工具链，而那个 7z 里带 darwin 的 dylib 符号
+  # 链接，解压需要 SeCreateSymbolicLinkPrivilege。**没开开发者模式、也没提权的
+  # Windows 开发机会在这里失败**（本机就是，见 TD-025），CI 的 runner 有这个权限。
+  # 也就是说本地打包从此需要开发者模式或管理员身份；打包形态本来就由 CI 验。
+  #
+  # 签名仍然没有（TD-001 的证书未到），electron-builder 在没有证书时只编辑、不签。
+  signAndEditExecutable: true
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
