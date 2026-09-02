@@ -22,12 +22,10 @@ import {
   Badge,
   Button,
   EmptyState,
+  Icon,
   ListCard,
   ListCardGrid,
-  MetricGrid,
-  MetricListCard,
   Section,
-  SectionHeader,
   StatusBadge,
 } from "@vxture/design-system";
 import {
@@ -101,6 +99,51 @@ const BLURBS: Record<string, string> = {
   "vxture.bid": "招标解析 · 需求矩阵 · 方案生成 · 覆盖校验",
 };
 
+/**
+ * Console 的应用中心 —— 「在线使用」的落点。
+ *
+ * 平台还没有 per-product 深链，所以只能落到应用中心这一层。**不拼一个猜出来的
+ * 产品 URL** —— 猜错的深链比多点一步糟得多。
+ */
+const APPCENTER_URL = (consoleBase: string) => `${consoleBase}/zh-CN/appcenter`;
+
+type StripTone = "ok" | "warn" | "danger" | "muted";
+
+/**
+ * 运行状态条 —— 三件事压成一行。
+ *
+ * 不用 MetricCard：那是给**要被读的读数**准备的（图标、大字、装饰条形图），
+ * 而这三条平时都对，属于「不出事就不必看」的一类。占位大小该按出问题时需要
+ * 多醒目来定，不是按平时占多少地方来定。
+ *
+ * 状态点是唯一的颜色出口：出了问题它变红，一行字里那个红点比放大三倍的卡片
+ * 更快被扫到。
+ */
+function StatusStrip({
+  items,
+}: {
+  items: ReadonlyArray<{
+    id: string;
+    label: string;
+    value: string;
+    detail: string;
+    tone: StripTone;
+  }>;
+}) {
+  return (
+    <ul className="status-strip" aria-label="运行时概况">
+      {items.map((it) => (
+        <li key={it.id} className="status-chip">
+          <span className={`status-dot status-dot--${it.tone}`} aria-hidden />
+          <span className="status-label">{it.label}</span>
+          <span className="status-value">{it.value}</span>
+          {it.detail && <span className="status-detail">{it.detail}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function HomePage({
   api,
   products,
@@ -158,42 +201,28 @@ export function HomePage({
 
   return (
     <div className="home">
-      {/* 一行就够。原来这里是 level=1 + 图标 + 两行说明，占掉首屏近三分之一，
-          而它全是提示性信息 —— 提示不该比它提示的东西还大。 */}
-      <SectionHeader
-        level={3}
-        title="开始工作"
-        description="业务产品由 Vxture 平台订阅提供；本地数据不出设备。"
-      />
+      {/* 「开始工作」那行标题去掉了：用户打开首页就是来工作的，一句标题重复
+          他已经知道的事，只是把内容往下推了一屏。 */}
 
-      {/* 三张卡是**框架自己的三件事**：跑得起来吗、数据安全吗、产品从哪来。
-          原来还有「可用产品」「项目」两张 —— 那是下面列表的计数，把同一份
-          事实说两遍，占的是首屏最贵的位置。 */}
-      <MetricGrid
-        aria-label="运行时概况"
-        columns={3}
+      {/* 运行状态是**提示性**信息，不是展示性的：它平时都对，只在出问题的那天
+          需要被看见。所以压成一行 —— 不用 MetricCard（它自带图标、装饰性条形
+          图和大字读数，三张并排要占掉首屏近四分之一），只留状态点 + 名称 +
+          结论 + 一处细节。出了问题靠颜色跳出来，而不是靠尺寸常年占着位置。 */}
+      <StatusStrip
         items={[
           {
             id: "runtime",
             label: "运行环境",
             value: health.ok ? "就绪" : "未连接",
-            description: health.ok
-              ? `本地守护进程 ${health.version ?? ""}`
-              : "等待守护进程",
-            icon: "cpu",
-            trend: health.ok ? "在线" : "离线",
-            trendTone: health.ok ? "success" : "danger",
+            detail: health.ok ? (health.version ?? "") : "等待守护进程",
+            tone: health.ok ? "ok" : "danger",
           },
           {
             id: "protection",
             label: "数据加密",
             value: encrypted ? "已加密" : "开发态",
-            description: encrypted
-              ? "DPAPI + 全库加密"
-              : "明文主密钥（仅开发）",
-            icon: "shield-check",
-            trend: encrypted ? "DPAPI" : "DEV",
-            trendTone: encrypted ? "success" : "warning",
+            detail: encrypted ? "DPAPI + 全库加密" : "明文主密钥（仅开发）",
+            tone: encrypted ? "ok" : "warn",
           },
           {
             // 第三件框架层面的事：产品与数据边界都由平台侧决定 —— 订阅决定
@@ -202,12 +231,10 @@ export function HomePage({
             id: "platform",
             label: "平台连接",
             value: signedIn ? "已连接" : "未登录",
-            description: signedIn
-              ? (session?.workspace?.name ?? "订阅与工作区已同步")
-              : "登录后同步你的订阅",
-            icon: "plugs-connected",
-            trend: signedIn ? "工作区" : "离线",
-            trendTone: signedIn ? "success" : "neutral",
+            detail: signedIn
+              ? (session?.workspace?.name ?? "订阅已同步")
+              : "登录后同步订阅",
+            tone: signedIn ? "ok" : "muted",
           },
         ]}
       />
@@ -226,9 +253,11 @@ export function HomePage({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => window.open(subscribeUrl(), "_blank", "noopener")}
+              onClick={() =>
+                window.open(APPCENTER_URL(consoleBase), "_blank", "noopener")
+              }
             >
-              在平台管理订阅 ↗
+              在线使用 ↗
             </Button>
           ) : undefined
         }
@@ -413,111 +442,123 @@ function ProductCard({
     }
   };
 
+  /**
+   * 状态徽章。**可用性先于订阅** —— 一个订阅还在、但本机停用了的产品要说
+   * 「已停用」；先判 entitled 会让它显示成「已订阅」，把那条真正决定他能不能
+   * 用的状态盖掉，而他看着一个「已订阅」的卡片却没有打开按钮。
+   */
+  const badge =
+    product.availability === "not_entitled" ? (
+      <StatusBadge tone="warning">未订阅</StatusBadge>
+    ) : product.availability === "disabled" ? (
+      <StatusBadge tone="neutral">已停用</StatusBadge>
+    ) : product.entitled === true ? (
+      <StatusBadge tone="success">已订阅</StatusBadge>
+    ) : (
+      <StatusBadge tone="neutral">本地已装</StatusBadge>
+    );
+
   return (
-    <MetricListCard
-      icon="cube"
-      title={product.name}
-      description={BLURBS[product.id] ?? "Vxture 业务产品"}
-      tone={usable ? "brand" : "neutral"}
-      badges={
-        // **可用性先于订阅。** 一个订阅还在、但本机停用了的产品要说「已停用」——
-        // 先判 entitled 会让它显示成「已订阅」，把那条真正决定他能不能用的状态
-        // 盖掉，而他看着一个「已订阅」的卡片却没有打开按钮。
-        <>
-          {product.availability === "not_entitled" ? (
-            <StatusBadge tone="warning">未订阅</StatusBadge>
-          ) : product.availability === "disabled" ? (
-            <StatusBadge tone="neutral">已停用</StatusBadge>
-          ) : product.entitled === true ? (
-            <StatusBadge tone="success">已订阅</StatusBadge>
-          ) : (
-            <StatusBadge tone="neutral">本地已装</StatusBadge>
-          )}
-        </>
-      }
-      metrics={[
-        { key: "version", value: product.version, label: "版本" },
-        {
-          key: "projects",
-          value: total > local ? `${local}/${total}` : String(local),
-          label: total > local ? "项目（本地/总）" : "本地项目",
-        },
-      ]}
-      note={
-        <span className="product-note">
-          <span className="product-ident">{product.id}</span>
-          {/* 不可用的要说清为什么。「打不开」和「因为退订所以打不开」在用户
-              那里是两件事，后者他知道该去哪解决。 */}
-          {!usable && product.reason && (
-            <span className="product-reason">{product.reason}</span>
-          )}
+    <article className={`pcard${usable ? "" : " pcard--blocked"}`}>
+      {/* 一、身份。图标与标题同一行，徽章是这一行唯一靠右的东西 ——
+          标题行右端是状态的固定位置，读者扫一列卡片时不必每张重新找。 */}
+      <header className="pcard-head">
+        <span className="pcard-icon" aria-hidden>
+          <Icon name="cube" size="sm" />
         </span>
-      }
-      footer={
-        <div className="card-actions">
-          {usable ? (
-            <>
-              {/* 辅：平台上的同一个产品。没有 per-product 深链之前先落到目录页
-                  —— 给一个猜出来的 URL 比给目录页更糟。 */}
+        <h3 className="pcard-title">{product.name}</h3>
+        {badge}
+      </header>
+
+      {/* 二、说明与标识。**缩进对齐标题**，不对齐图标 —— 图标是装饰，标题才是
+          这张卡的左缘。 */}
+      <div className="pcard-body">
+        <p className="pcard-desc">{BLURBS[product.id] ?? "Vxture 业务产品"}</p>
+        <p className="pcard-ident">{product.id}</p>
+        {/* 不可用的要说清为什么。「打不开」和「因为退订所以打不开」在用户那里
+            是两件事，后者他知道该去哪解决。 */}
+        {!usable && product.reason && (
+          <p className="pcard-reason">{product.reason}</p>
+        )}
+      </div>
+
+      {/* 三、读数。读数在上、名称在下 —— 扫的是数字，名称是给数字定性的。
+          这一行是「统一模式」的位置：项目型产品报项目数，持续型工作报它自己
+          的连续读数，卡片形状不变。 */}
+      <dl className="pcard-metrics">
+        <div className="pcard-metric">
+          <dd className="pcard-metric-value">{product.version}</dd>
+          <dt className="pcard-metric-label">版本</dt>
+        </div>
+        <div className="pcard-metric">
+          <dd className="pcard-metric-value">
+            {total > local ? `${local}/${total}` : String(local)}
+          </dd>
+          <dt className="pcard-metric-label">
+            {total > local ? "项目（本地/总）" : "本地项目"}
+          </dt>
+        </div>
+      </dl>
+
+      {/* 四、动作。**全部靠右，主动作在最右。** 之前主次两个按钮一左一右分站
+          两端，读者读到卡片末尾时手停在右侧，主动作却在左边 —— 那是把最常点的
+          东西放在最远的地方。 */}
+      <footer className="pcard-foot">
+        {usable ? (
+          <>
+            {/* 辅：平台上的同一个产品。没有 per-product 深链之前先落到应用
+                中心 —— 给一个猜出来的 URL 比多点一步糟。 */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                window.open(APPCENTER_URL(consoleBase), "_blank", "noopener")
+              }
+            >
+              在线 ↗
+            </Button>
+            <Button size="sm" disabled={opening} onClick={() => void open()}>
+              {opening ? "打开中……" : "打开"}
+            </Button>
+          </>
+        ) : (
+          <>
+            {/* §18.5：退订/停用的产品不可打开，但数据仍在、仍可导出。
+                本机停用的可以就地启用；未订阅的不行 —— 那不是这台机器能解决
+                的事，按钮给了也只会失败。 */}
+            {product.commercialIntent && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() =>
                   window.open(
-                    `${consoleBase}/zh-CN/appcenter`,
+                    subscribeUrl(product.id, product.commercialIntent!),
                     "_blank",
                     "noopener",
                   )
                 }
               >
-                在线 ↗
+                {product.commercialIntent === "renew"
+                  ? "去平台续费 ↗"
+                  : "去平台订阅 ↗"}
               </Button>
-              {/* 主 */}
-              <Button size="sm" disabled={opening} onClick={() => void open()}>
-                {opening ? "打开中……" : "打开"}
+            )}
+            {product.availability === "disabled" && (
+              <Button
+                size="sm"
+                onClick={() =>
+                  void api
+                    .activateProduct(product.id)
+                    .then(() => onRefresh())
+                    .catch((e: Error) => onError(e.message))
+                }
+              >
+                启用
               </Button>
-            </>
-          ) : (
-            <>
-              {/* §18.5：退订/停用的产品不可打开，但数据仍在、仍可导出。
-                  本机停用的可以就地启用；未订阅的不行 —— 那不是这台机器能
-                  解决的事，按钮给了也只会失败。 */}
-              {product.availability === "disabled" && (
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    void api
-                      .activateProduct(product.id)
-                      .then(() => onRefresh())
-                      .catch((e: Error) => onError(e.message))
-                  }
-                >
-                  启用
-                </Button>
-              )}
-              {/* 商业入口由 daemon 的 commercialIntent 决定：被捆绑覆盖的产品
-                  没有属于他的商业动作，就不显示按钮（TD-014 D4）。 */}
-              {product.commercialIntent && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    window.open(
-                      subscribeUrl(product.id, product.commercialIntent!),
-                      "_blank",
-                      "noopener",
-                    )
-                  }
-                >
-                  {product.commercialIntent === "renew"
-                    ? "去平台续费 ↗"
-                    : "去平台订阅 ↗"}
-                </Button>
-              )}
-            </>
-          )}
-        </div>
-      }
-    />
+            )}
+          </>
+        )}
+      </footer>
+    </article>
   );
 }

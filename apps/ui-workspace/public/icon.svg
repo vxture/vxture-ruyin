@@ -1,7 +1,17 @@
+<!--
+  应用图标（浏览器页签 / PWA）。和 logo.svg 同一个标记，加深色底片。
+
+  原来这里画的是汉字「如」，现在换掉：字标写作 RUYIN，标记再画一遍汉字是同一句
+  话说两遍；而且它靠 Microsoft YaHei 渲染，那个字体不是所有机器都有，缺字时会
+  掉进系统兜底字体，图标长什么样就不由我们决定了。几何形没有这个问题。
+
+  注意：**打包出来的桌面应用用的不是这个文件**。electron-builder.yml 里没有配
+  `icon:`，所以 Ruyin.exe 和安装器目前都挂着 Electron 自带的默认图标。要换掉它
+  需要一份 .ico（Windows 要多尺寸位图，SVG 不行），那是另一件事。
+-->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Ruyin app icon: dark tech-console tile + brand-blue mark. -->
   <rect width="512" height="512" rx="96" fill="#0a0a0a"/>
   <rect x="16" y="16" width="480" height="480" rx="84" fill="none" stroke="#1e51ff" stroke-opacity="0.35" stroke-width="8"/>
-  <text x="256" y="308" font-family="'Microsoft YaHei','PingFang SC',sans-serif" font-size="240" font-weight="700" fill="#f5f5f5" text-anchor="middle">如</text>
-  <circle cx="392" cy="132" r="26" fill="#1e51ff"/>
+  <rect x="176" y="176" width="176" height="176" rx="48" fill="#1e51ff" opacity="0.3"/>
+  <rect x="132" y="132" width="176" height="176" rx="48" fill="none" stroke="#1e51ff" stroke-width="22"/>
 </svg>
