@@ -60,9 +60,9 @@ void test("extractSseEvents: heartbeat and the initial comment yield no events",
 void test("extractSseEvents: multiple frames in one chunk, in order", () => {
   const { events, buffer } = extractSseEvents(
     "",
-    'data: {"kind":"task"}\n\ndata: {"kind":"pending"}\n\ndata: {"kind":"update-intent"}\n\n',
+    'data: {"kind":"task"}\n\ndata: {"kind":"pending"}\n\n',
   );
-  expect(events).toEqual([{ kind: "task" }, { kind: "pending" }, { kind: "update-intent" }]);
+  expect(events).toEqual([{ kind: "task" }, { kind: "pending" }]);
   expect(buffer).toBe("");
 });
 

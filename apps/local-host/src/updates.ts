@@ -1,15 +1,19 @@
 /**
- * 更新检查（TD-021 的第一半）。
+ * 更新检查（TD-021）。
  *
- * **检查不需要 Electron。** electron-updater 的 generic provider feed 就是渠道
- * 目录下的一个 `latest.yml`：拉回来、比个版本号，普通 HTTP 而已。需要
- * electron-updater 的是**下载与安装**——那一半在壳里，且另有前置（见文末）。
+ * **检查不需要 Electron。** 渠道目录下的一个 `latest.yml`：拉回来、比个版本号，
+ * 普通 HTTP 而已。放在守护进程里还有一个理由：界面是守护进程的纯 Web 客户端
+ * （无 preload、无 IPC，60 §4.2），让检查走它的 HTTP 面，边界不动。
  *
- * 放在守护进程里还有一个理由：界面是守护进程的纯 Web 客户端（无 preload、无
- * IPC，60 §4.2）。让检查走守护进程的 HTTP 面，界面照常读它，边界不动。
+ * **MVP 阶段不做自动更新（2026-09-02，owner 定）。** 曾经接过 electron-updater
+ * 的下载与安装，现已整段拆掉 —— 它在 Windows 上默认校验更新包签名，而 owner 定
+ * 了不采购证书（TD-001 转 standing）。于是只剩两条路：关掉那道校验，等于让更新
+ * 通道接受任何来自 feed 的包；或者不做自动安装。**选了后者** —— 为一个 MVP 阶段
+ * 还不需要的便利去降一条安全底线，不划算。
  *
- * **这里只回答「有没有新版本」，绝不下载、绝不安装。** 自动检查节奏、是否自动
- * 下载、渠道切换——都是策略，未定；未定的策略不该由实现替人默认掉。
+ * 所以这里回答的是「有没有新版本、去哪儿拿」：`downloadUrl` 由**刚校验过的这份
+ * feed** 自己的 `path` 字段拼出，不另立一套下载地址契约，也不猜 URL。用户在浏览
+ * 器里下载、自己安装。
  */
 
 import { parse as parseYaml } from "yaml";
@@ -20,18 +24,38 @@ export const DEFAULT_FEED_BASE = "https://dl.vxture.com/ruyin/stable";
 
 export type UpdateCheck =
   /** 已是最新——**只有真拉到 feed 并比对过才会返回它**。 */
-  | { status: "current"; current: string; latest: string; checkedAt: string }
+  | {
+      status: "current";
+      current: string;
+      latest: string;
+      channel: string;
+      checkedAt: string;
+    }
   | {
       status: "available";
       current: string;
       latest: string;
       releasedAt?: string;
+      /**
+       * 安装包地址，由 feed 自己的 `path` 拼出。**feed 里没有 path 就没有这个
+       * 字段** —— 界面据此退回一句「去下载页自己找」，而不是拼一个猜出来的地址
+       * 递给用户点。
+       */
+      downloadUrl?: string;
+      /** 这次检查的是哪个渠道。不写明渠道的下载链接是有害的。 */
+      channel: string;
       checkedAt: string;
     }
   /**
    * 没查成。**不是「已是最新」**——把查不到说成最新，正是这个功能上一版做的事。
    */
-  | { status: "unreachable"; current: string; reason: string; checkedAt: string };
+  | {
+      status: "unreachable";
+      current: string;
+      reason: string;
+      channel: string;
+      checkedAt: string;
+    };
 
 export interface UpdateCheckOptions {
   currentVersion: string;
@@ -44,6 +68,8 @@ export interface UpdateCheckOptions {
 interface LatestYml {
   version?: unknown;
   releaseDate?: unknown;
+  /** electron-builder 写进 feed 的安装包文件名。 */
+  path?: unknown;
 }
 
 export async function checkForUpdate(
@@ -51,6 +77,19 @@ export async function checkForUpdate(
 ): Promise<UpdateCheck> {
   const at = opts.now?.() ?? new Date().toISOString();
   const base = (opts.feedBase ?? DEFAULT_FEED_BASE).replace(/\/+$/, "");
+  // 渠道就是发布目录的末段：检查哪个渠道，就下载哪个渠道，两者不可能不一致。
+  //
+  // **只看 pathname**。早先这里是 `base.split("/").pop()`，base 若没有路径
+  // （测试 feed 常常就是 `http://127.0.0.1:18080`），末段就成了主机名，界面会
+  // 一本正经地显示「127.0.0.1:18080 渠道」。**渠道名宁可空着也不能猜** —— 空着
+  // 界面就不提渠道，猜一个则是拿一句错话冒充事实。
+  let channel = "";
+  try {
+    const segs = new URL(base).pathname.split("/").filter(Boolean);
+    channel = segs[segs.length - 1] ?? "";
+  } catch {
+    /* base 不是合法 URL：留空，下面的 fetch 自会失败并报 unreachable */
+  }
   const doFetch = opts.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 15_000);
@@ -62,7 +101,7 @@ export async function checkForUpdate(
       headers: { accept: "text/yaml, application/yaml, text/plain" },
     });
     if (!res.ok) {
-      return unreachable(opts.currentVersion, `feed returned ${res.status}`, at);
+      return unreachable(opts.currentVersion, `feed returned ${res.status}`, at, channel);
     }
     body = await res.text();
   } catch (cause) {
@@ -70,6 +109,7 @@ export async function checkForUpdate(
       opts.currentVersion,
       `feed unreachable: ${cause instanceof Error ? cause.message : String(cause)}`,
       at,
+      channel,
     );
   } finally {
     clearTimeout(timer);
@@ -83,22 +123,29 @@ export async function checkForUpdate(
       opts.currentVersion,
       `feed is not readable YAML: ${cause instanceof Error ? cause.message : String(cause)}`,
       at,
+      channel,
     );
   }
   const latest = typeof parsed.version === "string" ? parsed.version : "";
   if (!latest) {
     // 读不出版本就是没查成。**沉默地当作最新是这个功能原本的毛病。**
-    return unreachable(opts.currentVersion, "feed carries no version", at);
+    return unreachable(opts.currentVersion, "feed carries no version", at, channel);
   }
 
   const releasedAt =
     typeof parsed.releaseDate === "string" ? parsed.releaseDate : undefined;
+  // 下载地址由 feed 自己的 path 拼出，不另立契约。**path 缺了就不给这个字段** ——
+  // 宁可让界面退回「去下载页自己找」，也不拼一个猜出来的地址让用户点下去。
+  const rel = typeof parsed.path === "string" ? parsed.path.trim() : "";
+  const downloadUrl = rel ? `${base}/${encodeURIComponent(rel)}` : undefined;
   if (compareVersions(latest, opts.currentVersion) > 0) {
     return {
       status: "available",
       current: opts.currentVersion,
       latest,
       ...(releasedAt ? { releasedAt } : {}),
+      ...(downloadUrl ? { downloadUrl } : {}),
+      channel,
       checkedAt: at,
     };
   }
@@ -106,6 +153,7 @@ export async function checkForUpdate(
     status: "current",
     current: opts.currentVersion,
     latest,
+    channel,
     checkedAt: at,
   };
 }
@@ -114,72 +162,7 @@ function unreachable(
   current: string,
   reason: string,
   checkedAt: string,
+  channel: string,
 ): UpdateCheck {
-  return { status: "unreachable", current, reason, checkedAt };
-}
-
-/**
- * 安装闸门与意图（TD-021 策略 1、2，owner 定 2026-09-01）。
- *
- * **策略 1：有任务在跑就不装。** 安装要重启，重启会打断正在跑的回合——虽然
- * 恢复得回来，但人在回路的确认会被扰，而用户并没有要求这件事发生。
- *
- * **策略 2：操作权归用户。** 运行时只做两件事——告诉用户有新版本、在他点了之后
- * 记下这个意图。**绝不自行下载、绝不自行安装、绝不自行挑时机。**
- *
- * 闸门放在守护进程，因为**只有它知道有没有任务在跑**。壳在真正安装前会再问一次
- * ——用户点下去到壳开始装之间任务可能刚起来，只在按钮上禁用是不够的。
- */
-export interface InstallGate {
-  installable: boolean;
-  /** 不可安装时的人可读原因；可安装时缺省。 */
-  reason?: string;
-  runningTasks: number;
-}
-
-export function installGate(runningTasks: number): InstallGate {
-  if (runningTasks > 0) {
-    return {
-      installable: false,
-      reason: `有 ${runningTasks} 个任务正在运行；安装需要重启，会打断它们`,
-      runningTasks,
-    };
-  }
-  return { installable: true, runningTasks };
-}
-
-/** 用户已请求安装的版本，或 null。壳轮询它。 */
-export interface InstallIntent {
-  version: string;
-  requestedAt: string;
-}
-
-/**
- * 用户的安装意图，只存在内存里。
- *
- * 不落盘是刻意的：**这是一次点击，不是一条设置。** 守护进程重启后意图就没了，
- * 而那正对——用户是在看着「有新版本」那一刻点的，不是在授权一条长期规则。
- */
-export class InstallIntentBox {
-  private intent: InstallIntent | null = null;
-
-  request(version: string, at: string): InstallIntent {
-    this.intent = { version, requestedAt: at };
-    return this.intent;
-  }
-
-  peek(): InstallIntent | null {
-    return this.intent;
-  }
-
-  /** 壳取走它去执行；取走即清，避免重启后重复触发。 */
-  take(): InstallIntent | null {
-    const held = this.intent;
-    this.intent = null;
-    return held;
-  }
-
-  clear(): void {
-    this.intent = null;
-  }
+  return { status: "unreachable", current, reason, channel, checkedAt };
 }

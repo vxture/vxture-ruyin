@@ -33,7 +33,6 @@ const { FtsRanker, reindexBinding, searchContext } = await import(
   `${ROOT}/apps/local-host/dist/fts.js`
 );
 const { LocalToolExecutor } = await import(`${ROOT}/apps/local-host/dist/tool-executor.js`);
-const { InstallIntentBox } = await import(`${ROOT}/apps/local-host/dist/updates.js`);
 const { EventBus } = await import(`${ROOT}/apps/local-host/dist/events.js`);
 const { readFileSync } = await import("node:fs");
 
@@ -102,7 +101,11 @@ const server = createLocalApi({
   token: TOKEN,
   version: "0.1.0-uiharness",
   events,
-  updateIntent: new InstallIntentBox(),
+  // 更新检查指向哪个 feed：不设就是真渠道（在开发机上多半是 unreachable）。
+  // 设成本地一份 latest.yml，就能把「有新版本」那一路真的看一遍。
+  ...(process.env.RUYIN_UPDATE_FEED
+    ? { updateFeedBase: process.env.RUYIN_UPDATE_FEED }
+    : {}),
   writeArtifact: (p, b, g) => executor.writeArtifact(p, b, g),
   supportsTool: (t) => executor.supports(t),
   uiDir: `${repo}/apps/ui-workspace/dist`,

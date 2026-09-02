@@ -19,11 +19,6 @@ import {
   shell,
   utilityProcess,
 } from "electron";
-import electronUpdater from "electron-updater";
-
-// 顶层导入是刻意的：打包后的依赖树若解析不到它，**打包冒烟关会立刻发现**——
-// 惰性导入会把这个失败推迟到用户点安装的那一刻，那是最糟的暴露位置。
-const { autoUpdater } = electronUpdater;
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -342,142 +337,6 @@ function watchPending(win: BrowserWindow): void {
   void poll();
 }
 
-/**
- * 更新的下载与安装（TD-021，策略由 owner 定于 2026-09-01）。
- *
- *   1. **有任务在跑就不装** —— 安装要重启，重启会打断正在跑的回合。
- *   2. **操作权与时机都归用户** —— 运行时只提示；下载与安装都由用户点了才做，
- *      下载完成后**再问一次**才重启。
- *   3. 渠道不允许降级 —— 检查侧已保证（feed 版本不高于当前一律报「已是最新」）。
- *
- * 意图从守护进程轮询取得，不走 IPC：窗口是纯 Web 客户端（无 preload、无 Node），
- * 契约边界留在 HTTP（60 §4.2）。这与系统通知用的是同一条路子。
- *
- * **闸门在守护进程那边判，这里在真正重启前再问一次** —— 用户点下去到下载完成
- * 之间可能过了几分钟，任务完全可能已经起来了。
- */
-function watchUpdateIntent(win: BrowserWindow): void {
-  autoUpdater.autoDownload = false;
-  // 退出时静默安装不是用户选的时机（策略 2）。
-  autoUpdater.autoInstallOnAppQuit = false;
-  // 策略 3：渠道不允许降级。**显式写，不吃默认值。**
-  //
-  // 库的默认确实是 false，但它的 `channel` setter 会把这个字段翻成 true
-  // （文档原话：设 channel 后 allowDowngrade 会自动变 true，不合适就自己再设
-  // 回来）。而 channel 正是 beta/stable 切换要用的那个东西 —— 也就是说，未来
-  // 谁加渠道切换，这条策略会在没人察觉的情况下自己反过来。
-  autoUpdater.allowDowngrade = false;
-  autoUpdater.logger = null;
-  const feed = process.env["RUYIN_UPDATE_FEED"];
-  if (feed) autoUpdater.setFeedURL({ provider: "generic", url: feed });
-
-  let busy = false;
-
-  const askDaemon = async <T>(path: string, init?: RequestInit): Promise<T | null> => {
-    try {
-      const res = await fetch(`http://127.0.0.1:${PORT}${path}`, {
-        ...init,
-        headers: { authorization: `Bearer ${TOKEN}`, ...(init?.headers ?? {}) },
-      });
-      if (!res.ok) return null;
-      return (await res.json()) as T;
-    } catch {
-      return null;
-    }
-  };
-
-  const run = async (version: string): Promise<void> => {
-    try {
-      // **先 checkForUpdates 再 downloadUpdate。** 少了这一步，库直接 reject
-      // 「Please check update first」—— downloadUpdate 用的是上一次检查留下的
-      // updateInfo，没检查过就没有那个东西。整条安装路径原本在第一步就断，
-      // 而用户看到的是「更新下载失败」，一句指不向任何地方的话。
-      const found = await autoUpdater.checkForUpdates();
-      const offered = found?.updateInfo.version;
-      if (!offered) {
-        await dialog.showMessageBox(win, {
-          type: "info",
-          title: "没有可安装的更新",
-          message: `渠道里现在没有 ${version}`,
-          detail: "稍后在设置里再检查一次。",
-        });
-        return;
-      }
-      // 用户点的是某一个版本。下载前 feed 可能已经动了 —— 装另一个版本不是
-      // 「顺手更新到更新的那个」，是装了一个他没有同意过的东西（策略 2）。
-      if (offered !== version) {
-        await dialog.showMessageBox(win, {
-          type: "info",
-          title: "版本已变化",
-          message: `你要装的是 ${version}，而渠道现在提供的是 ${offered}`,
-          detail: "没有安装。请在设置里重新检查更新，再决定装哪一个。",
-        });
-        return;
-      }
-      await autoUpdater.downloadUpdate();
-    } catch (cause) {
-      await dialog.showMessageBox(win, {
-        type: "error",
-        title: "更新下载失败",
-        message: `无法下载 ${version}`,
-        detail: cause instanceof Error ? cause.message : String(cause),
-      });
-      return;
-    }
-
-    // 下载可能跑了几分钟：重问一次，别在任务中途重启。
-    const gate = await askDaemon<{ installable: boolean; reason?: string }>(
-      "/updates/intent",
-    );
-    if (gate && !gate.installable) {
-      await dialog.showMessageBox(win, {
-        type: "info",
-        title: "更新已就绪，暂不安装",
-        message: `${version} 已下载完成，但现在不能安装`,
-        detail: `${gate.reason ?? "有任务正在运行"}。任务结束后再在设置里点一次安装。`,
-      });
-      return;
-    }
-
-    // 时机也归用户：下载完成不等于现在就该重启。
-    const { response } = await dialog.showMessageBox(win, {
-      type: "question",
-      buttons: ["现在重启并安装", "稍后"],
-      defaultId: 0,
-      cancelId: 1,
-      title: "更新已就绪",
-      message: `${version} 已下载完成`,
-      detail: "安装需要重启如影。未完成的任务会在重启后恢复，但正在等待你确认的步骤会被打断。",
-    });
-    if (response !== 0) return;
-    autoUpdater.quitAndInstall(false, true);
-  };
-
-  const poll = async (): Promise<void> => {
-    if (busy) return;
-    const body = await askDaemon<{ intent: { version: string } | null }>(
-      "/updates/intent",
-    );
-    const version = body?.intent?.version;
-    if (!version) return;
-    busy = true;
-    try {
-      await run(version);
-    } finally {
-      busy = false;
-    }
-  };
-
-  const stop = onDaemonEvent((kind) => {
-    if (kind === "update-intent") void poll();
-  });
-  const timer = setInterval(() => void poll(), 60_000);
-  timer.unref?.();
-  win.on("closed", () => {
-    stop();
-    clearInterval(timer);
-  });
-}
 
 function openWindow(): void {
   userWindowOpened = true;
@@ -521,7 +380,6 @@ function openWindow(): void {
   void win.loadURL(`http://127.0.0.1:${PORT}/?token=${TOKEN}`);
   void streamDaemonEvents();
   watchPending(win);
-  watchUpdateIntent(win);
 }
 
 app.whenReady().then(async () => {

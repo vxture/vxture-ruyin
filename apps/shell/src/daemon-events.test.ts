@@ -43,9 +43,9 @@ void test("extractDaemonEvents: heartbeat and the initial ': ok' comment yield n
 void test("extractDaemonEvents: multiple frames in one chunk, in order", () => {
   const { events, buffer } = extractDaemonEvents(
     "",
-    'data: {"kind":"task"}\n\ndata: {"kind":"pending"}\n\ndata: {"kind":"update-intent"}\n\n',
+    'data: {"kind":"task"}\n\ndata: {"kind":"pending"}\n\n',
   );
-  assert.deepEqual(events, [{ kind: "task" }, { kind: "pending" }, { kind: "update-intent" }]);
+  assert.deepEqual(events, [{ kind: "task" }, { kind: "pending" }]);
   assert.equal(buffer, "");
 });
 

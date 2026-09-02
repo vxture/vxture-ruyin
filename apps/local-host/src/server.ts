@@ -27,11 +27,7 @@ import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import { apiError, REJECTION } from "./errors.js";
 import { join as joinPath } from "node:path";
 import type { EventBus } from "./events.js";
-import {
-  checkForUpdate,
-  installGate,
-  type InstallIntentBox,
-} from "./updates.js";
+import { checkForUpdate } from "./updates.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -71,8 +67,6 @@ export interface LocalApiDeps {
   refreshEntitlements?: () => Promise<void>;
   /** 更新 feed 基址覆盖（dl 主机未落地前可指向测试 feed）；缺省见 updates.ts。 */
   updateFeedBase?: string;
-  /** 用户的安装意图；壳轮询取走。 */
-  updateIntent: InstallIntentBox;
   /** 运行时事件总线（TD-027）。不接就没有 /events，消费方回到轮询。 */
   events?: EventBus;
   /**
@@ -377,57 +371,19 @@ async function handle(
 
   // GET /updates/check - 拉渠道 feed 比版本，并附上此刻能不能装（TD-021）。
   // **只回答问题，不下载不安装**：操作权归用户（策略 2）。
+  // GET /updates/check - 有没有新版本、去哪儿拿。**不下载、不安装。**
+  //
+  // MVP 阶段不做自动更新（2026-09-02，owner 定）：electron-updater 在 Windows
+  // 默认校验更新包签名，而 owner 定了不采购证书（TD-001 转 standing）。要么关掉
+  // 那道校验（等于让更新通道接受任何来自 feed 的包），要么不做自动安装 —— 选了
+  // 后者。原先的 POST /updates/install 与 GET /updates/intent 随之整段拆掉：
+  // **没有安装动作，就没有要闸的东西**，留着一个判不到任何事的闸门只是噪音。
   if (method === "GET" && path === "/updates/check") {
     const check = await checkForUpdate({
       currentVersion: deps.version,
       ...(deps.updateFeedBase ? { feedBase: deps.updateFeedBase } : {}),
     });
-    send(res, 200, { ...check, gate: installGate(deps.tasks.runningCount) });
-    return;
-  }
-
-  // POST /updates/install - 记下用户要装的意图。壳轮询取走它去执行。
-  // 闸门在这里再判一次：按钮禁用只挡误触，用户点下去到壳动手之间任务可能刚起来。
-  if (method === "POST" && path === "/updates/install") {
-    const gate = installGate(deps.tasks.runningCount);
-    if (!gate.installable) {
-      // 可重试：任务结束后它就变成可装了 —— 这正是 retryable 要传达的东西。
-      send(res, 409, {
-        ...apiError("UPDATE_INSTALL_BLOCKED", gate.reason ?? "现在不能安装", {
-          retryable: true,
-        }),
-        ...gate,
-      });
-      return;
-    }
-    const body = await readJson(req);
-    const version = String(body["version"] ?? "");
-    if (!version) {
-      send(
-        res,
-        400,
-        apiError("REQUEST_MALFORMED", "缺少要安装的版本号", { field: "version" }),
-      );
-      return;
-    }
-    const requested = deps.updateIntent.request(version, new Date().toISOString());
-    // 壳在等这个意图。发一声，它就不必每 5 秒问一次（TD-029）。
-    deps.events?.publish({ kind: "update-intent" });
-    send(res, 202, requested);
-    return;
-  }
-
-  // GET /updates/intent - 壳取走待执行的安装意图（取走即清）。
-  if (method === "GET" && path === "/updates/intent") {
-    const gate = installGate(deps.tasks.runningCount);
-    // 任务在此期间起来了：不交给壳，把意图丢掉。用户可以在任务停后再点一次；
-    // 悄悄留着它等会儿再装，等于替用户挑了时机（策略 2 不允许）。
-    if (!gate.installable) {
-      deps.updateIntent.clear();
-      send(res, 200, { intent: null, ...gate });
-      return;
-    }
-    send(res, 200, { intent: deps.updateIntent.take(), ...gate });
+    send(res, 200, check);
     return;
   }
 
