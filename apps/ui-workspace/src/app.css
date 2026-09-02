@@ -362,20 +362,18 @@ body {
 /* 安装本地包：功能要留着，但它是维护动作，不该长得像主路径。 */
 .install-row {
   display: flex;
-  flex-direction: column;
-  gap: var(--spacing-2xs, 4px);
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
   padding-top: var(--spacing-xs);
 }
-.install-row-label {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  flex-wrap: wrap;
-}
+/* 原生 file input 藏起来，由旁边那个 DS 按钮代打开。
+   它由浏览器渲染，文案跟**浏览器语言**走（「Choose File / No file chosen」），
+   改不掉，而且每个平台长得还不一样 —— 一句英文夹在中文界面里。
+   用 display:none 而不是「视觉隐藏」：视觉隐藏会留在 Tab 序里，成为一个看不见
+   却能聚焦的控件；这里按钮才是那个控件。 */
 .install-row input[type="file"] {
-  font-size: var(--body-sm-font-size, 12px);
-  color: var(--muted-foreground);
-  max-width: 100%;
+  display: none;
 }
 /* 左右 41px 是 DS 容器的默认留白；在只有一个内容列的工作台里那是纯损耗。
    纵向同理：header 之下立刻是内容，不需要再垫一段。 */
