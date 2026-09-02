@@ -116,17 +116,25 @@ process.stdout.write(smokeOut);
 
 // 起不来和不许起，是两件事。
 //
-// spawn 本身失败（Windows 上 errno UNKNOWN）说明这个 exe 连被执行的机会都
-// 没拿到 —— 应用控制策略（WDAC / 智能应用控制）会拦下新构建的未签名程序。
-// 把它报成「应用起不来」是一句错的诊断，会把人送去查依赖树和原生绑定，而
-// 那里什么问题都没有。
+// spawn 本身失败（Windows 上 errno UNKNOWN）说明这个 exe 连被执行的机会都没
+// 拿到，是被某条策略挡在门外，而不是应用自己崩了。把它报成「应用起不来」会把
+// 人送去查依赖树和原生绑定，那里什么问题都没有。
+//
+// **但别把原因写死成「未签名所以被拦」** —— 那是 TD-025 原本的判断，2026-09-02
+// 实测推翻了：本机 Smart App Control 开着强制，打出来的 exe 确认未签名，照样
+// 正常启动。SAC 拦的是**带 Mark-of-the-Web（下载来源标记）**的文件，本地构建
+// 产物没有这个标记。所以这里只说「被策略挡住了」，并把该看的东西列出来，不替
+// 用户断定是哪一条 —— 一句听起来笃定的错诊断，比不诊断更费时间。
 if (smoke.error) {
   const blocked = smoke.error.code === "UNKNOWN";
   console.error(
     blocked
-      ? "[pack] FAILED: 这台机器不允许运行这个 exe（应用控制策略拦下了未签名\n" +
-          "       程序）。这不是构建出的问题 —— 打包产物本身没被验证过，请在\n" +
-          "       未启用该策略的机器上跑，或先完成代码签名（TD-001）。"
+      ? "[pack] FAILED: 这个 exe 没能被执行（spawn errno UNKNOWN）—— 它是被某条\n" +
+          "       策略挡在门外的，不是应用崩了。打包产物本身因此没被验证过。\n" +
+          "       该查：① 文件有没有 Mark-of-the-Web（`Get-Item <exe> -Stream\n" +
+          "       Zone.Identifier`）—— Smart App Control 拦的是带下载标记的文件，\n" +
+          "       本地构建产物通常没有；② 杀毒/EDR 的隔离记录；③ 企业 WDAC 策略。\n" +
+          "       打包形态由 CI 的 packaged-smoke 兜底验证。"
       : `[pack] FAILED: could not launch the packaged app: ${smoke.error.message}`,
   );
   process.exit(1);
