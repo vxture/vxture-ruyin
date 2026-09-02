@@ -32,6 +32,14 @@ void test("App: a ?token= query param is used and moves past the connect hint", 
   expect(screen.queryByText("未连接到本地运行时")).not.toBeInTheDocument();
 });
 
+void test("App: a localStorage read that throws (private/sandboxed browsing) falls back to the connect hint, not a crash", () => {
+  vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    throw new DOMException("access denied", "SecurityError");
+  });
+  render(<App />);
+  expect(screen.getByText("未连接到本地运行时")).toBeInTheDocument();
+});
+
 void test("App: with no query param, a token remembered in localStorage is used instead", () => {
   localStorage.setItem("ruyin-token", "from-storage");
   render(<App />);

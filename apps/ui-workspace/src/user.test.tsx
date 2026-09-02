@@ -129,6 +129,18 @@ void test("UserSlot subscription line: not signed in", async () => {
   expect(await screen.findByText("登录后同步")).toBeInTheDocument();
 });
 
+void test("UserSlot: signed in and configured but no product ids never calls entitlements()", async () => {
+  const entitlements = vi.fn().mockResolvedValue({ workspace_id: "ws_1", entitlements: {} });
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue(session({ signedIn: true, entitlementsConfigured: true })),
+    entitlements,
+  });
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  await openPopover();
+  await screen.findByText("退出登录"); // 等它真的进了已登录态的渲染
+  expect(entitlements).not.toHaveBeenCalled();
+});
+
 void test("UserSlot subscription line: signed in but entitlements not configured", async () => {
   const api = fakeApi({
     session: vi.fn().mockResolvedValue(session({ signedIn: true, entitlementsConfigured: false })),
@@ -209,6 +221,59 @@ void test("UserSlot subscription line: active entitlements count and de-duplicat
   expect(await screen.findByText("3 个产品生效 · pro")).toBeInTheDocument();
 });
 
+void test("UserSlot subscription line: bundled-only active entitlements omit the tier suffix entirely", async () => {
+  const batch: EntitlementsBatch = {
+    workspace_id: "ws_1",
+    entitlements: {
+      "vxture.ops": {
+        status: "active",
+        trial_ends_at: null,
+        current_period_end: null,
+        cancel_at_period_end: false,
+        data_retention_until: null,
+        tier: null,
+        bundled: true,
+        limits: {},
+        quota_pools: [],
+      },
+    },
+  };
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue(session({ signedIn: true, entitlementsConfigured: true })),
+    entitlements: vi.fn().mockResolvedValue(batch),
+  });
+  render(<UserSlot api={api} productIds={["vxture.ops"]} onOpenSettings={() => {}} />);
+  await openPopover();
+  // 没有 " · 档位" 这截——被捆绑覆盖的产品没有自己的 tier，硬拼一个空档位
+  // 后缀出来比不显示更奇怪。
+  expect(await screen.findByText("1 个产品生效")).toBeInTheDocument();
+});
+
+void test("UserSlot: shows the active workspace name when signed in with one", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue(session({ signedIn: true, workspace: { name: "某工作区" } })),
+  });
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  await openPopover();
+  expect(await screen.findByText("某工作区")).toBeInTheDocument();
+});
+
+void test("UserSlot: online before system info has loaded shows 运行中 without a version, not stuck on the offline label", async () => {
+  const api = fakeApi({ system: vi.fn((): Promise<SystemInfo> => new Promise(() => {})) });
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  await openPopover();
+  expect(await screen.findByText(/运行中/)).toBeInTheDocument();
+});
+
+void test("UserSlot: non-DPAPI key protection reads 开发态, not left blank", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "plaintext" })),
+  });
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  await openPopover();
+  expect(await screen.findByText("开发态")).toBeInTheDocument();
+});
+
 // --- login / logout / settings ---------------------------------------------
 
 void test("UserSlot: the login button is disabled while offline", async () => {
@@ -259,6 +324,47 @@ void test("UserSlot: login polling picks up a completed sign-in and clears the f
 
   expect(await screen.findByText("郭彦豪", { selector: ".user-chip-name" })).toBeInTheDocument();
   expect(screen.queryByText("未打开？点此继续 ↗")).not.toBeInTheDocument();
+  vi.useRealTimers();
+});
+
+void test("UserSlot: clicking login again while a poll is already running replaces it instead of running both", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const sessionFn = vi.fn().mockResolvedValue(session({ signedIn: false })); // 从不签入
+  const api = fakeApi({ session: sessionFn });
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  await openPopover();
+  const button = await screen.findByText("登录 Vxture 账号");
+  await vi.waitFor(() => expect(button).not.toBeDisabled());
+
+  fireEvent.click(button);
+  await vi.waitFor(() => expect(api.login).toHaveBeenCalledTimes(1));
+  await vi.advanceTimersByTimeAsync(2000); // 第一个 interval 真的跑起来了
+
+  const callsBeforeSecondClick = sessionFn.mock.calls.length;
+  fireEvent.click(button);
+  await vi.waitFor(() => expect(api.login).toHaveBeenCalledTimes(2));
+
+  await vi.advanceTimersByTimeAsync(2000);
+  // 两个 interval 并存的话，这次推进会看到 +2；清掉了旧的才会是 +1。
+  expect(sessionFn.mock.calls.length).toBe(callsBeforeSecondClick + 1);
+  vi.useRealTimers();
+});
+
+void test("UserSlot: login polling gives up after 5 minutes rather than polling forever", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const sessionFn = vi.fn().mockResolvedValue(session({ signedIn: false }));
+  const api = fakeApi({ session: sessionFn });
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  await openPopover();
+  const button = await screen.findByText("登录 Vxture 账号");
+  await vi.waitFor(() => expect(button).not.toBeDisabled());
+  fireEvent.click(button);
+  await vi.waitFor(() => expect(api.login).toHaveBeenCalledTimes(1));
+
+  await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 2000);
+  const stoppedAt = sessionFn.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(sessionFn.mock.calls.length).toBe(stoppedAt);
   vi.useRealTimers();
 });
 
