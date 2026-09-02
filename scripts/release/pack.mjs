@@ -19,7 +19,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
@@ -157,6 +157,40 @@ if (process.platform === "win32") {
     );
     process.exit(1);
   }
+}
+
+// 图标真的贴上去了没有。
+//
+// **配了图标不等于贴上了。** electron-builder 是在「编辑可执行文件」那一步写入
+// 图标的，而 `signAndEditExecutable: false` 关掉的正是那一步 —— 于是 `icon:`
+// 配得好好的、构建全绿、装出来还是 Electron 的原子标，中间一句提示都没有。
+// 这个仓库栽在这上面过一次，是把图标从 exe 里抠出来看才发现的。
+//
+// 判据：图标里的某一档 PNG 原样出现在 exe 的资源里。rcedit 对 PNG 编码的档位
+// 是照搬字节的，所以逐帧找一遍，有一帧对上就说明这一步真的跑了。
+if (process.platform === "win32") {
+  const icoPath = join(shellDir, "icons", "icon.ico");
+  const ico = readFileSync(icoPath);
+  const exe = readFileSync(packagedExe);
+  const frames = [];
+  for (let i = 0; i < ico.readUInt16LE(4); i++) {
+    const o = 6 + i * 16;
+    frames.push({
+      size: ico[o] || 256,
+      data: ico.subarray(ico.readUInt32LE(o + 12), ico.readUInt32LE(o + 12) + ico.readUInt32LE(o + 8)),
+    });
+  }
+  const found = frames.filter((f) => exe.includes(f.data)).map((f) => f.size);
+  if (found.length === 0) {
+    console.error(
+      "[pack] FAILED: 打包出的 exe 里找不到我们的图标 —— 它多半还挂着 Electron\n" +
+        "       的默认原子标。检查 electron-builder.yml 的 `signAndEditExecutable`\n" +
+        "       是不是又被关掉了：图标是在那一步写进去的，关着它 `icon:` 完全空转。\n" +
+        `       图标源：${icoPath}`,
+    );
+    process.exit(1);
+  }
+  console.log(`[pack] icon: ${found.length}/${frames.length} 档在 exe 里对上（${found.join(", ")}px）`);
 }
 
 console.log(`[pack] done -> ${join(shellDir, "release")}`);
