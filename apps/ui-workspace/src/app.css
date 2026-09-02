@@ -171,26 +171,152 @@ body {
   gap: var(--spacing-xl);
 }
 
-/* 产品卡的两个动作：主次靠右，「打开」在最右 —— 阅读到卡片末尾时手已经在
-   那一侧，主动作就该落在停下来的地方。 */
-.card-actions {
+/* ---------- 运行状态条（提示性，一行） ---------- */
+/* 三件事平时都对，只在出问题那天需要被看见 —— 所以按「出事时够醒目」来定
+   尺寸，而不是按「平时占多少地方」。颜色是唯一的出口，全在那个点上。 */
+.status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-xs) var(--spacing-lg);
+  margin: 0;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-card, transparent);
+}
+.status-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--spacing-2xs, 4px);
+  min-width: 0;
+  font-size: var(--font-size-body-sm);
+  line-height: 1.4;
+}
+.status-dot {
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-muted-foreground);
+}
+.status-dot--ok { background: var(--color-success, #22c55e); }
+.status-dot--warn { background: var(--color-warning, #f59e0b); }
+.status-dot--danger { background: var(--color-danger, #ef4444); }
+.status-dot--muted { background: var(--color-muted-foreground); }
+.status-label { color: var(--color-muted-foreground); }
+.status-value { font-weight: 600; }
+/* 细节比结论再弱一档：它是解释，不是结论本身。 */
+.status-detail {
+  color: var(--color-muted-foreground);
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+/* ---------- 产品卡 ---------- */
+/* 一条对齐轴：内容全部左对齐，只有两处靠右 —— 标题行的状态徽章、卡片底部的
+   动作。这两处是卡片的固定位置，扫一列卡片时不必每张重新找。 */
+.pcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--color-card, transparent);
+  min-width: 0;
+}
+.pcard--blocked { opacity: 0.82; }
+
+.pcard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+.pcard-icon {
+  display: inline-flex;
+  color: var(--color-muted-foreground);
+  flex-shrink: 0;
+}
+.pcard-title {
+  margin: 0;
+  font-size: var(--font-size-body-md);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  /* 徽章推到行尾：状态永远在标题行右端。 */
+  margin-right: auto;
+}
+
+/* 说明与标识缩进到标题左缘 —— 图标是装饰，标题才是这张卡的左缘。
+   26px = 图标列宽 + gap。 */
+.pcard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 26px;
+  min-width: 0;
+}
+.pcard-desc {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted-foreground);
+}
+.pcard-ident {
+  margin: 0;
+  font-family: var(--code-sm-font-family, ui-monospace, monospace);
+  font-size: var(--code-sm-font-size, 12px);
+  color: var(--color-muted-foreground);
+  opacity: 0.68;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcard-reason {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted-foreground);
+}
+
+/* 读数在上、名称在下：扫的是数字，名称给数字定性。 */
+.pcard-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-lg);
+  margin: 0;
+  padding-left: 26px;
+}
+.pcard-metric { min-width: 0; }
+.pcard-metric-value {
+  margin: 0;
+  font-size: var(--font-size-body-lg, 16px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+.pcard-metric-label {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted-foreground);
+}
+
+/* 动作全部靠右，主动作在最右 —— 读到卡片末尾时手停在右侧，最常点的东西
+   就该落在那里，而不是被推到最远的左端。 */
+.pcard-foot {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: var(--spacing-xs);
   flex-wrap: wrap;
-}
-
-/* note 区：产品标识一行，不可用时的原因另起一行（它是句子，不是标识）。 */
-.product-note {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.product-reason {
-  font-size: var(--body-sm-font-size, 12px);
-  color: var(--muted-foreground);
+  padding-top: var(--spacing-xs);
+  border-top: 1px solid var(--color-border);
 }
 
 /* 推荐卡的 meta：分类一行、能力标签一行、动作一行。三行各说一件事，
@@ -505,12 +631,38 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 当前工作区：常驻，两态都在。 */
+/* 品牌锁定式：标记 + RUYIN + Workspace。
+   字标压到 body 尺寸 —— 标题栏是工具条，不是招牌；应用名天天在那里，用户
+   第二次打开之后就不再需要它大声说话，宽度该留给他正在做的事。 */
+.app-brand .vx-brand-mark {
+  width: 18px;
+  height: 18px;
+}
+/* 直接点名 DS 的字标类：`.vx-brand-name` 自己设了 18px，挂在外层的
+   font-size 继承不过去 —— 父元素上的字号对一个自己声明了字号的子元素无效。 */
+.app-brand .vx-brand-name {
+  font-size: var(--font-size-body-md);
+  letter-spacing: 0.04em;
+}
+.app-brand .vx-brand-local-name {
+  font-size: var(--font-size-body-sm);
+}
+
+/* 当前工作区：常驻，两态都在。原来只有一个光秃秃的名字，「这是什么」写在
+   title 里 —— 而 title 要悬停才看得到，等于没说。 */
 .app-workspace {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs, 4px);
   font-size: var(--font-size-body-sm);
   color: var(--color-muted-foreground);
   padding-inline: var(--spacing-xs);
   white-space: nowrap;
+  min-width: 0;
+}
+.app-workspace-label { opacity: 0.7; }
+.app-workspace-name {
+  color: var(--color-foreground);
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;

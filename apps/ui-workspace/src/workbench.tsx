@@ -29,6 +29,7 @@ import {
   type AnchorHTMLAttributes,
 } from "react";
 import {
+  Icon,
   ShellBrand,
   ShellHeader,
   ShellIconButton,
@@ -398,11 +399,15 @@ export function Workbench({ api }: { api: Api }) {
               </span>
             </>
           ) : (
+            /* 字标只写 RUYIN：标记已经在左边了，再把「如影」写出来是同一个
+               身份说两遍，而标题栏的宽度要留给用户正在做的事。 */
             <ShellBrand
-              label="如影 RUYIN"
+              label="RUYIN"
               tag="Workspace"
               href="#home"
-              className="cursor-pointer"
+              logoSrc="/logo.svg"
+              logoAlt="Ruyin"
+              className="app-brand cursor-pointer"
             />
           )}
         </span>
@@ -427,8 +432,13 @@ export function Workbench({ api }: { api: Api }) {
               订阅、权益、数据边界全按工作区划分，跨工作区访问会被服务端拒绝
               —— 用户看着屏幕却不知道自己在哪个工作区，那句拒绝就无从理解。 */}
           {workspaceName && (
-            <span className="app-workspace" title="当前工作区">
-              {workspaceName}
+            // 原来这里是一个光秃秃的词，「这是什么」只写在 title 里 —— 而 title
+            // 要悬停才看得到，等于没说。加个图标和「工作区」二字，它才自己说明
+            // 自己是什么。
+            <span className="app-workspace" title={`当前工作区：${workspaceName}`}>
+              <Icon name="buildings" size="xs" />
+              <span className="app-workspace-label">工作区</span>
+              <span className="app-workspace-name">{workspaceName}</span>
             </span>
           )}
           {/* 常驻：未决确认在哪个视图都看得见。放进某个页面里等于又要求

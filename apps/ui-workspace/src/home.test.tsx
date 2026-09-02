@@ -157,7 +157,7 @@ void test("HomePage: the metric row is the three framework facts - runtime, encr
   );
   expect(screen.getByText("运行环境")).toBeInTheDocument();
   expect(screen.getByText("就绪")).toBeInTheDocument();
-  expect(screen.getByText("本地守护进程 0.2.0")).toBeInTheDocument();
+  expect(screen.getByText("0.2.0")).toBeInTheDocument();
 
   expect(screen.getByText("数据加密")).toBeInTheDocument();
   expect(await screen.findByText("已加密")).toBeInTheDocument();
@@ -187,7 +187,7 @@ void test("HomePage: signed out, 平台连接 says 未登录 and points at loggi
     />,
   );
   expect(await screen.findByText("未登录")).toBeInTheDocument();
-  expect(screen.getByText("登录后同步你的订阅")).toBeInTheDocument();
+  expect(screen.getByText("登录后同步订阅")).toBeInTheDocument();
   expect(screen.queryByText("已连接")).not.toBeInTheDocument();
 });
 
@@ -446,11 +446,11 @@ void test("ProductCard: per-product operations moved off the home page - no 新�
   expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
 });
 
-void test("HomePage: 在平台管理订阅 (the button shown once there are products) opens the subscribe page", async () => {
+void test("HomePage: 我的产品 的标题行链接是「在线使用」，落到 console 的应用中心", async () => {
   renderHome({ products: [product()] });
-  await userEvent.click(screen.getByRole("button", { name: "在平台管理订阅 ↗" }));
+  await userEvent.click(screen.getByRole("button", { name: "在线使用 ↗" }));
   expect(globalThis.open).toHaveBeenCalledWith(
-    "https://vxture.com/subscribe",
+    "https://vxture.com/zh-CN/appcenter",
     "_blank",
     "noopener",
   );

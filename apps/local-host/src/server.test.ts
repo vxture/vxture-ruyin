@@ -145,6 +145,33 @@ async function unattributedProject(rig: Rig, id: string): Promise<void> {
   await store.setBusinessState("draft");
 }
 
+void test("HTTP: 页面直接引用的根级资源不经令牌闸门 —— 带 Authorization 的请求它拿不到", async () => {
+  // 浏览器为 `<img src>` / `<link href>` 发的请求**不带 Authorization 头**。
+  // 这类资源如果落到令牌闸门上就是 401，界面上留一个碎图，而控制台一句报错
+  // 都没有 —— img 加载失败不进 console.error。logo.svg 就是这么丢的：加了
+  // 文件、没登记，页签和标题栏的标记一起空掉，构建和类型全绿。
+  const uiDir = mkdtempSync(join(tmpdir(), "ruyin-ui-"));
+  writeFileSync(join(uiDir, "index.html"), "<!doctype html><title>t</title>");
+  writeFileSync(join(uiDir, "logo.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  writeFileSync(join(uiDir, "icon.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  writeFileSync(join(uiDir, "secret.txt"), "not a whitelisted root file");
+  const rig = await startServer({ uiDir });
+  try {
+    for (const name of ["logo.svg", "icon.svg"]) {
+      // 无凭据取，正是浏览器的取法。
+      const res = await fetch(`${rig.base}/${name}`);
+      assert.equal(res.status, 200, `${name} 应无需令牌即可取到`);
+      assert.equal(res.headers.get("content-type"), "image/svg+xml");
+    }
+    // 名单之外的东西不因此被放行 —— 这不是一个「静态目录全公开」的口子。
+    const denied = await fetch(`${rig.base}/secret.txt`);
+    assert.equal(denied.status, 401);
+  } finally {
+    closeRig(rig);
+    rmSync(uiDir, { recursive: true, force: true });
+  }
+});
+
 void test("HTTP /auth/session, /auth/login, /auth/logout wire straight through to PlatformService", async () => {
   let loginCalls = 0;
   let logoutCalls = 0;

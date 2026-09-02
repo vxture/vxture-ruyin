@@ -124,8 +124,13 @@ const STATIC_MIME: Record<string, string> = {
 
 /** 守护进程在 index.html 之外还提供的根级 UI 文件。**不含 web app manifest**：
  *  它已随 PWA 一并移除——装成 PWA 会得到一个不启动运行时的应用图标，而桌面
- *  应用只有 Electron 壳一个入口。 */
-const UI_ROOT_FILES = new Set(["icon.svg", "favicon.ico"]);
+ *  应用只有 Electron 壳一个入口。
+ *
+ *  这份名单是**页面用 `<img src>`/`<link href>` 直接取的东西**必须登记的地方：
+ *  浏览器发这类请求时不会带 Authorization 头，落到令牌闸门上就是 401，图标位置
+ *  留一个碎图，而控制台一句报错都没有（img 加载失败不进 console.error）。
+ *  往 public/ 里加根级资源时，这里要跟着加一条。 */
+const UI_ROOT_FILES = new Set(["icon.svg", "logo.svg", "favicon.ico"]);
 
 function serveStatic(res: ServerResponse, root: string, rel: string): void {
   // Normalize and refuse traversal outside the UI root.

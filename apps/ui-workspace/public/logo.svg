@@ -1,0 +1,14 @@
+<!--
+  Ruyin 字标前的标记。
+
+  形是「影」：一个方框，和它身后偏移出去的那一块。不用汉字 —— 字标写作
+  RUYIN，标记就不该再把「如」画一遍，那是同一句话说两遍，而且汉字在 20px
+  的标题栏里会糊成一团墨。
+
+  纯几何 + 单色，缩到 16px 仍然分得出前后两块。品牌蓝在深浅两套底色上都站得住，
+  所以这里不跟随主题切换。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-hidden="true">
+  <rect x="10" y="10" width="17" height="17" rx="5" fill="#1e51ff" opacity="0.3"/>
+  <rect x="5.25" y="5.25" width="17.5" height="17.5" rx="5" stroke="#1e51ff" stroke-width="2.5"/>
+</svg>
