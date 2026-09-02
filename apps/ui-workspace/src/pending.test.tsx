@@ -60,6 +60,40 @@ void test("PendingInbox: clicking a row calls onOpen with that row's project id"
   expect(onOpen).toHaveBeenCalledWith("prj_target");
 });
 
+void test("PendingInbox: waitedFor buckets the elapsed time - just now / minutes / hours / days", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-05T12:00:00Z"));
+  try {
+    render(
+      <PendingInbox
+        rows={[
+          row({ checkpointId: "cp_now", raisedAt: "2026-09-05T11:59:30Z" }), // 30s ago
+          row({ checkpointId: "cp_min", raisedAt: "2026-09-05T11:45:00Z" }), // 15min ago
+          row({ checkpointId: "cp_hr", raisedAt: "2026-09-05T09:00:00Z" }), // 3h ago
+          row({ checkpointId: "cp_day", raisedAt: "2026-09-02T12:00:00Z" }), // 3d ago
+        ]}
+        onOpen={() => {}}
+      />,
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+  // Popover 展开走的是 Radix 的 pointer 事件，跟假时钟同框会卡住——先用假时钟
+  // 把行渲染出来，再切回真时钟去点开它。
+  await openInbox();
+
+  expect(await screen.findByText("刚刚")).toBeInTheDocument();
+  expect(screen.getByText("已等 15 分钟")).toBeInTheDocument();
+  expect(screen.getByText("已等 3 小时")).toBeInTheDocument();
+  expect(screen.getByText("已等 3 天")).toBeInTheDocument();
+});
+
+void test("PendingInbox: a raisedAt in the future (clock skew) reads as 刚刚, not a negative duration", async () => {
+  render(<PendingInbox rows={[row({ raisedAt: "2099-01-01T00:00:00Z" })]} onOpen={() => {}} />);
+  await openInbox();
+  expect(await screen.findByText("刚刚")).toBeInTheDocument();
+});
+
 // --- usePending: polling + event-driven refresh, never clears on a failed fetch ---
 //
 // POLL_MS is 30s - well outside any of these tests' real running time, so the

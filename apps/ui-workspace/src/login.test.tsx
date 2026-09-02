@@ -139,6 +139,28 @@ void test("LoginScreen: polls session() after login and moves to the product onc
   vi.useRealTimers();
 });
 
+void test("LoginScreen: clicking 登录 again while a poll is already running replaces it instead of running both", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const session = vi.fn().mockResolvedValue(signedOut()); // 从不签入，两次轮询都跑满
+  const api = fakeApi({ session });
+  render(<SessionGate api={api} />);
+  const button = await screen.findByText("登录 Vxture 账号");
+
+  fireEvent.click(button);
+  await vi.waitFor(() => expect(api.login).toHaveBeenCalledTimes(1));
+  await vi.advanceTimersByTimeAsync(2000); // 第一个 interval 真的跑起来了
+
+  const callsBeforeSecondClick = session.mock.calls.length;
+  fireEvent.click(button); // 第二次点击：该清掉第一个 interval，不是叠加一个
+  await vi.waitFor(() => expect(api.login).toHaveBeenCalledTimes(2));
+
+  await vi.advanceTimersByTimeAsync(2000);
+  // 只清了旧的、留了新的：这次推进只该看到一次轮询，不是两次（两个 interval
+  // 并存的话，同一笔 2000ms 会各自触发一次 session()，calls 会跳 +2）。
+  expect(session.mock.calls.length).toBe(callsBeforeSecondClick + 1);
+  vi.useRealTimers();
+});
+
 void test("LoginScreen: gives up polling after 5 minutes rather than polling forever", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const session = vi.fn().mockResolvedValue(signedOut()); // 从不签入
