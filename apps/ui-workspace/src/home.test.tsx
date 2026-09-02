@@ -187,8 +187,10 @@ void test("HomePage: signed out, 平台连接 says 未登录 and points at loggi
     />,
   );
   expect(await screen.findByText("未登录")).toBeInTheDocument();
-  expect(screen.getByText("登录后同步订阅")).toBeInTheDocument();
   expect(screen.queryByText("已连接")).not.toBeInTheDocument();
+  // 「该怎么办」是解释，进 tooltip；版面上只留结论。
+  const platform = document.querySelectorAll(".status-card")[2];
+  expect(platform?.getAttribute("title")).toContain("登录 Vxture 账号");
 });
 
 void test("HomePage: an unreachable daemon shows 未连接, not a stale 就绪", () => {
@@ -205,7 +207,9 @@ void test("HomePage: an unreachable daemon shows 未连接, not a stale 就绪",
     />,
   );
   expect(screen.getByText("未连接")).toBeInTheDocument();
-  expect(screen.getByText("等待守护进程")).toBeInTheDocument();
+  expect(document.querySelector(".status-card")?.getAttribute("title")).toContain(
+    "守护进程未响应",
+  );
 });
 
 void test("HomePage: entitled products with entitled=null anywhere still count as 'subscription unknown', shows the caveat line", () => {
@@ -286,15 +290,51 @@ void test("ProductCard: the badge tells the four states apart - 已订阅 / 本�
   expect(screen.getByText("已停用")).toBeInTheDocument();
 });
 
-void test("ProductCard: the metric row carries the version and the local project count", () => {
+void test("ProductCard: code and version read as one subtitle - vxture.bid v2.3.0", () => {
   renderHome({
-    products: [product({ version: "2.3.0" })],
+    products: [product({ id: "vxture.bid", version: "2.3.0" })],
+    workspaces: [],
+  });
+  // 标识和版本回答的是同一个问题（哪个产品的哪一版），所以连在一行里；
+  // 拆到两处会逼读者把一句话的两半自己拼回去。
+  const ident = document.querySelector(".pcard-ident");
+  expect(ident?.textContent?.replace(/s+/g, " ").trim()).toBe("vxture.bid v2.3.0");
+});
+
+void test("ProductCard: the project count sits on the 打开 row and says it in one breath", () => {
+  renderHome({
+    products: [product()],
     workspaces: [workspace(), workspace({ id: "prj_2" })],
   });
-  expect(screen.getByText("版本")).toBeInTheDocument();
-  expect(screen.getByText("2.3.0")).toBeInTheDocument();
-  expect(screen.getByText("本地项目")).toBeInTheDocument();
-  expect(screen.getByText("2")).toBeInTheDocument();
+  const foot = document.querySelector(".pcard-foot");
+  // 「2 项目」就够了 —— 一个个位数不需要再配一行「项目（本地/总）」来解释。
+  expect(foot?.textContent).toContain("2 项目");
+  // 同一行里就是那个主动作。
+  expect(foot?.querySelector("button")?.textContent).toBe("打开");
+  // 口径在 tooltip 里，不在版面上：那行标签会比它解释的数字还长。
+  expect(foot?.querySelector(".pcard-count")).toHaveAttribute(
+    "title",
+    "本机上属于该产品的项目：2",
+  );
+});
+
+void test("StatusCards: three cards in a row, the explanation lives in the tooltip not on the page", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue({ keyProtection: "dpapi" }),
+    session: vi.fn().mockResolvedValue({
+      signedIn: true,
+      workspace: { name: "演示工作区" },
+    } as unknown as SessionInfo),
+  });
+  renderHome({ api, products: [product()] });
+  await screen.findByText("已加密");
+  const cards = document.querySelectorAll(".status-card");
+  // 三件事就是三张卡 —— 合并成一根条，读者得自己去数分隔点在哪。
+  expect(cards).toHaveLength(3);
+  // 版面上只留结论和一小截事实；「怎么加密的」这种解释在 title 里。
+  expect(cards[1]?.textContent).toContain("DPAPI");
+  expect(cards[1]?.textContent).not.toContain("全库加密");
+  expect(cards[1]?.getAttribute("title")).toContain("整库加密");
 });
 
 void test("ProductCard: only this product's projects are counted, not every project on the machine", () => {
@@ -306,8 +346,7 @@ void test("ProductCard: only this product's projects are counted, not every proj
       workspace({ id: "p3", productId: "vxture.other" }),
     ],
   });
-  expect(screen.getByText("本地项目")).toBeInTheDocument();
-  expect(screen.getByText("1")).toBeInTheDocument();
+  expect(document.querySelector(".pcard-foot")?.textContent).toContain("1 项目");
 });
 
 void test("ProductCard: 打开 enters the most recent project, not whichever came back first", async () => {
@@ -352,16 +391,15 @@ void test("ProductCard: a failed first-project creation surfaces the daemon's re
   await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("工作区未选定"));
 });
 
-void test("ProductCard: 在线 is the auxiliary action and opens the platform, 打开 stays local", async () => {
-  const onOpen = vi.fn();
-  renderHome({ workspaces: [workspace({ id: "prj_1" })], onOpen });
-  await userEvent.click(screen.getByRole("button", { name: "在线 ↗" }));
-  expect(globalThis.open).toHaveBeenCalledWith(
-    "https://vxture.com/zh-CN/appcenter",
-    "_blank",
-    "noopener",
-  );
-  expect(onOpen).not.toHaveBeenCalled();
+void test("ProductCard: 打开 is the card's only action - 在线使用 lives once on the section header", () => {
+  renderHome({ products: [product()], workspaces: [workspace({ id: "prj_1" })] });
+  const foot = document.querySelector(".pcard-foot")!;
+  // 每张卡再放一个指向同一个地址的「在线」，是把一个入口复制 N 份。
+  expect([...foot.querySelectorAll("button")].map((b) => b.textContent)).toEqual([
+    "打开",
+  ]);
+  // 那个入口仍然在，只是只有一处。
+  expect(screen.getByRole("button", { name: "在线使用 ↗" })).toBeInTheDocument();
 });
 
 void test("ProductCard: a blocked product cannot be opened - no 打开, no 在线", () => {

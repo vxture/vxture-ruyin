@@ -110,34 +110,44 @@ const APPCENTER_URL = (consoleBase: string) => `${consoleBase}/zh-CN/appcenter`;
 type StripTone = "ok" | "warn" | "danger" | "muted";
 
 /**
- * 运行状态条 —— 三件事压成一行。
+ * 运行状态 —— **三张卡，并排占一行**。
  *
- * 不用 MetricCard：那是给**要被读的读数**准备的（图标、大字、装饰条形图），
- * 而这三条平时都对，属于「不出事就不必看」的一类。占位大小该按出问题时需要
- * 多醒目来定，不是按平时占多少地方来定。
+ * 不用 MetricCard：那是给要被读的读数准备的（图标、大字、装饰条形图），一张
+ * 就一百多像素高。而这三条平时都对，属于「不出事就不必看」的一类，占位大小该
+ * 按出问题时需要多醒目来定，不是按平时占多少地方来定。
  *
- * 状态点是唯一的颜色出口：出了问题它变红，一行字里那个红点比放大三倍的卡片
+ * 所以是压扁的卡，不是合并成一根条：三件事本来就是三件事，挤进同一个框里读者
+ * 得自己去数分隔点在哪。卡片边界替他分好。
+ *
+ * 状态点是唯一的颜色出口 —— 出问题时它变红，三张卡里那一个红点比放大的读数
  * 更快被扫到。
  */
-function StatusStrip({
+function StatusCards({
   items,
 }: {
   items: ReadonlyArray<{
     id: string;
     label: string;
     value: string;
+    /** 可见的一小截事实：版本号、工作区名。**不是解释**。 */
     detail: string;
+    /** 解释放这里 —— 悬停才出现。要用一句话说清的东西不该常年占着版面。 */
+    hint: string;
     tone: StripTone;
   }>;
 }) {
   return (
-    <ul className="status-strip" aria-label="运行时概况">
+    <ul className="status-cards" aria-label="运行时概况">
       {items.map((it) => (
-        <li key={it.id} className="status-chip">
-          <span className={`status-dot status-dot--${it.tone}`} aria-hidden />
-          <span className="status-label">{it.label}</span>
-          <span className="status-value">{it.value}</span>
-          {it.detail && <span className="status-detail">{it.detail}</span>}
+        <li key={it.id} className="status-card" title={it.hint}>
+          <span className="status-card-head">
+            <span className={`status-dot status-dot--${it.tone}`} aria-hidden />
+            <span className="status-label">{it.label}</span>
+          </span>
+          <span className="status-card-body">
+            <span className="status-value">{it.value}</span>
+            {it.detail && <span className="status-detail">{it.detail}</span>}
+          </span>
         </li>
       ))}
     </ul>
@@ -204,24 +214,29 @@ export function HomePage({
       {/* 「开始工作」那行标题去掉了：用户打开首页就是来工作的，一句标题重复
           他已经知道的事，只是把内容往下推了一屏。 */}
 
-      {/* 运行状态是**提示性**信息，不是展示性的：它平时都对，只在出问题的那天
-          需要被看见。所以压成一行 —— 不用 MetricCard（它自带图标、装饰性条形
-          图和大字读数，三张并排要占掉首屏近四分之一），只留状态点 + 名称 +
-          结论 + 一处细节。出了问题靠颜色跳出来，而不是靠尺寸常年占着位置。 */}
-      <StatusStrip
+      {/* 运行状态是**提示性**信息，不是展示性的：它平时都对，只在出问题的
+          那天需要被看见。三张压扁的卡并排占一行 —— 不用 MetricCard，那个自带
+          图标、大字读数和装饰性条形图，三张并排要占掉首屏近四分之一。 */}
+      <StatusCards
         items={[
           {
             id: "runtime",
             label: "运行环境",
             value: health.ok ? "就绪" : "未连接",
-            detail: health.ok ? (health.version ?? "") : "等待守护进程",
+            detail: health.ok ? (health.version ?? "") : "",
+            hint: health.ok
+              ? `本地守护进程 ${health.version ?? ""} 正在运行`
+              : "守护进程未响应，正在等待它起来",
             tone: health.ok ? "ok" : "danger",
           },
           {
             id: "protection",
             label: "数据加密",
             value: encrypted ? "已加密" : "开发态",
-            detail: encrypted ? "DPAPI + 全库加密" : "明文主密钥（仅开发）",
+            detail: encrypted ? "DPAPI" : "明文",
+            hint: encrypted
+              ? "主密钥由 Windows DPAPI 保护，业务库整库加密"
+              : "主密钥以明文存放，仅供开发，不可用于真实数据",
             tone: encrypted ? "ok" : "warn",
           },
           {
@@ -231,9 +246,10 @@ export function HomePage({
             id: "platform",
             label: "平台连接",
             value: signedIn ? "已连接" : "未登录",
-            detail: signedIn
-              ? (session?.workspace?.name ?? "订阅已同步")
-              : "登录后同步订阅",
+            detail: signedIn ? (session?.workspace?.name ?? "") : "",
+            hint: signedIn
+              ? `已登录；当前工作区「${session?.workspace?.name ?? "未选定"}」决定了本地可用的产品与数据归属`
+              : "登录 Vxture 账号后，你订阅的产品和工作区才会同步到本地",
             tone: signedIn ? "ok" : "muted",
           },
         ]}
@@ -292,7 +308,6 @@ export function HomePage({
                 api={api}
                 product={p}
                 projects={workspaces.filter((w) => w.productId === p.id)}
-                consoleBase={consoleBase}
                 subscribeUrl={subscribeUrl}
                 onOpen={onOpen}
                 onCreated={onCreated}
@@ -392,7 +407,6 @@ function ProductCard({
   api,
   product,
   projects,
-  consoleBase,
   subscribeUrl,
   onOpen,
   onCreated,
@@ -402,7 +416,6 @@ function ProductCard({
   api: Api;
   product: ProductInfo;
   projects: ProjectMeta[];
-  consoleBase: string;
   subscribeUrl: (id?: string, intent?: "subscribe" | "renew") => string;
   onOpen: (projectId: string) => void;
   onCreated: (projectId: string) => void | Promise<void>;
@@ -460,8 +473,8 @@ function ProductCard({
 
   return (
     <article className={`pcard${usable ? "" : " pcard--blocked"}`}>
-      {/* 一、身份。图标与标题同一行，徽章是这一行唯一靠右的东西 ——
-          标题行右端是状态的固定位置，读者扫一列卡片时不必每张重新找。 */}
+      {/* 一、身份。图标 + 标题一行，徽章是这一行唯一靠右的东西 —— 标题行右端
+          是状态的固定位置，扫一列卡片时不必每张重新找。 */}
       <header className="pcard-head">
         <span className="pcard-icon" aria-hidden>
           <Icon name="cube" size="sm" />
@@ -470,11 +483,14 @@ function ProductCard({
         {badge}
       </header>
 
-      {/* 二、说明与标识。**缩进对齐标题**，不对齐图标 —— 图标是装饰，标题才是
-          这张卡的左缘。 */}
+      {/* 二、副标题：产品标识与版本**连在一起**。它们回答的是同一个问题——
+          「这是哪个产品的哪一版」——拆成两处（标识在这里、版本在下面的读数行）
+          会逼读者把一句话的两半自己拼回去。 */}
       <div className="pcard-body">
+        <p className="pcard-ident" title={`产品标识 ${product.id}，当前生效版本 ${product.version}`}>
+          {product.id} <span className="pcard-ver">v{product.version}</span>
+        </p>
         <p className="pcard-desc">{BLURBS[product.id] ?? "Vxture 业务产品"}</p>
-        <p className="pcard-ident">{product.id}</p>
         {/* 不可用的要说清为什么。「打不开」和「因为退订所以打不开」在用户那里
             是两件事，后者他知道该去哪解决。 */}
         {!usable && product.reason && (
@@ -482,82 +498,67 @@ function ProductCard({
         )}
       </div>
 
-      {/* 三、读数。读数在上、名称在下 —— 扫的是数字，名称是给数字定性的。
-          这一行是「统一模式」的位置：项目型产品报项目数，持续型工作报它自己
-          的连续读数，卡片形状不变。 */}
-      <dl className="pcard-metrics">
-        <div className="pcard-metric">
-          <dd className="pcard-metric-value">{product.version}</dd>
-          <dt className="pcard-metric-label">版本</dt>
-        </div>
-        <div className="pcard-metric">
-          <dd className="pcard-metric-value">
-            {total > local ? `${local}/${total}` : String(local)}
-          </dd>
-          <dt className="pcard-metric-label">
-            {total > local ? "项目（本地/总）" : "本地项目"}
-          </dt>
-        </div>
-      </dl>
-
-      {/* 四、动作。**全部靠右，主动作在最右。** 之前主次两个按钮一左一右分站
-          两端，读者读到卡片末尾时手停在右侧，主动作却在左边 —— 那是把最常点的
-          东西放在最远的地方。 */}
+      {/* 三、横线下这一行：左边一句项目数，右边动作。
+          「3 项目」就够了 —— 之前是读数和标签上下叠成两行、标签还写着
+          「项目（本地/总）」，一个个位数配一行解释文字，说的比要说的事还多。 */}
       <footer className="pcard-foot">
-        {usable ? (
-          <>
-            {/* 辅：平台上的同一个产品。没有 per-product 深链之前先落到应用
-                中心 —— 给一个猜出来的 URL 比多点一步糟。 */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                window.open(APPCENTER_URL(consoleBase), "_blank", "noopener")
-              }
-            >
-              在线 ↗
-            </Button>
+        {/* 「11/22」不写成「本地项目/总计项目」—— 那行标签比它解释的数字还长。
+            口径进 tooltip：要用一句话说清的东西，不该常年占着版面。 */}
+        <span
+          className="pcard-count"
+          title={
+            total > local
+              ? `本地项目 ${local} / 总计 ${total}`
+              : `本机上属于该产品的项目：${local}`
+          }
+        >
+          <b>{total > local ? `${local}/${total}` : local}</b> 项目
+        </span>
+        <span className="pcard-actions">
+          {usable ? (
+            /* 只有「打开」。在线使用已经由板块标题行统一提供，每张卡再放一个
+               指向同一个地址的按钮，是把一个入口复制 N 份。 */
             <Button size="sm" disabled={opening} onClick={() => void open()}>
               {opening ? "打开中……" : "打开"}
             </Button>
-          </>
-        ) : (
-          <>
-            {/* §18.5：退订/停用的产品不可打开，但数据仍在、仍可导出。
-                本机停用的可以就地启用；未订阅的不行 —— 那不是这台机器能解决
-                的事，按钮给了也只会失败。 */}
-            {product.commercialIntent && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  window.open(
-                    subscribeUrl(product.id, product.commercialIntent!),
-                    "_blank",
-                    "noopener",
-                  )
-                }
-              >
-                {product.commercialIntent === "renew"
-                  ? "去平台续费 ↗"
-                  : "去平台订阅 ↗"}
-              </Button>
-            )}
-            {product.availability === "disabled" && (
-              <Button
-                size="sm"
-                onClick={() =>
-                  void api
-                    .activateProduct(product.id)
-                    .then(() => onRefresh())
-                    .catch((e: Error) => onError(e.message))
-                }
-              >
-                启用
-              </Button>
-            )}
-          </>
-        )}
+          ) : (
+            <>
+              {/* §18.5：退订/停用的产品不可打开，但数据仍在、仍可导出。
+                  本机停用的可以就地启用；未订阅的不行 —— 那不是这台机器能解决
+                  的事，按钮给了也只会失败。 */}
+              {product.commercialIntent && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    window.open(
+                      subscribeUrl(product.id, product.commercialIntent!),
+                      "_blank",
+                      "noopener",
+                    )
+                  }
+                >
+                  {product.commercialIntent === "renew"
+                    ? "去平台续费 ↗"
+                    : "去平台订阅 ↗"}
+                </Button>
+              )}
+              {product.availability === "disabled" && (
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    void api
+                      .activateProduct(product.id)
+                      .then(() => onRefresh())
+                      .catch((e: Error) => onError(e.message))
+                  }
+                >
+                  启用
+                </Button>
+              )}
+            </>
+          )}
+        </span>
       </footer>
     </article>
   );
