@@ -3,13 +3,15 @@
 - Stamp: 2607241430 (2026-07-24 14:30)
 - From: ruyin line
 - To: platform line (owns 140-repo-governance-standard / vxture-template)
-- Status: partially acknowledged (2026-09-02 verified; platform-side change landed 2026-09-01) —
-  platform's `140-repo-governance-standard.md` added a rule requiring distribution-type repos to
-  add a "does the packaged thing actually run" required check, citing this repo's `packaged-smoke`
-  job as the reference implementation by name. That addresses request item 1 (packaged-smoke's
-  shape is accepted) and part of item 2 (one concrete rule absorbed into the base standard) — it is
-  not yet the full "desktop distribution repo profile" document item 2 asked for. See
-  docs/60-operations/10-tech-debt.md TD-007/TD-025 for the ruyin-side follow-up.
+- Status: open - awaiting platform-line acknowledgement (re-verified 2026-09-02; a 2026-09-02
+  entry here briefly said "partially acknowledged" citing a rule change in
+  `140-repo-governance-standard.md` that named this repo's `packaged-smoke` job as the reference
+  implementation - that was wrong. The text existed only on a pushed-but-unmerged branch
+  (`docs/governance-distribution-launch-check`, commit `981d378`) in `vxture-platform`, not on its
+  `main` (confirmed via `git merge-base --is-ancestor 981d378 origin/main` = false, and no PR has
+  ever been opened for that branch). Per the standing cross-repo boundary — this line only
+  branches/commits/pushes in vxture-platform, PR/merge is platform line's to execute — that branch
+  is sitting there waiting for exactly that step. Still genuinely unacknowledged until it lands.
 - 性质: 纪律性报备（非阻塞）；`product_240` §0 结论 3 已裁定 ruyin 不适用产品仓模板，本函报备替换剖面并建议补标准
 
 ## Context
