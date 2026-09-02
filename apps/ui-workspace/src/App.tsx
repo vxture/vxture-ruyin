@@ -43,7 +43,7 @@ export default function App() {
 function ConnectHint() {
   return (
     <div className="splash">
-      <img className="splash-mark" src="/icon.svg" alt="" aria-hidden />
+      <img className="splash-mark" src="/logo.svg" alt="" aria-hidden />
       <div className="text-title-md font-medium">未连接到本地运行时</div>
       <p
         className="text-body-md text-muted-foreground"

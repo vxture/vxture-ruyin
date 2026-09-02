@@ -130,7 +130,7 @@ const STATIC_MIME: Record<string, string> = {
  *  浏览器发这类请求时不会带 Authorization 头，落到令牌闸门上就是 401，图标位置
  *  留一个碎图，而控制台一句报错都没有（img 加载失败不进 console.error）。
  *  往 public/ 里加根级资源时，这里要跟着加一条。 */
-const UI_ROOT_FILES = new Set(["icon.svg", "logo.svg", "favicon.ico"]);
+const UI_ROOT_FILES = new Set(["logo.svg", "favicon.ico"]);
 
 function serveStatic(res: ServerResponse, root: string, rel: string): void {
   // Normalize and refuse traversal outside the UI root.

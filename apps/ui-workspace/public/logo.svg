@@ -1,14 +1,14 @@
-<!--
-  Ruyin 字标前的标记。
-
-  形是「影」：一个方框，和它身后偏移出去的那一块。不用汉字 —— 字标写作
-  RUYIN，标记就不该再把「如」画一遍，那是同一句话说两遍，而且汉字在 20px
-  的标题栏里会糊成一团墨。
-
-  纯几何 + 单色，缩到 16px 仍然分得出前后两块。品牌蓝在深浅两套底色上都站得住，
-  所以这里不跟随主题切换。
--->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-hidden="true">
-  <rect x="10" y="10" width="17" height="17" rx="5" fill="#1e51ff" opacity="0.3"/>
-  <rect x="5.25" y="5.25" width="17.5" height="17.5" rx="5" stroke="#1e51ff" stroke-width="2.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Vxture">
+  <defs>
+    <!-- weave patches: dark passes over light at the left &amp; right crossings -->
+    <clipPath id="xL"><path d="M59.4 89.2L26.8 121.8L65.0 159.9L97.6 127.2Z"/></clipPath>
+    <clipPath id="xR"><path d="M196.6 166.8L229.2 134.2L191.1 96.1L158.4 128.8Z"/></clipPath>
+  </defs>
+  <!-- dark link: top-right ↔ bottom-left -->
+  <path fill="#0052D9"  fill-rule="evenodd" d="M143.3 19.3L19.3 143.3A66 66 0 0 0 112.7 236.7L236.7 112.7A66 66 0 0 0 143.3 19.3ZM174.4 50.4L50.4 174.4A22 22 0 0 0 81.6 205.6L205.6 81.6A22 22 0 0 0 174.4 50.4Z"/>
+  <!-- light link: top-left ↔ bottom-right (over dark at top &amp; bottom) -->
+  <path fill="#B5C7FF" fill-rule="evenodd" d="M19.3 112.7L143.3 236.7A66 66 0 0 0 236.7 143.3L112.7 19.3A66 66 0 0 0 19.3 112.7ZM50.4 81.6L174.4 205.6A22 22 0 0 0 205.6 174.4L81.6 50.4A22 22 0 0 0 50.4 81.6Z"/>
+  <!-- dark woven back over light at the two side crossings -->
+  <path fill="#0052D9" fill-rule="evenodd" clip-path="url(#xL)" d="M143.3 19.3L19.3 143.3A66 66 0 0 0 112.7 236.7L236.7 112.7A66 66 0 0 0 143.3 19.3ZM174.4 50.4L50.4 174.4A22 22 0 0 0 81.6 205.6L205.6 81.6A22 22 0 0 0 174.4 50.4Z"/>
+  <path fill="#0052D9" fill-rule="evenodd" clip-path="url(#xR)" d="M143.3 19.3L19.3 143.3A66 66 0 0 0 112.7 236.7L236.7 112.7A66 66 0 0 0 143.3 19.3ZM174.4 50.4L50.4 174.4A22 22 0 0 0 81.6 205.6L205.6 81.6A22 22 0 0 0 174.4 50.4Z"/>
 </svg>
