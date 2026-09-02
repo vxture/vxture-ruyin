@@ -33,7 +33,13 @@ import { isRenderPdfRequest, parsePdfSelfCheck, type RenderPdfReply } from "./pd
 import { extractDaemonEvents, type DaemonEventKind } from "./daemon-events.js";
 import { diffPending } from "./pending-notify.js";
 
-app.setName("Ruyin"); // userData path derives from this, not productName
+// userData 路径由它决定，而不是 productName。
+//
+// **它是无条件的，于是装机态和开发态共用同一个 Chromium 配置目录**
+// （`%APPDATA%\Ruyin`）。下面的 dataDir 只分了业务数据那一层，cookie、
+// Local/Session Storage、Preferences 两种形态是同一份 —— 也就是登录会话互相
+// 串。已实测确认并记为 TD-032；要分家得在开发态调 app.setPath("userData", ...)。
+app.setName("Ruyin");
 
 const SMOKE = process.argv.includes("--smoke");
 const PORT = Number(process.env["RUYIN_PORT"] ?? (SMOKE ? 17420 : 7420));
