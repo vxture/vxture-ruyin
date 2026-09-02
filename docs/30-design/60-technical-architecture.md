@@ -155,7 +155,7 @@ flowchart TB
 | T10 | 能力通道 | **产品自己的云端能力面**为统一入口（回合制：发历史+上下文+可用工具，收 tool_calls / content / verdict）；Runtime 不直连任何模型 Provider，**也不直连 Atlas**——凭证与模型选择都在产品那一侧（ADR-009 / 011，2026-08-31 修订：原写 "Vxture AI Gateway 统一入口"） | — | —（03 Principle 4 的基础设施面） |
 | T11 | 本地 API | 127.0.0.1 绑定 HTTP + WebSocket；每会话随机 token | 命名管道 / gRPC | 浏览器入口与 iframe 桥都需要 HTTP，维持 |
 | T12 | 仓库结构 | pnpm workspaces monorepo | 多仓库 | —（共享内核决定） |
-| T13 | 打包与更新 | electron-builder + 自动更新；企业环境提供离线 MSI；产品包走 03-A §18 独立通道 | — | 信创路线启动时补充 Linux 打包 |
+| T13 | 打包与更新 | electron-builder；**MVP 不做自动更新**（2026-09-02 owner 定，TD-021）——检查保留，下载与安装由用户在浏览器里自己完成；electron-updater 已整段移除。企业环境提供离线 MSI；产品包走 03-A §18 独立通道 | — | 信创路线启动时补充 Linux 打包；自动更新等签名证书（TD-001，现为 standing）或一个「接受关掉签名校验」的决定 |
 
 ## 5.1 T4 专项论证：为什么是 Electron 而不是趋势上更热的 Tauri
 
