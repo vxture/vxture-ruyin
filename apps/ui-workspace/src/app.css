@@ -170,6 +170,69 @@ body {
   flex-direction: column;
   gap: var(--spacing-xl);
 }
+
+/* 产品卡的两个动作：主次靠右，「打开」在最右 —— 阅读到卡片末尾时手已经在
+   那一侧，主动作就该落在停下来的地方。 */
+.card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+}
+
+/* note 区：产品标识一行，不可用时的原因另起一行（它是句子，不是标识）。 */
+.product-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.product-reason {
+  font-size: var(--body-sm-font-size, 12px);
+  color: var(--muted-foreground);
+}
+
+/* 推荐卡的 meta：分类一行、能力标签一行、动作一行。三行各说一件事，
+   挤在一行里读起来是一串没有断句的词。 */
+.catalog-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+.catalog-category {
+  font-size: var(--body-sm-font-size, 12px);
+  color: var(--muted-foreground);
+}
+.catalog-caps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2xs, 4px);
+}
+.catalog-meta > button {
+  align-self: flex-start;
+}
+
+/* 安装本地包：功能要留着，但它是维护动作，不该长得像主路径。 */
+.install-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2xs, 4px);
+  padding-top: var(--spacing-xs);
+}
+.install-row-label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+}
+.install-row input[type="file"] {
+  font-size: var(--body-sm-font-size, 12px);
+  color: var(--muted-foreground);
+  max-width: 100%;
+}
 /* 左右 41px 是 DS 容器的默认留白；在只有一个内容列的工作台里那是纯损耗。
    纵向同理：header 之下立刻是内容，不需要再垫一段。 */
 .workbench-page {

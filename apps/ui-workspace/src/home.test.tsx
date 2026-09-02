@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HomePage } from "./home";
+import { CATALOG, CATALOG_SOURCE } from "./catalog";
 import { Api, type ProductInfo, type ProjectMeta, type SessionInfo } from "./api";
 
 function product(over: Partial<ProductInfo> = {}): ProductInfo {
@@ -129,8 +130,19 @@ void test("HomePage: the empty-state button opens the platform subscribe page in
   );
 });
 
-void test("HomePage: metrics reflect health/product/workspace counts and key protection", async () => {
-  const api = fakeApi({ system: vi.fn().mockResolvedValue({ keyProtection: "dpapi" }) });
+// --- 概况三张卡 --------------------------------------------------------------
+//
+// 从四张减到三张：「可用产品」「项目」是下面列表的计数，把同一份事实说两遍，
+// 占掉的是首屏最贵的位置。留下的三张各自回答一件**框架自己的事**。
+
+void test("HomePage: the metric row is the three framework facts - runtime, encryption, platform", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue({ keyProtection: "dpapi" }),
+    session: vi.fn().mockResolvedValue({
+      signedIn: true,
+      workspace: { name: "演示工作区" },
+    } as unknown as SessionInfo),
+  });
   render(
     <HomePage
       api={api}
@@ -143,10 +155,40 @@ void test("HomePage: metrics reflect health/product/workspace counts and key pro
       onError={noop}
     />,
   );
+  expect(screen.getByText("运行环境")).toBeInTheDocument();
   expect(screen.getByText("就绪")).toBeInTheDocument();
   expect(screen.getByText("本地守护进程 0.2.0")).toBeInTheDocument();
-  expect(screen.getByText("2")).toBeInTheDocument(); // 项目数
+
+  expect(screen.getByText("数据加密")).toBeInTheDocument();
   expect(await screen.findByText("已加密")).toBeInTheDocument();
+
+  expect(screen.getByText("平台连接")).toBeInTheDocument();
+  expect(await screen.findByText("已连接")).toBeInTheDocument();
+
+  // 砍掉的两张不该以任何形式回来。
+  expect(screen.queryByText("可用产品")).not.toBeInTheDocument();
+  expect(screen.queryByText("本地业务项目")).not.toBeInTheDocument();
+});
+
+void test("HomePage: signed out, 平台连接 says 未登录 and points at logging in - it does not read as 已连接", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue({ signedIn: false } as SessionInfo),
+  });
+  render(
+    <HomePage
+      api={api}
+      products={[product()]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  expect(await screen.findByText("未登录")).toBeInTheDocument();
+  expect(screen.getByText("登录后同步你的订阅")).toBeInTheDocument();
+  expect(screen.queryByText("已连接")).not.toBeInTheDocument();
 });
 
 void test("HomePage: an unreachable daemon shows 未连接, not a stale 就绪", () => {
@@ -200,378 +242,213 @@ void test("HomePage: once any product has a known entitlement, the caveat line d
   ).not.toBeInTheDocument();
 });
 
-// --- InstalledProductCard ----------------------------------------------------
+// --- ProductCard -------------------------------------------------------------
+//
+// 一种卡片同时服务可用与不可用的产品：不可用的仍然列出（§18.5 数据可达），
+// 只是动作换成「启用 / 去平台订阅」。以前它们分在两个 Section 里，同一个产品
+// 换个订阅状态就跳到另一栏去，读起来像两种东西。
 
-void test("HomePage: the usable-products grid uses 2 vs 3-column layout once there's more than one card", () => {
-  const { container, rerender } = render(
-    <HomePage
-      api={fakeApi()}
-      products={[product({ id: "vxture.bid" }), product({ id: "vxture.crm" })]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  expect(container.querySelector(".md\\:grid-cols-2:not(.xl\\:grid-cols-3)")).toBeTruthy();
-
-  rerender(
-    <HomePage
-      api={fakeApi()}
-      products={[
-        product({ id: "vxture.bid" }),
-        product({ id: "vxture.crm" }),
-        product({ id: "vxture.ops" }),
-      ]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  expect(container.querySelector(".xl\\:grid-cols-3")).toBeTruthy();
-});
-
-void test("HomePage: the blocked-products grid gets the same column treatment past two cards", () => {
-  const { container } = render(
-    <HomePage
-      api={fakeApi()}
-      products={[
-        product({ id: "vxture.bid", availability: "disabled", state: "inactive", reason: "已停用" }),
-        product({ id: "vxture.crm", availability: "disabled", state: "inactive", reason: "已停用" }),
-        product({ id: "vxture.ops", availability: "disabled", state: "inactive", reason: "已停用" }),
-      ]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  expect(container.querySelector(".xl\\:grid-cols-3")).toBeTruthy();
-});
-
-void test("InstalledProductCard: entitled shows 已订阅, merely-installed shows 本地已装", () => {
-  const { rerender } = render(
-    <HomePage
-      api={fakeApi()}
-      products={[product({ entitled: true })]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  expect(screen.getByText("已订阅")).toBeInTheDocument();
-
-  rerender(
-    <HomePage
-      api={fakeApi()}
-      products={[product({ entitled: false })]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  expect(screen.getByText("本地已装")).toBeInTheDocument();
-});
-
-void test("InstalledProductCard: clicking an existing project opens it, and lists 'N more' past three", async () => {
-  const onOpen = vi.fn();
-  const workspaces = ["a", "b", "c", "d"].map((s) => workspace({ id: `prj_${s}`, name: `项目${s}` }));
+function renderHome(over: {
+  products?: ProductInfo[];
+  workspaces?: ProjectMeta[];
+  api?: Api;
+  onOpen?: (id: string) => void;
+  onCreated?: (id: string) => void | Promise<void>;
+  onRefresh?: () => void | Promise<void>;
+  onError?: (msg: string) => void;
+} = {}) {
   render(
     <HomePage
-      api={fakeApi()}
-      products={[product()]}
-      workspaces={workspaces}
-      health={{ ok: true }}
-      onOpen={onOpen}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
+      api={over.api ?? fakeApi()}
+      products={over.products ?? [product()]}
+      workspaces={over.workspaces ?? []}
+      health={{ ok: true, version: "0.1.0" }}
+      onOpen={over.onOpen ?? noop}
+      onCreated={over.onCreated ?? noop}
+      onRefresh={over.onRefresh ?? noop}
+      onError={over.onError ?? noop}
     />,
   );
-  expect(await screen.findByText("等 4 个")).toBeInTheDocument();
-  const user = userEvent.setup();
-  await user.click(screen.getByText("项目a"));
-  expect(onOpen).toHaveBeenCalledWith("prj_a");
-});
-
-void test("InstalledProductCard: 新建项目 is disabled without a workspace (not signed in / no workspace)", async () => {
-  render(
-    <HomePage
-      api={fakeApi()}
-      products={[product()]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  expect(await screen.findByText("新建项目")).toBeDisabled();
-  expect(
-    screen.getByText("登录并选择工作区后可新建——项目须归属于一个工作区"),
-  ).toBeInTheDocument();
-});
-
-async function renderWithWorkspace(
-  apiOverrides: Partial<Api>,
-  extra: Partial<Parameters<typeof HomePage>[0]> = {},
-) {
-  const workspaceSession: SessionInfo = {
-    signedIn: true,
-    issuer: "",
-    consoleBase: "https://vxture.com",
-    entitlementsConfigured: false,
-    workspace: { id: "wsp_1", name: "演示工作区" },
-  };
-  // apiOverrides 里从不带 session（每个调用点都只给 createProject 之类），
-  // 展开放在前面、显式 session 放在后面，两边都不会触发"可能被覆盖"的告警。
-  const withSession = fakeApi({ ...apiOverrides, session: vi.fn().mockResolvedValue(workspaceSession) });
-  render(
-    <HomePage
-      api={withSession}
-      products={[product()]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-      {...extra}
-    />,
-  );
-  await screen.findByText("将建在「演示工作区」，从这里开始第一个项目");
-  return withSession;
 }
 
-void test("InstalledProductCard: creating a project opens a name field, submits, and calls onCreated", async () => {
+void test("ProductCard: the badge tells the four states apart - 已订阅 / 本地已装 / 未订阅 / 已停用", () => {
+  renderHome({
+    products: [
+      product({ id: "a", name: "A", entitled: true }),
+      product({ id: "b", name: "B", entitled: null }),
+      product({ id: "c", name: "C", entitled: false, availability: "not_entitled" }),
+      product({ id: "d", name: "D", entitled: true, availability: "disabled" }),
+    ],
+  });
+  expect(screen.getByText("已订阅")).toBeInTheDocument();
+  expect(screen.getByText("本地已装")).toBeInTheDocument();
+  expect(screen.getByText("未订阅")).toBeInTheDocument();
+  expect(screen.getByText("已停用")).toBeInTheDocument();
+});
+
+void test("ProductCard: the metric row carries the version and the local project count", () => {
+  renderHome({
+    products: [product({ version: "2.3.0" })],
+    workspaces: [workspace(), workspace({ id: "prj_2" })],
+  });
+  expect(screen.getByText("版本")).toBeInTheDocument();
+  expect(screen.getByText("2.3.0")).toBeInTheDocument();
+  expect(screen.getByText("本地项目")).toBeInTheDocument();
+  expect(screen.getByText("2")).toBeInTheDocument();
+});
+
+void test("ProductCard: only this product's projects are counted, not every project on the machine", () => {
+  renderHome({
+    products: [product({ id: "vxture.bid" })],
+    workspaces: [
+      workspace({ id: "p1", productId: "vxture.bid" }),
+      workspace({ id: "p2", productId: "vxture.other" }),
+      workspace({ id: "p3", productId: "vxture.other" }),
+    ],
+  });
+  expect(screen.getByText("本地项目")).toBeInTheDocument();
+  expect(screen.getByText("1")).toBeInTheDocument();
+});
+
+void test("ProductCard: 打开 enters the most recent project, not whichever came back first", async () => {
+  const onOpen = vi.fn();
+  renderHome({
+    workspaces: [
+      workspace({ id: "old", createdAt: "2026-01-01T00:00:00Z" }),
+      workspace({ id: "newest", createdAt: "2026-09-01T00:00:00Z" }),
+      workspace({ id: "mid", createdAt: "2026-05-01T00:00:00Z" }),
+    ],
+    onOpen,
+  });
+  await userEvent.click(screen.getByRole("button", { name: "打开" }));
+  expect(onOpen).toHaveBeenCalledWith("newest");
+});
+
+void test("ProductCard: 打开 with no project yet creates the first one named after the product", async () => {
   const createProject = vi.fn().mockResolvedValue({ id: "prj_new" });
   const onCreated = vi.fn();
-  await renderWithWorkspace({ createProject }, { onCreated });
-
-  const user = userEvent.setup();
-  await user.click(screen.getByText("新建项目"));
-  const input = screen.getByPlaceholderText("项目名称");
-  await user.type(input, "我的新项目");
-  await user.click(screen.getByText("创建"));
-
-  expect(createProject).toHaveBeenCalledWith("vxture.bid", "我的新项目");
+  renderHome({
+    api: fakeApi({ createProject }),
+    products: [product({ id: "vxture.bid", name: "标书编写" })],
+    workspaces: [],
+    onCreated,
+  });
+  await userEvent.click(screen.getByRole("button", { name: "打开" }));
+  // 首页不再有取名字的表单：让人在还没进门时先取名，是把产品的第一步搬进了框架。
+  expect(createProject).toHaveBeenCalledWith("vxture.bid", "标书编写");
   await vi.waitFor(() => expect(onCreated).toHaveBeenCalledWith("prj_new"));
 });
 
-void test("InstalledProductCard: an empty name falls back to the product's own name", async () => {
-  const createProject = vi.fn().mockResolvedValue({ id: "prj_new" });
-  await renderWithWorkspace({ createProject });
-
-  const user = userEvent.setup();
-  await user.click(screen.getByText("新建项目"));
-  await user.click(screen.getByText("创建"));
-  expect(createProject).toHaveBeenCalledWith("vxture.bid", "标书编写");
-});
-
-void test("InstalledProductCard: a failed creation calls onError, not a silent no-op", async () => {
-  const createProject = vi.fn().mockRejectedValue(new Error("产品未安装"));
+void test("ProductCard: a failed first-project creation surfaces the daemon's reason, not a dead button", async () => {
   const onError = vi.fn();
-  await renderWithWorkspace({ createProject }, { onError });
-
-  const user = userEvent.setup();
-  await user.click(screen.getByText("新建项目"));
-  await user.click(screen.getByText("创建"));
-  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("产品未安装"));
-});
-
-void test("InstalledProductCard: a product with no canned blurb falls back to a generic description", () => {
-  render(
-    <HomePage
-      api={fakeApi()}
-      products={[product({ id: "vxture.crm", name: "CRM" })]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  expect(screen.getByText("Vxture 业务产品")).toBeInTheDocument();
-});
-
-void test("InstalledProductCard: pressing Escape while naming a new project cancels it", async () => {
-  await renderWithWorkspace({});
-  const user = userEvent.setup();
-  await user.click(screen.getByText("新建项目"));
-  await user.type(screen.getByPlaceholderText("项目名称"), "半途而废{Escape}");
-  expect(screen.queryByPlaceholderText("项目名称")).not.toBeInTheDocument();
-  expect(screen.getByText("新建项目")).toBeInTheDocument();
-});
-
-void test("InstalledProductCard: an existing project in the workspace drops the 'first project' hint", async () => {
-  const session = {
-    signedIn: true,
-    issuer: "",
-    consoleBase: "https://vxture.com",
-    entitlementsConfigured: false,
-    workspace: { id: "wsp_1", name: "演示工作区" },
-  } as SessionInfo;
-  render(
-    <HomePage
-      api={fakeApi({ session: vi.fn().mockResolvedValue(session) })}
-      products={[product()]}
-      workspaces={[workspace()]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  expect(await screen.findByText("将建在「演示工作区」")).toBeInTheDocument();
-  expect(screen.queryByText(/从这里开始第一个项目/)).not.toBeInTheDocument();
-});
-
-void test("InstalledProductCard: the version dropdown only appears with a real second version to pick", () => {
-  const { rerender } = render(
-    <HomePage
-      api={fakeApi()}
-      products={[product({ versions: ["1.0.0"] })]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-
-  rerender(
-    <HomePage
-      api={fakeApi()}
-      products={[product({ versions: ["1.0.0", "0.9.0"] })]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  expect(screen.getByRole("combobox")).toBeInTheDocument();
-});
-
-void test("InstalledProductCard: switching version pins it, then refreshes", async () => {
-  const pinProductVersion = vi.fn().mockResolvedValue(product());
-  const onRefresh = vi.fn();
-  render(
-    <HomePage
-      api={fakeApi({ pinProductVersion } as Partial<Api>)}
-      products={[product({ versions: ["1.0.0", "0.9.0"] })]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={onRefresh}
-      onError={noop}
-    />,
-  );
-  const user = userEvent.setup();
-  await user.selectOptions(screen.getByRole("combobox"), "0.9.0");
-  expect(pinProductVersion).toHaveBeenCalledWith("vxture.bid", "0.9.0");
-  await vi.waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
-});
-
-void test("InstalledProductCard: 停用 calls deactivateProduct then refreshes; a failure calls onError", async () => {
-  const deactivateProduct = vi.fn().mockRejectedValue(new Error("守护进程忙"));
-  const onError = vi.fn();
-  render(
-    <HomePage
-      api={fakeApi({ deactivateProduct } as Partial<Api>)}
-      products={[product()]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={onError}
-    />,
-  );
-  const user = userEvent.setup();
-  await user.click(screen.getByText("停用"));
-  expect(deactivateProduct).toHaveBeenCalledWith("vxture.bid");
-  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("守护进程忙"));
-});
-
-void test("InstalledProductCard: a successful 停用 refreshes rather than requiring a manual reload", async () => {
-  const deactivateProduct = vi.fn().mockResolvedValue(product({ state: "inactive" }));
-  const onRefresh = vi.fn();
-  render(
-    <HomePage
-      api={fakeApi({ deactivateProduct } as Partial<Api>)}
-      products={[product()]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={onRefresh}
-      onError={noop}
-    />,
-  );
-  const user = userEvent.setup();
-  await user.click(screen.getByText("停用"));
-  await vi.waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
-});
-
-void test("InstalledProductCard: a failed version pin calls onError with the daemon's reason", async () => {
-  const pinProductVersion = vi.fn().mockRejectedValue(new Error("该版本已从库中移除"));
-  const onError = vi.fn();
-  render(
-    <HomePage
-      api={fakeApi({ pinProductVersion } as Partial<Api>)}
-      products={[product({ versions: ["1.0.0", "0.9.0"] })]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={onError}
-    />,
-  );
-  const user = userEvent.setup();
-  await user.selectOptions(screen.getByRole("combobox"), "0.9.0");
-  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("该版本已从库中移除"));
-});
-
-void test("HomePage: 在平台管理订阅 (the button shown once there are usable products) opens the subscribe page too", async () => {
-  const api = fakeApi({
-    session: vi.fn().mockResolvedValue({ signedIn: true, consoleBase: "https://vxture.com" } as SessionInfo),
+  renderHome({
+    api: fakeApi({
+      createProject: vi.fn().mockRejectedValue(new Error("工作区未选定")),
+    }),
+    workspaces: [],
+    onError,
   });
-  render(
-    <HomePage
-      api={api}
-      products={[product()]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
+  await userEvent.click(screen.getByRole("button", { name: "打开" }));
+  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("工作区未选定"));
+});
+
+void test("ProductCard: 在线 is the auxiliary action and opens the platform, 打开 stays local", async () => {
+  const onOpen = vi.fn();
+  renderHome({ workspaces: [workspace({ id: "prj_1" })], onOpen });
+  await userEvent.click(screen.getByRole("button", { name: "在线 ↗" }));
+  expect(globalThis.open).toHaveBeenCalledWith(
+    "https://vxture.com/zh-CN/appcenter",
+    "_blank",
+    "noopener",
   );
-  const user = userEvent.setup();
-  await user.click(await screen.findByText("在平台管理订阅 ↗"));
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+void test("ProductCard: a blocked product cannot be opened - no 打开, no 在线", () => {
+  renderHome({
+    products: [product({ availability: "not_entitled", commercialIntent: "subscribe" })],
+  });
+  expect(screen.queryByRole("button", { name: "打开" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "在线 ↗" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "去平台订阅 ↗" })).toBeInTheDocument();
+});
+
+void test("ProductCard: a blocked product says WHY - 打不开 and 因为退订所以打不开 are different things", () => {
+  renderHome({
+    products: [
+      product({ availability: "not_entitled", reason: "订阅已于 8 月 31 日到期" }),
+    ],
+  });
+  expect(screen.getByText("订阅已于 8 月 31 日到期")).toBeInTheDocument();
+});
+
+void test("ProductCard: 已停用 can be re-enabled here, then refreshes; a failure calls onError", async () => {
+  const activateProduct = vi.fn().mockResolvedValue(undefined);
+  const onRefresh = vi.fn();
+  renderHome({
+    api: fakeApi({ activateProduct }),
+    products: [product({ id: "vxture.bid", availability: "disabled" })],
+    onRefresh,
+  });
+  await userEvent.click(screen.getByRole("button", { name: "启用" }));
+  expect(activateProduct).toHaveBeenCalledWith("vxture.bid");
+  await vi.waitFor(() => expect(onRefresh).toHaveBeenCalled());
+});
+
+void test("ProductCard: a failed 启用 calls onError with the daemon's reason", async () => {
+  const onError = vi.fn();
+  renderHome({
+    api: fakeApi({
+      activateProduct: vi.fn().mockRejectedValue(new Error("产品库缺少该版本")),
+    }),
+    products: [product({ availability: "disabled" })],
+    onError,
+  });
+  await userEvent.click(screen.getByRole("button", { name: "启用" }));
+  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("产品库缺少该版本"));
+});
+
+void test("ProductCard: 未订阅 without commercialIntent shows no subscribe button (bundled-covered, D4)", () => {
+  renderHome({
+    products: [
+      product({ availability: "not_entitled", entitled: false, commercialIntent: null }),
+    ],
+  });
+  expect(screen.queryByRole("button", { name: /去平台(订阅|续费)/ })).not.toBeInTheDocument();
+});
+
+void test("ProductCard: renew intent links to the renew flow, not first-purchase", async () => {
+  renderHome({
+    products: [
+      product({
+        id: "vxture.crm",
+        availability: "not_entitled",
+        commercialIntent: "renew",
+      }),
+    ],
+  });
+  await userEvent.click(screen.getByRole("button", { name: "去平台续费 ↗" }));
+  expect(globalThis.open).toHaveBeenCalledWith(
+    "https://vxture.com/subscribe?product=vxture.crm&intent=renew",
+    "_blank",
+    "noopener",
+  );
+});
+
+void test("ProductCard: per-product operations moved off the home page - no 新建项目 / 停用 / version picker", () => {
+  renderHome({
+    products: [product({ versions: ["1.0.0", "1.1.0"] })],
+    workspaces: [workspace()],
+  });
+  // 进了产品就是进了另一套框架：这些操作归产品自己，不该在框架首页上。
+  expect(screen.queryByText("新建项目")).not.toBeInTheDocument();
+  expect(screen.queryByText("停用")).not.toBeInTheDocument();
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+});
+
+void test("HomePage: 在平台管理订阅 (the button shown once there are products) opens the subscribe page", async () => {
+  renderHome({ products: [product()] });
+  await userEvent.click(screen.getByRole("button", { name: "在平台管理订阅 ↗" }));
   expect(globalThis.open).toHaveBeenCalledWith(
     "https://vxture.com/subscribe",
     "_blank",
@@ -579,126 +456,79 @@ void test("HomePage: 在平台管理订阅 (the button shown once there are usab
   );
 });
 
-// --- Blocked products ---------------------------------------------------------
+// --- 热门推荐 ----------------------------------------------------------------
+//
+// 这一栏说的是「平台上有这些」，不是「你有这些」。两者混淆正是首页那条硬规则
+// （不得硬编码产品）要防的事，所以下面几条测的核心就是这条边界。
 
-void test("Blocked products: not_entitled shows 未订阅 with a subscribe/renew link; disabled shows 已停用 with 启用", async () => {
-  const activateProduct = vi.fn().mockResolvedValue(product());
-  const onRefresh = vi.fn();
-  render(
-    <HomePage
-      api={fakeApi({ activateProduct } as Partial<Api>)}
-      products={[
-        product({
-          id: "vxture.crm",
-          name: "CRM",
-          availability: "not_entitled",
-          entitled: false,
-          reason: "平台订阅未覆盖此产品",
-          commercialIntent: "subscribe",
-        }),
-        product({
-          id: "vxture.ops",
-          name: "运维",
-          availability: "disabled",
-          state: "inactive",
-          reason: "已在本机停用",
-        }),
-      ]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={onRefresh}
-      onError={noop}
-    />,
-  );
-
-  expect(await screen.findByText("未订阅")).toBeInTheDocument();
-  expect(screen.getByText("平台订阅未覆盖此产品")).toBeInTheDocument();
-  expect(screen.getByText("去平台订阅 ↗")).toBeInTheDocument();
-
-  expect(screen.getByText("已停用")).toBeInTheDocument();
-  const user = userEvent.setup();
-  await user.click(screen.getByText("启用"));
-  expect(activateProduct).toHaveBeenCalledWith("vxture.ops");
-  await vi.waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+void test("热门推荐: renders the platform catalog with its real 正式版 / 开发中 status", () => {
+  renderHome({ products: [] });
+  expect(screen.getByText("热门推荐")).toBeInTheDocument();
+  const released = CATALOG.filter((c) => c.status === "released");
+  const building = CATALOG.filter((c) => c.status === "building");
+  for (const c of CATALOG) {
+    expect(screen.getByText(c.name)).toBeInTheDocument();
+  }
+  expect(screen.getAllByText("正式版")).toHaveLength(released.length);
+  expect(screen.getAllByText("开发中")).toHaveLength(building.length);
 });
 
-void test("Blocked products: a failed 启用 calls onError with the daemon's reason", async () => {
-  const activateProduct = vi.fn().mockRejectedValue(new Error("产品需要重新签名验证"));
-  const onError = vi.fn();
-  render(
-    <HomePage
-      api={fakeApi({ activateProduct } as Partial<Api>)}
-      products={[
-        product({ id: "vxture.ops", availability: "disabled", state: "inactive", reason: "已在本机停用" }),
-      ]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={onError}
-    />,
+void test("热门推荐: every card says 了解详情, never a subscribe action the link cannot honour", () => {
+  renderHome({ products: [] });
+  // 这个链接落在目录页，不是某个产品的订阅流程 —— 所以按钮不写「订阅」，
+  // 上没上线交给状态徽章说。写成「去平台订阅」是拿做不到的动作骗点击。
+  expect(screen.getAllByRole("button", { name: "了解详情 ↗" })).toHaveLength(
+    CATALOG.length,
   );
-  const user = userEvent.setup();
-  await user.click(await screen.findByText("启用"));
-  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("产品需要重新签名验证"));
+  expect(
+    screen.queryByRole("button", { name: "去平台订阅 ↗" }),
+  ).not.toBeInTheDocument();
 });
 
-void test("Blocked products: a bundled-covered product with no commercialIntent shows no subscribe button (D4)", () => {
-  render(
-    <HomePage
-      api={fakeApi()}
-      products={[
-        product({
-          id: "vxture.ops",
-          availability: "disabled",
-          state: "inactive",
-          reason: "已在本机停用",
-          commercialIntent: null,
-        }),
-      ]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  expect(screen.queryByText(/去平台/)).not.toBeInTheDocument();
+void test("热门推荐: NOTHING in the catalog is openable - 打开 belongs to products you actually have", () => {
+  renderHome({ products: [] });
+  // 这是这一栏与「我的产品」之间那条线。目录里出现一个「打开」，就等于告诉
+  // 用户他拥有一个其实没有的订阅 —— 首页那条硬规则防的正是这个。
+  expect(screen.queryByRole("button", { name: "打开" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "在线 ↗" })).not.toBeInTheDocument();
 });
 
-void test("Blocked products: renew intent links to the renew flow, not first-purchase", async () => {
-  render(
-    <HomePage
-      api={fakeApi({
-        session: vi.fn().mockResolvedValue({ signedIn: true, consoleBase: "https://vxture.com" } as SessionInfo),
-      })}
-      products={[
-        product({
-          id: "vxture.crm",
-          availability: "not_entitled",
-          entitled: false,
-          commercialIntent: "renew",
-        }),
-      ]}
-      workspaces={[]}
-      health={{ ok: true }}
-      onOpen={noop}
-      onCreated={noop}
-      onRefresh={noop}
-      onError={noop}
-    />,
-  );
-  const user = userEvent.setup();
-  await user.click(await screen.findByText("去平台续费 ↗"));
+void test("热门推荐: says where the list came from and when - it is a snapshot, not live", () => {
+  renderHome({ products: [] });
+  expect(
+    screen.getByText(`取自 Vxture 平台目录（${CATALOG_SOURCE.capturedAt} 快照）。`),
+  ).toBeInTheDocument();
+});
+
+void test("热门推荐: 浏览全部 opens the real catalog page", async () => {
+  renderHome({ products: [] });
+  await userEvent.click(screen.getByRole("button", { name: "浏览全部 ↗" }));
   expect(globalThis.open).toHaveBeenCalledWith(
-    "https://vxture.com/subscribe?product=vxture.crm&intent=renew",
+    CATALOG_SOURCE.url,
     "_blank",
     "noopener",
   );
+});
+
+void test("热门推荐: a card's 了解详情 opens the catalog page in a new tab, and opens nothing local", async () => {
+  const onOpen = vi.fn();
+  renderHome({ products: [], onOpen });
+  await userEvent.click(screen.getAllByRole("button", { name: "了解详情 ↗" })[0]!);
+  expect(globalThis.open).toHaveBeenCalledWith(
+    CATALOG_SOURCE.url,
+    "_blank",
+    "noopener",
+  );
+  // 目录里的东西不是你的：点它不该把任何本地项目打开。
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+void test("热门推荐: capability tags come from the catalog entry, not invented per card", () => {
+  renderHome({ products: [] });
+  const first = CATALOG[0]!;
+  for (const cap of first.capabilities) {
+    expect(screen.getAllByText(cap).length).toBeGreaterThan(0);
+  }
 });
 
 // --- InstallPackageRow --------------------------------------------------------
