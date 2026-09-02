@@ -7,10 +7,17 @@
  * as a quiet secondary link.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@vxture/design-system";
 import { Api, type SessionInfo } from "./api";
-import { Workbench, useHostChrome } from "./workbench";
+import { useHostChrome } from "./host-chrome";
+
+// Workbench (~570 lines, plus its own lazy-loaded home/settings/workspace
+// views) only exists once signed in - the login screen has no reason to wait
+// on it, and shouldn't ship it to a visitor who never signs in (TD-011②).
+const Workbench = lazy(() =>
+  import("./workbench").then((m) => ({ default: m.Workbench })),
+);
 
 /**
  * 单条标题栏模式（Electron 无边框 / PWA-WCO）下，登录页与加载页没有 header，
@@ -71,7 +78,19 @@ export function SessionGate({ api }: { api: Api }) {
       />
     );
   }
-  return <Workbench api={api} />;
+  return (
+    <Suspense
+      fallback={
+        <div className="splash">
+          <DragStrip />
+          <img className="splash-mark" src="/icon.svg" alt="" aria-hidden />
+          <div className="text-body-md text-muted-foreground">正在加载…</div>
+        </div>
+      }
+    >
+      <Workbench api={api} />
+    </Suspense>
+  );
 }
 
 function LoginScreen({

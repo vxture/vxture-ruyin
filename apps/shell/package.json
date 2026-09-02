@@ -11,6 +11,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --experimental-test-coverage --test-coverage-include=\"dist/**/*.js\" --test-coverage-exclude=\"dist/**/*.test.js\" --test-coverage-lines=95 --test-coverage-branches=85 --test-coverage-functions=95 --test \"dist/**/*.test.js\"",
     "native:electron": "node ../../scripts/native/sqlite-electron-binding.mjs",
     "start": "pnpm run native:electron && electron .",
     "smoke": "pnpm run native:electron && electron . --smoke"

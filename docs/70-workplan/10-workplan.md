@@ -287,3 +287,29 @@ CI 另加 `packaged-smoke`（windows-latest，真启动 + 真排一份 PDF + 断
 
 `pnpm dev:ui`：带登录桩的界面观察台。此前界面改动只能靠类型与构建，视觉从未
 过眼 —— 它只顶开登录这道门，服务端的授权护栏、工作区边界、审计全部照常。
+
+### 测试与覆盖（2026-09-02）
+
+`test-coverage` 这个必需检查从 TD-003 关闭那天起就只跑测试、从未量过覆盖率
+（TD-030）——按包实测之后，最陡的一个窟窿是 `platform.ts`（OIDC 登录/会话/
+刷新/权益查询整个类）17% 函数覆盖，只测过两个纯函数；`server.ts` 大片路由
+（`/auth/*`、`/oauth/callback`、`/entitlements`、product 生命周期、
+`/projects/:id` 下的 state/grants/bindings/cancel/context/import）从未经真实
+HTTP 打过；`pdf.ts`（壳渲染通道）与 `loadProducts`（开发态产品扫描）从未被
+任何用例加载过；`packages/cli` 连 `test` 脚本都没有。
+
+按包补测后（PR #75–#80）：
+
+| 包 | 覆盖率变化（行/分支/函数，仅自身源码） |
+|---|---|
+| runtime-core | 93.67%/80.60%/92.56% → 94.41%/83.48%/92.56%（tool-gate.ts、export.ts 补到 100%/96%/100% 与 100%/87%/100%） |
+| local-host | 83.55%/74.01%/81.13% → 94.88%/84.33%/91.70% |
+| document | 88.58%/74.85%/92.31% → 96.96%/86.60%/100% |
+| contract-schema | 99.37%/93.89%/100% → 100%/95.49%/100% |
+| cli | 0%（无测试） → 100%/100%/100% |
+
+五个包的 `test` 脚本各自加了 `--experimental-test-coverage` + 按包 scope 的
+行/分支/函数阈值（TD-030 已回收）。`apps/shell`（Electron 壳）与
+`apps/ui-workspace`（React 界面）当时仍无 `test` 脚本，不在这批范围内
+（TD-031）；两者后续由 #82（壳）与 #83–#84（ui-workspace 六个大组件）补齐，
+TD-031 已回收。

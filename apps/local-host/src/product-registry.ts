@@ -54,6 +54,32 @@ export interface SubscriptionFacts {
   cancelAtPeriodEnd: boolean;
 }
 
+/** C2 信封里 Ruyin 会读的那几项（limits / quota_pools 有意不列）。 */
+export interface CommercialEnvelope {
+  status?: string | null;
+  tier?: string | null;
+  bundled?: boolean;
+  trial_ends_at?: string | null;
+  current_period_end?: string | null;
+  cancel_at_period_end?: boolean;
+}
+
+/**
+ * 把平台线上格式的信封投影成 SubscriptionFacts。**不在这里压成布尔**（TD-014
+ * D4）：压扁之后界面就再也分不出「从未订阅」与「已失效」。bundled /
+ * cancel_at_period_end 严格判等 true —— 信封给出一个含糊值时，安全缺省是「否」。
+ */
+export function projectSubscriptionFacts(env: CommercialEnvelope): SubscriptionFacts {
+  return {
+    status: env.status ?? null,
+    tier: env.tier ?? null,
+    bundled: env.bundled === true,
+    trialEndsAt: env.trial_ends_at ?? null,
+    currentPeriodEnd: env.current_period_end ?? null,
+    cancelAtPeriodEnd: env.cancel_at_period_end === true,
+  };
+}
+
 /** 曾经有过、现在失效了的状态——这些该引导续费，不是首购。 */
 const LAPSED = new Set(["expired", "cancelled", "canceled", "suspended"]);
 

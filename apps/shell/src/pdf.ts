@@ -5,6 +5,9 @@
  * 出字节、原路发回。**字节回到守护进程落盘**，不在这里写文件：`writeArtifact`
  * 是本宿主唯一的写入路径，授权护栏、大小上限、原子改名都在那一处，壳自己写
  * 就是开第二条路。
+ *
+ * 消息形状与自检标记解析在 pdf-protocol.ts——那一半没有 electron 依赖，能被
+ * node:test 直接测；这一半必须在真 Electron 进程里跑，测不了。
  */
 
 import { BrowserWindow } from "electron";
@@ -15,31 +18,6 @@ import { pathToFileURL } from "node:url";
 
 /** 一次渲染的上限。排不完就是排不完，挂着不返回更糟。 */
 const RENDER_TIMEOUT_MS = 60_000;
-
-export interface RenderPdfRequest {
-  kind: "render-pdf";
-  id: string;
-  html: string;
-}
-
-export interface RenderPdfReply {
-  kind: "render-pdf-result";
-  id: string;
-  ok: boolean;
-  /** 成功时的 PDF 字节；失败时缺省。 */
-  bytes?: Uint8Array;
-  error?: string;
-}
-
-export function isRenderPdfRequest(value: unknown): value is RenderPdfRequest {
-  if (typeof value !== "object" || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    v["kind"] === "render-pdf" &&
-    typeof v["id"] === "string" &&
-    typeof v["html"] === "string"
-  );
-}
 
 /**
  * 排版一份 HTML 为 PDF。

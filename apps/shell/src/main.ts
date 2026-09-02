@@ -28,7 +28,10 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isRenderPdfRequest, renderPdf, type RenderPdfReply } from "./pdf.js";
+import { renderPdf } from "./pdf.js";
+import { isRenderPdfRequest, parsePdfSelfCheck, type RenderPdfReply } from "./pdf-protocol.js";
+import { extractDaemonEvents, type DaemonEventKind } from "./daemon-events.js";
+import { diffPending } from "./pending-notify.js";
 
 app.setName("Ruyin"); // userData path derives from this, not productName
 
@@ -149,7 +152,6 @@ function startDaemon(): Electron.UtilityProcess {
  *
  * 一条连接，多个消费者：待确认与更新意图看的是同一条流。
  */
-type DaemonEventKind = "task" | "pending" | "update-intent";
 const eventListeners = new Set<(kind: DaemonEventKind) => void>();
 
 function onDaemonEvent(listener: (kind: DaemonEventKind) => void): () => void {
@@ -174,23 +176,11 @@ async function streamDaemonEvents(): Promise<void> {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let cut = buffer.indexOf("\n\n");
-        while (cut >= 0) {
-          const frame = buffer.slice(0, cut);
-          buffer = buffer.slice(cut + 2);
-          for (const line of frame.split("\n")) {
-            if (!line.startsWith("data:")) continue; // 心跳是注释行
-            try {
-              const event = JSON.parse(line.slice(5).trim()) as {
-                kind: DaemonEventKind;
-              };
-              for (const listener of [...eventListeners]) listener(event.kind);
-            } catch {
-              // 半截或异常的帧：丢这一帧，别让它带走整条流。
-            }
-          }
-          cut = buffer.indexOf("\n\n");
+        const chunk = decoder.decode(value, { stream: true });
+        const parsed = extractDaemonEvents(buffer, chunk);
+        buffer = parsed.buffer;
+        for (const event of parsed.events) {
+          for (const listener of [...eventListeners]) listener(event.kind);
         }
       }
     } catch {
@@ -208,13 +198,12 @@ async function streamDaemonEvents(): Promise<void> {
  * 在机器慢的时候会通过，在链路断掉的时候也会通过。
  */
 async function waitForPdfSelfCheck(timeoutMs = 60_000): Promise<void> {
-  const marker = /\[ruyin\] pdf self-check: (.+)/;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const hit = marker.exec(daemonOutput);
-    if (hit) {
-      if (hit[1]?.startsWith("ok")) return;
-      throw new Error(`pdf self-check did not pass: ${hit[1]}`);
+    const result = parsePdfSelfCheck(daemonOutput);
+    if (result.status === "ok") return;
+    if (result.status === "failed") {
+      throw new Error(`pdf self-check did not pass: ${result.detail}`);
     }
     await new Promise((ok) => setTimeout(ok, 200));
   }
@@ -296,35 +285,26 @@ function watchPending(win: BrowserWindow): void {
       return; // daemon busy or restarting - nothing to say
     }
 
-    const live = new Set(rows.map((r) => r.checkpointId));
-    if (!announced) {
-      announced = live;
-    } else {
-      for (const row of rows) {
-        if (announced.has(row.checkpointId)) continue;
-        if (Notification.isSupported()) {
-          const n = new Notification({
-            title: `${row.projectName} 在等你`,
-            body: KIND_LABEL[row.kind] ?? "有一处需要你确认",
-          });
-          // The point of the notification is to get back to the decision, so
-          // it is a way there rather than an announcement to acknowledge.
-          n.on("click", () => {
-            if (win.isDestroyed()) return;
-            if (win.isMinimized()) win.restore();
-            win.show();
-            win.focus();
-            void win.loadURL(
-              `http://127.0.0.1:${PORT}/?token=${TOKEN}#ws/${row.projectId}`,
-            );
-          });
-          n.show();
-        }
-        announced.add(row.checkpointId);
-      }
-      // Forget what is no longer pending, so a later confirmation with the
-      // same id would announce again - and so this set cannot grow forever.
-      for (const id of announced) if (!live.has(id)) announced.delete(id);
+    const diff = diffPending(announced, rows);
+    announced = diff.announced;
+    for (const row of diff.toNotify) {
+      if (!Notification.isSupported()) continue;
+      const n = new Notification({
+        title: `${row.projectName} 在等你`,
+        body: KIND_LABEL[row.kind] ?? "有一处需要你确认",
+      });
+      // The point of the notification is to get back to the decision, so
+      // it is a way there rather than an announcement to acknowledge.
+      n.on("click", () => {
+        if (win.isDestroyed()) return;
+        if (win.isMinimized()) win.restore();
+        win.show();
+        win.focus();
+        void win.loadURL(
+          `http://127.0.0.1:${PORT}/?token=${TOKEN}#ws/${row.projectId}`,
+        );
+      });
+      n.show();
     }
   };
 

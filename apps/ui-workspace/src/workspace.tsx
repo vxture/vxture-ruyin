@@ -45,17 +45,23 @@ import {
   type ProjectView,
 } from "./api";
 import { verifyChain } from "./chain";
+// TabId/PROJECT_TABS live in their own module (workspace-tabs.ts) so the
+// sidebar can know the tab list without pulling in this file's DS-heavy
+// ProjectPanel - see that file's header comment (TD-011②).
+export { PROJECT_TABS, type TabId } from "./workspace-tabs";
+import type { TabId } from "./workspace-tabs";
 
-export type TabId = "overview" | "context" | "tasks" | "audit";
-
-/** 项目内的分区。**这是产品自己的导航**，所以它属于侧栏而不是一条 32px 的
- *  横条 —— 进了产品就是进了另一套框架（macOS 的应用源列表就是这么回事）。 */
-export const PROJECT_TABS: Array<{ id: TabId; label: string }> = [
-  { id: "overview", label: "概览" },
-  { id: "context", label: "上下文" },
-  { id: "tasks", label: "任务" },
-  { id: "audit", label: "审计" },
-];
+/**
+ * 审计时间的短形式：`MM-DD HH:mm:ss`。
+ *
+ * 存的是完整 ISO（带毫秒、带时区），那是**记录**该有的样子，不动。这里只改
+ * 呈现：毫秒在人读的时候没有用，年份在同一个项目里也不承载信息，而完整串会
+ * 把表格行撑到三行高。全量值仍在 title 里。
+ */
+function shortTime(iso: string): string {
+  const m = /^\d{4}-(\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/.exec(iso);
+  return m ? `${m[1]} ${m[2]}` : iso;
+}
 
 /** 审计结果的呈现。`unknown` 是 X-3 之前的记录，**不知道就是不知道**。 */
 const OUTCOME_LABEL: Record<string, string> = {
@@ -192,7 +198,16 @@ export function ProjectPanel({
   );
   useEffect(() => onPending?.(pending.length), [onPending, pending.length]);
 
-  if (!view) return <p className="text-body-md text-muted-foreground">加载中……</p>;
+  // 首次加载失败时 view 永远是 null——错误盒子在下面 view 非空的分支里，
+  // 之前这条路一直卡在"加载中……"，错误说了也白说（`error` 一直有值，用户
+  // 却永远看不到）。这里补一条出口：加载不出来就说清，不再无限转圈。
+  if (!view) {
+    return error ? (
+      <div className="error-box">{error}</div>
+    ) : (
+      <p className="text-body-md text-muted-foreground">加载中……</p>
+    );
+  }
   return (
     <div className="flex flex-col gap-lg">
       {/* 项目名与产品名已经在标题栏和侧栏里常驻，这里不再重复一遍 —— 重复的
@@ -220,12 +235,9 @@ export function ProjectPanel({
             </span>
           </div>
           <Button
-            onClick={() =>
-              void guard(async () => {
-                await api.importProject(id);
-                await refresh();
-              })
-            }
+            // guard() 本身成功后就会 refresh()——这里不用再手动追加一次，
+            // 不然一次点击悄悄拉两遍全部五个端点。
+            onClick={() => void guard(() => api.importProject(id))}
           >
             导入当前工作区
           </Button>
@@ -546,12 +558,18 @@ function ContextTab({
           description="Runtime 只能访问你显式授权的目录。"
         />
       )}
-      {grants.map((g) => (
-        <div key={g.id} className="card mono">
-          {g.path}{" "}
-          <span className="text-body-sm text-muted-foreground">({g.mode})</span>
-        </div>
-      ))}
+      {/* 一条授权是一行字（路径 + 读写模式）。一条一张卡，等于给一行字配
+          16px 内边距和一道边框 —— 三条授权就吃掉小半屏。 */}
+      {grants.length > 0 && (
+        <ul className="row-list">
+          {grants.map((g) => (
+            <li key={g.id} className="row-item">
+              <code className="row-main" title={g.path}>{g.path}</code>
+              <span className="row-tag">{g.mode}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="row">
         <Input
           value={grantPath}
@@ -962,18 +980,26 @@ function AuditTab({
           </TableHeader>
           <TableBody>
             {rows.map((e, i) => (
-              <TableRow key={e.eventId}>
-                <TableCell>{i + 1}</TableCell>
-                <TableCell>{e.occurredAt}</TableCell>
-                <TableCell>{e.action}</TableCell>
+              <TableRow key={e.eventId} className="audit-row">
+                <TableCell className="audit-idx">{i + 1}</TableCell>
+                {/* 完整 ISO 带毫秒会换到三行，而毫秒在这里没有用；同一个项目里
+                    年份也不承载信息。鼠标悬停仍给全量值。 */}
+                <TableCell className="audit-time" title={e.occurredAt}>
+                  {shortTime(e.occurredAt)}
+                </TableCell>
+                <TableCell className="audit-action">{e.action}</TableCell>
                 <TableCell>
                   {/* 旧记录的结果是 unknown —— 显示成 unknown，不显示成成功。 */}
                   <StatusBadge tone={OUTCOME_TONE[e.outcome] ?? "neutral"}>
                     {OUTCOME_LABEL[e.outcome] ?? e.outcome}
                   </StatusBadge>
                 </TableCell>
-                <TableCell>{e.actor}</TableCell>
-                <TableCell>{JSON.stringify(e.payload)}</TableCell>
+                <TableCell className="audit-action">{e.actor}</TableCell>
+                {/* payload 是原始 JSON，长度无上限。一行显示、溢出省略，全量在
+                    title 里 —— 让它撑开行高，等于让八条记录占满一屏。 */}
+                <TableCell className="audit-payload" title={JSON.stringify(e.payload)}>
+                  {JSON.stringify(e.payload)}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

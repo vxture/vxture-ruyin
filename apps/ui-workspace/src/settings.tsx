@@ -20,25 +20,13 @@ import {
   useTheme,
 } from "@vxture/design-system";
 import { Api, type SystemInfo, type UpdateCheck } from "./api";
+// SectionId/SETTINGS_SECTIONS live in their own module (settings-sections.ts)
+// so the sidebar can know the section list without pulling in this file's
+// DS-heavy SettingsView - see that file's header comment (TD-011②).
+export { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
+import type { SectionId } from "./settings-sections";
 
 const UI_VERSION = "0.2.0";
-
-export type SectionId = "account" | "general" | "privacy" | "updates" | "about";
-
-/**
- * 设置的分区。**这是设置自己的导航，所以它属于侧栏。**
- *
- * 原本它是页面内的第二根竖直导航栏 —— 于是设置页上并排站着两根：工作台的
- * 256px 和这里的 180px，436px 全是导航，右边才是内容。设置是一个应用，应用有
- * 自己的框架（和产品态同一套道理）。
- */
-export const SETTINGS_SECTIONS: Array<{ id: SectionId; label: string; icon: string }> = [
-  { id: "account", label: "账户", icon: "role" },
-  { id: "general", label: "通用", icon: "settings" },
-  { id: "privacy", label: "数据与隐私", icon: "lock" },
-  { id: "updates", label: "软件更新", icon: "arrow-down" },
-  { id: "about", label: "关于", icon: "info" },
-];
 
 export function SettingsView({ api, section }: { api: Api; section: SectionId }) {
   const [system, setSystem] = useState<SystemInfo | null>(null);
@@ -233,22 +221,28 @@ function UpdatesSection({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<UpdateCheck | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  // 单独一个状态，不与 check() 的失败共用：曾经共用一个 `failed`，界面只有一处
+  // 出口、写死「检查失败」——检查其实成功了，是随后点「下载并安装」时
+  // requestInstall 失败，用户看到的却是「检查失败：<安装错误>」，一句指错
+  // 了哪一步的话。
+  const [installFailed, setInstallFailed] = useState<string | null>(null);
   const [requested, setRequested] = useState(false);
 
   const install = async (version: string) => {
-    setFailed(null);
+    setInstallFailed(null);
     try {
       await api.requestInstall(version);
       setRequested(true);
     } catch (e) {
       // 守护进程可能刚判出有任务在跑 —— 说出原因，不要静默。
-      setFailed(String((e as Error).message));
+      setInstallFailed(String((e as Error).message));
     }
   };
 
   const check = async () => {
     setBusy(true);
     setFailed(null);
+    setInstallFailed(null);
     setRequested(false);
     try {
       setResult(await api.checkUpdate());
@@ -311,6 +305,11 @@ function UpdatesSection({
                 {requested && (
                   <span className="text-body-sm text-muted-foreground">
                     下载完成后会问你是否现在重启安装
+                  </span>
+                )}
+                {installFailed && (
+                  <span className="text-body-sm update-line--warn">
+                    安装请求失败：{installFailed}
                   </span>
                 )}
               </div>

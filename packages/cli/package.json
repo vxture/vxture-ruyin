@@ -17,7 +17,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "type-check": "tsc -p tsconfig.json --noEmit"
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --experimental-test-coverage --test-coverage-include=\"dist/**/*.js\" --test-coverage-exclude=\"dist/**/*.test.js\" --test-coverage-lines=95 --test-coverage-branches=90 --test-coverage-functions=95 --test dist/main.test.js"
   },
   "dependencies": {
     "@vxture/ruyin-contract-schema": "workspace:*"

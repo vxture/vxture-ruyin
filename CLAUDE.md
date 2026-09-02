@@ -56,8 +56,12 @@ Ruyin adds a sixth, `packaged-smoke`: it builds the installer and actually
 launches the packaged app. The other five can all be green while the shipped
 artifact does not start - a dependency missing from the deployed tree, a native
 module built for the wrong ABI, or one that silently degrades when it fails to
-resolve. Only running the packaged thing sees that. Governance basis: the
-distribution-repo clause in 140-repo-governance-standard.md (2026-09-01).
+resolve. Only running the packaged thing sees that. Governance basis: ruyin's
+own call as a desktop-distribution repo the platform template explicitly
+excludes (product_240 section 0.3) - not contingent on any org-wide standard.
+A parallel proposal to generalize this for all distribution repos is open at
+vxture-platform#131 (see docs/60-operations/10-tech-debt.md TD-025); ruyin
+does not wait on it to land.
 
 The ruleset (docs/50-deployment/rebuild/main-ruleset.json) documents intent;
 GitHub only enforces what has been applied to it (TD-002 covers the bootstrap).
