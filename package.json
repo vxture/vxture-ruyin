@@ -19,6 +19,7 @@
     "lint:publish-order": "node scripts/guardrails/check-publish-order.mjs",
     "lint:shared-shapes": "node scripts/guardrails/check-shared-shapes.mjs",
     "lint:update-policy": "node scripts/guardrails/check-update-policy.mjs",
-    "dev:ui": "node scripts/dev/ui-harness.mjs"
+    "dev:ui": "node scripts/dev/ui-harness.mjs",
+    "lint:brand-assets": "node scripts/guardrails/check-brand-assets.mjs"
   }
 }

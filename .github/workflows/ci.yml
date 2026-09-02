@@ -149,6 +149,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
+      # 品牌资源守卫住在这里而不是 static-checks：它要解析
+      # @vxture/design-system 的包根，也就是需要 node_modules，而 static-checks
+      # 是刻意不装依赖的纯 node 检查。
+      - name: Brand asset guardrail (public/ copy vs design system)
+        run: pnpm lint:brand-assets
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
   # -- Quality gate (aggregator; stable required-check name) ------------------
   quality-gate:
     name: quality-gate

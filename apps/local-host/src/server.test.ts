@@ -153,11 +153,10 @@ void test("HTTP: 页面直接引用的根级资源不经令牌闸门 —— 带 
   const uiDir = mkdtempSync(join(tmpdir(), "ruyin-ui-"));
   writeFileSync(join(uiDir, "index.html"), "<!doctype html><title>t</title>");
   writeFileSync(join(uiDir, "logo.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>');
-  writeFileSync(join(uiDir, "icon.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>');
   writeFileSync(join(uiDir, "secret.txt"), "not a whitelisted root file");
   const rig = await startServer({ uiDir });
   try {
-    for (const name of ["logo.svg", "icon.svg"]) {
+    for (const name of ["logo.svg"]) {
       // 无凭据取，正是浏览器的取法。
       const res = await fetch(`${rig.base}/${name}`);
       assert.equal(res.status, 200, `${name} 应无需令牌即可取到`);

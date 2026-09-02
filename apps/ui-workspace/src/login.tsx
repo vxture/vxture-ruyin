@@ -61,7 +61,7 @@ export function SessionGate({ api }: { api: Api }) {
     return (
       <div className="splash">
         <DragStrip />
-        <img className="splash-mark" src="/icon.svg" alt="" aria-hidden />
+        <img className="splash-mark" src="/logo.svg" alt="" aria-hidden />
         <div className="text-body-md text-muted-foreground">正在连接运行时…</div>
       </div>
     );
@@ -83,7 +83,7 @@ export function SessionGate({ api }: { api: Api }) {
       fallback={
         <div className="splash">
           <DragStrip />
-          <img className="splash-mark" src="/icon.svg" alt="" aria-hidden />
+          <img className="splash-mark" src="/logo.svg" alt="" aria-hidden />
           <div className="text-body-md text-muted-foreground">正在加载…</div>
         </div>
       }
@@ -149,7 +149,7 @@ function LoginScreen({
     <div className="login-screen">
       <DragStrip />
       <div className="login-center">
-        <img className="login-mark" src="/icon.svg" alt="如影 Ruyin" />
+        <img className="login-mark" src="/logo.svg" alt="Vxture Ruyin" />
         <h1 className="login-title">
           <span className="logo-cn">如影</span> · 你的业务工作台
         </h1>
