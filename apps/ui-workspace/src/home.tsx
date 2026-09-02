@@ -17,7 +17,7 @@
  * 的 chrome 三态同一条道理）。首页负责的是：环境可不可用、我有什么、能去哪。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Badge,
   Button,
@@ -55,11 +55,24 @@ function InstallPackageRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<InstalledPackage | null>(null);
+  const pick = useRef<HTMLInputElement>(null);
   return (
     <div className="install-row">
-      <label className="install-row-label">
-        <span className="text-body-sm text-muted-foreground">安装本地产品包</span>
-        <input
+      {/* 原生 file input 藏起来，由一个 DS 按钮代打开。
+          藏它不是为了好看：那个控件由浏览器渲染，按**浏览器的语言**显示
+          「Choose File / No file chosen」—— 一句改不掉的英文夹在中文界面里，
+          而且它长什么样每个平台还不一样。功能照旧走这个 input（同一个页面在
+          浏览器和壳里都要能用，不走只有壳能走的原生对话框）。 */}
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={busy}
+        onClick={() => pick.current?.click()}
+      >
+        {busy ? "正在安装……" : "安装本地产品包"}
+      </Button>
+      <input
+          ref={pick}
           type="file"
           accept=".ruyinpkg"
           disabled={busy}
@@ -80,10 +93,7 @@ function InstallPackageRow({
               .finally(() => setBusy(false));
           }}
         />
-      </label>
-      {busy && (
-        <span className="text-body-sm text-muted-foreground">正在安装……</span>
-      )}
+      {/* 「正在安装」已经写在按钮上了，不再在旁边说第二遍。 */}
       {done && (
         <span className="text-body-sm text-muted-foreground">
           已安装 {done.productId}@{done.version}

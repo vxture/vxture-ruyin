@@ -571,6 +571,28 @@ void test("热门推荐: capability tags come from the catalog entry, not invent
 
 // --- InstallPackageRow --------------------------------------------------------
 
+void test("InstallPackageRow: a DS button opens the picker - the browser-rendered control is hidden", async () => {
+  const { container } = render(
+    <HomePage
+      api={fakeApi()}
+      products={[]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  // 原生控件由浏览器渲染，文案跟浏览器语言走（Choose File / No file chosen），
+  // 改不掉，每个平台长得还不一样 —— 所以藏起来，由按钮代打开。功能仍走这个 input。
+  expect(input).toBeInTheDocument();
+  const clicked = vi.spyOn(input, "click");
+  await userEvent.click(screen.getByRole("button", { name: "安装本地产品包" }));
+  expect(clicked).toHaveBeenCalledTimes(1);
+});
+
 void test("InstallPackageRow: installing shows a busy state then the signed/unsigned result, and refreshes", async () => {
   const installPackage = vi.fn().mockResolvedValue({
     productId: "vxture.new",
