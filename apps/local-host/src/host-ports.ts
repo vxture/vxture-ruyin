@@ -40,7 +40,12 @@ export const nodeCrypto: CryptoPort = {
 };
 
 /**
- * Stand-in provider until the Capability Resolver lands (ADR-001).
+ * 没有配置能力面时的那条分支 —— **不是等着被替换掉的占位**。
+ *
+ * 这一行原本写的是 "Stand-in provider until the Capability Resolver lands"，
+ * 而**同一个文件往上四行**就写着相反的话：真正的 `CapabilityClient` 已经在了
+ * （`capability-client.ts`），配了 `RUYIN_CAPABILITY_BASE` 就走它。一份文件里
+ * 并存两种说法，读到哪一句全看运气 —— 而读到旧那句的人会去找一个不存在的待办。
  *
  * It echoes how many messages it was handed on purpose: the straight-line
  * predecessor fed every capability the same inputs, and a mock that ignored

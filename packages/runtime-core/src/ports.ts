@@ -195,6 +195,17 @@ export interface CapabilityTurnRequest {
  * and gets it wrong in the passing direction - which is exactly how a
  * verification step turns into decoration.
  */
+/**
+ * 恰好三支。**没有「引用」那一支** —— ADR-013 的 B 路（产品自己排版、能力面回一个
+ * 引用、Runtime 下载落盘）一直没建，登记在 TD-024。
+ *
+ * 碑立在这里，是因为这就是加那一支的地方。**它现在不该被加**：B 的触发条件是
+ * 「有产品自带排版实现」，而目前没有任何业务产品部署了云端能力面（与 TD-018 同
+ * 一个前置）。没有需求驱动就先建通路，建出来的是一条没人走、也没法验的路。
+ *
+ * 别把 `CapabilityResult.artifact`（本文件下方）看成 B 的雏形：那是**本地写入
+ * 回执**（写到哪、多少字节），不是一个可以去取回的引用。
+ */
 export type CapabilityTurn =
   | { kind: "tool_calls"; calls: ToolCall[] }
   | { kind: "content"; content: string }
