@@ -3,13 +3,18 @@ name: ci
 # Trunk-based CI: runs on PRs to main and on push:main (the squash commit that
 # lands on main is a new SHA, so it gets its own gate run). Does NOT publish.
 #
-# Produces four of the five required status checks named in
+# Produces five of the six required status checks named in
 # docs/50-deployment/rebuild/main-ruleset.json: `quality-gate` / `build` /
-# `test-coverage` / `audit` (the fifth, `gitleaks`, is in secret-scan.yml). Job
-# names are a stable contract - renaming one breaks branch protection. In the
-# governance-shell batch `build` and `test-coverage` are green placeholders
-# (no workspace packages yet, TD-003); workplan W2 replaces them with real work
-# while keeping the context names stable.
+# `test-coverage` / `audit` / `packaged-smoke` (the sixth, `gitleaks`, is in
+# secret-scan.yml). Job names are a stable contract - renaming one breaks
+# branch protection.
+#
+# `packaged-smoke` is ruyin's own addition, not an org-wide standard: as a
+# desktop-distribution repo the platform template explicitly excludes (CLAUDE.md,
+# product_240 section 0.3), the other five can all be green while the shipped
+# artifact does not start. It must always report - never a matrix leg, never
+# skipped - because a required check that never reports reads as "CI still
+# running" and blocks the branch forever.
 
 on:
   pull_request:
