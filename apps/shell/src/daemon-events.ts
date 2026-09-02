@@ -5,7 +5,7 @@
  * parsing that main.ts's streamDaemonEvents() drives.
  */
 
-export type DaemonEventKind = "task" | "pending" | "update-intent";
+export type DaemonEventKind = "task" | "pending";
 
 export interface DaemonEventFrame {
   kind: DaemonEventKind;

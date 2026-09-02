@@ -1,7 +1,7 @@
 /**
  * HTTP surface tests for routes integration.test.ts's milestone flow never
  * reaches: identity (auth/session, auth/login, auth/logout, oauth/callback),
- * entitlements, updates/check + updates/intent, product lifecycle
+ * entitlements, updates/check, product lifecycle
  * (pin-version/activate/deactivate), and the project sub-routes state /
  * grants / bindings / cancel / context / import. Also the errorStatus()
  * branches those routes exercise - server.ts's "one error shape" contract
@@ -32,7 +32,6 @@ import { loadProducts } from "./products.js";
 import { ProductRegistry } from "./product-registry.js";
 import { createLocalApi, type LocalApiDeps } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
-import { InstallIntentBox } from "./updates.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -88,7 +87,6 @@ async function startServer(overrides: Partial<LocalApiDeps> = {}): Promise<Rig> 
     tasks: new TaskRunner(runtime),
     token,
     version: "test",
-    updateIntent: new InstallIntentBox(),
     writeArtifact: (p, b, g) => executor.writeArtifact(p, b, g),
     supportsTool: (t) => executor.supports(t),
     systemInfo: testSystemInfo,
@@ -324,29 +322,6 @@ void test("HTTP GET /entitlements: NotSignedInError -> 401, PlatformNotConfigure
   try {
     const res = await fetch(`${rig.base}/entitlements?products=bid`, { headers: rig.headers });
     assert.equal(res.status, 503);
-  } finally {
-    closeRig(rig);
-  }
-});
-
-void test("HTTP GET /updates/check answers with a gate and does not install anything", async () => {
-  const rig = await startServer();
-  try {
-    const res = await fetch(`${rig.base}/updates/check`, { headers: rig.headers });
-    assert.equal(res.status, 200);
-    const body = (await res.json()) as { gate: { installable: boolean } };
-    assert.equal(typeof body.gate.installable, "boolean");
-  } finally {
-    closeRig(rig);
-  }
-});
-
-void test("HTTP GET /updates/intent: no pending intent by default", async () => {
-  const rig = await startServer();
-  try {
-    const res = await fetch(`${rig.base}/updates/intent`, { headers: rig.headers });
-    assert.equal(res.status, 200);
-    assert.equal(((await res.json()) as { intent: unknown }).intent, null);
   } finally {
     closeRig(rig);
   }
@@ -621,3 +596,44 @@ void test("HTTP: an unknown route is a 404 that names the path", async () => {
   }
 });
 
+
+/**
+ * 更新检查（MVP 不做自动更新之后）。
+ *
+ * 端点只回答「有没有新版本、去哪儿拿」。**没有安装动作，也就没有闸门**——
+ * 原先的 gate/intent 随 electron-updater 一并拆掉了（TD-021，owner 定
+ * 2026-09-02）。
+ */
+void test("HTTP GET /updates/check 只作答，不安装；已无 gate 字段", async () => {
+  const rig = await startServer();
+  try {
+    const res = await fetch(`${rig.base}/updates/check`, { headers: rig.headers });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body["current"], "test");
+    // 渠道必须在答案里：不写明渠道的下载链接是有害的。
+    assert.equal(typeof body["channel"], "string");
+    // 闸门是安装时代的遗物，不该再出现。
+    assert.equal(body["gate"], undefined);
+    assert.ok(["current", "available", "unreachable"].includes(String(body["status"])));
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("HTTP: 安装与意图两个端点已经不存在（不是留着不用）", async () => {
+  const rig = await startServer();
+  try {
+    // 留着一条走不通的路，下一个人会以为它还能走。
+    const install = await fetch(`${rig.base}/updates/install`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ version: "9.9.9" }),
+    });
+    assert.equal(install.status, 404);
+    const intent = await fetch(`${rig.base}/updates/intent`, { headers: rig.headers });
+    assert.equal(intent.status, 404);
+  } finally {
+    closeRig(rig);
+  }
+});

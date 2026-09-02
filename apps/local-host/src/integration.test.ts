@@ -31,7 +31,6 @@ import { ProductRegistry } from "./product-registry.js";
 import { createLocalApi } from "./server.js";
 import type { PlatformService } from "./platform.js";
 import { TaskRunner } from "./task-runner.js";
-import { InstallIntentBox } from "./updates.js";
 import { EventBus } from "./events.js";
 import { CHECKSUMS_ENTRY, MANIFEST_ENTRY, sha256 as pkgSha256 } from "./pkg.js";
 import { makeTestZip } from "./pkg-testkit.js";
@@ -196,7 +195,6 @@ function installablePackage(): Buffer {
 const testSystemInfo = {
   version: "test",
 
-  updateIntent: new InstallIntentBox(),
 
   writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       new LocalToolExecutor().writeArtifact(p, b, g),
@@ -281,7 +279,6 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     token,
     version: "test",
 
-    updateIntent: new InstallIntentBox(),
 
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       new LocalToolExecutor().writeArtifact(p, b, g),
@@ -517,7 +514,6 @@ test("daemon serves the built workspace ui with traversal guard", async () => {
     token: "t",
     version: "test",
 
-    updateIntent: new InstallIntentBox(),
 
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       new LocalToolExecutor().writeArtifact(p, b, g),
@@ -682,7 +678,6 @@ test("归属：未登录不能新建项目；老项目可导入当前工作区",
     token,
     version: "test",
 
-    updateIntent: new InstallIntentBox(),
 
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       new LocalToolExecutor().writeArtifact(p, b, g),
@@ -775,7 +770,6 @@ test("导出：落进授权目录、留下审计、未授权目录一律拒绝",
     tasks: new TaskRunner(runtime),
     token,
     version: "test",
-    updateIntent: new InstallIntentBox(),
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       new LocalToolExecutor().writeArtifact(p, b, g),
     supportsTool: (t: string) => new LocalToolExecutor().supports(t),
@@ -867,7 +861,6 @@ test("任务列表：跑不了的标出来，标了的确实启动不了，没�
     tasks: new TaskRunner(runtime),
     token,
     version: "test",
-    updateIntent: new InstallIntentBox(),
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       executor.writeArtifact(p, b, g),
     supportsTool: (t: string) => executor.supports(t),
@@ -942,7 +935,6 @@ test("事件流：任务一动，订阅者就收到，而且只说什么变了",
     tasks: new TaskRunner(runtime, new Set(), events),
     token,
     version: "test",
-    updateIntent: new InstallIntentBox(),
     events,
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       executor.writeArtifact(p, b, g),
@@ -1024,59 +1016,6 @@ test("事件流：任务一动，订阅者就收到，而且只说什么变了",
 });
 
 /**
- * 安装意图也要发事件（TD-029）。
- *
- * 壳原本每 5 秒问一次「有没有人要装更新」。用户按下按钮到壳动手之间的那段
- * 空白，全是这个轮询周期。
- */
-test("事件流：记下安装意图时发一声，壳不必每 5 秒问一次", async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-intent-"));
-  const { ports, storage, executor } = await makePorts(dataDir);
-  const runtime = new ProjectRuntime(ports);
-  const token = "intent-token";
-  const events = new EventBus();
-  const seen: string[] = [];
-  events.subscribe((e) => seen.push(e.kind));
-
-  const server = createLocalApi({
-    runtime,
-    registry: new ProductRegistry(productsDir, dataDir),
-    tasks: new TaskRunner(runtime, new Set(), events),
-    token,
-    version: "test",
-    updateIntent: new InstallIntentBox(),
-    events,
-    writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
-      executor.writeArtifact(p, b, g),
-    supportsTool: (t: string) => executor.supports(t),
-    systemInfo: testSystemInfo,
-    reindex: async () => 0,
-  });
-  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-
-  try {
-    const res = await fetch(`${base}/updates/install`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ version: "9.9.9" }),
-    });
-    assert.equal(res.status, 202);
-    assert.ok(
-      seen.includes("update-intent"),
-      "意图记下了却没人被通知 —— 壳只能靠等",
-    );
-  } finally {
-    server.close();
-    storage.closeAll();
-    rmSync(dataDir, { recursive: true, force: true });
-  }
-});
-
-/**
  * 装一个 .ruyinpkg（TD-028）。
  *
  * 端点一直在，界面上没有入口 —— 现在补上了 file input，那就得确认它 POST 的
@@ -1094,7 +1033,6 @@ test("安装包：字节直接 POST，回来的形状就是界面声明的那个
     tasks: new TaskRunner(runtime),
     token,
     version: "0.1.0",
-    updateIntent: new InstallIntentBox(),
     // 开发口径：未签名包放行。生产缺省要求副署（§18.2 / TD-012）。
     requireSignedPackages: false,
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
@@ -1181,7 +1119,6 @@ test("工作区边界：别的工作区的项目，凭 id 也打不开", async (
     tasks: new TaskRunner(runtime),
     token,
     version: "test",
-    updateIntent: new InstallIntentBox(),
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       executor.writeArtifact(p, b, g),
     supportsTool: (t: string) => executor.supports(t),
@@ -1286,7 +1223,6 @@ test("导出：待导入的项目未登录时也导不走", async () => {
     tasks: new TaskRunner(runtime),
     token,
     version: "test",
-    updateIntent: new InstallIntentBox(),
     writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
       executor.writeArtifact(p, b, g),
     supportsTool: (t: string) => executor.supports(t),

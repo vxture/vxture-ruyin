@@ -76,24 +76,33 @@ export interface ProjectMeta {
  * 更新检查结果（daemon /updates/check）。**`current` 只在真拉到 feed 并比对过
  * 之后才会出现**——查不到就是 `unreachable`，不是「已是最新」。
  */
-export interface InstallGate {
-  installable: boolean;
-  /** 不可安装时的人可读原因。 */
-  reason?: string;
-  runningTasks: number;
-}
 
-export type UpdateCheck = (
-  | { status: "current"; current: string; latest: string; checkedAt: string }
+export type UpdateCheck =
+  | {
+      status: "current";
+      current: string;
+      latest: string;
+      channel: string;
+      checkedAt: string;
+    }
   | {
       status: "available";
       current: string;
       latest: string;
       releasedAt?: string;
+      /** 安装包地址，由守护进程从 feed 自己的 path 拼出。缺 path 时没有这个字段。 */
+      downloadUrl?: string;
+      /** stable / beta。不写明渠道的下载链接是有害的。 */
+      channel: string;
       checkedAt: string;
     }
-  | { status: "unreachable"; current: string; reason: string; checkedAt: string }
-) & { gate: InstallGate };
+  | {
+      status: "unreachable";
+      current: string;
+      reason: string;
+      channel: string;
+      checkedAt: string;
+    };
 
 /**
  * `GET /projects` 的形状。`elsewhere` 只报**数量不报名字**：隔离要照做，但
@@ -142,8 +151,7 @@ export interface ProjectExport {
 /** 运行时事件（daemon /events）。只说什么变了，不带业务数据。 */
 export type RuntimeEvent =
   | { kind: "task"; projectId: string; taskInstance: string }
-  | { kind: "pending" }
-  | { kind: "update-intent" };
+  | { kind: "pending" };
 
 export interface StateItem {
   name: string;
@@ -444,13 +452,6 @@ export class Api {
     return () => abort.abort();
   };
   checkUpdate = () => this.call<UpdateCheck>("/updates/check");
-  /** 记下安装意图（策略 2：操作与时机都归用户）。守护进程会再判一次闸门。 */
-  requestInstall = (version: string) =>
-    this.call<{ version: string; requestedAt: string }>(
-      "/updates/install",
-      "POST",
-      { version },
-    );
   products = () => this.call<ProductInfo[]>("/products");
   projects = () => this.call<ProjectList>("/projects");
   createProject = (product: string, name: string) =>

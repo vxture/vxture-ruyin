@@ -200,22 +200,21 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
 /* ---------------- 软件更新 ---------------- */
 
 /**
- * 检查、下载与安装**都已接入**（2026-09-01，TD-021）。
+ * 检查更新；**下载与安装交给用户自己在浏览器里做**（2026-09-02，owner 定）。
  *
- * 检查只是一个 HTTP GET，放在守护进程；下载与安装归壳（electron-updater）。
- * 三条策略由 owner 定下并落进代码，`scripts/guardrails/check-update-policy.mjs`
- * 逐条钉住：①有任务在跑就不装（闸门在守护进程，因为只有它知道有没有任务在跑；
- * 壳在真正安装前会再问一次）②绝不自行下载、也不在退出时静默安装 ③渠道不允许
- * 降级。**未定的策略不该由实现替人默认掉** —— 现在它们定了，于是写进了代码。
+ * MVP 阶段不做自动更新。原因不是没做到：曾经整套接过 electron-updater，
+ * 但它在 Windows 上默认校验更新包签名，而 owner 定了不采购证书
+ * （TD-001 转 standing）。于是只剩两条路 —— 关掉那道校验，等于让更新通道接受
+ * 任何来自 feed 的包；或者不做自动安装。**选了后者**：为一个 MVP 阶段还不需要
+ * 的便利去降一条安全底线，不划算。下载与安装那一整段代码已经拆掉，不是留着
+ * 不用 —— 留着的死路会让下一个人以为它还能走。
  *
- * 余下只等 TD-001 的证书：Windows 上 electron-updater 默认校验更新包签名，本仓
- * 选择**不关掉那道校验**，所以没有签名就发不出能装的更新。
+ * 于是这里只做两件事：说清有没有新版本，以及**给出那一份包的确切地址**。地址
+ * 由守护进程从它刚校验过的那份 feed 自己拼出，**带着渠道**（stable / beta）。
+ * 不写明渠道的下载链接是有害的 —— 用户可能正装上一个 beta 包而不自知。
  *
  * **查不到 ≠ 已是最新。** 这个功能的上一版不发请求就断言「当前已是最新」并附
  * 时间戳；现在 `unreachable` 是一个正式状态，绝不折叠进「最新」。
- *
- * 这段注释本身出过一次反向的错：下载与安装接进来之后它还写着「尚未接入」、
- * 「三条尚未定的策略」，读起来像没做、其实做了 —— 与 TD-015 记的那一类同科。
  */
 function UpdatesSection({
   system,
@@ -227,29 +226,10 @@ function UpdatesSection({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<UpdateCheck | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  // 单独一个状态，不与 check() 的失败共用：曾经共用一个 `failed`，界面只有一处
-  // 出口、写死「检查失败」——检查其实成功了，是随后点「下载并安装」时
-  // requestInstall 失败，用户看到的却是「检查失败：<安装错误>」，一句指错
-  // 了哪一步的话。
-  const [installFailed, setInstallFailed] = useState<string | null>(null);
-  const [requested, setRequested] = useState(false);
-
-  const install = async (version: string) => {
-    setInstallFailed(null);
-    try {
-      await api.requestInstall(version);
-      setRequested(true);
-    } catch (e) {
-      // 守护进程可能刚判出有任务在跑 —— 说出原因，不要静默。
-      setInstallFailed(String((e as Error).message));
-    }
-  };
 
   const check = async () => {
     setBusy(true);
     setFailed(null);
-    setInstallFailed(null);
-    setRequested(false);
     try {
       setResult(await api.checkUpdate());
     } catch (e) {
@@ -292,30 +272,34 @@ function UpdatesSection({
           {result?.status === "available" && (
             <div className="update-line update-line--new">
               有新版本 <span className="mono">{result.latest}</span>
-              （当前 <span className="mono">{result.current}</span>）
+              （当前 <span className="mono">{result.current}</span>
+              {/* 渠道要写在明面上：用户有权知道自己要装的是 stable 还是 beta。
+                  更新源没写明渠道时**不提它** —— 猜一个渠道名是拿错话冒充事实。 */}
+              {result.channel && (
+                <>
+                  ，<span className="mono">{result.channel}</span> 渠道
+                </>
+              )}
+              ）
               <div className="update-actions">
-                {/* 操作权归用户（策略 2）：只有点了才装。
-                    有任务在跑时禁用（策略 1），并说清为什么——防误触，
-                    也免得按了没反应。真正的闸门在守护进程，这里只是不让人白点。 */}
-                <Button
-                  disabled={!result.gate.installable || requested}
-                  onClick={() => void install(result.latest)}
-                >
-                  {requested ? "已请求安装" : "下载并安装"}
-                </Button>
-                {!result.gate.installable && (
-                  <span className="text-body-sm text-muted-foreground">
-                    {result.gate.reason}
-                  </span>
-                )}
-                {requested && (
-                  <span className="text-body-sm text-muted-foreground">
-                    下载完成后会问你是否现在重启安装
-                  </span>
-                )}
-                {installFailed && (
+                {result.downloadUrl ? (
+                  <>
+                    <Button
+                      onClick={() =>
+                        window.open(result.downloadUrl, "_blank", "noopener")
+                      }
+                    >
+                      下载安装包 ↗
+                    </Button>
+                    <span className="text-body-sm text-muted-foreground">
+                      在浏览器里下载，下载完自己运行它 —— 本应用不会自动安装。
+                    </span>
+                  </>
+                ) : (
+                  // feed 里没有 path。**不拼一个猜出来的地址**：点下去拿到 404，
+                  // 用户会以为是产品坏了。照实说这一次拿不到地址。
                   <span className="text-body-sm update-line--warn">
-                    安装请求失败：{installFailed}
+                    这次没能拿到安装包地址（更新源里没写文件名）。
                   </span>
                 )}
               </div>
@@ -330,14 +314,16 @@ function UpdatesSection({
           )}
         </div>
       </SettingRow>
-      {/* 下载与安装已经开放了，渠道仍不提供 —— 原因换了，不是「还没做到那一步」：
-          electron-updater 的 `channel` setter 会把 `allowDowngrade` 自动翻成
-          true，而那正是 owner 定的策略 ③。加一个渠道开关就等于让策略在没人察觉
-          的情况下自己反过来（check-update-policy.mjs 盯着这一条）。要提供它，
-          得先处理这个副作用，而不是把开关摆上去。 */}
+      {/* 这一句的理由**换到第三个版本了**，前两个都随实现变化而过期：
+          ① 「随下载与安装一并开放」—— 那两样开放之后它没跟着改；
+          ② 「切换渠道会连带允许降级」—— 那是 electron-updater 的 `channel`
+             setter 副作用，而 electron-updater 已随自动更新一并拆掉；
+          ③ 现在：本机只发 stable，切到 beta 那边**没有包**，检查会 unreachable。
+          之所以把这段历史留着：一处解释性文案连着两次比它解释的东西活得更久，
+          说明它值得被当成会过期的东西看待，而不是写完就忘。 */}
       <SettingRow
         label="更新渠道"
-        hint="暂不提供：切换渠道会连带允许降级，而降级是明确禁止的——要开放它得先解掉这个副作用"
+        hint="当前只发布 stable。切到其他渠道那边还没有包，检查会查不到——等有了再开放"
       >
         <span className="text-body-sm text-muted-foreground">stable</span>
       </SettingRow>

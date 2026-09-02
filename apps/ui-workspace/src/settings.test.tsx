@@ -7,7 +7,7 @@
  * these tests, not just testing pre-existing behavior - install() wrote its
  * failure into the same `failed` state check() uses, and the one place that
  * state renders says "检查失败" (check failed) unconditionally. A user who
- * clicks 检查更新 (succeeds), then 下载并安装 (fails - a task started
+ * clicks 检查更新 (succeeds), then 下载安装包 (opens the browser
  * running in between) would have seen "检查失败：<install's error>" - blaming
  * the wrong step. Fixed with its own `installFailed` state/message; the
  * regression test below is what would have caught it.
@@ -37,7 +37,6 @@ function fakeApi(over: Partial<Api> = {}): Api {
   return {
     system: vi.fn().mockResolvedValue(systemInfo()),
     checkUpdate: vi.fn(),
-    requestInstall: vi.fn(),
     ...over,
   } as unknown as Api;
 }
@@ -134,8 +133,8 @@ function currentResult(over: Partial<Extract<UpdateCheck, { status: "current" }>
     status: "current" as const,
     current: "0.2.0",
     latest: "0.2.0",
+    channel: "stable",
     checkedAt: "2026-09-02T00:00:00Z",
-    gate: { installable: true, runningTasks: 0 },
     ...over,
   };
 }
@@ -145,8 +144,8 @@ function availableResult(over: Partial<Extract<UpdateCheck, { status: "available
     status: "available" as const,
     current: "0.2.0",
     latest: "0.3.0",
+    channel: "stable",
     checkedAt: "2026-09-02T00:00:00Z",
-    gate: { installable: true, runningTasks: 0 },
     ...over,
   };
 }
@@ -164,37 +163,41 @@ void test("UpdatesSection: checking shows a busy state, then 已是最新 on a c
   expect(await screen.findByText("已是最新（0.2.0）")).toBeInTheDocument();
 });
 
-void test("UpdatesSection: an available update with an installable gate lets you install", async () => {
-  const requestInstall = vi.fn().mockResolvedValue({ version: "0.3.0", requestedAt: "" });
-  const api = fakeApi({
-    checkUpdate: vi.fn().mockResolvedValue(availableResult({ latest: "0.3.0" })),
-    requestInstall,
-  });
-  renderSection("updates", api);
-  await clickCheck();
-  const install = await screen.findByText("下载并安装");
-  expect(install).not.toBeDisabled();
-
-  const user = userEvent.setup();
-  await user.click(install);
-  expect(requestInstall).toHaveBeenCalledWith("0.3.0");
-  expect(await screen.findByText("已请求安装")).toBeInTheDocument();
-  expect(screen.getByText("下载完成后会问你是否现在重启安装")).toBeInTheDocument();
-});
-
-void test("UpdatesSection: a blocked gate disables install and shows why, without calling requestInstall", async () => {
-  const requestInstall = vi.fn();
+void test("UpdatesSection: an available update offers the exact package, with its channel named", async () => {
   const api = fakeApi({
     checkUpdate: vi.fn().mockResolvedValue(
-      availableResult({ gate: { installable: false, reason: "有任务正在运行", runningTasks: 1 } }),
+      availableResult({
+        latest: "0.3.0",
+        downloadUrl: "https://dl.example.com/ruyin/stable/Ruyin-Setup-0.3.0.exe",
+      }),
     ),
-    requestInstall,
+  });
+  vi.stubGlobal("open", vi.fn());
+  renderSection("updates", api);
+  await clickCheck();
+  await userEvent.setup().click(await screen.findByRole("button", { name: "下载安装包 ↗" }));
+  expect(globalThis.open).toHaveBeenCalledWith(
+    "https://dl.example.com/ruyin/stable/Ruyin-Setup-0.3.0.exe",
+    "_blank",
+    "noopener",
+  );
+  // 渠道要写在明面上：用户有权知道自己要装的是 stable 还是 beta。
+  // 收进那一行里断言 —— 「更新渠道」那一行也写着 stable，全页找会撞上它。
+  const line = document.querySelector(".update-line--new");
+  expect(line?.textContent).toContain("stable");
+  // 本应用不会自动安装 —— 这句话必须说出来，否则用户会等着它自己装。
+  expect(screen.getByText(/本应用不会自动安装/)).toBeInTheDocument();
+});
+
+void test("UpdatesSection: no path in the feed means no link - never a guessed URL", async () => {
+  const api = fakeApi({
+    checkUpdate: vi.fn().mockResolvedValue(availableResult({ latest: "0.3.0" })),
   });
   renderSection("updates", api);
   await clickCheck();
-  expect(await screen.findByText("下载并安装")).toBeDisabled();
-  expect(screen.getByText("有任务正在运行")).toBeInTheDocument();
-  expect(requestInstall).not.toHaveBeenCalled();
+  // 猜出来的地址点下去是 404，而用户会以为是产品坏了。照实说这次拿不到。
+  expect(await screen.findByText(/更新源里没写文件名/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "下载安装包 ↗" })).not.toBeInTheDocument();
 });
 
 void test("UpdatesSection: unreachable is a distinct status, never folded into 'current'", async () => {
@@ -203,8 +206,8 @@ void test("UpdatesSection: unreachable is a distinct status, never folded into '
       status: "unreachable",
       current: "0.2.0",
       reason: "渠道 feed 无法访问",
+      channel: "stable",
       checkedAt: "2026-09-02T00:00:00Z",
-      gate: { installable: true, runningTasks: 0 },
     }),
   });
   renderSection("updates", api);
@@ -222,38 +225,4 @@ void test("UpdatesSection: checkUpdate() rejecting reads '检查失败', not sil
   await clickCheck();
   expect(await screen.findByText("检查失败：网络不可达")).toBeInTheDocument();
   expect(screen.queryByText(/已是最新/)).not.toBeInTheDocument();
-});
-
-void test("UpdatesSection: a requestInstall() failure reads as an install failure, not 检查失败 (regression)", async () => {
-  const api = fakeApi({
-    checkUpdate: vi.fn().mockResolvedValue(availableResult({ latest: "0.3.0" })),
-    requestInstall: vi.fn().mockRejectedValue(new Error("有任务刚刚开始运行")),
-  });
-  renderSection("updates", api);
-  await clickCheck();
-  const user = userEvent.setup();
-  await user.click(await screen.findByText("下载并安装"));
-
-  expect(await screen.findByText("安装请求失败：有任务刚刚开始运行")).toBeInTheDocument();
-  // 检查本身是成功的：不该出现"检查失败"这句话，那会指错哪一步出的问题。
-  expect(screen.queryByText(/检查失败/)).not.toBeInTheDocument();
-});
-
-void test("UpdatesSection: re-checking clears a previous install failure and the requested flag", async () => {
-  const checkUpdate = vi
-    .fn()
-    .mockResolvedValueOnce(availableResult({ latest: "0.3.0" }))
-    .mockResolvedValueOnce(availableResult({ latest: "0.3.0" }));
-  const api = fakeApi({
-    checkUpdate,
-    requestInstall: vi.fn().mockRejectedValue(new Error("boom")),
-  });
-  renderSection("updates", api);
-  await clickCheck();
-  const user = userEvent.setup();
-  await user.click(await screen.findByText("下载并安装"));
-  await screen.findByText("安装请求失败：boom");
-
-  await clickCheck();
-  expect(screen.queryByText(/安装请求失败/)).not.toBeInTheDocument();
 });

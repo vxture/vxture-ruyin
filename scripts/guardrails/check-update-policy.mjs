@@ -1,67 +1,93 @@
 #!/usr/bin/env node
 /**
- * 更新策略守卫（TD-021，owner 定于 2026-09-01）。
+ * 更新策略守卫（TD-021，owner 定于 2026-09-02）。
  *
- * 三条策略不是实现细节，是 owner 的决定：
+ * **MVP 阶段不做自动更新。** 这不是"还没做到"——曾经整套接过 electron-updater，
+ * 后来整段拆掉了。原因是 owner 定了不采购签名证书（TD-001 转 standing），而
+ * electron-updater 在 Windows 上默认校验更新包签名：要么关掉那道校验，等于让更新
+ * 通道接受任何来自 feed 的包；要么不做自动安装。选了后者。
  *
- *   1. 有任务在跑就不装
- *   2. 是否更新、何时安装，都归用户 —— 运行时绝不自行下载、自行挑时机
- *   3. 渠道不允许降级
+ * 所以这道守卫的方向和上一版**是反的**。上一版钉的是"自动更新必须按这三条策略
+ * 走"；这一版钉的是**"它不许悄悄回来"**，外加检查那一半必须继续诚实。
  *
- * 每一条在代码里都只是一行。**一行很容易在别的改动里被顺手改掉，而改掉之后
- * 什么都不会报错** —— 自动下载了、退出时静默装了、降级了，用户只会觉得
- * 「它自己动了」，而没有任何一处会说是谁决定的。
- *
- * 第三条尤其要显式：electron-updater 的 `channel` setter 会把 `allowDowngrade`
- * 自动翻成 true（库文档原话）。而 channel 正是 beta/stable 切换要用的东西 ——
- * 也就是说，未来谁加渠道切换，这条策略会在没人察觉的情况下自己反过来。
+ * 为什么值得钉：`autoUpdater.autoDownload = true` 是一行的事，而它一旦回来，
+ * 用户会在没有任何人做过决定的情况下开始自动下载安装包。**这类东西不出错的时候
+ * 什么都不会说**——没有报错、没有告警，只是它自己动了。
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-const shell = readFileSync(join(repoRoot, "apps/shell/src/main.ts"), "utf8");
+const shellDir = join(repoRoot, "apps", "shell", "src");
+const shell = readdirSync(shellDir)
+  .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+  .map((f) => readFileSync(join(shellDir, f), "utf8"))
+  .join("\n");
 const updates = readFileSync(
-  join(repoRoot, "apps/local-host/src/updates.ts"),
+  join(repoRoot, "apps", "local-host", "src", "updates.ts"),
+  "utf8",
+);
+const settings = readFileSync(
+  join(repoRoot, "apps", "ui-workspace", "src", "settings.tsx"),
   "utf8",
 );
 
 const problems = [];
 
-/** 必须**显式**写成这样的赋值。吃默认值不算 —— 默认值会变，也会被别处翻掉。 */
-const MUST_SET = [
-  ["autoUpdater.autoDownload = false", "策略 2：绝不自行下载"],
-  ["autoUpdater.autoInstallOnAppQuit = false", "策略 2：退出时静默安装不是用户选的时机"],
-  ["autoUpdater.allowDowngrade = false", "策略 3：渠道不允许降级"],
-];
-for (const [needle, why] of MUST_SET) {
-  if (!shell.includes(needle)) {
-    problems.push(`壳里找不到 \`${needle}\` —— ${why}`);
+// ---- 一、自动更新不许回来 -------------------------------------------------
+//
+// 整段拆掉是一个决定，不是一次清理。改回来要先改决定。
+for (const [needle, why] of [
+  ["electron-updater", "壳里重新引入了 electron-updater"],
+  ["autoUpdater", "壳里重新出现了 autoUpdater"],
+]) {
+  if (shell.includes(needle)) {
+    problems.push(
+      `${why} —— MVP 阶段不做自动更新（owner 定 2026-09-02）。\n` +
+        `    它默认会校验更新包签名，而本仓不签名（TD-001 转 standing）：要么关掉那道\n` +
+        `    校验、让更新通道接受任何来自 feed 的包，要么不自动安装。选的是后者。`,
+    );
   }
 }
 
-// 策略 1 的闸门在守护进程（只有它知道有没有任务在跑），壳在重启前再问一次。
-if (!/installGate/.test(updates)) {
-  problems.push("updates.ts 里没有 installGate —— 策略 1 的闸门不见了");
-}
-if (!/\/updates\/intent/.test(shell)) {
+// ---- 二、检查那一半必须继续诚实 -------------------------------------------
+//
+// 这个功能的上一版**不发请求就断言「当前已是最新」并附时间戳**。没查过就说最新，
+// 比不提供这个按钮糟得多：它把一个未知说成了一个保证。
+if (!/"unreachable"/.test(updates)) {
   problems.push(
-    "壳没有在安装前问 /updates/intent —— 只在按钮上禁用是挡误触，不是挡竞态：" +
-      "用户点下去到下载完成之间隔着上百 MB，任务完全可能已经起来了",
+    "updates.ts 里没有 `unreachable` 状态 —— 查不到必须是一个独立状态。\n" +
+      "    把它折叠进「已是最新」，就是把「没问到」说成「问过了，没有新版本」。",
+  );
+}
+if (!/unreachable/.test(settings) && !/没查到/.test(settings)) {
+  problems.push(
+    "设置页没有呈现「没查到」这一路 —— 状态存在但界面不显示，等于没有这个状态。",
   );
 }
 
-// downloadUpdate 之前必须先 checkForUpdates：库拿的是上一次检查留下的
-// updateInfo，没检查过就直接 reject「Please check update first」。
-const download = shell.indexOf("autoUpdater.downloadUpdate(");
-const check = shell.indexOf("autoUpdater.checkForUpdates(");
-if (download >= 0 && (check < 0 || check > download)) {
+// ---- 三、下载地址必须来自 feed，且必须写明渠道 -----------------------------
+//
+// 地址若另存一份，迟早和检查用的那份 feed 不一致：用户检查的是 stable，下到的
+// 是 beta，而两边各自都"对"。从同一份 feed 拼出来则不可能不一致。
+if (!/parsed\.path/.test(updates)) {
   problems.push(
-    "壳在 checkForUpdates 之前就调 downloadUpdate —— 库会直接拒绝" +
-      "（Please check update first），整条安装路径在第一步就断，而用户看到的" +
-      "只是一句「更新下载失败」",
+    "updates.ts 不再从 feed 的 `path` 拼下载地址 —— 地址一旦另存一份，就会和\n" +
+      "    检查用的那份 feed 漂开：检查 stable、下到 beta，而两边各自都「对」。",
+  );
+}
+if (/https?:\/\/[^\s"'`]*\.exe/.test(settings)) {
+  problems.push(
+    "设置页里出现了写死的安装包地址 —— 它必须来自守护进程刚校验过的那份 feed。\n" +
+      "    猜出来的地址点下去是 404，而用户会以为是产品坏了。",
+  );
+}
+if (!/result\.channel/.test(settings)) {
+  problems.push(
+    "设置页没有显示渠道 —— **不写明渠道的下载链接是有害的**：用户可能正装上一个\n" +
+      "    beta 包而不自知，而他以为自己在用 stable。",
   );
 }
 
@@ -69,9 +95,12 @@ if (problems.length > 0) {
   console.error("[update-policy] 不合规：");
   for (const p of problems) console.error(`  ${p}`);
   console.error(
-    "  这三条是 owner 的决定（TD-021），不是实现细节。要改先改决定。",
+    "  这些是 owner 的决定（TD-021），不是实现细节。要改先改决定。",
   );
   process.exit(1);
 }
 
-console.log("[update-policy] OK - 三条更新策略都在代码里显式写着。");
+console.log(
+  "[update-policy] OK - 不做自动更新；检查诚实（unreachable 独立）；" +
+    "下载地址出自 feed 且写明渠道。",
+);

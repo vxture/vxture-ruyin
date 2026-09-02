@@ -80,39 +80,65 @@ void test("检查：任何情况下都带当前版本，界面不必自己猜", 
 });
 
 /**
- * 安装闸门与意图（TD-021 策略 1、2）。
+ * 下载地址与渠道（2026-09-02，MVP 不做自动更新之后新增）。
  *
- * 策略 1「有任务在跑就不装」若只在按钮上禁用，就是一道**只挡误触、不挡竞态**的
- * 闸门：用户点下去到壳真正动手之间可能隔着一整段下载。所以它必须在守护进程侧
- * 每次被问到时重判。
+ * 地址不另立契约：它由**刚校验过的那份 feed** 自己的 `path` 拼出，落在同一个
+ * 渠道目录里。检查哪个渠道就下载哪个渠道，两者不可能不一致 —— 而另存一个下载
+ * 地址再去对齐它，迟早会不一致。
  */
-import { installGate, InstallIntentBox } from "./updates.js";
-
-void test("闸门：有任务在跑 → 不可安装，并说清有几个", () => {
-  const g = installGate(2);
-  assert.equal(g.installable, false);
-  assert.equal(g.runningTasks, 2);
-  assert.match(g.reason ?? "", /2 个任务/);
+void test("下载：地址由 feed 自己的 path 拼出，落在同一个渠道目录", async () => {
+  const r = await checkForUpdate({
+    currentVersion: "1.0.0",
+    feedBase: "https://dl.example.com/ruyin/stable",
+    fetchImpl: feed("version: 1.2.0\npath: Ruyin-Setup-1.2.0.exe\n"),
+    now: () => "2026-09-02T00:00:00Z",
+  });
+  assert.equal(r.status, "available");
+  if (r.status === "available") {
+    assert.equal(
+      r.downloadUrl,
+      "https://dl.example.com/ruyin/stable/Ruyin-Setup-1.2.0.exe",
+    );
+    assert.equal(r.channel, "stable");
+  }
 });
 
-void test("闸门：没有任务 → 可安装", () => {
-  assert.equal(installGate(0).installable, true);
+void test("下载：feed 里没有 path → 不给地址，而不是拼一个猜的", async () => {
+  const r = await checkForUpdate({
+    currentVersion: "1.0.0",
+    feedBase: "https://dl.example.com/ruyin/stable",
+    fetchImpl: feed("version: 1.2.0\n"),
+    now: () => "2026-09-02T00:00:00Z",
+  });
+  assert.equal(r.status, "available");
+  // 猜出来的下载地址比没有地址糟：用户点下去拿到 404，而他以为那是产品的问题。
+  if (r.status === "available") assert.equal(r.downloadUrl, undefined);
 });
 
-void test("意图：取走即清，重启后不会重复触发", () => {
-  const box = new InstallIntentBox();
-  box.request("0.9.9", "2026-09-01T00:00:00Z");
-  assert.equal(box.peek()?.version, "0.9.9");
-  assert.equal(box.take()?.version, "0.9.9");
-  // 取过之后就没有了 —— 否则壳每轮询一次就要装一次。
-  assert.equal(box.take(), null);
-  assert.equal(box.peek(), null);
+void test("渠道：beta 目录检查出来的就是 beta —— 不写明渠道的下载链接是有害的", async () => {
+  const r = await checkForUpdate({
+    currentVersion: "1.0.0",
+    feedBase: "https://dl.example.com/ruyin/beta/",
+    fetchImpl: feed("version: 1.3.0-beta.1\npath: Ruyin-Setup-1.3.0-beta.1.exe\n"),
+    now: () => "2026-09-02T00:00:00Z",
+  });
+  assert.equal(r.channel, "beta");
+  if (r.status === "available") {
+    assert.match(r.downloadUrl ?? "", /\/ruyin\/beta\//);
+  }
 });
 
-void test("意图：可被丢弃——任务在期间起来了，不该悄悄留着等会儿装", () => {
-  const box = new InstallIntentBox();
-  box.request("0.9.9", "2026-09-01T00:00:00Z");
-  box.clear();
-  // 留着它等任务停了再装，等于替用户挑了时机（策略 2 不允许）。
-  assert.equal(box.peek(), null);
+void test("渠道：feed 基址没有路径时留空，不把主机名当渠道名", async () => {
+  const r = await checkForUpdate({
+    currentVersion: "1.0.0",
+    // 测试 feed 常常就长这样。早先的实现会把 "127.0.0.1:18080" 当成渠道名，
+    // 界面于是一本正经地显示「127.0.0.1:18080 渠道」。
+    feedBase: "http://127.0.0.1:18080",
+    fetchImpl: feed("version: 1.2.0\npath: Ruyin-Setup-1.2.0.exe\n"),
+    now: () => "2026-09-02T00:00:00Z",
+  });
+  assert.equal(r.channel, "", "渠道名宁可空着也不能猜");
+  if (r.status === "available") {
+    assert.equal(r.downloadUrl, "http://127.0.0.1:18080/Ruyin-Setup-1.2.0.exe");
+  }
 });

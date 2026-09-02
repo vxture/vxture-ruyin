@@ -133,13 +133,6 @@ const WRAPPER_CASES: WrapperCase[] = [
     body: { version: "1.2.0" },
   },
   { name: "checkUpdate", call: (api) => api.checkUpdate(), method: "GET", path: "/updates/check" },
-  {
-    name: "requestInstall",
-    call: (api) => api.requestInstall("0.3.0"),
-    method: "POST",
-    path: "/updates/install",
-    body: { version: "0.3.0" },
-  },
   { name: "products", call: (api) => api.products(), method: "GET", path: "/products" },
   { name: "projects", call: (api) => api.projects(), method: "GET", path: "/projects" },
   {
