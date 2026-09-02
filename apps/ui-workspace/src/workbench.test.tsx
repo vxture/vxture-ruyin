@@ -228,10 +228,86 @@ void test("Workbench: the sidebar splits attributed projects from the unattribut
     ),
   });
   render(<Workbench api={api} />);
-  expect(await screen.findByText("项目")).toBeInTheDocument();
+  expect(await screen.findByText("最近工作")).toBeInTheDocument();
   expect(screen.getByText("待导入工作区")).toBeInTheDocument();
   expect(screen.getByText("我的项目")).toBeInTheDocument();
   expect(screen.getByText("老项目")).toBeInTheDocument();
+});
+
+void test("Workbench: 最近工作 is newest-first, and each row carries its product as the second line", async () => {
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({
+    products: vi
+      .fn()
+      .mockResolvedValue([product({ id: "vxture.bid", name: "标书编写" })]),
+    projects: vi.fn().mockResolvedValue(
+      projectList([
+        workspace({
+          id: "prj_old",
+          name: "旧的",
+          workspaceId: "wsp_1",
+          createdAt: "2026-01-01T00:00:00Z",
+        }),
+        workspace({
+          id: "prj_new",
+          name: "新的",
+          workspaceId: "wsp_1",
+          createdAt: "2026-09-01T00:00:00Z",
+        }),
+      ]),
+    ),
+  });
+  render(<Workbench api={api} />);
+  await screen.findByText("最近工作");
+  // 产品名走第二行：项目名是他要找的东西，产品名是用来区分重名的上下文。
+  expect(screen.getAllByText("标书编写").length).toBeGreaterThan(0);
+  const rows = screen.getAllByRole("link").map((a) => a.textContent ?? "");
+  const iNew = rows.findIndex((t) => t.includes("新的"));
+  const iOld = rows.findIndex((t) => t.includes("旧的"));
+  expect(iNew).toBeGreaterThanOrEqual(0);
+  expect(iNew).toBeLessThan(iOld);
+});
+
+void test("Workbench: with no real project the 最近工作 samples show, marked 示例 and linking nowhere", async () => {
+  const { Workbench } = await import("./workbench");
+  const { DEMO_RECENT } = await import("./catalog");
+  const api = fakeApi({ projects: vi.fn().mockResolvedValue(projectList([])) });
+  render(<Workbench api={api} />);
+  await screen.findByText("最近工作");
+  const sample = DEMO_RECENT[0]!;
+  // 样例不指向任何项目路由 —— 一个点进去是空的项目，比没有这一组更让人困惑。
+  // 而且每条 href 必须唯一：侧栏拿它当 key，撞 key 会让这一组删不干净。
+  const hrefs = DEMO_RECENT.map(
+    (d) => screen.getByText(d.project).closest("a")?.getAttribute("href") ?? "",
+  );
+  expect(new Set(hrefs).size).toBe(DEMO_RECENT.length);
+  for (const h of hrefs) {
+    expect(h).not.toMatch(/^#ws\//);
+  }
+  expect(screen.getByText(sample.project).closest("a")).toHaveAttribute(
+    "href",
+    "#sample/0",
+  );
+  // 同一个产品下可以有多条样例，所以按 All 取。
+  expect(screen.getAllByText(`示例 · ${sample.product}`).length).toBeGreaterThan(0);
+});
+
+void test("Workbench: one real project and the whole sample group is gone - never mixed together", async () => {
+  const { Workbench } = await import("./workbench");
+  const { DEMO_RECENT } = await import("./catalog");
+  const api = fakeApi({
+    projects: vi
+      .fn()
+      .mockResolvedValue(
+        projectList([workspace({ id: "prj_real", name: "真项目", workspaceId: "wsp_1" })]),
+      ),
+  });
+  render(<Workbench api={api} />);
+  expect(await screen.findByText("真项目")).toBeInTheDocument();
+  // 真假混排是最坏的一种：用户没有办法分辨哪一条是自己的。
+  for (const d of DEMO_RECENT) {
+    expect(screen.queryByText(d.project)).not.toBeInTheDocument();
+  }
 });
 
 void test("Workbench: projects left in other workspaces are reported by count only, in the sidebar footer", async () => {

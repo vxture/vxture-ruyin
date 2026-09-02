@@ -43,6 +43,7 @@ import {
 import { Api, type ProductInfo, type ProjectMeta } from "./api";
 import { PROJECT_TABS, type TabId } from "./workspace-tabs";
 import { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
+import { DEMO_RECENT } from "./catalog";
 import { UserSlot } from "./user";
 import { PendingInbox, usePending } from "./pending";
 import { useHostChrome } from "./host-chrome";
@@ -261,12 +262,37 @@ export function Workbench({ api }: { api: Api }) {
     // 混在一起会让「这是个不该长期存在的状态」这件事消失。
     const pendingImport = workspaces.filter((w) => !w.workspaceId);
     if (mine.length > 0) {
+      // 「最近工作」而不是「项目」：侧栏要回答的是「我刚才在做什么」，所以按
+      // 新到旧排。产品名走 subLabel —— 项目名是他要找的东西，产品名是用来
+      // 区分重名的上下文，两者不该挤在同一行里用连字符拼起来。
+      const recent = [...mine].sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt),
+      );
       list.push({
-        title: "项目",
+        title: "最近工作",
         dividerBefore: true,
-        items: mine.map((w) => ({
+        items: recent.map((w) => ({
           href: `#ws/${w.id}/overview`,
           label: w.name,
+          subLabel:
+            products.find((p) => p.id === w.productId)?.name ?? w.productId,
+          icon: "cube" as const,
+        })),
+      });
+    } else {
+      // 一个真项目都没有时才放样例，好让这一栏的样子看得见。真数据一到就整组
+      // 消失 —— 真假混排用户没法分辨（catalog.ts 的 DEMO_RECENT 有完整约束）。
+      list.push({
+        title: "最近工作",
+        dividerBefore: true,
+        // href 必须**逐条唯一**：侧栏拿 href 当 key，三条都写 `#home` 会撞成
+        // 重复 key，React 就不保证增删的对应关系了 —— 真项目到位、这一组本该
+        // 整体消失时，会有一条样例留在屏幕上，那正是这组数据最不能出的错。
+        // `#sample/N` 不匹配 navigate() 的任何一支，点了什么也不发生。
+        items: DEMO_RECENT.map((d, i) => ({
+          href: `#sample/${i}`,
+          label: d.project,
+          subLabel: `示例 · ${d.product}`,
           icon: "cube" as const,
         })),
       });
@@ -283,7 +309,7 @@ export function Workbench({ api }: { api: Api }) {
       });
     }
     return list;
-  }, [workspaces]);
+  }, [workspaces, products]);
 
   const searchGroups: ShellSearchGroup[] = useMemo(() => {
     const q = query.trim().toLowerCase();
