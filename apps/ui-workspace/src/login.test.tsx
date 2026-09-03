@@ -179,3 +179,13 @@ void test("LoginScreen: gives up polling after 5 minutes rather than polling for
   expect(callsBeforeCutoff()).toBe(stoppedAt);
   vi.useRealTimers();
 });
+
+void test("LoginScreen: the two legal links point at the website's /legal/ directory (verified live 2026-09-03; /privacy and /terms are 404)", async () => {
+  const api = fakeApi({ session: vi.fn().mockResolvedValue(signedOut()) });
+  render(<SessionGate api={api} />);
+  const privacy = (await screen.findByRole("link", { name: "隐私政策" })) as HTMLAnchorElement;
+  const terms = screen.getByRole("link", { name: "服务条款" }) as HTMLAnchorElement;
+  expect(privacy.href).toBe("https://vxture.com/legal/privacy");
+  expect(terms.href).toBe("https://vxture.com/legal/terms");
+  expect(privacy.target).toBe("_blank");
+});

@@ -190,10 +190,12 @@ function LoginScreen({
             登出，只有服务端明确拒绝 refresh 才清会话。 */}
       </div>
       <div className="login-foot">
-        <a href={`${consoleBase}/privacy`} target="_blank" rel="noopener noreferrer">
+        {/* 网站的条款都在 /legal/ 一级目录下（vxture.com/legal/{privacy,terms}，
+            经语言前缀跳转后 200）；此前少了这一级，两个链接都是 404。2026-09-03 实测。 */}
+        <a href={`${consoleBase}/legal/privacy`} target="_blank" rel="noopener noreferrer">
           隐私政策
         </a>
-        <a href={`${consoleBase}/terms`} target="_blank" rel="noopener noreferrer">
+        <a href={`${consoleBase}/legal/terms`} target="_blank" rel="noopener noreferrer">
           服务条款
         </a>
       </div>
