@@ -26,6 +26,7 @@ import { installPackage } from "./installer.js";
 import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import { apiError, REJECTION } from "./errors.js";
+import { ConnectorInstallRefusedError } from "./connector-registry.js";
 import { join as joinPath } from "node:path";
 import type { EventBus } from "./events.js";
 import { checkForUpdate } from "./updates.js";
@@ -34,6 +35,20 @@ import {
   PlatformNotConfiguredError,
   type PlatformService,
 } from "./platform.js";
+
+/** server.ts 只依赖这几个动作；实现见 connector-registry.ts。 */
+export interface ConnectorRegistryLike {
+  list(): Promise<unknown[]>;
+  install(input: {
+    id: string;
+    command: string;
+    args?: string[];
+    env?: Record<string, string>;
+    source: string;
+  }): Promise<unknown>;
+  remove(id: string): Promise<void>;
+  healthOf(id: string): Promise<unknown>;
+}
 
 export interface LocalApiDeps {
   runtime: ProjectRuntime;
@@ -45,6 +60,11 @@ export interface LocalApiDeps {
   version: string;
   /** Rebuild the FTS index rows for one binding; returns indexed count. */
   reindex: (projectId: string, binding: Binding) => Promise<number>;
+  /**
+   * 宿主的连接器注册表（ADR-005 通路二）。缺省 = 这套装配没有进程外连接器，
+   * `/connectors` 如实回答「没有」，而不是空列表冒充「一个都没装」。
+   */
+  connectors?: ConnectorRegistryLike;
   /** Built Workspace UI directory; when set, served at / (dev console moves to /dev). */
   uiDir?: string;
   /** Vxture platform integration (C1 identity + C2 entitlements); absent in
@@ -195,11 +215,19 @@ function errorStatus(cause: unknown): { status: number; body: unknown } {
     return { status: 409, body: apiError("STATE_TRANSITION_ILLEGAL", message) };
   }
   if (
-    /outside every granted folder|not declared in the contract|does not allow the local source/.test(
+    /outside every granted folder|not declared in the contract|does not allow the [a-z]+ source|not granted to this project|no longer grants/.test(
       message,
     )
   ) {
     return { status: 400, body: apiError("BINDING_INVALID", message) };
+  }
+  // 授权本身不成立：给 local-fs 当连接器授权、授权没装的连接器、重复授权。
+  if (/granted per folder|already granted to this project|connector "[^"]+" is not installed/.test(message)) {
+    return { status: 400, body: apiError("GRANT_INVALID", message) };
+  }
+  // 绑定还在、连接器没了（卸了或起不来）：不是请求错，是这套装配此刻没有它。
+  if (/connector "[^"]+" is not available/.test(message)) {
+    return { status: 503, body: apiError("CONNECTOR_UNAVAILABLE", message) };
   }
   // 内部错误可能是瞬时的（磁盘忙、锁竞争），所以它是少数几个 retryable 之一。
   return { status: 500, body: apiError("INTERNAL", message, { retryable: true }) };
@@ -408,6 +436,67 @@ async function handle(
     await deps.refreshEntitlements?.().catch(() => {});
     send(res, 200, deps.registry.list());
     return;
+  }
+
+  // --- 连接器（ADR-005 通路二）：机器级的装与卸；项目级的授权走 /projects/:id/grants ---
+  if (segments[0] === "connectors") {
+    if (!deps.connectors) {
+      send(
+        res,
+        503,
+        apiError("CONNECTORS_NOT_AVAILABLE", "这套装配没有进程外连接器注册表"),
+      );
+      return;
+    }
+    if (method === "GET" && segments.length === 1) {
+      send(res, 200, { items: await deps.connectors.list() });
+      return;
+    }
+    if (method === "POST" && segments.length === 1) {
+      const body = await readJson(req);
+      try {
+        const view = await deps.connectors.install({
+          id: String(body["id"] ?? ""),
+          command: String(body["command"] ?? ""),
+          ...(Array.isArray(body["args"]) ? { args: body["args"].map(String) } : {}),
+          ...(body["env"] && typeof body["env"] === "object"
+            ? { env: body["env"] as Record<string, string> }
+            : {}),
+          source: String(body["source"] ?? ""),
+        });
+        send(res, 201, view);
+      } catch (cause) {
+        // 生产拒装不是「参数错了」：403 + 说清为什么，用户能读到 TD-012。
+        const refused = cause instanceof ConnectorInstallRefusedError;
+        send(
+          res,
+          refused ? 403 : 400,
+          apiError(
+            refused ? "CONNECTOR_INSTALL_REFUSED" : "CONNECTOR_INVALID",
+            cause instanceof Error ? cause.message : String(cause),
+          ),
+        );
+      }
+      return;
+    }
+    if (segments.length === 3 && segments[2] === "health" && method === "GET") {
+      send(res, 200, await deps.connectors.healthOf(segments[1]!));
+      return;
+    }
+    if (segments.length === 2 && method === "DELETE") {
+      try {
+        await deps.connectors.remove(segments[1]!);
+      } catch (cause) {
+        send(
+          res,
+          404,
+          apiError("CONNECTOR_NOT_FOUND", cause instanceof Error ? cause.message : String(cause)),
+        );
+        return;
+      }
+      send(res, 200, { removed: segments[1] });
+      return;
+    }
   }
 
   // GET /products - 受管资产视图：已装 + 启用态 + 订阅可用性（§18.5）

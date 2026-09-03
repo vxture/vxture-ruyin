@@ -17,15 +17,17 @@
 import { strict as assert } from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import test from "node:test";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { ProjectRuntime } from "@vxture/ruyin-core";
+import { ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { KeyManager } from "./keys.js";
 import { LocalFsConnector } from "./connector-fs.js";
+import { ConnectorRegistry } from "./connector-registry.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
 import { LocalToolExecutor } from "./tool-executor.js";
 import { loadProducts } from "./products.js";
@@ -64,7 +66,12 @@ interface Rig {
   runtime: ProjectRuntime;
 }
 
-async function startServer(overrides: Partial<LocalApiDeps> = {}): Promise<Rig> {
+async function startServer(
+  overrides: Partial<LocalApiDeps> = {},
+  // The lookup the kernel reads; a test that installs connectors hands in the
+  // same Map its registry writes to.
+  lookup: Map<string, ConnectorPort> = new Map([["local-fs", new LocalFsConnector()]]),
+): Promise<Rig> {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-srv-"));
   const keys = await KeyManager.open(dataDir);
   const storage = new SqliteStoragePort(dataDir, keys);
@@ -77,7 +84,7 @@ async function startServer(overrides: Partial<LocalApiDeps> = {}): Promise<Rig> 
     id: nodeId,
     crypto: nodeCrypto,
     gateway: new MockAIGateway(),
-    connectors: new Map([["local-fs", new LocalFsConnector()]]),
+    connectors: lookup,
     ranker: new FtsRanker(storage),
     tools: executor,
   });
@@ -91,7 +98,8 @@ async function startServer(overrides: Partial<LocalApiDeps> = {}): Promise<Rig> 
     writeArtifact: (p, b, g) => executor.writeArtifact(p, b, g),
     supportsTool: (t) => executor.supports(t),
     systemInfo: testSystemInfo,
-    reindex: (pid, b) => reindexBinding(storage, pid, b, new LocalFsConnector()),
+    reindex: (pid, b) => reindexBinding(storage, pid, b, lookup.get(b.connector)!),
+    connectors: new ConnectorRegistry(dataDir, new Map(), { allowUnsigned: false }),
     ...overrides,
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
@@ -106,6 +114,131 @@ async function startServer(overrides: Partial<LocalApiDeps> = {}): Promise<Rig> 
     runtime,
   };
 }
+
+test("connectors: list is empty, install is refused in production with 403 naming TD-012, unknown id is 404", async () => {
+  const rig = await startServer();
+  try {
+    const list = await fetch(`${rig.base}/connectors`, { headers: rig.headers });
+    assert.equal(list.status, 200);
+    assert.deepEqual(await list.json(), { items: [] });
+
+    const install = await fetch(`${rig.base}/connectors`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ id: "crm", command: process.execPath, args: [], source: "lan" }),
+    });
+    assert.equal(install.status, 403);
+    const body = (await install.json()) as { code: string; message: string; retryable: boolean };
+    assert.equal(body.code, "CONNECTOR_INSTALL_REFUSED");
+    assert.match(body.message, /TD-012/);
+
+    const health = await fetch(`${rig.base}/connectors/crm/health`, { headers: rig.headers });
+    assert.equal(health.status, 200);
+    assert.equal(((await health.json()) as { ok: boolean }).ok, false);
+
+    const del = await fetch(`${rig.base}/connectors/crm`, { method: "DELETE", headers: rig.headers });
+    assert.equal(del.status, 404);
+    assert.equal(((await del.json()) as { code: string }).code, "CONNECTOR_NOT_FOUND");
+  } finally {
+    closeRig(rig);
+  }
+});
+
+test("connectors: without a registry the routes answer 503, not an empty list", async () => {
+  const rig = await startServer({ connectors: undefined });
+  try {
+    const list = await fetch(`${rig.base}/connectors`, { headers: rig.headers });
+    assert.equal(list.status, 503);
+    assert.equal(((await list.json()) as { code: string }).code, "CONNECTORS_NOT_AVAILABLE");
+  } finally {
+    closeRig(rig);
+  }
+});
+
+test("connectors: development install -> project grant -> lan binding -> discover and index through MCP; then removal", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-srv-conn-"));
+  const lookup = new Map<string, ConnectorPort>([["local-fs", new LocalFsConnector()]]);
+  const registry = new ConnectorRegistry(dataDir, lookup, { allowUnsigned: true, timeoutMs: 5000 });
+  const rig = await startServer({ platform: signedInTo("wsp_x"), connectors: registry }, lookup);
+  const fake = fileURLToPath(new URL("./fake-mcp-server.js", import.meta.url));
+  try {
+    const bad = await fetch(`${rig.base}/connectors`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ id: "Bad Id", command: process.execPath, source: "lan" }),
+    });
+    assert.equal(bad.status, 400);
+    assert.equal(((await bad.json()) as { code: string }).code, "CONNECTOR_INVALID");
+
+    const install = await fetch(`${rig.base}/connectors`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ id: "crm", command: process.execPath, args: [fake], source: "lan" }),
+    });
+    assert.equal(install.status, 201);
+    const view = (await install.json()) as { id: string; health: { ok: boolean } };
+    assert.equal(view.id, "crm");
+    assert.equal(view.health.ok, true);
+    assert.ok(lookup.has("crm"), "the kernel sees what the registry installed");
+
+    const pid = await projectIn(rig, "wsp_x");
+    // Binding through an ungranted connector is refused - authorization is per project.
+    const ungranted = await fetch(`${rig.base}/projects/${pid}/bindings`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ type: "enterprise_capability", root: "crm://accounts/", connector: "crm", source: "lan" }),
+    });
+    assert.equal(ungranted.status, 400);
+    assert.match(((await ungranted.json()) as { message: string }).message, /not granted to this project/);
+
+    const grant = await fetch(`${rig.base}/projects/${pid}/grants`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ connector: "crm" }),
+    });
+    assert.equal(grant.status, 201);
+    assert.equal(((await grant.json()) as { kind: string }).kind, "connector");
+
+    // The contract decides which source kinds a type may take: tender_document is local-only.
+    const wrongSource = await fetch(`${rig.base}/projects/${pid}/bindings`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ type: "tender_document", root: "crm://", connector: "crm", source: "lan" }),
+    });
+    assert.equal(wrongSource.status, 400);
+    assert.match(((await wrongSource.json()) as { message: string }).message, /does not allow the lan source/);
+
+    const bound = await fetch(`${rig.base}/projects/${pid}/bindings`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ type: "enterprise_capability", root: "crm://accounts/", connector: "crm", source: "lan" }),
+    });
+    assert.equal(bound.status, 201);
+    const binding = (await bound.json()) as { source: string; connector: string; indexed: number };
+    assert.equal(binding.source, "lan");
+    assert.equal(binding.connector, "crm");
+    // Three resources under crm://accounts/ - one unreadable, still indexed by name.
+    assert.equal(binding.indexed, 3);
+
+    const items = (await (
+      await fetch(`${rig.base}/projects/${pid}/context/enterprise_capability`, { headers: rig.headers })
+    ).json()) as Array<{ connector: string; source: string; ref: string }>;
+    assert.equal(items.length, 3);
+    assert.ok(items.every((i) => i.connector === "crm" && i.source === "lan" && i.ref.startsWith("crm://accounts/")));
+
+    const removed = await fetch(`${rig.base}/connectors/crm`, { method: "DELETE", headers: rig.headers });
+    assert.equal(removed.status, 200);
+    assert.ok(!lookup.has("crm"));
+    // The binding is still on record; discovering through it now says the connector is gone.
+    const after = await fetch(`${rig.base}/projects/${pid}/context/enterprise_capability`, { headers: rig.headers });
+    assert.notEqual(after.status, 200);
+    assert.match(((await after.json()) as { message: string }).message, /connector "crm" is not available/);
+  } finally {
+    await registry.stopAll();
+    closeRig(rig);
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
 
 function closeRig(rig: Rig): void {
   rig.server.close();

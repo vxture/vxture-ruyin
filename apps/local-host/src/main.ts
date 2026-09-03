@@ -35,6 +35,7 @@ import {
 import { createLocalApi } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
 import { LocalFsConnector } from "./connector-fs.js";
+import { ConnectorRegistry } from "./connector-registry.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
 import { shellPdfRenderer } from "./pdf.js";
 import { LocalToolExecutor } from "./tool-executor.js";
@@ -77,7 +78,17 @@ try {
   await new Promise(() => {}); // never resolves - exit happens in the callback
 }
 const localFs = new LocalFsConnector();
+// 内核拿着这同一份表；宿主注册表在运行时往里放进程外连接器（ADR-005 接缝 ④）。
 const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
+const connectorRegistry = new ConnectorRegistry(dataDir, connectors, {
+  // 与包的先例同一姿态：签名信任锚（TD-012）就位前生产拒装，开发显式放行。
+  allowUnsigned: process.env["RUYIN_ALLOW_UNSIGNED_CONNECTORS"] === "1",
+  log: (line) => console.error(line),
+});
+process.on("exit", () => {
+  // 子进程不该活得比守护进程久。同步 kill 就够：exit 里等不了 promise。
+  void connectorRegistry.stopAll();
+});
 
 // Shared with the TaskRunner: cancellation is an in-memory signal so the
 // running loop cannot overwrite it on its next persist.
@@ -149,7 +160,13 @@ const server = createLocalApi({
   tasks,
   token,
   version: VERSION,
-  reindex: (projectId, binding) => reindexBinding(storage, projectId, binding, localFs),
+  reindex: (projectId, binding) => {
+    // 按绑定记的连接器取，不再钉死 local-fs（ADR-005 接缝 ②）。
+    const connector = connectors.get(binding.connector);
+    if (!connector) throw new Error(`connector "${binding.connector}" is not available`);
+    return reindexBinding(storage, projectId, binding, connector);
+  },
+  connectors: connectorRegistry,
   uiDir,
   platform,
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
@@ -246,6 +263,9 @@ async function pdfSelfCheck(): Promise<void> {
   console.log(`[ruyin] pdf self-check: ok (${bytes.byteLength} bytes)`);
 }
 
+// 装好的进程外连接器先起来再开门：起不来的照样登记（健康为 false），只记日志。
+await connectorRegistry.load();
+
 server.listen(port, "127.0.0.1", () => {
   console.log(`[ruyin] local runtime ${VERSION}`);
   console.log(`[ruyin] data dir: ${dataDir}`);
@@ -260,6 +280,16 @@ server.listen(port, "127.0.0.1", () => {
       ? `[ruyin] capability surface: ${capabilityBase}`
       : "[ruyin] capability surface: NOT configured - tasks will return mock output",
   );
+  {
+    const installed = [...connectors.keys()].filter((id) => id !== "local-fs");
+    console.log(
+      `[ruyin] connectors: local-fs${installed.length ? `, ${installed.join(", ")}` : ""}${
+        process.env["RUYIN_ALLOW_UNSIGNED_CONNECTORS"] === "1"
+          ? " (unsigned installs ALLOWED - development only)"
+          : ""
+      }`,
+    );
+  }
   console.log(
     `[ruyin] products: ${registry
       .installed()

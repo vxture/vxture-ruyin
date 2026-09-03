@@ -182,7 +182,7 @@ unavailable { reason, mediaType? }        读不了 —— 这是一个正式答
 |---|---|
 | local-fs | 内置，文件系统能力由 Desktop Shell 提供（02 §17） |
 | cloud-vxture | 内置，访问 Vxture 云端数据 / 知识库 |
-| lan-* / private-* | MCP 兼容外部连接器，用户 / 企业安装 |
+| lan-* / private-* | MCP 兼容外部连接器，用户 / 企业安装。**2026-09-03 落地 stdio 传输**：守护进程内一个最小 MCP 客户端（initialize / resources/list / resources/read / ping，`apps/local-host/src/mcp-client.ts`），`McpConnector` 以同一 `ConnectorPort` 接口接入，`root` 是资源 URI 前缀。Streamable HTTP 见 TD-035；连接器的工具面见 TD-034 |
 
 ## 4.3 授权作用域
 

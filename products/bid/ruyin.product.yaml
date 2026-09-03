@@ -63,7 +63,8 @@ context:
     - id: enterprise_capability
       name: 企业能力资料
       required: false
-      sources: [local, cloud]
+      # lan：企业能力资料常在内网系统里（CRM / 案例库），经本地连接器取（ADR-005）
+      sources: [local, cloud, lan]
       class: source
       sensitivity: high
     - id: enterprise_knowledge
