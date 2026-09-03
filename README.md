@@ -90,6 +90,22 @@ git config core.hooksPath .husky
 A `NODE_AUTH_TOKEN` with read access to GitHub Packages is needed once
 @vxture-scoped dependencies appear (see `.npmrc`).
 
+## Versions and channels
+
+Two independent version lines, the industry-standard way:
+
+- npm packages (packages/): one version for all four, released by tag
+  `packages-vX.Y.Z`. Stable versions publish under the npm dist-tag
+  `latest` (what `npm install` picks by default). Pre-releases carry a
+  semver suffix - `X.Y.Z-beta.1`, `-rc.1`, `-alpha.1` - and publish under
+  the dist-tag of the same name, so they never become `latest` and `^X.Y.Z`
+  ranges never pick them up. The dist-tag is derived from the version by the
+  publish script; nothing to remember. While the line is 0.x, `latest` means
+  newest, not stable (semver: 0.y.z is initial development).
+- Desktop installer (apps/shell): channels, not dist-tags. `beta-YYYYMMDD.N`
+  tags publish to the beta channel, `vX.Y.Z` tags to stable (with the
+  production approval gate); each channel has its own update feed.
+
 ## Working agreement
 
 See [CLAUDE.md](CLAUDE.md): branch model, tag-to-channel release flow, the five

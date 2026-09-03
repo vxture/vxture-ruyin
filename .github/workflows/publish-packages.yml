@@ -31,6 +31,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The version guardrail diffs against the previous packages-v* tag.
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -52,6 +55,12 @@ jobs:
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      # tag 号必须等于四个包的版本号（步调一致）；预发布版必须带 -beta.N / -rc.N /
+      # -alpha.N 后缀，发布脚本据此打同名 dist-tag，正式版才落 latest。
+      - name: Version guardrail (tag == package version, lockstep, shape)
+        run: node scripts/guardrails/check-package-versions.mjs --tag "${GITHUB_REF_NAME}"
+        shell: bash
 
       # 发布不可撤销，所以这一步不是形式：这是最后一次能拦住的地方。
       - name: Test
