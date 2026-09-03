@@ -543,7 +543,7 @@ function AboutSection({ system }: { system: SystemInfo | null }) {
         </p>
         <p className="brand-tag">Intelligent Workbench</p>
         <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
-          Vxture AI 原生业务产品的本地智能工作环境
+          Vxture AI 原生智能体的本地智能工作环境
         </p>
         <div className="mono text-muted-foreground">
           Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-

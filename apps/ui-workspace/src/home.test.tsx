@@ -84,7 +84,7 @@ void test("HomePage: zero usable products while signed out guides to login, not 
       onError={noop}
     />,
   );
-  expect(await screen.findByText("登录后同步你的业务产品")).toBeInTheDocument();
+  expect(await screen.findByText("登录后同步你的智能体")).toBeInTheDocument();
 });
 
 void test("HomePage: zero usable products while signed in says so, not a login prompt", async () => {
@@ -103,7 +103,7 @@ void test("HomePage: zero usable products while signed in says so, not a login p
       onError={noop}
     />,
   );
-  expect(await screen.findByText("当前账号没有可用的业务产品")).toBeInTheDocument();
+  expect(await screen.findByText("当前账号没有可用的智能体")).toBeInTheDocument();
 });
 
 void test("HomePage: the empty-state button opens the platform subscribe page in a new tab", async () => {
@@ -485,7 +485,7 @@ void test("ProductCard: per-product operations moved off the home page - no 新�
   expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
 });
 
-void test("HomePage: 我的产品 的标题行链接是「在线使用」，落到 console 的应用中心", async () => {
+void test("HomePage: 我的智能体 的标题行链接是「在线使用」，落到 console 的应用中心", async () => {
   renderHome({ products: [product()] });
   await userEvent.click(screen.getByRole("button", { name: "在线使用 ↗" }));
   expect(globalThis.open).toHaveBeenCalledWith(
@@ -500,9 +500,9 @@ void test("HomePage: 我的产品 的标题行链接是「在线使用」，落�
 // 这一栏说的是「平台上有这些」，不是「你有这些」。两者混淆正是首页那条硬规则
 // （不得硬编码产品）要防的事，所以下面几条测的核心就是这条边界。
 
-void test("热门推荐: renders the platform catalog with its real 正式版 / 开发中 status", () => {
+void test("智能体广场: renders the platform catalog with its real 正式版 / 开发中 status", () => {
   renderHome({ products: [] });
-  expect(screen.getByText("热门推荐")).toBeInTheDocument();
+  expect(screen.getByText("智能体广场")).toBeInTheDocument();
   const released = RECOMMENDED.filter((c) => c.status === "released");
   const building = RECOMMENDED.filter((c) => c.status === "building");
   for (const c of RECOMMENDED) {
@@ -517,7 +517,7 @@ void test("热门推荐: renders the platform catalog with its real 正式版 / 
   }
 });
 
-void test("热门推荐: every card says 了解详情, never a subscribe action the link cannot honour", () => {
+void test("智能体广场: every card says 了解详情, never a subscribe action the link cannot honour", () => {
   renderHome({ products: [] });
   // 这个链接落在目录页，不是某个产品的订阅流程 —— 所以按钮不写「订阅」，
   // 上没上线交给状态徽章说。写成「去平台订阅」是拿做不到的动作骗点击。
@@ -529,22 +529,22 @@ void test("热门推荐: every card says 了解详情, never a subscribe action 
   ).not.toBeInTheDocument();
 });
 
-void test("热门推荐: NOTHING in the catalog is openable - 打开 belongs to products you actually have", () => {
+void test("智能体广场: NOTHING in the catalog is openable - 打开 belongs to products you actually have", () => {
   renderHome({ products: [] });
-  // 这是这一栏与「我的产品」之间那条线。目录里出现一个「打开」，就等于告诉
+  // 这是这一栏与「我的智能体」之间那条线。目录里出现一个「打开」，就等于告诉
   // 用户他拥有一个其实没有的订阅 —— 首页那条硬规则防的正是这个。
   expect(screen.queryByRole("button", { name: "打开" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "在线 ↗" })).not.toBeInTheDocument();
 });
 
-void test("热门推荐: says where the list came from and when - it is a snapshot, not live", () => {
+void test("智能体广场: says where the list came from and when - it is a snapshot, not live", () => {
   renderHome({ products: [] });
   expect(
     screen.getByText(`取自 Vxture 平台目录（${CATALOG_SOURCE.capturedAt} 快照）。`),
   ).toBeInTheDocument();
 });
 
-void test("热门推荐: 浏览全部 opens the real catalog page", async () => {
+void test("智能体广场: 浏览全部 opens the real catalog page", async () => {
   renderHome({ products: [] });
   await userEvent.click(screen.getByRole("button", { name: "浏览全部 ↗" }));
   expect(globalThis.open).toHaveBeenCalledWith(
@@ -554,7 +554,7 @@ void test("热门推荐: 浏览全部 opens the real catalog page", async () => 
   );
 });
 
-void test("热门推荐: a card's 了解详情 opens the catalog page in a new tab, and opens nothing local", async () => {
+void test("智能体广场: a card's 了解详情 opens the catalog page in a new tab, and opens nothing local", async () => {
   const onOpen = vi.fn();
   renderHome({ products: [], onOpen });
   await userEvent.click(screen.getAllByRole("button", { name: "了解详情 ↗" })[0]!);
@@ -567,7 +567,7 @@ void test("热门推荐: a card's 了解详情 opens the catalog page in a new t
   expect(onOpen).not.toHaveBeenCalled();
 });
 
-void test("热门推荐: capability tags come from the catalog entry, not invented per card", () => {
+void test("智能体广场: capability tags come from the catalog entry, not invented per card", () => {
   renderHome({ products: [] });
   const first = CATALOG[0]!;
   for (const cap of first.capabilities) {
@@ -874,9 +874,9 @@ void test("HomePage/产品库: an empty catalog says so; a failed fetch and a fa
   await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("package sha256 mismatch"));
 });
 
-/* ---------------- 我的产品：标题行动作与卡片动作（2026-09-03 重排）---------------- */
+/* ---------------- 我的智能体：标题行动作与卡片动作（2026-09-03 重排）---------------- */
 
-void test("我的产品 header: 同步产品版本 · 安装本地包 · 在线使用, with 在线使用 as the primary action on the right", async () => {
+void test("我的智能体 header: 同步产品版本 · 安装本地包 · 在线使用, with 在线使用 as the primary action on the right", async () => {
   const api = fakeApi();
   render(
     <HomePage api={api} products={[product()]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={noop} />,
@@ -951,7 +951,7 @@ void test("ProductCard: 更新版本 appears only when the store holds a newer v
   expect(screen.queryByRole("button", { name: /更新版本/ })).not.toBeInTheDocument();
 });
 
-void test("ProductCard: a failed version pin goes to onError; 产品介绍 is a link to the platform catalog", async () => {
+void test("ProductCard: a failed version pin goes to onError; 智能体介绍 is a link to the platform catalog", async () => {
   const onError = vi.fn();
   render(
     <HomePage
@@ -968,7 +968,7 @@ void test("ProductCard: a failed version pin goes to onError; 产品介绍 is a 
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "更新版本 v1.1.0" }));
   await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("版本不存在"));
-  const intro = screen.getByRole("link", { name: "产品介绍 ↗" }) as HTMLAnchorElement;
+  const intro = screen.getByRole("link", { name: "智能体介绍 ↗" }) as HTMLAnchorElement;
   expect(intro.href).toBe("https://vxture.com/zh-CN/appcenter");
 });
 

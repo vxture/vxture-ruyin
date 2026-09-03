@@ -156,7 +156,7 @@ function LoginScreen({
           <span className="brand-tag">Intelligent Workbench</span>
         </h1>
         <p className="login-sub">
-          Vxture AI 原生业务产品的本地智能工作环境 · 本地数据不出设备
+          Vxture AI 原生智能体的本地智能工作环境 · 本地数据不出设备
         </p>
         <Button
           className="login-btn"
