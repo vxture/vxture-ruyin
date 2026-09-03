@@ -305,11 +305,17 @@ CI 另加 `packaged-smoke`（windows-latest，真启动 + 真排一份 PDF + 断
       （宿主持表、运行时可写）、`ConnectorPort` 可选生命周期；另加
       `ConnectorGrant`（授权以项目为边界，与文件夹授权并列、选择期复核、进审计）。
       传输审计每条记 `connector`。
-- [ ] **B · MCP 连接器**（local-host）：stdio 传输的最小 MCP 客户端（initialize /
-      resources/list / resources/read / ping）+ `McpConnector` 实现 `ConnectorPort`
-      + 宿主连接器注册表（清单落 data dir、启停、健康）+ `/connectors` 安装口。
-      **安装口在签名信任锚（TD-012）就位前按包的先例处理**：生产默认拒绝，
-      显式开发开关放行 —— 「不接受任意 URL」是 ADR 的信任模型第一条。
+- [x] **B · MCP 连接器**（local-host，2026-09-03）：stdio 传输的最小 MCP 客户端
+      （initialize / resources/list 分页 / resources/read / ping；服务端反向请求一律
+      `-32601`；超时、进程退出、stdout 混入非 JSON 各有出口）+ `McpConnector`
+      实现 `ConnectorPort`（含 start / stop / health；读失败是 `unavailable` 条目，
+      不是任务失败）+ 宿主注册表 `ConnectorRegistry`（清单 `connectors.json` 落
+      data dir、启动时全部拉起、起不来的照样登记为不健康）+ `/connectors` 四个口。
+      **安装口在签名信任锚（TD-012）就位前按包的先例处理**：生产 403 拒绝并点名
+      TD-012，`RUYIN_ALLOW_UNSIGNED_CONNECTORS=1` 仅开发放行（TD-036）——
+      「不接受任意 URL」是 ADR 的信任模型第一条。子进程只继承 PATH 与清单里
+      写明的环境变量，守护进程的会话令牌不进去。用例跑的是真子进程、真管道
+      （`fake-mcp-server.ts`），每条失败路径都在假服务器上开关得到。
 - [ ] **C · 界面**：绑定面板可选连接器与来源种类、项目授权里出现连接器、设置页
       列连接器与健康、审计表显示连接器。
 - [ ] **D · 连接器工具经 Tool Gate**：MCP `tools/*` 映射到契约 `tools[]`，写操作
