@@ -128,6 +128,8 @@ void test("检索：空范围和查不到，说的不能是同一句话", async 
     arguments: { query },
     workspace: projectId,
     taskId: "ti_1",
+    provider: "runtime" as const,
+    connectors: [],
     grants: [],
     contextSet,
   });

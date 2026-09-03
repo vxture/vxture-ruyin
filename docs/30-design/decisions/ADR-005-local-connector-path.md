@@ -98,3 +98,11 @@ Tool Gate 坐在它前面。
 **还没有的**：进程外连接器本身（MCP stdio 客户端 + `ConnectorPort` 实现 +
 宿主注册表 + 安装口）、连接器工具经 Tool Gate 暴露给模型、Streamable HTTP
 传输。各自在工作计划「通路二」一批与技术债登记里有名字，不在这里含混带过。
+
+**2026-09-03 · B/C/D 落地。** 进程外连接器本身（stdio 传输的最小 MCP 客户端、
+`McpConnector`、宿主注册表与 `/connectors`）、界面两处、以及**连接器工具经
+Tool Gate**：owner 定映射来源为**契约声明** —— `tools[].provider: connector`，
+id 相同即接通，category / risk / default 仍归契约，R15 限 `query` /
+`external_send`。「安全边界」一节四条的现状：来源受限与签名验证仍受 TD-012
+阻（TD-036，生产拒装）；显式安装与项目为界的授权已落地。Streamable HTTP
+传输见 TD-035。

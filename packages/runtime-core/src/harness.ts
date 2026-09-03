@@ -35,14 +35,14 @@
  * 的说明，和一段正确的说明长得一模一样。
  */
 
-import type { RuyinContract, TaskDefinition } from "@vxture/ruyin-contract-schema";
+import type { RuyinContract, TaskDefinition, ToolProvider } from "@vxture/ruyin-contract-schema";
 import {
   emitAudit,
   OUTCOME_MUST_BE_STATED,
   RUNTIME_ACTOR,
 } from "./audit.js";
 import { TransientError } from "./ports.js";
-import { LOCAL_FS, bindingRevoked, folderGrants, isPathGranted } from "./project.js";
+import { LOCAL_FS, bindingRevoked, folderGrants, isFolderGrant, isPathGranted } from "./project.js";
 import { decideTool, validateToolCall } from "./tool-gate.js";
 import type {
   AIGatewayPort,
@@ -359,7 +359,7 @@ export class Harness {
     // calls later: expensive, slow, and it never named the cause. Same outcome,
     // one twelfth the cost, and this time it says what is missing.
     const unrunnable = unrunnableTools(definition.tools, (tool) =>
-      this.deps.tools?.supports(tool) ?? false,
+      this.deps.tools?.supports(tool, this.providerOf(tool)) ?? false,
     );
     if (unrunnable.length) {
       throw new HarnessError(
@@ -1153,8 +1153,13 @@ export class Harness {
       .filter((t) => declared.has(t.id))
       // A tool no host can run is not on offer: promising it and failing later
       // costs a turn and teaches the provider nothing.
-      .filter((t) => this.deps.tools?.supports(t.id) ?? false)
+      .filter((t) => this.deps.tools?.supports(t.id, t.provider ?? "runtime") ?? false)
       .map((t) => ({ id: t.id, description: `${t.category} (risk: ${t.risk})` }));
+  }
+
+  /** The contract's word on who implements a tool; runtime unless it says connector. */
+  private providerOf(tool: string): ToolProvider {
+    return this.deps.contract.tools.find((t) => t.id === tool)?.provider ?? "runtime";
   }
 
   /**
@@ -1260,7 +1265,10 @@ export class Harness {
     calls: ToolCall[],
   ): Promise<TurnMessage[]> {
     const out: TurnMessage[] = [];
-    const grants = folderGrants(jsonArray<Grant>(await this.deps.store.getGrants()));
+    const allGrants = jsonArray<Grant>(await this.deps.store.getGrants());
+    const grants = folderGrants(allGrants);
+    // Connector tools route only through connectors this project granted.
+    const connectors = allGrants.flatMap((g) => (isFolderGrant(g) ? [] : [g.connector]));
     for (const call of calls) {
       // journal-before-write (50-harness 8.2): the intent is on record before
       // the effect, so recovery can tell "never ran" from "ran, unrecorded".
@@ -1270,10 +1278,12 @@ export class Harness {
         if (!this.deps.tools) throw new Error("no tool executor is configured");
         result = await this.deps.tools.execute({
           tool: call.tool,
+          provider: this.providerOf(call.tool),
           arguments: call.arguments,
           workspace: this.deps.projectId,
           taskId: instance.id,
           grants,
+          connectors,
           contextSet: instance.contextSet ?? [],
         });
       } catch (cause) {
@@ -1289,7 +1299,8 @@ export class Harness {
       await this.audit(
         instance,
         "tool.executed",
-        { tool: call.tool },
+        // 经连接器跑的说清经的是谁（ADR-005：每次连接器调用落审计）。
+        { tool: call.tool, ...(result.connector ? { connector: result.connector } : {}) },
         // 工具报错是 failed，不是 rejected —— 没有谁拒绝它，是它自己没做成。
         result.isError ? "failed" : "success",
       );

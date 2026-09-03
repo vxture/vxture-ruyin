@@ -230,7 +230,15 @@ tools:
         source:  { type: string, x-ruyin-ref: context_item }  # 须属于本任务上下文集
       required: [path, content]
     output_schema: { ... }  # 可选
+    provider: runtime       # 可选：runtime（默认）| connector
 ```
+
+> **`provider`（2026-09-03，ADR-005 通路二 D）。** `runtime` 是 Ruyin 内建的预制
+> skill 层；`connector` 表示由**本机安装、且本项目已授权**的连接器暴露一个同名
+> 工具来实现。映射就是 id 相同 —— 契约说要什么、连接器说有什么，两边名字对上即
+> 接通；category / risk / default 仍由契约决定，闸门的判断与别的工具一模一样。
+> 连接器工具只能是 `query`（读内网系统）或 `external_send`（写进内网系统，硬底线
+> ≥ ask）——R15。机器上没有任何连接器暴露该工具时，任务在启动前就被拒并点名。
 
 > **`input_schema` 为什么必填。** Tool Gate 放行前要做三项校验：参数合 schema、
 > 路径类参数落在授权范围内、引用的资料在本次上下文集内（05 §5.2）。三项都需要
@@ -356,6 +364,7 @@ sync:
 | R12 | 包签名有效且签名身份与 product.publisher 一致 | L4 |
 | R13 | `input_schema.required` 中每个名字均已声明；`local_read`/`local_write`/`export` 类工具至少标注一个 `x-ruyin-ref: path` 参数 | L2 |
 | R14 | 声明了 tools 的 task 必须至少声明一条 capability——工具只在能力回合内被调用，`capabilities: []` 的任务一个回合都不跑，声明的工具永远调不到 | L2 |
+| R15 | `provider: connector` 的工具 category 只能是 `query` 或 `external_send`——其余类别靠路径参数过目录授权（连接器工具没有路径可查）或是模型自己的产出 | L1 |
 
 ---
 

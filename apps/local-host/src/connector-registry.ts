@@ -20,7 +20,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ConnectorHealth, ConnectorPort, ContextSource } from "@vxture/ruyin-core";
-import { McpConnector } from "./connector-mcp.js";
+import { McpConnector, type ConnectorToolOutcome } from "./connector-mcp.js";
+import type { ConnectorToolSource } from "./tool-executor.js";
 
 export const CONNECTORS_FILE = "connectors.json";
 
@@ -40,6 +41,8 @@ export interface InstalledConnector {
 
 export interface ConnectorView extends InstalledConnector {
   health: ConnectorHealth;
+  /** Tools the running server exposes (tools/list at start); empty when not running. */
+  tools: string[];
 }
 
 export class ConnectorInstallRefusedError extends Error {}
@@ -48,7 +51,7 @@ interface Manifest {
   items: InstalledConnector[];
 }
 
-export class ConnectorRegistry {
+export class ConnectorRegistry implements ConnectorToolSource {
   private readonly manifestPath: string;
   private readonly live = new Map<string, McpConnector>();
   private specs: InstalledConnector[] = [];
@@ -85,9 +88,38 @@ export class ConnectorRegistry {
   async list(): Promise<ConnectorView[]> {
     const out: ConnectorView[] = [];
     for (const spec of this.specs) {
-      out.push({ ...spec, health: await this.healthOf(spec.id) });
+      out.push({
+        ...spec,
+        health: await this.healthOf(spec.id),
+        tools: this.live.get(spec.id)?.tools() ?? [],
+      });
     }
     return out;
+  }
+
+  // -- ConnectorToolSource (ADR-005 batch D) ------------------------------
+
+  /** Does any running connector expose this tool - the machine-level question startTask asks. */
+  exposes(tool: string): boolean {
+    for (const connector of this.live.values()) {
+      if (connector.tools().includes(tool)) return true;
+    }
+    return false;
+  }
+
+  /** Which of the *granted* connectors expose this tool - the project-level question execution asks. */
+  providersOf(tool: string, granted: readonly string[]): string[] {
+    return granted.filter((id) => this.live.get(id)?.tools().includes(tool) ?? false);
+  }
+
+  async callTool(
+    connector: string,
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<ConnectorToolOutcome> {
+    const live = this.live.get(connector);
+    if (!live) return { content: `connector "${connector}" is not running`, isError: true };
+    return live.callTool(tool, args);
   }
 
   async healthOf(id: string): Promise<ConnectorHealth> {
@@ -141,7 +173,7 @@ export class ConnectorRegistry {
     await this.bringUp(spec);
     this.specs.push(spec);
     this.writeManifest();
-    return { ...spec, health: await this.healthOf(spec.id) };
+    return { ...spec, health: await this.healthOf(spec.id), tools: this.live.get(spec.id)?.tools() ?? [] };
   }
 
   async remove(id: string): Promise<void> {

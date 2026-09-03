@@ -723,6 +723,7 @@ const crm = {
   source: "lan" as const,
   installedAt: "2026-09-03T00:00:00.000Z",
   health: { ok: true, checkedAt: "2026-09-03T00:00:00.000Z" },
+  tools: [],
 };
 
 void test("ProjectPanel/Context: no connectors installed -> the connector section does not exist, the binding form has no 经由 select", async () => {
