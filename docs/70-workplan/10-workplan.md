@@ -68,6 +68,9 @@
 ## W5 · npm 发布流
 
 - [x] publish-packages.yml（2026-09-01）：contract-schema / runtime-core / cli → GitHub Packages。
+      **首次发布已完成（2026-09-03，owner 定，tag `packages-v0.1.0`）**：contract-schema / document /
+      runtime-core / cli 四个包各 0.1.0，发布流水线按顺序全部发出、无跳过，包页已关联本仓。
+      自此版本守卫有了真基线：改了包内容就必须升版本。
       `product-sdk` 尚不存在（W3，待契约冻结），到时排进 ORDER 即可——**守卫会提醒**。
       - **两套 tag**：`packages-v*` 与安装包的 `v*` 分开。库的版本不该被应用版本牵着走——
         runtime-core 的版本是「规范实现版本」（OQ-2），与桌面应用发到第几版无关。
