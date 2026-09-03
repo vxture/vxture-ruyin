@@ -597,7 +597,7 @@ void test("InstallPackageRow: a DS button opens the picker - the browser-rendere
   const clicked = vi.spyOn(input, "click");
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "安装" }));
-  await user.click(await screen.findByRole("menuitem", { name: "安装本地包…" }));
+  await user.click(await screen.findByRole("menuitem", { name: "从本地包安装" }));
   expect(clicked).toHaveBeenCalledTimes(1);
 });
 
@@ -799,7 +799,7 @@ void test("HomePage/产品库: nothing is fetched until opened; unreachable says
   expect(registry).not.toHaveBeenCalled();
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "安装" }));
-  await user.click(await screen.findByRole("menuitem", { name: "从产品库安装" }));
+  await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
   expect(await screen.findByText(/产品库没查到 —— index unreachable: ECONNREFUSED/)).toBeInTheDocument();
   expect(screen.getByText(/这不代表产品库是空的/)).toBeInTheDocument();
   expect(registry).toHaveBeenCalledTimes(1);
@@ -808,7 +808,7 @@ void test("HomePage/产品库: nothing is fetched until opened; unreachable says
   expect(screen.queryByText(/产品库没查到/)).not.toBeInTheDocument();
   // Reopening does not refetch - the catalog is kept.
   await user.click(screen.getByRole("button", { name: "安装" }));
-  await user.click(await screen.findByRole("menuitem", { name: "从产品库安装" }));
+  await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
   expect(registry).toHaveBeenCalledTimes(1);
 });
 
@@ -825,7 +825,7 @@ void test("HomePage/产品库: an installable catalog lists packages with 未签
   );
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "安装" }));
-  await user.click(await screen.findByRole("menuitem", { name: "从产品库安装" }));
+  await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
   const list = await screen.findByLabelText("产品库");
   expect(within(list).getByText("标书编写")).toBeInTheDocument();
   expect(within(list).getByText("未签名")).toBeInTheDocument();
@@ -842,7 +842,7 @@ void test("HomePage/产品库: a production machine can see the catalog but is t
   homeWith(api);
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "安装" }));
-  await user.click(await screen.findByRole("menuitem", { name: "从产品库安装" }));
+  await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
   const list = await screen.findByLabelText("产品库");
   expect(within(list).getByText("本机不装未签名包")).toBeInTheDocument();
   expect(within(list).queryByRole("button", { name: "安装" })).not.toBeInTheDocument();
@@ -858,7 +858,7 @@ void test("HomePage/产品库: an empty catalog says so; a failed fetch and a fa
   );
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "安装" }));
-  await user.click(await screen.findByRole("menuitem", { name: "从产品库安装" }));
+  await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
   expect(await screen.findByText("产品库里目前没有产品包")).toBeInTheDocument();
   first.unmount();
 
@@ -873,13 +873,13 @@ void test("HomePage/产品库: an empty catalog says so; a failed fetch and a fa
     <HomePage api={failing} products={[]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={onError} />,
   );
   await user.click(screen.getByRole("button", { name: "安装" }));
-  await user.click(await screen.findByRole("menuitem", { name: "从产品库安装" }));
+  await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
   await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("daemon down"));
   // Second open refetches because the first attempt left no catalog.
   await user.click(screen.getByRole("button", { name: "安装" }));
   await user.click(await screen.findByRole("menuitem", { name: "收起产品库" }));
   await user.click(screen.getByRole("button", { name: "安装" }));
-  await user.click(await screen.findByRole("menuitem", { name: "从产品库安装" }));
+  await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
   const list = await screen.findByLabelText("产品库");
   await user.click(within(list).getByRole("button", { name: "安装" }));
   await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("package sha256 mismatch"));
@@ -1048,7 +1048,7 @@ void test("我的智能体 header: 从产品库安装 toggles the registry list 
   const user = userEvent.setup();
   expect(screen.queryByText(/产品库没查到/)).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "安装" }));
-  await user.click(await screen.findByRole("menuitem", { name: "从产品库安装" }));
+  await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
   expect(await screen.findByText(/产品库没查到 —— 没网/)).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "安装" }));
   await user.click(await screen.findByRole("menuitem", { name: "收起产品库" }));

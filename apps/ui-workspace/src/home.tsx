@@ -189,9 +189,9 @@ function InstallMenu({
               浏览器渲染，按**浏览器的语言**显示「Choose File / No file chosen」——
               一句改不掉的英文夹在中文界面里。功能照旧走这个 input（同一个页面在
               浏览器和壳里都要能用，不走只有壳能走的原生对话框）。 */}
-          <DropdownMenuItem onSelect={() => pick.current?.click()}>安装本地包…</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => pick.current?.click()}>从本地包安装</DropdownMenuItem>
           <DropdownMenuItem onSelect={onToggleRegistry}>
-            {registryOpen ? "收起产品库" : "从产品库安装"}
+            {registryOpen ? "收起产品库" : "从产品库拉取"}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
