@@ -37,8 +37,11 @@ import {
   auditView,
   type StoredAuditEvent,
   type Binding,
+  type ConnectorView,
   type ContextItemMeta,
   type FolderGrant,
+  type Grant,
+  isConnectorGrant,
   type ProjectExport,
   type TaskDef,
   type TaskInstance,
@@ -122,7 +125,7 @@ export function ProjectPanel({
 }) {
   const [view, setView] = useState<ProjectView | null>(null);
   const [instances, setInstances] = useState<TaskInstance[]>([]);
-  const [grants, setGrants] = useState<FolderGrant[]>([]);
+  const [grants, setGrants] = useState<Grant[]>([]);
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [audit, setAudit] = useState<StoredAuditEvent[]>([]);
   const [chainOk, setChainOk] = useState<boolean | null>(null);
@@ -269,7 +272,12 @@ export function ProjectPanel({
           grants={grants}
           bindings={bindings}
           onAddGrant={(p) => void guard(() => api.addGrant(id, p))}
-          onBind={(type, root) => void guard(() => api.setBinding(id, type, root))}
+          onGrantConnector={(c) => void guard(() => api.addConnectorGrant(id, c))}
+          onBind={(type, root, via) =>
+            void guard(() =>
+              via ? api.setBinding(id, type, root, via) : api.setBinding(id, type, root),
+            )
+          }
         />
       )}
       {tab === "tasks" && (
@@ -305,11 +313,13 @@ function ProjectSummary({
 }: {
   view: ProjectView;
   instances: TaskInstance[];
-  grants: FolderGrant[];
+  grants: Grant[];
   bindings: Binding[];
   audit: StoredAuditEvent[];
   chainOk: boolean | null;
 }) {
+  const folders = grants.filter((g) => !isConnectorGrant(g)).length;
+  const connectorGrants = grants.length - folders;
   const waiting = instances.filter((t) => t.state === "waiting_human").length;
   const running = instances.filter(
     (t) => !TERMINAL_TASK_STATES.has(t.state) && t.state !== "waiting_human",
@@ -334,7 +344,9 @@ function ProjectSummary({
       <div className="proj-summary-cell">
         <span className="proj-summary-k">资料</span>
         <span className="proj-summary-v">
-          {bindings.length} 类 · {grants.length} 个授权目录
+          {bindings.length} 类 · {folders} 个授权目录
+          {/* 连接器授权只在有的时候才说：没有就不占字。 */}
+          {connectorGrants > 0 && <> · {connectorGrants} 个连接器</>}
         </span>
       </div>
       <div className="proj-summary-cell">
@@ -530,28 +542,59 @@ function ContextTab({
   grants,
   bindings,
   onAddGrant,
+  onGrantConnector,
   onBind,
 }: {
   api: Api;
   projectId: string;
   view: ProjectView;
-  grants: FolderGrant[];
+  grants: Grant[];
   bindings: Binding[];
   onAddGrant: (path: string) => void;
-  onBind: (type: string, root: string) => void;
+  onGrantConnector: (connector: string) => void;
+  onBind: (type: string, root: string, via?: { connector: string; source: string }) => void;
 }) {
   const [grantPath, setGrantPath] = useState("");
   const [bindType, setBindType] = useState("");
   const [bindRoot, setBindRoot] = useState("");
+  /** "" = 本地文件夹（local-fs）；否则是一个已授权连接器的 id。 */
+  const [bindVia, setBindVia] = useState("");
+  const [grantConnector, setGrantConnector] = useState("");
+  /**
+   * 机器上装了哪些连接器（null = 还没问到 / 这套装配没有）。装是机器级的事，
+   * 授权是项目级的事 —— 这里列前者，好让用户把其中的某个授给这个项目。
+   */
+  const [installed, setInstalled] = useState<ConnectorView[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .connectors()
+      .then((r) => alive && setInstalled(r.items))
+      .catch(() => alive && setInstalled(null));
+    return () => {
+      alive = false;
+    };
+  }, [api]);
+
+  const folderGrants = grants.filter((g): g is FolderGrant => !isConnectorGrant(g));
+  const connectorGrants = grants.filter(isConnectorGrant);
+  const grantable = (installed ?? []).filter(
+    (c) => !connectorGrants.some((g) => g.connector === c.id),
+  );
+  const effectiveGrantConnector = grantConnector || grantable[0]?.id || "";
+
   const contextTypes = useMemo(
     () => Array.from(new Set(view.tasks.flatMap((t) => t.input_types))),
     [view.tasks],
   );
   const effectiveType = bindType || contextTypes[0] || "";
+  const viaConnector = bindVia
+    ? (installed ?? []).find((c) => c.id === bindVia)
+    : undefined;
   return (
     <>
       <SectionHeader level={2} title="文件授权 · Grants" icon="folder-open" />
-      {grants.length === 0 && (
+      {folderGrants.length === 0 && (
         <EmptyState
           icon="lock"
           title="尚未授权任何文件夹"
@@ -560,9 +603,9 @@ function ContextTab({
       )}
       {/* 一条授权是一行字（路径 + 读写模式）。一条一张卡，等于给一行字配
           16px 内边距和一道边框 —— 三条授权就吃掉小半屏。 */}
-      {grants.length > 0 && (
+      {folderGrants.length > 0 && (
         <ul className="row-list">
-          {grants.map((g) => (
+          {folderGrants.map((g) => (
             <li key={g.id} className="row-item">
               <code className="row-main" title={g.path}>{g.path}</code>
               <span className="row-tag">{g.mode}</span>
@@ -587,6 +630,49 @@ function ContextTab({
         </Button>
       </div>
 
+      {/* 连接器授权（ADR-005）：与文件夹授权同级，但只在这台机器装了连接器时才
+          出现 —— 一个永远空着的板块是在解释一件用户没有的东西。 */}
+      {(installed?.length ?? 0) + connectorGrants.length > 0 && (
+        <>
+          <SectionHeader level={2} title="连接器授权 · Connectors" icon="plugs-connected" />
+          {connectorGrants.length > 0 && (
+            <ul className="row-list" aria-label="已授权的连接器">
+              {connectorGrants.map((g) => (
+                <li key={g.id} className="row-item">
+                  <code className="row-main">{g.connector}</code>
+                  <span className="row-tag">{g.mode}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {grantable.length > 0 && (
+            <div className="row">
+              <NativeSelect
+                aria-label="要授权的连接器"
+                value={effectiveGrantConnector}
+                onChange={(e) => setGrantConnector(e.target.value)}
+                wrapperClassName="sel-narrow"
+              >
+                {grantable.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.id}（{c.source}{c.health.ok ? "" : "，未运行"}）
+                  </option>
+                ))}
+              </NativeSelect>
+              <Button
+                disabled={!effectiveGrantConnector}
+                onClick={() => {
+                  onGrantConnector(effectiveGrantConnector);
+                  setGrantConnector("");
+                }}
+              >
+                授权连接器
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+
       <SectionHeader level={2} title="类型绑定 · Bindings" icon="plugs-connected" />
       {bindings.map((b) => (
         <BindingCard key={b.type} api={api} projectId={projectId} binding={b} />
@@ -603,16 +689,41 @@ function ContextTab({
             </option>
           ))}
         </NativeSelect>
+        {/* 经由什么：只在有已授权连接器时才多出这个选择 —— 没有的话就是本地
+            文件夹，和从前一样，不多问一句。 */}
+        {connectorGrants.length > 0 && (
+          <NativeSelect
+            aria-label="经由"
+            value={bindVia}
+            onChange={(e) => setBindVia(e.target.value)}
+            wrapperClassName="sel-narrow"
+          >
+            <option value="">本地文件夹</option>
+            {connectorGrants.map((g) => (
+              <option key={g.id} value={g.connector}>
+                连接器 {g.connector}
+              </option>
+            ))}
+          </NativeSelect>
+        )}
         <Input
           value={bindRoot}
           onChange={(e) => setBindRoot(e.target.value)}
-          placeholder="已授权文件夹内的路径"
+          placeholder={bindVia ? "资源 URI 前缀（如 crm://accounts/）" : "已授权文件夹内的路径"}
         />
         <Button
           variant="outline"
           disabled={!effectiveType || !bindRoot}
           onClick={() => {
-            onBind(effectiveType, bindRoot);
+            onBind(
+              effectiveType,
+              bindRoot,
+              // 连接器装了又卸了、授权还在：来源种类不知道，交给内核拒绝，
+              // 而不是在这里猜一个。
+              bindVia
+                ? { connector: bindVia, source: viaConnector?.source ?? "lan" }
+                : undefined,
+            );
             setBindRoot("");
           }}
         >
@@ -656,6 +767,13 @@ function BindingCard({
           <span className="text-body-sm text-muted-foreground mono">
             ← {binding.root}
           </span>
+          {/* 经连接器的绑定说明经的是谁：「crm://accounts/」这样的地址本身不说
+              它从哪个连接器来，而两个连接器可以暴露同一个地址。 */}
+          {binding.connector !== "local-fs" && (
+            <span className="row-tag" style={{ marginLeft: 8 }}>
+              连接器 {binding.connector} · {binding.source}
+            </span>
+          )}
         </span>
         <span className="text-body-sm text-muted-foreground">
           {open ? "收起" : "查看条目"}

@@ -129,6 +129,8 @@ function fakeApi(over: Partial<Api> = {}): Api {
     startTask: vi.fn().mockResolvedValue({}),
     exportProject: vi.fn().mockResolvedValue({}),
     contextItems: vi.fn().mockResolvedValue([]),
+    connectors: vi.fn().mockResolvedValue({ items: [] }),
+    addConnectorGrant: vi.fn().mockResolvedValue({}),
     ...over,
   } as unknown as Api;
 }
@@ -709,4 +711,118 @@ void test("ProjectPanel: reports the waiting_human count upward via onPending", 
   });
   render(<ProjectPanel api={api} id="prj_1" tab="overview" onPending={onPending} />);
   await vi.waitFor(() => expect(onPending).toHaveBeenCalledWith(2));
+});
+
+/* ---------------- Connectors (ADR-005 path two) ---------------- */
+
+const crm = {
+  id: "crm",
+  transport: "stdio" as const,
+  command: "node",
+  args: ["crm.js"],
+  source: "lan" as const,
+  installedAt: "2026-09-03T00:00:00.000Z",
+  health: { ok: true, checkedAt: "2026-09-03T00:00:00.000Z" },
+};
+
+void test("ProjectPanel/Context: no connectors installed -> the connector section does not exist, the binding form has no 经由 select", async () => {
+  const api = fakeApi({ grants: vi.fn().mockResolvedValue([grant()]) });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  await screen.findByText("C:\\proj\\docs");
+  expect(screen.queryByText("连接器授权 · Connectors")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("经由")).not.toBeInTheDocument();
+});
+
+void test("ProjectPanel/Context: an installed, ungranted connector can be granted to this project", async () => {
+  const api = fakeApi({
+    grants: vi.fn().mockResolvedValue([grant()]),
+    connectors: vi.fn().mockResolvedValue({ items: [crm] }),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  expect(await screen.findByText("连接器授权 · Connectors")).toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "授权连接器" }));
+  expect(api.addConnectorGrant).toHaveBeenCalledWith("prj_1", "crm");
+  // Folder count stays folder-only in the summary.
+  expect(screen.getByText("0 类 · 1 个授权目录")).toBeInTheDocument();
+});
+
+void test("ProjectPanel/Context: a granted connector is listed, counted apart from folders, and binding 经由 it sends connector+source", async () => {
+  const api = fakeApi({
+    workspace: vi.fn().mockResolvedValue(projectView({ tasks: [taskDef({ input_types: ["tender_doc"] })] })),
+    grants: vi.fn().mockResolvedValue([
+      grant(),
+      { id: "g2", kind: "connector", connector: "crm", mode: "read", createdAt: "2026-09-03T00:00:00.000Z" },
+    ]),
+    connectors: vi.fn().mockResolvedValue({ items: [crm] }),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  await screen.findByText("连接器授权 · Connectors");
+  expect(within(screen.getByLabelText("已授权的连接器")).getByText("crm")).toBeInTheDocument();
+  // Already granted -> nothing left to grant, the control is gone.
+  expect(screen.queryByRole("button", { name: "授权连接器" })).not.toBeInTheDocument();
+  expect(screen.getByText(/1 个授权目录 · 1 个连接器/)).toBeInTheDocument();
+
+  const user = userEvent.setup();
+  await user.selectOptions(screen.getByLabelText("经由"), "crm");
+  const root = screen.getByPlaceholderText("资源 URI 前缀（如 crm://accounts/）");
+  await user.type(root, "crm://accounts/");
+  await user.click(screen.getByRole("button", { name: "绑定并索引" }));
+  expect(api.setBinding).toHaveBeenCalledWith("prj_1", "tender_doc", "crm://accounts/", {
+    connector: "crm",
+    source: "lan",
+  });
+});
+
+void test("ProjectPanel/Context: a binding through a connector says which one; a local-fs one does not", async () => {
+  const api = fakeApi({
+    bindings: vi.fn().mockResolvedValue([
+      binding({ type: "tender_doc", root: "docs/tender", connector: "local-fs" }),
+      binding({ type: "enterprise_capability", root: "crm://accounts/", connector: "crm", source: "lan" }),
+    ]),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  expect(await screen.findByText("连接器 crm · lan")).toBeInTheDocument();
+  expect(screen.getAllByText(/^连接器 /)).toHaveLength(1);
+});
+
+void test("ProjectPanel/Context: when /connectors cannot be reached the connector section is simply absent (unknown is not none)", async () => {
+  const api = fakeApi({
+    grants: vi.fn().mockResolvedValue([grant()]),
+    connectors: vi.fn().mockRejectedValue(new Error("503")),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  await screen.findByText("rw");
+  expect(screen.queryByText("连接器授权 · Connectors")).not.toBeInTheDocument();
+});
+
+void test("ProjectPanel/Context: with two grantable connectors the chosen one is granted, and an unhealthy one says so in the option", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({
+      items: [crm, { ...crm, id: "erp", source: "private" as const, health: { ok: false, checkedAt: "x" } }],
+    }),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  const select = await screen.findByLabelText("要授权的连接器");
+  expect(within(select).getByText("erp（private，未运行）")).toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.selectOptions(select, "erp");
+  await user.click(screen.getByRole("button", { name: "授权连接器" }));
+  expect(api.addConnectorGrant).toHaveBeenCalledWith("prj_1", "erp");
+});
+
+void test("ProjectPanel/Context: a connector granted but no longer installed still offers 经由, and the source falls back to lan for the kernel to judge", async () => {
+  const api = fakeApi({
+    workspace: vi.fn().mockResolvedValue(projectView({ tasks: [taskDef({ input_types: ["tender_doc"] })] })),
+    grants: vi.fn().mockResolvedValue([
+      { id: "g2", kind: "connector", connector: "gone", mode: "read", createdAt: "2026-09-03T00:00:00.000Z" },
+    ]),
+    connectors: vi.fn().mockResolvedValue({ items: [] }),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  const user = userEvent.setup();
+  await user.selectOptions(await screen.findByLabelText("经由"), "gone");
+  await user.type(screen.getByPlaceholderText("资源 URI 前缀（如 crm://accounts/）"), "x://");
+  await user.click(screen.getByRole("button", { name: "绑定并索引" }));
+  expect(api.setBinding).toHaveBeenCalledWith("prj_1", "tender_doc", "x://", { connector: "gone", source: "lan" });
 });

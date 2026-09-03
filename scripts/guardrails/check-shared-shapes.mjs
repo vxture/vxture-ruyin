@@ -85,6 +85,7 @@ const SHARED = [
   // 副本此前一份少 ref、一份少 source，都是「源头有而界面没有」的那类漂移。
   ["ContextItemMeta", "ContextItemMeta", "packages/runtime-core/src/ports.ts"],
   ["Binding", "Binding", "packages/runtime-core/src/ports.ts"],
+  ["ConnectorGrant", "ConnectorGrant", "packages/runtime-core/src/ports.ts"],
 ];
 
 const sources = new Map();
