@@ -92,6 +92,12 @@ export interface LocalApiDeps {
     dataDir: string;
     productsDir: string;
     keyProtection: "dpapi" | "plaintext";
+    /**
+     * 能力面接没接（ADR-009）。`mock` = 没配 `RUYIN_CAPABILITY_BASE`，任务会拿到
+     * `MockAIGateway` 的字面量占位输出。界面据此在产品卡上标「未接通」（TD-033）——
+     * 「没接上」绝不能看起来像「在工作」，而守护进程日志到不了用户眼前。
+     */
+    capabilitySurface: "configured" | "mock";
     startedAt: string;
   };
 }

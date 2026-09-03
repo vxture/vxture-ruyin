@@ -185,7 +185,10 @@ export function HomePage({
   onError: (msg: string) => void;
 }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
-  const [system, setSystem] = useState<{ keyProtection: string } | null>(null);
+  const [system, setSystem] = useState<{
+    keyProtection: string;
+    capabilitySurface?: string;
+  } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -217,6 +220,11 @@ export function HomePage({
 
   const subscriptionKnown = products.some((p) => p.entitled !== null);
   const encrypted = system?.keyProtection === "dpapi";
+  // 能力面没接时，任务拿到的是 MockAIGateway 的字面量占位输出，而它会一路走到
+  // 用户面前当成工作成果（TD-033）。守护进程日志已如实播报，但日志到不了用户
+  // 眼前 —— 所以产品卡要说。**只在 daemon 明确说 mock 时才标**：/system 还没回
+  // 来是「不知道」，把「不知道」标成「没接上」是同一类错，方向相反。
+  const capabilityMock = system?.capabilitySurface === "mock";
   const signedIn = session?.signedIn === true;
 
   return (
@@ -319,6 +327,7 @@ export function HomePage({
                 product={p}
                 projects={workspaces.filter((w) => w.productId === p.id)}
                 subscribeUrl={subscribeUrl}
+                capabilityMock={capabilityMock}
                 onOpen={onOpen}
                 onCreated={onCreated}
                 onRefresh={onRefresh}
@@ -418,6 +427,7 @@ function ProductCard({
   product,
   projects,
   subscribeUrl,
+  capabilityMock,
   onOpen,
   onCreated,
   onRefresh,
@@ -427,6 +437,8 @@ function ProductCard({
   product: ProductInfo;
   projects: ProjectMeta[];
   subscribeUrl: (id?: string, intent?: "subscribe" | "renew") => string;
+  /** daemon 说能力面是 mock（TD-033）。运行环境层面的事实，每张卡都受影响。 */
+  capabilityMock: boolean;
   onOpen: (projectId: string) => void;
   onCreated: (projectId: string) => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
@@ -491,6 +503,10 @@ function ProductCard({
         </span>
         <h3 className="pcard-title">{product.name}</h3>
         {badge}
+        {/* 「未接通」与订阅徽章并列而不是替换：「已订阅」和「能力面没接」是两件
+            都成立的事。只标在能打开的卡上 —— 打不开的卡不会跑任务，也就没有
+            「拿到占位输出当成果」这回事。 */}
+        {usable && capabilityMock && <StatusBadge tone="warning">未接通</StatusBadge>}
       </header>
 
       {/* 二、副标题：产品标识与版本**连在一起**。它们回答的是同一个问题——
@@ -505,6 +521,14 @@ function ProductCard({
             是两件事，后者他知道该去哪解决。 */}
         {!usable && product.reason && (
           <p className="pcard-reason">{product.reason}</p>
+        )}
+        {/* 徽章说「是什么」，这一行说「意味着什么」：现在跑任务得到的不是成果。
+            owner 定的判据是「拿到安装包的人能不能分清『在工作』与『没接上』」，
+            所以卡仍可打开 —— 要分清，不是要拦住。 */}
+        {usable && capabilityMock && (
+          <p className="pcard-reason">
+            能力面未接通：现在发起任务只会得到占位输出，不是真实成果
+          </p>
         )}
       </div>
 

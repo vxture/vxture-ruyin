@@ -28,6 +28,7 @@ function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
     dataDir: "C:/Users/demo/.ruyin/dev",
     productsDir: "D:/ruyin/products",
     keyProtection: "dpapi",
+    capabilitySurface: "configured",
     startedAt: "2026-09-01T00:00:00Z",
     ...over,
   };

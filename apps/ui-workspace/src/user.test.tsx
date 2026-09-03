@@ -36,6 +36,7 @@ function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
     dataDir: "(test)",
     productsDir: "(test)",
     keyProtection: "dpapi",
+    capabilitySurface: "configured",
     startedAt: "2026-09-01T00:00:00Z",
     ...over,
   };

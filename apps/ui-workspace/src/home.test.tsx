@@ -665,3 +665,92 @@ void test("InstallPackageRow: a rejected package calls onError with the daemon's
   await user.upload(input, new File([new Uint8Array([1])], "demo.ruyinpkg"));
   await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("checksum 不符"));
 });
+
+// --- 能力面没接（TD-033）------------------------------------------------------
+//
+// 没配 RUYIN_CAPABILITY_BASE 时任务拿到的是 MockAIGateway 的字面量占位输出，而它
+// 会一路走到用户面前当成工作成果。守护进程日志说了，但日志到不了用户眼前。
+
+void test("HomePage: daemon says capabilitySurface=mock -> usable product card is marked 未接通 and says tasks give placeholder output, but stays openable", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue({ keyProtection: "dpapi", capabilitySurface: "mock" }),
+  });
+  render(
+    <HomePage
+      api={api}
+      products={[product()]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  expect(await screen.findByText("未接通")).toBeInTheDocument();
+  expect(screen.getByText(/能力面未接通/)).toBeInTheDocument();
+  // 订阅徽章不被顶掉：两件事都成立。
+  expect(screen.getByText("已订阅")).toBeInTheDocument();
+  // 要分清，不是要拦住：打开入口还在。
+  expect(screen.getByRole("button", { name: /打开|新建/ })).toBeInTheDocument();
+});
+
+void test("HomePage: capabilitySurface=configured -> no 未接通 anywhere", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue({ keyProtection: "dpapi", capabilitySurface: "configured" }),
+  });
+  render(
+    <HomePage
+      api={api}
+      products={[product()]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  await screen.findByText("已加密");
+  expect(screen.queryByText("未接通")).not.toBeInTheDocument();
+  expect(screen.queryByText(/能力面未接通/)).not.toBeInTheDocument();
+});
+
+void test("HomePage: /system unknown (null) is not 'mock' - no 未接通 badge on a guess", async () => {
+  const api = fakeApi({ system: vi.fn().mockResolvedValue(null) });
+  render(
+    <HomePage
+      api={api}
+      products={[product()]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  await vi.waitFor(() => expect(api.system).toHaveBeenCalled());
+  expect(screen.queryByText("未接通")).not.toBeInTheDocument();
+});
+
+void test("HomePage: a blocked (not_entitled) card does not also get 未接通 - it will not run a task anyway", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue({ keyProtection: "dpapi", capabilitySurface: "mock" }),
+  });
+  render(
+    <HomePage
+      api={api}
+      products={[product({ entitled: false, availability: "not_entitled", reason: "订阅已到期" })]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  await screen.findByText("已加密");
+  expect(screen.getByText("未订阅")).toBeInTheDocument();
+  expect(screen.queryByText("未接通")).not.toBeInTheDocument();
+});

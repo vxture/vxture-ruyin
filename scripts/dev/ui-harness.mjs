@@ -118,6 +118,9 @@ const server = createLocalApi({
     dataDir,
     productsDir: `${repo}/products`,
     keyProtection: "dpapi",
+    // 观察台跑的就是 MockAIGateway，所以照实说 mock —— 首页产品卡的「未接通」
+    // （TD-033）在这里就能看见，而不是只在装机后才第一次出现。
+    capabilitySurface: "mock",
     startedAt: new Date().toISOString(),
   },
 });
