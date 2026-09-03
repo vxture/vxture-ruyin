@@ -105,7 +105,7 @@ run(
 // installer builds, installs, and the window never appears.
 //
 // The unpacked tree is produced by both modes, so this runs either way.
-const packagedExe = join(shellDir, "release", "win-unpacked", "RUYIN.exe");
+const packagedExe = join(shellDir, "release", "win-unpacked", "Ruyin.exe");
 console.log(`[pack] smoke: ${packagedExe} --smoke`);
 const smoke = spawnSync(packagedExe, ["--smoke"], {
   cwd: shellDir,

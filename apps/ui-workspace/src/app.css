@@ -665,8 +665,21 @@ body {
   font-size: var(--font-size-body-md);
   letter-spacing: 0.04em;
 }
+/* 标语「Intelligent Workbench」：设计系统默认把子名做成贴片（浅底 + 描边），那是给
+   「产品代号 / 环境名」用的。标语不是标签 —— 它是字标的一句轻声注脚（owner 2026-09-03
+   定：去掉背景与边框，字更小更淡）。 */
 .app-brand .vx-brand-local-name {
-  font-size: var(--font-size-body-sm);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: var(--font-size-body-xs, 11px);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+  opacity: 0.7;
+  margin-left: 2px;
+  align-self: center;
 }
 
 /* 当前工作区：常驻，两态都在。原来只有一个光秃秃的名字，「这是什么」写在

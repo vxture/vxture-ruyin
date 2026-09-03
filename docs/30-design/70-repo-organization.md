@@ -187,7 +187,7 @@ tailnet-ssh-connect → rsync 到下载主机 staging 目录 → 原子切换
 ```text
 dl.vxture.com/ruyin/
 ├── stable/
-│   ├── RUYIN-Setup-1.0.0.exe（+ .blockmap）
+│   ├── Ruyin-Setup-1.0.0.exe（+ .blockmap）
 │   ├── latest.yml                 # electron-updater generic provider feed
 │   └── manifest.json              # 网站消费的下载清单（见下）
 ├── beta/…（同构）
