@@ -181,6 +181,14 @@ tailnet-ssh-connect → rsync 到下载主机 staging 目录 → 原子切换
 
 ## 7.3 下载主机与网站对接
 
+**过渡形态（2026-09-03 起，直到 L2 落地）**：仓库是公开的，发布流水线把产物发到
+**GitHub Releases** —— 每次推 tag 出两份：版本化 release（不可变，历史记录）与按渠道
+滚动的 release（tag `stable` / `beta`，资产始终是该渠道最新构建，旧版本资产随之删除）。
+于是有了固定地址：下载 `releases/download/<channel>/Ruyin-Setup-x.y.z.exe`，更新 feed
+`releases/download/<channel>/latest.yml`（守护进程缺省指向 stable，末段仍是渠道名）。
+manifest.json 里的 url 也指向滚动 release。静态产品库 `products/` 是目录树，release
+资产是平铺的，仍只随 run 暂存（TD-037）。登记 TD-038。
+
 **MVP 形态**：境内既有 worker 上加 nginx 静态站点，边缘 vhost `dl.vxture.com`
 （照 vxture-template `configs/edge/` 的 vhost 模式向平台线申请，走 80-liaison）：
 

@@ -57,7 +57,10 @@
 - [x] beta / production Environment 已建，production 必审人已配（tag→渠道审批拓扑就位）
 - [x] tag↔版本一致性闸（2026-09-01）：`v*` tag 与 `apps/shell/package.json` 不符即 release 失败。此前版本只取自 package.json——**推 `v0.2.0` 而包里还是 `0.1.0`，会产出 `Ruyin-Setup-0.1.0.exe` 并当作 v0.2.0 发布，产物、更新 feed、下载清单全都带着一个没人发布过的版本号，而没有任何东西会报错**
 - [x] ~~签名步~~ **不做（2026-09-02，owner 定：不采购证书，TD-001 转 standing）**。`signAndEditExecutable` 已于同日回开，但那是为了写入应用图标——**它不等于签名**，没有证书时 electron-builder 只编辑不签。连锁后果已一并处置：**自动更新改为不做**（见下一条）
-- [ ] dl 主机上载（**前置：liaison L2**）——publish job 已留占位，L2 落地后换 tailnet-ssh-connect + rsync 原子切换
+- [ ] dl 主机上载（**前置：liaison L2**）——L2 落地后加 tailnet-ssh-connect + rsync 原子切换。
+      **过渡已落地（2026-09-03）**：publish job 发到 GitHub Releases —— 版本化 release + 按渠道滚动的
+      release（tag `stable` / `beta`），固定地址、不过期；更新 feed 缺省指向滚动的 stable（TD-038）。
+      此前 run 产物 90 天过期、检查更新永远查不到，两条都由此收掉
 - [x] products/ 静态清单目录（流 C 的 MVP Registry，2026-09-03）：`ruyin pack` / `ruyin registry`
       产出包与 `index.json`（无签名、清单里逐条写明 `signed: false`），release.yml 随安装包暂存；
       守护进程 `GET /registry` + `POST /registry/install`（下载与清单核对 size / sha256 / 同源后走

@@ -19,8 +19,15 @@
 import { parse as parseYaml } from "yaml";
 import { compareVersions } from "./installer.js";
 
-/** 渠道目录基址。dl 主机未落地（liaison L2）前，可用它指向测试 feed。 */
-export const DEFAULT_FEED_BASE = "https://dl.vxture.com/ruyin/stable";
+/**
+ * 渠道目录基址。**过渡（2026-09-03）**：dl 主机未落地（liaison L2）前，发布流水线
+ * 把每个渠道的最新构建放在 GitHub 的滚动 release 上（tag 就叫 stable / beta），
+ * 于是 `<base>/latest.yml` 与 `<base>/<安装包>` 有固定地址；末段仍是渠道名，
+ * 界面显示的渠道不用另猜。L2 落地后改回 dl 主机的渠道目录（TD-038）。
+ * `RUYIN_UPDATE_FEED` 可覆盖。
+ */
+export const DEFAULT_FEED_BASE =
+  "https://github.com/vxture/vxture-ruyin/releases/download/stable";
 
 export type UpdateCheck =
   /** 已是最新——**只有真拉到 feed 并比对过才会返回它**。 */

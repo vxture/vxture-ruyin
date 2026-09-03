@@ -6,10 +6,14 @@ name: release
 # only tag pushes do, and quality gates are NOT re-run here - a tag ships
 # what main already verified.
 #
-# Publish target is a placeholder until liaison L2 lands the dl host: the
-# gated publish job stages artifacts on the workflow run. The rsync step
-# (tailnet-ssh-connect + staging, org CD idiom) drops in without touching
-# the build job.
+# Publish target, until liaison L2 lands the dl host: GitHub Releases on
+# this (public) repo. Two releases per push - the versioned one, immutable,
+# and a rolling one per channel (tags "stable" / "beta") whose assets are
+# always that channel's newest build, so a fixed URL
+# (.../releases/download/<channel>/latest.yml) serves as the update feed and
+# the download address. When L2 lands, the rsync step (tailnet-ssh-connect +
+# staging, org CD idiom) is added next to it; the two can coexist.
+# Run artifacts expire after 90 days; releases do not - that is the point.
 
 on:
   push:
@@ -79,9 +83,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
+      # Download urls in manifest.json point at the rolling channel release
+      # on GitHub until the dl host exists (see the header).
       - name: Generate manifest + checksums
         shell: bash
-        run: node scripts/release/make-manifest.mjs "${{ steps.meta.outputs.channel }}" "${{ steps.meta.outputs.version }}"
+        run: node scripts/release/make-manifest.mjs "${{ steps.meta.outputs.channel }}" "${{ steps.meta.outputs.version }}" "https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.channel }}"
 
       # Flow C, MVP form (70-repo-organization s7.4): the static product
       # registry - one .ruyinpkg per product under products/ plus index.json.
@@ -110,6 +116,8 @@ jobs:
     needs: build-installer
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
     # v* tags pause here for the owner's approval; beta-* passes straight
     # through (org standard: production writes go through a human gate).
     environment: ${{ startsWith(github.ref_name, 'v') && 'production' || 'beta' }}
@@ -120,13 +128,45 @@ jobs:
           name: ruyin-${{ needs.build-installer.outputs.channel }}-${{ needs.build-installer.outputs.version }}
           path: staged
 
-      - name: Publish (placeholder until liaison L2 lands the dl host)
+      - name: Publish to GitHub Releases (interim distribution until L2)
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ needs.build-installer.outputs.channel }}
+          VERSION: ${{ needs.build-installer.outputs.version }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          echo "channel: ${{ needs.build-installer.outputs.channel }}"
-          echo "version: ${{ needs.build-installer.outputs.version }}"
           ls -la staged/
-          echo "dl host pending (liaison L2) - artifacts staged on this run."
-          echo "When L2 lands: tailnet-ssh-connect + rsync staging/ to"
-          echo "dl.vxture.com/ruyin/<channel>/ with atomic switch (70 s7.2)."
+          # Installer + feed + manifest + sums. The products/ registry dir stays
+          # on the run artifact only: release assets are flat and the static
+          # registry is a directory tree (TD-037 covers its distribution).
+          ASSETS=(staged/*.exe staged/*.blockmap staged/latest.yml staged/manifest.json staged/SHA256SUMS)
+          PRE=(); [ "$CHANNEL" = "beta" ] && PRE=(--prerelease)
+
+          # 1. The versioned release: immutable record of this exact build.
+          gh release create "$TAG" "${ASSETS[@]}" \
+            --title "Ruyin $VERSION ($CHANNEL, $TAG)" \
+            --notes "Channel: $CHANNEL. Unsigned installer (TD-001): Windows SmartScreen warns once; choose More info -> Run anyway. Feed and manifest are the copies also served from the rolling '$CHANNEL' release." \
+            "${PRE[@]}"
+
+          # 2. The rolling channel release: a fixed address whose assets are
+          #    always the newest build of the channel. Created once, then its
+          #    assets are replaced; stale assets from older versions are removed
+          #    so latest.yml and the files next to it never disagree.
+          if ! gh release view "$CHANNEL" >/dev/null 2>&1; then
+            gh release create "$CHANNEL" \
+              --title "Ruyin $CHANNEL channel (rolling)" \
+              --notes "Rolling release: assets are replaced on every $CHANNEL build. Update feed: releases/download/$CHANNEL/latest.yml. For a specific build use its versioned release." \
+              "${PRE[@]}"
+          fi
+          KEEP=$(for f in "${ASSETS[@]}"; do basename "$f"; done)
+          for old in $(gh release view "$CHANNEL" --json assets --jq '.assets[].name'); do
+            if ! grep -qx "$old" <<<"$KEEP"; then
+              gh release delete-asset "$CHANNEL" "$old" --yes
+            fi
+          done
+          gh release upload "$CHANNEL" "${ASSETS[@]}" --clobber
+          echo "published $TAG and refreshed rolling '$CHANNEL':"
+          echo "  https://github.com/${GITHUB_REPOSITORY}/releases/tag/$TAG"
+          echo "  https://github.com/${GITHUB_REPOSITORY}/releases/download/$CHANNEL/latest.yml"
