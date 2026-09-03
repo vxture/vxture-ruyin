@@ -29,16 +29,10 @@ import {
   type AnchorHTMLAttributes,
 } from "react";
 import {
-  Button,
   Icon,
-  Popover,
-  PopoverTrigger,
   ShellBrand,
   ShellHeader,
   ShellIconButton,
-  ShellPanelContent,
-  ShellPanelHeader,
-  ShellPanelSection,
   ShellPageContainer,
   ShellSearchBox,
   ShellSidebarNav,
@@ -48,6 +42,7 @@ import {
   type ShellSearchGroup,
 } from "@vxture/design-system";
 import { Api, type ProductInfo, type ProjectMeta, type SessionInfo } from "./api";
+import { TenantMenu } from "./tenant-menu";
 import { PROJECT_TABS, type TabId } from "./workspace-tabs";
 import { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
 import { DEMO_RECENT } from "./catalog";
@@ -447,42 +442,10 @@ export function Workbench({ api }: { api: Api }) {
                 ④ 设置（全局入口，固定在最右）
               读的东西在左，动的东西在右；越常按的越靠外侧，手停下的位置就是
               最右。通知紧挨设置，是各家桌面应用的惯例（VS Code / GitHub 皆如此）。 */}
-          {workspaceName && (
-            // 图标 + 工作区名，不再写「工作区」三个字（owner 定）；点开是下拉，
-            // 说清它是哪个租户下的哪个工作区、以及怎么换——切换在平台做，本地
-            // 只是读它。
-            <Popover>
-              <PopoverTrigger asChild>
-                <button type="button" className="app-workspace" title={`当前工作区：${workspaceName}`}>
-                  <Icon name="buildings" size="xs" />
-                  <span className="app-workspace-name">{workspaceName}</span>
-                  <Icon name="caret-up-down" size="xs" className="app-workspace-caret" />
-                </button>
-              </PopoverTrigger>
-              <ShellPanelContent side="bottom" align="end" sideOffset={8}>
-                <ShellPanelHeader
-                  icon="buildings"
-                  title={workspaceName}
-                  metaRows={[
-                    ...(session?.org?.name
-                      ? [{ key: "org", icon: "role" as const, content: `租户：${session.org.name}` }]
-                      : []),
-                    { key: "scope", content: "本机的项目、订阅与数据边界都按这个工作区划分" },
-                  ]}
-                />
-                <ShellPanelSection>
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() =>
-                      window.open(`${session?.consoleBase ?? "https://vxture.com"}/zh-CN/profile`, "_blank", "noopener")
-                    }
-                  >
-                    在平台切换工作区 ↗
-                  </Button>
-                </ShellPanelSection>
-              </ShellPanelContent>
-            </Popover>
+          {session && workspaceName && (
+            // 租户 / 工作区菜单：租户 + 工作区、只读 AI 配额、租户管理链接
+            // （owner 2026-09-04 定的三项，见 tenant-menu.tsx）。
+            <TenantMenu api={api} session={session} productIds={products.map((p) => p.id)} />
           )}
           <StatusBadge tone={health.ok ? "success" : "danger"} dot>
             {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
