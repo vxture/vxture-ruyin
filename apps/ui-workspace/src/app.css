@@ -946,15 +946,37 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 
 /* 9-12. 侧栏：不写域名文字，只留收缩按钮；首页组不画组头；导航项加高，
    两行文字拉开；「最近工作」第一行小字是智能体，第二行是任务。 */
-.app-sidebar--home .h-header-sm .text-label-md { display: none; }
+/* 域名那一行只留收缩按钮：首页传的是空字符串，本来就没字。（此前按类名隐藏，
+   把同样带 text-label-md 的收缩按钮一起藏掉了 —— owner 2026-09-04 指出。） */
+.app-sidebar--home .h-header-sm > :not(:first-child):not(:has(button)) { display: none; }
 .app-sidebar--home nav > div:first-child > button { display: none; }
 .app-sidebar--home nav > div:first-child { padding-top: var(--spacing-sm); padding-bottom: var(--spacing-sm); }
 .app-sidebar nav a { min-height: 44px; padding-block: 4px; }
 .app-sidebar nav a > span:last-child > span { flex-direction: column-reverse; gap: 3px; padding-block: 2px; }
 .app-sidebar nav a > span:last-child > span > span:first-child { font-size: var(--font-size-body-md); }
+/* 「最近工作」第一行的智能体名：照标题栏 Runtime 徽章的样子做成 chip ——
+   前面一颗鲜亮的圆点，底色与文字都淡（owner 2026-09-04 定）。 */
 .app-sidebar nav a > span:last-child > span > span:last-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 1px 7px 1px 6px;
+  border-radius: 999px;
   font-size: 11px;
-  color: var(--muted-foreground);
   font-weight: 400;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--foreground) 62%, transparent);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+.app-sidebar nav a > span:last-child > span > span:last-child::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--primary, var(--color-primary, #4f7cff));
 }
 .app-sidebar--home nav > div + div { padding-top: var(--spacing-sm); }
