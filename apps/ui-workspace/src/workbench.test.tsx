@@ -23,9 +23,12 @@ vi.mock("./home", () => ({
   HomePage: (props: {
     onOpen: (id: string) => void;
     onCreated: (id: string) => Promise<void>;
+    onSelectProduct?: (id: string | null) => void;
   }) => (
     <div data-testid="home-stub">
       home
+      <button data-testid="home-stub-select-a" onClick={() => props.onSelectProduct?.("a")}>select-a</button>
+      <button data-testid="home-stub-select-none" onClick={() => props.onSelectProduct?.(null)}>select-none</button>
       <button onClick={() => props.onOpen("prj_from_home")}>home-stub-open</button>
       <button onClick={() => void props.onCreated("prj_from_created")}>
         home-stub-created
@@ -597,12 +600,70 @@ void test("Header workspace control: icon + name only (no 工作区 label); open
     "https://vxture.com/zh-CN/tenant-settings",
   );
 
-  // Order: workspace (context) before the runtime badge, before pending, before settings.
-  const trailing = trigger.closest(".no-drag") as HTMLElement;
+  // 2026-09-04 layout: workspace + Runtime sit right after the brand (leading, .app-header-context);
+  // pending + settings stay on the far right (trailing). Document order: brand < workspace < Runtime < 设置.
   const after = (a: Element, b: Element) =>
     (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-  const runtime = within(trailing).getByText(/Runtime/);
+  const context = trigger.closest(".app-header-context") as HTMLElement;
+  expect(context).not.toBeNull();
+  const runtime = within(context).getByText(/Runtime/);
+  const trailing = document.querySelector(".app-header-trailing") as HTMLElement;
   const settings = within(trailing).getByRole("button", { name: "设置" });
   expect(after(trigger, runtime)).toBe(true);
   expect(after(runtime, settings)).toBe(true);
+  expect(after(screen.getByRole("link", { name: "RUYIN" }), trigger)).toBe(true);
+});
+
+void test("Sidebar 最近工作: capped at 8, newest first; no 总览 group; domain row has no 工作台 text on home", async () => {
+  const { Workbench } = await import("./workbench");
+  const many = Array.from({ length: 12 }, (_, i) =>
+    workspace({ id: `prj_${i}`, name: `项目${i}`, createdAt: `2026-09-${String(i + 1).padStart(2, "0")}T00:00:00Z` }),
+  );
+  const api = fakeApi({ projects: vi.fn().mockResolvedValue({ items: many, elsewhere: 0 } as ProjectList) });
+  render(<Workbench api={api} />);
+  await screen.findByText("项目11");
+  const links = Array.from(document.querySelectorAll(".app-sidebar nav a")).map((a) => a.getAttribute("href"));
+  const recent = links.filter((h) => h?.startsWith("#ws/"));
+  expect(recent).toHaveLength(8); // RECENT cap
+  expect(recent[0]).toBe("#ws/prj_11/overview");
+  expect(screen.queryByText("总览")).not.toBeInTheDocument();
+  expect(screen.queryByText("工作台", { exact: true })).not.toBeInTheDocument();
+});
+
+void test("Sidebar 最近工作 follows the home card selection: one product selected -> only its projects; deselect -> all", async () => {
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({
+    products: vi.fn().mockResolvedValue([product({ id: "a", name: "甲" }), product({ id: "b", name: "乙" })]),
+    projects: vi.fn().mockResolvedValue({
+      items: [workspace({ id: "p1", name: "甲一", productId: "a" }), workspace({ id: "p2", name: "乙一", productId: "b" })],
+      elsewhere: 0,
+    } as ProjectList),
+  });
+  render(<Workbench api={api} />);
+  await screen.findByText("甲一");
+  const user = userEvent.setup();
+  await user.click(screen.getByTestId("home-stub-select-a"));
+  await vi.waitFor(() => expect(screen.queryByText("乙一")).not.toBeInTheDocument());
+  expect(screen.getByText("甲一")).toBeInTheDocument();
+  await user.click(screen.getByTestId("home-stub-select-none"));
+  expect(await screen.findByText("乙一")).toBeInTheDocument();
+});
+
+void test("Scrollbars: any scroll marks the document as scrolling, and the mark clears ~900ms after the last scroll", async () => {
+  const { Workbench } = await import("./workbench");
+  vi.useFakeTimers();
+  try {
+    render(<Workbench api={fakeApi()} />);
+    const main = document.querySelector("main") ?? document.body;
+    main.dispatchEvent(new Event("scroll", { bubbles: true }));
+    expect(document.documentElement.hasAttribute("data-scrolling")).toBe(true);
+    vi.advanceTimersByTime(500);
+    main.dispatchEvent(new Event("scroll", { bubbles: true }));
+    vi.advanceTimersByTime(500);
+    expect(document.documentElement.hasAttribute("data-scrolling")).toBe(true); // re-armed by the second scroll
+    vi.advanceTimersByTime(500);
+    expect(document.documentElement.hasAttribute("data-scrolling")).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
 });

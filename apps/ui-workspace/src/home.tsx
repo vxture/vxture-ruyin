@@ -61,18 +61,20 @@ function compareVersions(a: string, b: string): number {
  * 一个可有可无的目录变成首屏的依赖。三种回答各说各的：查不到（不是「没有产品」）、
  * 有但这台机器装不了（未签名，生产拒装）、有且能装。
  */
-function RegistryRow({
+function RegistryList({
   api,
+  open,
   onDone,
   onError,
 }: {
   api: Api;
+  /** 由标题行的「从产品库安装」开关；关着时什么都不渲染、也不去问。 */
+  open: boolean;
   onDone: () => void | Promise<void>;
   onError: (msg: string) => void;
 }) {
   const [catalog, setCatalog] = useState<RegistryCatalog | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
   const load = async () => {
     setBusy("__catalog");
     try {
@@ -95,20 +97,16 @@ function RegistryRow({
       setBusy(null);
     }
   };
+  useEffect(() => {
+    if (open && catalog === null) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  if (!open) return null;
   return (
     <div className="install-row" style={{ flexDirection: "column", alignItems: "flex-start" }}>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={busy === "__catalog"}
-        onClick={() => {
-          const next = !open;
-          setOpen(next);
-          if (next && catalog === null) void load();
-        }}
-      >
-        {open ? "收起产品库" : "从产品库安装"}
-      </Button>
+      {busy === "__catalog" && catalog === null && (
+        <span className="text-body-sm text-muted-foreground">正在读取产品库…</span>
+      )}
       {open && catalog?.status === "unreachable" && (
         <span className="text-body-sm text-muted-foreground">
           产品库没查到 —— {catalog.reason}。这不代表产品库是空的，只代表这次没问到。
@@ -285,6 +283,8 @@ export function HomePage({
   onCreated,
   onRefresh,
   onError,
+  selectedProductId = null,
+  onSelectProduct = () => {},
 }: {
   api: Api;
   products: ProductInfo[];
@@ -295,9 +295,13 @@ export function HomePage({
   /** 重新拉一遍产品与项目。改了本机生效态之后要用它。 */
   onRefresh: () => void | Promise<void>;
   onError: (msg: string) => void;
+  /** 卡片选中态与侧栏「最近工作」联动；null = 一个都不选，侧栏显示全部。 */
+  selectedProductId?: string | null;
+  onSelectProduct?: (id: string | null) => void;
 }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [registryOpen, setRegistryOpen] = useState(false);
   /**
    * 同步产品版本：对每个产品拉一次契约（一级供给，ADR-012）。拉到新版本的落进
    * 产品库，卡上随即出现「更新版本」；这里**不自动切换**生效版本 —— 切版本是
@@ -378,8 +382,8 @@ export function HomePage({
             id: "runtime",
             icon: "cpu",
             label: "运行环境",
-            value: health.ok ? "就绪" : "未连接",
-            detail: health.ok ? (health.version ?? "") : "",
+            value: health.ok ? "已就绪" : "未连接",
+            detail: health.ok ? `Runtime ${health.version ?? ""}`.trim() : "",
             hint: health.ok
               ? `本地守护进程 ${health.version ?? ""} 正在运行`
               : "守护进程未响应，正在等待它起来",
@@ -437,6 +441,14 @@ export function HomePage({
               </Button>
             )}
             <InstallPackageButton api={api} onDone={onRefresh} onError={onError} />
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={registryOpen}
+              onClick={() => setRegistryOpen((v) => !v)}
+            >
+              {registryOpen ? "收起产品库" : "从产品库安装"}
+            </Button>
             {products.length > 0 && (
               <Button
                 size="sm"
@@ -444,7 +456,8 @@ export function HomePage({
                   window.open(APPCENTER_URL(consoleBase), "_blank", "noopener")
                 }
               >
-                在线使用 ↗
+                在线使用
+                <Icon name="external-link" size="xs" />
               </Button>
             )}
           </span>
@@ -468,7 +481,8 @@ export function HomePage({
               <Button
                 onClick={() => window.open(subscribeUrl(), "_blank", "noopener")}
               >
-                到 Vxture 平台订阅 ↗
+                到 Vxture 平台订阅
+                <Icon name="external-link" size="xs" />
               </Button>
             }
           />
@@ -483,6 +497,8 @@ export function HomePage({
                 subscribeUrl={subscribeUrl}
                 consoleBase={consoleBase}
                 capabilityMock={capabilityMock}
+                selected={selectedProductId === p.id}
+                onToggleSelect={() => onSelectProduct(selectedProductId === p.id ? null : p.id)}
                 onOpen={onOpen}
                 onCreated={onCreated}
                 onRefresh={onRefresh}
@@ -491,7 +507,7 @@ export function HomePage({
             ))}
           </ListCardGrid>
         )}
-        <RegistryRow api={api} onDone={onRefresh} onError={onError} />
+        <RegistryList api={api} open={registryOpen} onDone={onRefresh} onError={onError} />
       </Section>
 
       {/* 靠底：订阅少时推荐区贴着页面底部，订阅多时随内容顺延向下（.home 撑满
@@ -510,7 +526,8 @@ export function HomePage({
               window.open(CATALOG_SOURCE.url, "_blank", "noopener")
             }
           >
-            浏览全部 ↗
+            浏览全部
+            <Icon name="external-link" size="xs" />
           </Button>
         }
       >
@@ -559,7 +576,7 @@ export function HomePage({
                       window.open(CATALOG_SOURCE.url, "_blank", "noopener")
                     }
                   >
-                    了解详情 ↗
+                    了解详情
                   </Button>
                 </span>
               </footer>
@@ -600,6 +617,8 @@ function ProductCard({
   onCreated,
   onRefresh,
   onError,
+  selected,
+  onToggleSelect,
 }: {
   api: Api;
   product: ProductInfo;
@@ -613,6 +632,9 @@ function ProductCard({
   onCreated: (projectId: string) => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
   onError: (msg: string) => void;
+  /** 选中态（与侧栏「最近工作」联动）：点卡片空白处切换，再点一次取消。 */
+  selected: boolean;
+  onToggleSelect: () => void;
 }) {
   const [opening, setOpening] = useState(false);
   const usable = product.availability === "available";
@@ -684,7 +706,15 @@ function ProductCard({
     );
 
   return (
-    <article className={`pcard${usable ? "" : " pcard--blocked"}`}>
+    <article
+      className={`pcard${usable ? "" : " pcard--blocked"}${selected ? " pcard--selected" : ""}`}
+      aria-pressed={selected}
+      onClick={(e) => {
+        // 按钮与链接各干各的；只有点在卡片空白处才算「选中这个智能体」。
+        if ((e.target as HTMLElement).closest("button, a")) return;
+        onToggleSelect();
+      }}
+    >
       {/* 一、身份。图标 + 标题一行，徽章是这一行唯一靠右的东西 —— 标题行右端
           是状态的固定位置，扫一列卡片时不必每张重新找。 */}
       {/* 图标占两行；右边名称一行、标识 + 版本一行（行距收紧）；徽章靠右
@@ -754,7 +784,7 @@ function ProductCard({
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                智能体介绍 ↗
+                智能体介绍
               </a>
               {newer && (
                 <Button
@@ -787,9 +817,8 @@ function ProductCard({
                     )
                   }
                 >
-                  {product.commercialIntent === "renew"
-                    ? "去平台续费 ↗"
-                    : "去平台订阅 ↗"}
+                  {product.commercialIntent === "renew" ? "去平台续费" : "去平台订阅"}
+                  <Icon name="external-link" size="xs" />
                 </Button>
               )}
               {product.availability === "disabled" && (

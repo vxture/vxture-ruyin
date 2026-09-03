@@ -136,7 +136,7 @@ void test("UserSlot: online before system info has loaded shows 运行中 withou
   const api = fakeApi({ system: vi.fn((): Promise<SystemInfo> => new Promise(() => {})) });
   render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
   await openPopover();
-  expect(await screen.findByText(/^就绪/)).toBeInTheDocument();
+  expect(await screen.findByText(/^已就绪/)).toBeInTheDocument();
 });
 
 void test("UserSlot: non-DPAPI key protection reads 开发态, not left blank", async () => {
@@ -291,7 +291,7 @@ void test("UserSlot panel: the three environment rows mirror the home page word 
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /账户/ }));
   expect(await screen.findByText("运行环境")).toBeInTheDocument();
-  expect(screen.getByText("就绪 · 0.1.0")).toBeInTheDocument();
+  expect(screen.getByText("已就绪 · Runtime 0.1.0")).toBeInTheDocument();
   expect(screen.getByText("数据加密")).toBeInTheDocument();
   expect(screen.getByText("已加密 · DPAPI")).toBeInTheDocument();
   expect(screen.getByText("平台连接")).toBeInTheDocument();

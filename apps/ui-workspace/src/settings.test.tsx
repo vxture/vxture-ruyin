@@ -358,7 +358,7 @@ void test("Settings/账户: signed in shows the identity - name, email, tenant, 
   expect(screen.getByRole("link", { name: "https://vxture.com/zh-CN/profile" })).toBeInTheDocument();
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "在线修改 ↗" }));
+  await user.click(screen.getByRole("button", { name: "在线修改" }));
   expect(open).toHaveBeenCalledWith("https://vxture.com/zh-CN/profile", "_blank", "noopener");
   open.mockRestore();
   expect(screen.queryByText("账户由左下角的账户菜单管理")).not.toBeInTheDocument();
