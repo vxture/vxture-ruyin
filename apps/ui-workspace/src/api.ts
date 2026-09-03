@@ -343,6 +343,12 @@ export interface SystemInfo {
   dataDir: string;
   productsDir: string;
   keyProtection: "dpapi" | "plaintext";
+  /**
+   * 能力面接没接（daemon 判定，界面不重算）。`mock` = 任务只会拿到占位输出，
+   * 产品卡据此标「未接通」（TD-033）。**缺失 ≠ mock**：拿不到 /system 时是「不知道」，
+   * 不是「没接上」。
+   */
+  capabilitySurface: "configured" | "mock";
   startedAt: string;
 }
 

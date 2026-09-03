@@ -204,6 +204,7 @@ const testSystemInfo = {
   dataDir: "(test)",
   productsDir: "(test)",
   keyProtection: "plaintext" as const,
+  capabilitySurface: "mock" as const,
   startedAt: new Date().toISOString(),
 };
 
@@ -311,8 +312,13 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     // System transparency surface for the settings panel.
     const system = await fetch(`${base}/system`, { headers: authed });
     assert.equal(system.status, 200);
-    const sysInfo = (await system.json()) as { keyProtection: string };
+    const sysInfo = (await system.json()) as {
+      keyProtection: string;
+      capabilitySurface: string;
+    };
     assert.ok(["dpapi", "plaintext"].includes(sysInfo.keyProtection));
+    // 这套 rig 没配能力面：守护进程必须如实说 mock，界面据此标「未接通」（TD-033）。
+    assert.equal(sysInfo.capabilitySurface, "mock");
 
     // 契约拉取未配置能力面时必须如实回答 503（ADR-012）。「没接通」看起来像
     // 「拉过了、无事发生」是最坏的一种沉默。

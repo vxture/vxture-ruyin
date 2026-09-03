@@ -181,6 +181,7 @@ const server = createLocalApi({
     dataDir,
     productsDir,
     keyProtection: keys.protection,
+    capabilitySurface: capabilityBase ? "configured" : "mock",
     startedAt: new Date().toISOString(),
   },
 });

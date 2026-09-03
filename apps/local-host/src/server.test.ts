@@ -50,6 +50,7 @@ const testSystemInfo = {
   dataDir: "(test)",
   productsDir: "(test)",
   keyProtection: "plaintext" as const,
+  capabilitySurface: "mock" as const,
   startedAt: new Date().toISOString(),
 };
 
