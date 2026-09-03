@@ -101,6 +101,8 @@ const toolExecutor = new LocalToolExecutor(
   (projectId, query, scope, limit) =>
     searchContext(storage, projectId, query, scope, limit),
   shellPdfRenderer(),
+  // 连接器工具面（ADR-005 D）：契约 provider: connector 的工具经它路由。
+  connectorRegistry,
 );
 
 const runtime = new ProjectRuntime({
@@ -174,7 +176,7 @@ const server = createLocalApi({
   events,
   writeArtifact: (path, bytes, grants) =>
     toolExecutor.writeArtifact(path, bytes, grants),
-  supportsTool: (tool) => toolExecutor.supports(tool),
+  supportsTool: (tool, provider) => toolExecutor.supports(tool, provider),
   refreshEntitlements: () => syncEntitlements(),
   ...(process.env["RUYIN_UPDATE_FEED"]
     ? { updateFeedBase: process.env["RUYIN_UPDATE_FEED"] }

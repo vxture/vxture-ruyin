@@ -353,7 +353,38 @@ const r14: Rule = (c, errors) => {
   });
 };
 
-const RULES: Rule[] = [r1, r3, r4, r5, r7, r8, r9, r10, r11, r13, r14];
+/**
+ * R15 - a connector-provided tool is a query or an external_send, nothing else.
+ *
+ * A connector (ADR-005) is a process outside the runtime that reaches a LAN or
+ * private system. What it can do for a task is read from that system (query)
+ * or write into it (external_send - the write leaves the machine, so the
+ * hard floor of "at least ask" applies and the contract cannot relax it, R7).
+ * The other categories name things only the runtime does on the user's own
+ * disk: local_read / local_write / export are path-gated against folder
+ * grants, and generate is the model's own output. A connector declared under
+ * one of those would either bypass the path gate (no path to check) or claim
+ * an effect it does not have. The category is chosen by the contract and
+ * enforced by the gate; this rule keeps the choice honest.
+ */
+const CONNECTOR_CATEGORIES: ReadonlySet<string> = new Set(["query", "external_send"]);
+
+const r15: Rule = (c, errors) => {
+  c.tools.forEach((tool, i) => {
+    if (tool.provider === "connector" && !CONNECTOR_CATEGORIES.has(tool.category)) {
+      err(
+        errors,
+        "R15",
+        `tools[${i}].category`,
+        `tool "${tool.id}" is provided by a connector but declared as ${tool.category} - ` +
+          `a connector tool reads (query) or writes into an external system (external_send); ` +
+          `the other categories are the runtime's own, path-gated effects`,
+      );
+    }
+  });
+};
+
+const RULES: Rule[] = [r1, r3, r4, r5, r7, r8, r9, r10, r11, r13, r14, r15];
 
 export function runRules(contract: RuyinContract): ValidationError[] {
   const errors: ValidationError[] = [];

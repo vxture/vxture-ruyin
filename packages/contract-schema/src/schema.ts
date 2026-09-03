@@ -210,6 +210,7 @@ export const contractJsonSchema = {
           },
           risk: { enum: ["low", "medium", "high"] },
           default: PERMISSION_VALUE,
+          provider: { enum: ["runtime", "connector"] },
           input_schema: TOOL_IO_SCHEMA,
           output_schema: TOOL_IO_SCHEMA,
         },

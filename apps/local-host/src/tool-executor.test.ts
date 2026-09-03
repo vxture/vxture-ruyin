@@ -54,6 +54,8 @@ function call(
     arguments: args,
     workspace: "prj_1",
     taskId: "ti_1",
+    provider: "runtime",
+    connectors: [],
     grants,
     contextSet,
   };

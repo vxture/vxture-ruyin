@@ -5,10 +5,9 @@
  * stdin/stdout - the MCP "stdio" transport. Of the protocol it implements
  * exactly what a **read-only context connector** needs: `initialize` +
  * `notifications/initialized`, `resources/list` (paginated), `resources/read`,
- * `ping`. Tools are deliberately not here yet (workplan 通路二 D, TD-034): a
- * tool call is an effect, and effects go through the Tool Gate, which has no
- * mapping for connector tools until the owner decides where that mapping
- * comes from.
+ * `ping`, and - since batch D - `tools/list` + `tools/call`. A tool call is
+ * an effect; it reaches this client only after the Tool Gate let it through
+ * on the contract's terms (03-A §11 `provider: connector`, R15).
  *
  * Why not the official SDK: it drags express / hono / cors / jose and friends
  * into a daemon that **ships inside the installer**, for a client that uses
@@ -50,6 +49,20 @@ export interface McpResource {
 export type McpResourceContent =
   | { uri: string; mimeType?: string; text: string }
   | { uri: string; mimeType?: string; blob: string };
+
+export interface McpTool {
+  name: string;
+  title?: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+/** What tools/call returns: content parts, and whether the tool itself failed. */
+export interface McpToolResult {
+  content: Array<{ type: string; text?: string; mimeType?: string }>;
+  isError?: boolean;
+  structuredContent?: unknown;
+}
 
 export interface McpServerInfo {
   protocolVersion: string;
@@ -183,6 +196,27 @@ export class McpStdioClient {
       cursor = result.nextCursor;
     }
     throw new McpError("resources/list", `more than ${MAX_LIST_PAGES} pages`);
+  }
+
+  /** Every tool the server lists, following pagination. Empty when it has none. */
+  async listTools(): Promise<McpTool[]> {
+    const out: McpTool[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_LIST_PAGES; page++) {
+      const result = (await this.request("tools/list", cursor ? { cursor } : {})) as {
+        tools?: McpTool[];
+        nextCursor?: string;
+      };
+      out.push(...(result.tools ?? []));
+      if (!result.nextCursor) return out;
+      cursor = result.nextCursor;
+    }
+    throw new McpError("tools/list", `more than ${MAX_LIST_PAGES} pages`);
+  }
+
+  async callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
+    const result = (await this.request("tools/call", { name, arguments: args })) as McpToolResult;
+    return { ...result, content: Array.isArray(result?.content) ? result.content : [] };
   }
 
   async readResource(uri: string): Promise<McpResourceContent[]> {

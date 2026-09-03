@@ -7,7 +7,7 @@
  * Anything host-specific enters through these interfaces.
  */
 
-import type { ContextSource } from "@vxture/ruyin-contract-schema";
+import type { ContextSource, ToolProvider } from "@vxture/ruyin-contract-schema";
 
 /**
  * 契约允许的来源种类（03-A §9），原样再导出：绑定要说自己是哪一种，而这个
@@ -383,9 +383,22 @@ export interface ConnectorLookup {
  */
 export interface ToolExecutionRequest {
   tool: string;
+  /**
+   * Who the contract says implements this tool (03-A §11 `provider`, default
+   * runtime). A connector tool is routed to a connector **this project has
+   * granted** - see `connectors` - never to whichever one happens to be
+   * running.
+   */
+  provider: ToolProvider;
   arguments: Record<string, unknown>;
   workspace: string;
   taskId: string;
+  /**
+   * Connector ids granted to this project (ADR-005: authorization is
+   * per project). The executor may route a connector tool only to one of
+   * these; an installed-but-ungranted connector is invisible here on purpose.
+   */
+  connectors: string[];
   /** Folders the user granted; path arguments have already been checked. */
   grants: FolderGrant[];
   /**
@@ -398,6 +411,8 @@ export interface ToolExecutionRequest {
 export interface ToolExecutionResult {
   content: string;
   isError?: boolean;
+  /** Which connector ran it, when one did - the audit names it (ADR-005). */
+  connector?: string;
   /**
    * 这次调用在磁盘上留下的产物。
    *
@@ -408,8 +423,13 @@ export interface ToolExecutionResult {
 }
 
 export interface ToolExecutorPort {
-  /** Tool ids this host can actually run. */
-  supports(tool: string): boolean;
+  /**
+   * Can this host run the tool the contract declares under this provider.
+   * "runtime" asks the preset skill layer; "connector" asks whether any
+   * installed connector exposes a tool of that id (project-level grants are
+   * checked at execution, not here - offering is machine-level).
+   */
+  supports(tool: string, provider?: ToolProvider): boolean;
   execute(request: ToolExecutionRequest): Promise<ToolExecutionResult>;
 }
 

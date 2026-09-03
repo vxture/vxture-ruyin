@@ -238,12 +238,13 @@ const crmView = {
   source: "lan" as const,
   installedAt: "2026-09-03T00:00:00.000Z",
   health: { ok: true, detail: "fake-crm 0.0.1", checkedAt: "2026-09-03T00:00:00.000Z" },
+  tools: ["lookup_account", "update_account"],
 };
 
 void test("Settings/连接器: lists installed connectors with live health, and uninstall calls the api", async () => {
   const api = fakeApi({
     connectors: vi.fn().mockResolvedValue({
-      items: [crmView, { ...crmView, id: "erp", health: { ok: false, detail: "not running", checkedAt: "x" } }],
+      items: [crmView, { ...crmView, id: "erp", tools: [], health: { ok: false, detail: "not running", checkedAt: "x" } }],
     }),
     removeConnector: vi.fn().mockResolvedValue({ removed: "crm" }),
   });
@@ -252,6 +253,7 @@ void test("Settings/连接器: lists installed connectors with live health, and 
   expect(within(list).getByText("crm")).toBeInTheDocument();
   expect(within(list).getByText("运行中")).toBeInTheDocument();
   expect(within(list).getByText("未运行：not running")).toBeInTheDocument();
+  expect(within(list).getByText("工具：lookup_account、update_account")).toBeInTheDocument();
   const user = userEvent.setup();
   await user.click(within(list).getAllByRole("button", { name: "卸载" })[0]!);
   expect(api.removeConnector).toHaveBeenCalledWith("crm");

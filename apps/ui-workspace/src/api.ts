@@ -256,6 +256,8 @@ export interface ConnectorView {
   source: "lan" | "private";
   installedAt: string;
   health: { ok: boolean; detail?: string; checkedAt: string };
+  /** 运行中的服务器暴露的工具名；契约里 provider: connector 的工具靠同名接上。 */
+  tools: string[];
 }
 
 export interface Binding {

@@ -22,6 +22,7 @@ import {
 import { randomBytes } from "node:crypto";
 import { basename, dirname, extname, join } from "node:path";
 import { isPathGranted } from "@vxture/ruyin-core";
+import type { ToolProvider } from "@vxture/ruyin-contract-schema";
 import {
   describeDiagnostics,
   isLossy,
@@ -77,6 +78,21 @@ const IMPLEMENTED = new Set([
   "search_knowledge",
 ]);
 
+/**
+ * 连接器那一半的工具面（ADR-005 通路二 D）。宿主注入：执行器不该知道 MCP，
+ * 它只问三件事 —— 机器上有没有连接器暴露这个工具、本项目授权的连接器里哪些
+ * 暴露它、以及让其中一个跑一次。
+ */
+export interface ConnectorToolSource {
+  exposes(tool: string): boolean;
+  providersOf(tool: string, granted: readonly string[]): string[];
+  callTool(
+    connector: string,
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<{ content: string; isError?: boolean }>;
+}
+
 /** 在给定范围内检索的能力。宿主注入，因为它要碰存储，而执行器本身不该碰。 */
 export type ContextSearch = (
   projectId: string,
@@ -98,6 +114,8 @@ export class LocalToolExecutor implements ToolExecutorPort {
     private readonly search?: ContextSearch,
     /** 壳提供的 PDF 排版（ADR-017）；脱离壳运行时缺省。 */
     private readonly renderPdfBytes?: (html: string) => Promise<Uint8Array>,
+    /** 连接器工具面；缺省 = 这套装配没有连接器，契约里 provider: connector 的工具一律跑不了。 */
+    private readonly connectorTools?: ConnectorToolSource,
   ) {}
 
   /** 打包冒烟的自检要走这条真实通道，所以它是可读的。 */
@@ -105,9 +123,41 @@ export class LocalToolExecutor implements ToolExecutorPort {
     return this.renderPdfBytes;
   }
 
-  supports(tool: string): boolean {
+  supports(tool: string, provider: ToolProvider = "runtime"): boolean {
+    // 契约说由连接器提供的，只问连接器 —— 哪怕运行时恰好也实现了同名工具。
+    // 两边都答「行」会让「谁在跑」取决于问的顺序，而审计要说得清是谁。
+    if (provider === "connector") return this.connectorTools?.exposes(tool) ?? false;
     if (tool === "search_knowledge") return this.search !== undefined;
     return IMPLEMENTED.has(tool);
+  }
+
+  /**
+   * 连接器工具：只路由到**本项目授权过**且暴露该工具的连接器。装了没授权的
+   * 在这里看不见 —— 那是设计，不是漏项（ADR-005：授权以项目为边界）。
+   * 两个授权的连接器都暴露同名工具时不猜，让调用方看到这个歧义。
+   */
+  private async viaConnector(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
+    if (!this.connectorTools) {
+      return { content: `tool "${request.tool}" needs a connector and this host has none`, isError: true };
+    }
+    const providers = this.connectorTools.providersOf(request.tool, request.connectors);
+    if (providers.length === 0) {
+      return {
+        content: this.connectorTools.exposes(request.tool)
+          ? `tool "${request.tool}" is exposed by a connector this project has not granted`
+          : `no installed connector exposes tool "${request.tool}"`,
+        isError: true,
+      };
+    }
+    if (providers.length > 1) {
+      return {
+        content: `tool "${request.tool}" is exposed by more than one granted connector (${providers.join(", ")}); this host does not pick one`,
+        isError: true,
+      };
+    }
+    const connector = providers[0]!;
+    const outcome = await this.connectorTools.callTool(connector, request.tool, request.arguments);
+    return { ...outcome, connector };
   }
 
   /** 这台机器此刻真渲染得出来的格式。 */
@@ -116,6 +166,7 @@ export class LocalToolExecutor implements ToolExecutorPort {
   }
 
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
+    if (request.provider === "connector") return this.viaConnector(request);
     switch (request.tool) {
       case "read_file":
         return this.readFile(request);

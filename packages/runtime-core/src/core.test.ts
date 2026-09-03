@@ -1852,3 +1852,78 @@ test("一致性：C1–C7 在内存 ports 上全过", async () => {
   );
   assert.equal(results.length, 7, "清单是七条，少一条就是漏了一项要求");
 });
+
+/* ---------------- Connector tools (ADR-005 path two, batch D) ---------------- */
+
+function withConnectorTool() {
+  const contract = structuredClone(bidContract) as RuyinContract;
+  contract.tools.push({
+    id: "lookup_account",
+    category: "query",
+    risk: "low",
+    default: "allow",
+    provider: "connector",
+    input_schema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+  });
+  const analyze = contract.tasks.find((t) => t.id === "analyze_tender");
+  assert.ok(analyze);
+  analyze.tools = [...analyze.tools, "lookup_account"];
+  return contract;
+}
+
+test("connector tools: the contract's provider routes the call with this project's connector grants, and the audit names the connector", async () => {
+  const { ports, runtime, connector } = makeSelectionFixture();
+  const seen: Array<{ tool: string; provider: string; connectors: string[] }> = [];
+  ports.tools = {
+    supports: (tool, provider) => (provider === "connector" ? tool === "lookup_account" : true),
+    execute: async (req) => {
+      seen.push({ tool: req.tool, provider: req.provider, connectors: req.connectors });
+      return { content: "Acme 工业：年度预算 1200 万", connector: "memory" };
+    },
+  };
+  let asked = false;
+  ports.gateway = {
+    turn: async () => {
+      if (!asked) {
+        asked = true;
+        return {
+          kind: "tool_calls" as const,
+          calls: [{ id: "c1", tool: "lookup_account", arguments: { q: "acme" } }],
+        };
+      }
+      return { kind: "content" as const, content: "需求矩阵" };
+    },
+  };
+  const meta = await runtime.createProject(withConnectorTool(), "ws", "wsp_test");
+  await bindTender(runtime, connector, meta.id); // grants the memory connector on the way
+  const harness = await runtime.createHarness(meta.id);
+  const final = await approveThrough(harness, "analyze_tender");
+  assert.equal(final.state, "completed");
+  // Routed as a connector tool, and only through what this project granted.
+  assert.deepEqual(seen, [{ tool: "lookup_account", provider: "connector", connectors: ["memory"] }]);
+  const events = await runtime.listAuditEvents(meta.id);
+  const executed = events.map(toAuditView).find((e) => e.action === "tool.executed");
+  assert.ok(executed);
+  assert.equal((executed.payload as { connector?: string }).connector, "memory");
+});
+
+test("connector tools: a task needing a connector tool no connector exposes is refused before any turn, by name", async () => {
+  const { ports, runtime } = makeSelectionFixture();
+  const asked: Array<[string, string | undefined]> = [];
+  ports.tools = {
+    supports: (tool, provider) => {
+      asked.push([tool, provider]);
+      return provider !== "connector";
+    },
+    execute: async () => ({ content: "" }),
+  };
+  const meta = await runtime.createProject(withConnectorTool(), "ws", "wsp_test");
+  const harness = await runtime.createHarness(meta.id);
+  await assert.rejects(
+    harness.startTask("analyze_tender"),
+    /needs tools this host does not implement: lookup_account/,
+  );
+  // The provider travels with the question: read_file is asked as runtime, lookup_account as connector.
+  assert.ok(asked.some(([t, p]) => t === "lookup_account" && p === "connector"));
+  assert.ok(asked.every(([t, p]) => t === "lookup_account" || p === "runtime"));
+});

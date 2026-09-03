@@ -55,9 +55,16 @@ function tailOf(uri: string): string {
   return idx >= 0 ? stripped.slice(idx + 1) || uri : uri;
 }
 
+/** A tool call's outcome, in the executor's terms. */
+export interface ConnectorToolOutcome {
+  content: string;
+  isError?: boolean;
+}
+
 export class McpConnector implements ConnectorPort {
   readonly id: string;
   private readonly client: McpStdioClient;
+  private toolNames: string[] = [];
 
   constructor(spec: McpConnectorSpec, options: { timeoutMs?: number } = {}) {
     this.id = spec.id;
@@ -70,6 +77,41 @@ export class McpConnector implements ConnectorPort {
 
   async start(): Promise<void> {
     await this.client.start();
+    // Learned once at start. A server that grows tools at runtime is not a
+    // case this batch handles - the contract names tools ahead of time anyway.
+    try {
+      this.toolNames = (await this.client.listTools()).map((t) => t.name);
+    } catch {
+      // A server without the tools capability answers -32601; that is "no
+      // tools", not a broken connector.
+      this.toolNames = [];
+    }
+  }
+
+  /** Tool names this server exposes (from tools/list at start). */
+  tools(): string[] {
+    return [...this.toolNames];
+  }
+
+  /**
+   * Run one of the server's tools. Text parts are joined; a non-text part is
+   * named, not dropped - a model told "image omitted" can ask, one told
+   * nothing assumes there was nothing.
+   */
+  async callTool(name: string, args: Record<string, unknown>): Promise<ConnectorToolOutcome> {
+    let result;
+    try {
+      result = await this.client.callTool(name, args);
+    } catch (cause) {
+      return { content: `connector "${this.id}" could not run ${name}: ${describe(cause)}`, isError: true };
+    }
+    const parts = result.content.map((p) =>
+      p.type === "text" && typeof p.text === "string" ? p.text : `[${p.type} content omitted]`,
+    );
+    return {
+      content: parts.join("\n"),
+      ...(result.isError ? { isError: true } : {}),
+    };
   }
 
   async stop(): Promise<void> {

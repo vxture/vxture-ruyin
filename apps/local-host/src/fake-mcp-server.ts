@@ -8,6 +8,7 @@
  *   --prose-on-stdout     write a non-JSON line before answering
  *   --ask-client          send the client a request (sampling) and expect -32601
  *   --pages N             paginate resources/list into N pages
+ *   --no-tools            answer tools/list with an empty list
  *
  * Excluded from coverage (package.json): it runs in a child process, where
  * the coverage collector cannot see it.
@@ -81,6 +82,54 @@ lines.on("line", (line) => {
     case "ping":
       write({ jsonrpc: "2.0", id: msg.id, result: {} });
       return;
+    case "tools/list":
+      write({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: {
+          tools: argv.has("--no-tools")
+            ? []
+            : [
+                {
+                  name: "lookup_account",
+                  description: "按名称查客户",
+                  inputSchema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+                },
+                {
+                  name: "update_account",
+                  description: "写回客户备注",
+                  inputSchema: { type: "object", properties: { id: { type: "string" }, note: { type: "string" } } },
+                },
+              ],
+        },
+      });
+      return;
+    case "tools/call": {
+      const name = String(msg.params?.["name"]);
+      const args = (msg.params?.["arguments"] ?? {}) as Record<string, unknown>;
+      if (name === "lookup_account") {
+        write({
+          jsonrpc: "2.0",
+          id: msg.id,
+          result: {
+            content: [
+              { type: "text", text: `Acme 工业（查询：${String(args["q"])}）：年度预算 1200 万` },
+              { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" },
+            ],
+          },
+        });
+      } else if (name === "update_account") {
+        if (!args["id"]) {
+          // The tool itself failed - MCP says isError, not a JSON-RPC error.
+          write({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "id is required" }], isError: true } });
+        } else {
+          write({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `updated ${String(args["id"])}` }] } });
+        }
+      } else {
+        write({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: `Unknown tool: ${name}` } });
+      }
+      return;
+    }
     case "resources/list": {
       const per = Math.ceil(RESOURCES.length / PAGES);
       const page = msg.params?.["cursor"] ? Number(msg.params["cursor"]) : 0;

@@ -41,6 +41,14 @@ export type ToolCategory =
   | "export"
   | "external_send";
 export type RiskLevel = "low" | "medium" | "high";
+/**
+ * Who implements a tool. `runtime` (the default) is the preset skill layer
+ * built into Ruyin; `connector` means an installed local connector exposes a
+ * tool of the same id (ADR-005 path two) - the contract still owns category,
+ * risk and default, so the Tool Gate decides exactly as it does for any other
+ * tool.
+ */
+export type ToolProvider = "runtime" | "connector";
 export type PermissionValue = "allow" | "ask" | "deny";
 export type SyncPolicy =
   | "local_only"
@@ -121,6 +129,7 @@ export interface Tool {
   category: ToolCategory;
   risk: RiskLevel;
   default: PermissionValue;
+  provider?: ToolProvider;
   /** Required: a tool the gate cannot validate is a tool it cannot let through. */
   input_schema: ToolIoSchema;
   output_schema?: ToolIoSchema;

@@ -26,6 +26,7 @@ import { installPackage } from "./installer.js";
 import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import { apiError, REJECTION } from "./errors.js";
+import type { ToolProvider } from "@vxture/ruyin-contract-schema";
 import { ConnectorInstallRefusedError } from "./connector-registry.js";
 import { join as joinPath } from "node:path";
 import type { EventBus } from "./events.js";
@@ -104,7 +105,7 @@ export interface LocalApiDeps {
    * 判据与 startTask 的拒绝判据是同一个（`unrunnableTools`），所以列表上
    * 能启动的，启动时不会再被拒。
    */
-  supportsTool: (tool: string) => boolean;
+  supportsTool: (tool: string, provider?: ToolProvider) => boolean;
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -863,7 +864,10 @@ async function handle(
           input_types: t.input_types,
           // 本宿主跑不了的工具。列出来，是为了让「启动不了」在点击之前就看得
           // 见 —— 而不是点下去之后拿到一个错误。判据和 startTask 是同一个。
-          unrunnable: unrunnableTools(t.tools, deps.supportsTool),
+          // 问的时候带上契约说的 provider：连接器工具问连接器，运行时工具问运行时。
+          unrunnable: unrunnableTools(t.tools, (id) =>
+            deps.supportsTool(id, view.contract.tools.find((x) => x.id === id)?.provider ?? "runtime"),
+          ),
         })),
         states: view.contract.states,
       });

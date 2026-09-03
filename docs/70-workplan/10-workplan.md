@@ -322,9 +322,14 @@ CI 另加 `packaged-smoke`（windows-latest，真启动 + 真排一份 PDF + 断
       设置页新增「连接器」分区：列已装连接器与**问出来的**健康、卸载、开发态安装
       （生产 403 原话照转，不软化成「暂不可用」；没有注册表的装配显示 503 原话并隐藏
       安装表单）。审计表的 payload 本就整段显示，连接器字段随之可见，不另加列。
-- [ ] **D · 连接器工具经 Tool Gate**：MCP `tools/*` 映射到契约 `tools[]`，写操作
-      属 `external_send`（硬底线 ≥ ask）。**映射从哪来**（契约声明 vs 安装时
-      声明）待 owner 定，先不猜。
+- [x] **D · 连接器工具经 Tool Gate**（2026-09-03，owner 定：**契约声明**）：契约
+      `tools[]` 加 `provider: connector`，映射就是 id 相同；category / risk / default
+      仍由契约定，闸门一字不改。R15 把连接器工具限在 `query` / `external_send`
+      （写进内网系统走 external_send 硬底线 ≥ ask）。执行器只路由到**本项目授权过**且
+      暴露该工具的连接器（装了没授权的看不见；两个都暴露不猜，报歧义）；机器上没有
+      连接器暴露时任务启动前就被拒并点名。审计 `tool.executed` 记连接器。MCP 客户端
+      补 `tools/list` / `tools/call`，非文本内容点名省略而不是静默丢掉；设置页列出
+      每个连接器暴露的工具名。
 - [ ] **E · Streamable HTTP 传输**：stdio 之外的第二种标准传输。
 
 **不采用 MCP 官方 SDK 的理由（B，2026-09-03）**：它把 express / hono / cors /

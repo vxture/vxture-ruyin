@@ -290,6 +290,13 @@ function ConnectorsSection({ api }: { api: Api }) {
                     {c.id}
                   </code>
                   <span className="row-tag">{c.source}</span>
+                  {/* 暴露了哪些工具：契约里 provider: connector 的工具要靠同名才接得上，
+                      用户对着契约就能看出接没接。 */}
+                  {c.tools.length > 0 && (
+                    <span className="text-body-sm text-muted-foreground mono">
+                      {`工具：${c.tools.join("、")}`}
+                    </span>
+                  )}
                   {/* 健康是问出来的：一个「已安装」不说它此刻活着没有。 */}
                   <StatusBadge tone={c.health.ok ? "success" : "warning"}>
                     {c.health.ok ? "运行中" : `未运行${c.health.detail ? "：" + c.health.detail : ""}`}
