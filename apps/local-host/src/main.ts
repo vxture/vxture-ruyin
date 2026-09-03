@@ -248,6 +248,17 @@ async function pdfSelfCheck(): Promise<void> {
 server.listen(port, "127.0.0.1", () => {
   console.log(`[ruyin] local runtime ${VERSION}`);
   console.log(`[ruyin] data dir: ${dataDir}`);
+  // 上面 `capabilityBase` 处的注释写着「不接就说不接，『没接上』绝不能看起来像
+  // 『在工作』」—— **而在这一行加上之前，守护进程一个字都没说过**。注释承诺了一
+  // 个不存在的保障，这比没有注释更糟：它让人以为这道口子被看住了。
+  //
+  // 没接能力面时跑任务，`MockAIGateway` 回的是字面量 `[mock:...]` 文本，而它会
+  // 一路走到用户面前当成工作成果。至少要在启动时说清楚用的是哪一条。
+  console.log(
+    capabilityBase
+      ? `[ruyin] capability surface: ${capabilityBase}`
+      : "[ruyin] capability surface: NOT configured - tasks will return mock output",
+  );
   console.log(
     `[ruyin] products: ${registry
       .installed()
