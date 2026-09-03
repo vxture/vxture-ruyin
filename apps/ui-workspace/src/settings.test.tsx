@@ -18,7 +18,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@vxture/design-system";
 import { SettingsView, type SectionId } from "./settings";
-import { Api, type SystemInfo, type UpdateCheck } from "./api";
+import { Api, type SystemInfo, type UpdateCheck, ApiError } from "./api";
 
 function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
   return {
@@ -226,4 +226,105 @@ void test("UpdatesSection: checkUpdate() rejecting reads '检查失败', not sil
   await clickCheck();
   expect(await screen.findByText("检查失败：网络不可达")).toBeInTheDocument();
   expect(screen.queryByText(/已是最新/)).not.toBeInTheDocument();
+});
+
+/* ---------------- 连接器 ---------------- */
+
+const crmView = {
+  id: "crm",
+  transport: "stdio" as const,
+  command: "node",
+  args: ["crm.js"],
+  source: "lan" as const,
+  installedAt: "2026-09-03T00:00:00.000Z",
+  health: { ok: true, detail: "fake-crm 0.0.1", checkedAt: "2026-09-03T00:00:00.000Z" },
+};
+
+void test("Settings/连接器: lists installed connectors with live health, and uninstall calls the api", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({
+      items: [crmView, { ...crmView, id: "erp", health: { ok: false, detail: "not running", checkedAt: "x" } }],
+    }),
+    removeConnector: vi.fn().mockResolvedValue({ removed: "crm" }),
+  });
+  renderSection("connectors", api);
+  const list = await screen.findByLabelText("已安装的连接器");
+  expect(within(list).getByText("crm")).toBeInTheDocument();
+  expect(within(list).getByText("运行中")).toBeInTheDocument();
+  expect(within(list).getByText("未运行：not running")).toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(within(list).getAllByRole("button", { name: "卸载" })[0]!);
+  expect(api.removeConnector).toHaveBeenCalledWith("crm");
+});
+
+void test("Settings/连接器: install sends id/command/args/source; a 403 refusal is shown verbatim, not softened", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({ items: [] }),
+    installConnector: vi
+      .fn()
+      .mockRejectedValue(new Error("connector installation is refused until connectors arrive signed (TD-012)")),
+  });
+  renderSection("connectors", api);
+  expect(await screen.findByText("尚未安装任何连接器")).toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.type(screen.getByPlaceholderText("连接器 id，如 crm"), "crm");
+  await user.type(screen.getByPlaceholderText(/^命令/), "node");
+  await user.type(screen.getByPlaceholderText("参数（空格分隔，可空）"), "crm.js --port 1");
+  await user.selectOptions(screen.getByLabelText("来源种类"), "private");
+  await user.click(screen.getByRole("button", { name: "安装并启动" }));
+  expect(api.installConnector).toHaveBeenCalledWith({
+    id: "crm",
+    command: "node",
+    args: ["crm.js", "--port", "1"],
+    source: "private",
+  });
+  expect(await screen.findByText(/refused until connectors arrive signed \(TD-012\)/)).toBeInTheDocument();
+});
+
+void test("Settings/连接器: an assembly without a registry (503) says so and hides the install form", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockRejectedValue(
+      new ApiError(503, { error: "CONNECTORS_NOT_AVAILABLE", message: "这套装配没有进程外连接器注册表" }),
+    ),
+  });
+  renderSection("connectors", api);
+  expect(await screen.findByText("这套装配没有进程外连接器注册表")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "安装并启动" })).not.toBeInTheDocument();
+});
+
+void test("Settings/连接器: a generic failure to list is shown as a failure (not as 尚未安装), install success clears the form and reloads", async () => {
+  const connectors = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("daemon unreachable"))
+    .mockResolvedValue({ items: [crmView] });
+  const api = fakeApi({
+    connectors,
+    installConnector: vi.fn().mockResolvedValue(crmView),
+  });
+  renderSection("connectors", api);
+  expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
+  expect(screen.queryByText("尚未安装任何连接器")).not.toBeInTheDocument();
+
+  const user = userEvent.setup();
+  const idInput = screen.getByPlaceholderText("连接器 id，如 crm") as HTMLInputElement;
+  await user.type(idInput, " crm ");
+  await user.type(screen.getByPlaceholderText(/^命令/), "node");
+  await user.click(screen.getByRole("button", { name: "安装并启动" }));
+  expect(api.installConnector).toHaveBeenCalledWith({ id: "crm", command: "node", args: [], source: "lan" });
+  await vi.waitFor(() => expect(idInput.value).toBe(""));
+  expect(await screen.findByText("运行中")).toBeInTheDocument();
+  expect(screen.queryByText("daemon unreachable")).not.toBeInTheDocument();
+});
+
+void test("Settings/连接器: a failed uninstall is reported, the list stays", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({ items: [crmView] }),
+    removeConnector: vi.fn().mockRejectedValue(new Error("connector \"crm\" is not installed")),
+  });
+  renderSection("connectors", api);
+  const list = await screen.findByLabelText("已安装的连接器");
+  const user = userEvent.setup();
+  await user.click(within(list).getByRole("button", { name: "卸载" }));
+  expect(await screen.findByText(/is not installed/)).toBeInTheDocument();
+  expect(within(list).getByText("crm")).toBeInTheDocument();
 });

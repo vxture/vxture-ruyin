@@ -229,6 +229,35 @@ export interface FolderGrant {
   createdAt: string;
 }
 
+/**
+ * 项目级的连接器授权（ADR-005：授权以项目为边界，与文件夹授权同级、同一张表）。
+ * 文件夹授权没有 `kind`——它先于这个存在，旧记录不回填。
+ */
+export interface ConnectorGrant {
+  id: string;
+  kind: "connector";
+  connector: string;
+  mode: "read";
+  createdAt: string;
+}
+
+export type Grant = FolderGrant | ConnectorGrant;
+
+export function isConnectorGrant(grant: Grant): grant is ConnectorGrant {
+  return "kind" in grant && grant.kind === "connector";
+}
+
+/** 宿主上装了哪些进程外连接器（daemon /connectors）。健康是问出来的，不是记的。 */
+export interface ConnectorView {
+  id: string;
+  transport: "stdio";
+  command: string;
+  args: string[];
+  source: "lan" | "private";
+  installedAt: string;
+  health: { ok: boolean; detail?: string; checkedAt: string };
+}
+
 export interface Binding {
   type: string;
   /** 契约的来源种类（local / lan / private …）。 */
@@ -501,16 +530,36 @@ export class Api {
       to,
       humanConfirmed,
     });
-  grants = (id: string) => this.call<FolderGrant[]>(`/projects/${id}/grants`);
+  grants = (id: string) => this.call<Grant[]>(`/projects/${id}/grants`);
   addGrant = (id: string, path: string) =>
     this.call<FolderGrant>(`/projects/${id}/grants`, "POST", { path });
+  addConnectorGrant = (id: string, connector: string) =>
+    this.call<ConnectorGrant>(`/projects/${id}/grants`, "POST", { connector });
   bindings = (id: string) => this.call<Binding[]>(`/projects/${id}/bindings`);
-  setBinding = (id: string, type: string, root: string) =>
+  /**
+   * 不带 `via` = 本地文件夹（local-fs，来源 local）。带了 = 经某个连接器，
+   * `source` 是它服务的来源种类；由内核对照契约校验，界面只透传。
+   */
+  setBinding = (
+    id: string,
+    type: string,
+    root: string,
+    via?: { connector: string; source: string },
+  ) =>
     this.call<Binding & { indexed: number }>(
       `/projects/${id}/bindings`,
       "POST",
-      { type, root },
+      via ? { type, root, connector: via.connector, source: via.source } : { type, root },
     );
+  connectors = () => this.call<{ items: ConnectorView[] }>("/connectors");
+  installConnector = (input: {
+    id: string;
+    command: string;
+    args: string[];
+    source: "lan" | "private";
+  }) => this.call<ConnectorView>("/connectors", "POST", input);
+  removeConnector = (id: string) =>
+    this.call<{ removed: string }>(`/connectors/${id}`, "DELETE");
   audit = (id: string) => this.call<StoredAuditEvent[]>(`/projects/${id}/audit`);
   contextItems = (id: string, type: string) =>
     this.call<ContextItemMeta[]>(`/projects/${id}/context/${type}`);

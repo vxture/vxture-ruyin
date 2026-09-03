@@ -13,13 +13,14 @@ import { useEffect, useState } from "react";
 import {
   Button,
   EmptyState,
+  Input,
   NativeSelect,
   SectionHeader,
   SegmentedControl,
   StatusBadge,
   useTheme,
 } from "@vxture/design-system";
-import { Api, type SystemInfo, type UpdateCheck } from "./api";
+import { Api, ApiError, type ConnectorView, type SystemInfo, type UpdateCheck } from "./api";
 // SectionId/SETTINGS_SECTIONS live in their own module (settings-sections.ts)
 // so the sidebar can know the section list without pulling in this file's
 // DS-heavy SettingsView - see that file's header comment (TD-011②).
@@ -46,6 +47,7 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
       {section === "account" && <AccountSection />}
       {section === "general" && <GeneralSection />}
       {section === "privacy" && <PrivacySection system={system} />}
+      {section === "connectors" && <ConnectorsSection api={api} />}
       {section === "updates" && <UpdatesSection system={system} api={api} />}
       {section === "about" && <AboutSection system={system} />}
     </div>
@@ -193,6 +195,147 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
           </span>
         </SettingRow>
       </div>
+    </>
+  );
+}
+
+/* ---------------- 连接器 ---------------- */
+
+/**
+ * 机器级的连接器（ADR-005 通路二）：装了哪些、活着没有、装一个、卸一个。
+ * 项目级的授权不在这里 —— 那在每个项目的「资料」板块，因为授权是项目的事。
+ *
+ * 装是受限的：签名信任锚就位前生产拒装（TD-036），守护进程会用 403 说明。
+ * 界面照实转达，不把「拒绝」包装成「暂不可用」。
+ */
+function ConnectorsSection({ api }: { api: Api }) {
+  const [items, setItems] = useState<ConnectorView[] | null>(null);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [id, setId] = useState("");
+  const [command, setCommand] = useState("");
+  const [args, setArgs] = useState("");
+  const [source, setSource] = useState<"lan" | "private">("lan");
+
+  const reload = async () => {
+    try {
+      setItems((await api.connectors()).items);
+      setUnavailable(null);
+    } catch (e) {
+      // 503 = 这套装配没有注册表。这不是错误，是一个事实，单独说。
+      if (e instanceof ApiError && e.status === 503) {
+        setItems([]);
+        setUnavailable(e.message);
+      } else {
+        setFailed(String((e as Error).message));
+      }
+    }
+  };
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api]);
+
+  const install = async () => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      await api.installConnector({
+        id: id.trim(),
+        command: command.trim(),
+        // 空格分参数够用了：这是开发态的口子，真正的安装走签名包（TD-036）。
+        args: args.trim() ? args.trim().split(/\s+/) : [],
+        source,
+      });
+      setId("");
+      setCommand("");
+      setArgs("");
+      await reload();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (target: string) => {
+    setFailed(null);
+    try {
+      await api.removeConnector(target);
+      await reload();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    }
+  };
+
+  return (
+    <>
+      <div className="card">
+        <SettingRow
+          label="已安装的连接器"
+          hint="局域网 / 私有服务经本机 MCP 连接器进入项目上下文；每个项目要单独授权才能用"
+        >
+          {unavailable ? (
+            <span className="text-body-sm text-muted-foreground">{unavailable}</span>
+          ) : items === null ? (
+            "…"
+          ) : items.length === 0 ? (
+            <span className="text-body-sm text-muted-foreground">尚未安装任何连接器</span>
+          ) : (
+            <ul className="row-list" aria-label="已安装的连接器">
+              {items.map((c) => (
+                <li key={c.id} className="row-item">
+                  <code className="row-main" title={`${c.command} ${c.args.join(" ")}`}>
+                    {c.id}
+                  </code>
+                  <span className="row-tag">{c.source}</span>
+                  {/* 健康是问出来的：一个「已安装」不说它此刻活着没有。 */}
+                  <StatusBadge tone={c.health.ok ? "success" : "warning"}>
+                    {c.health.ok ? "运行中" : `未运行${c.health.detail ? "：" + c.health.detail : ""}`}
+                  </StatusBadge>
+                  <Button variant="ghost" size="sm" onClick={() => void remove(c.id)}>
+                    卸载
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SettingRow>
+      </div>
+      {!unavailable && (
+        <div className="card">
+          <SettingRow
+            label="安装连接器（stdio）"
+            hint="一个 MCP 服务器的启动命令。签名信任锚就位前，正式版会拒绝安装并说明原因（TD-036）"
+          >
+            <div className="flex flex-col gap-sm">
+              <Input value={id} onChange={(e) => setId(e.target.value)} placeholder="连接器 id，如 crm" />
+              <Input
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+                placeholder="命令，如 node，或 MCP 服务器可执行文件的完整路径"
+              />
+              <Input value={args} onChange={(e) => setArgs(e.target.value)} placeholder="参数（空格分隔，可空）" />
+              <NativeSelect
+                aria-label="来源种类"
+                value={source}
+                onChange={(e) => setSource(e.target.value === "private" ? "private" : "lan")}
+                wrapperClassName="sel-narrow"
+              >
+                <option value="lan">lan · 局域网系统</option>
+                <option value="private">private · 私有服务</option>
+              </NativeSelect>
+              <div>
+                <Button disabled={busy || !id.trim() || !command.trim()} onClick={() => void install()}>
+                  {busy ? "正在安装…" : "安装并启动"}
+                </Button>
+              </div>
+              {failed && <div className="update-line update-line--warn">{failed}</div>}
+            </div>
+          </SettingRow>
+        </div>
+      )}
     </>
   );
 }

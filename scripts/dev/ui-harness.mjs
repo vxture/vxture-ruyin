@@ -34,6 +34,7 @@ const { FtsRanker, reindexBinding, searchContext } = await import(
 );
 const { LocalToolExecutor } = await import(`${ROOT}/apps/local-host/dist/tool-executor.js`);
 const { EventBus } = await import(`${ROOT}/apps/local-host/dist/events.js`);
+const { ConnectorRegistry } = await import(`${ROOT}/apps/local-host/dist/connector-registry.js`);
 const { readFileSync } = await import("node:fs");
 
 const PORT = Number(process.env.PORT ?? 17470);
@@ -49,6 +50,13 @@ writeFileSync(
 );
 
 const storage = new SqliteStoragePort(dataDir, await KeyManager.open(dataDir));
+// 观察台允许装未签名连接器（它本来就只用桩数据、只在本机）。要试的话，dist 里有
+// 一个假的 MCP 服务器：命令 node，参数 apps/local-host/dist/fake-mcp-server.js。
+const connectorLookup = new Map([["local-fs", new LocalFsConnector()]]);
+const connectorRegistry = new ConnectorRegistry(dataDir, connectorLookup, {
+  allowUnsigned: true,
+  log: (l) => console.error(l),
+});
 const executor = new LocalToolExecutor((pid, q, scope, limit) =>
   searchContext(storage, pid, q, scope, limit),
 );
@@ -58,7 +66,7 @@ const runtime = new ProjectRuntime({
   id: nodeId,
   crypto: nodeCrypto,
   gateway: new MockAIGateway(),
-  connectors: new Map([["local-fs", new LocalFsConnector()]]),
+  connectors: connectorLookup,
   ranker: new FtsRanker(storage),
   tools: executor,
 });
@@ -110,7 +118,8 @@ const server = createLocalApi({
   supportsTool: (t) => executor.supports(t),
   uiDir: `${repo}/apps/ui-workspace/dist`,
   platform,
-  reindex: (pid, b) => reindexBinding(storage, pid, b, new LocalFsConnector()),
+  reindex: (pid, b) => reindexBinding(storage, pid, b, connectorLookup.get(b.connector)),
+  connectors: connectorRegistry,
   systemInfo: {
     version: "0.1.0-uiharness",
     platform: process.platform,
