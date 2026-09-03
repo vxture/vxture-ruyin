@@ -157,6 +157,7 @@ void test("Workbench: starts on the home view, showing the brand and the home st
   render(<Workbench api={fakeApi()} />);
   // 字标只写 RUYIN：标记已经在左边了，再写一遍「如影」是同一个身份说两遍。
   expect(await screen.findByText("RUYIN")).toBeInTheDocument();
+  expect(screen.getByText("Intelligent Workbench")).toBeInTheDocument();
   expect(screen.queryByText(/如影/)).not.toBeInTheDocument();
   expect(screen.getByTestId("home-stub")).toBeInTheDocument();
   expect(screen.queryByTestId("settings-stub")).not.toBeInTheDocument();

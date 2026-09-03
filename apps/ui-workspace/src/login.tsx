@@ -149,9 +149,11 @@ function LoginScreen({
     <div className="login-screen">
       <DragStrip />
       <div className="login-center">
-        <img className="login-mark" src="/logo.svg" alt="Vxture Ruyin" />
+        <img className="login-mark" src="/logo.svg" alt="RUYIN" />
+        {/* 品牌 = 产品 = RUYIN，标语 Intelligent Workbench；不再并列一个中文名。 */}
         <h1 className="login-title">
-          <span className="logo-cn">如影</span> · 你的业务工作台
+          <span className="brand-name">RUYIN</span>
+          <span className="brand-tag">Intelligent Workbench</span>
         </h1>
         <p className="login-sub">
           Vxture AI 原生业务产品的本地智能工作环境 · 本地数据不出设备

@@ -49,8 +49,8 @@ function ConnectHint() {
         className="text-body-md text-muted-foreground"
         style={{ maxWidth: 380, textAlign: "center" }}
       >
-        如影的主体是运行在你自己机器上的<strong>本地运行时</strong>，
-        由<strong>如影桌面应用</strong>启动。请从开始菜单打开「如影 Ruyin」——
+        RUYIN 的主体是运行在你自己机器上的<strong>本地运行时</strong>，
+        由<strong>RUYIN 桌面应用</strong>启动。请从开始菜单打开「RUYIN」——
         运行时会随之启动并自动连接，无需你输入任何东西。
       </p>
       {/* 说清这个页面是什么：它是访问方式，不是应用本身。少了这句，
@@ -60,7 +60,7 @@ function ConnectHint() {
         style={{ maxWidth: 380, textAlign: "center", opacity: 0.75 }}
       >
         你现在打开的是运行时的网页界面。它需要运行时已在运行——
-        单独打开它不会启动如影。
+        单独打开它不会启动 RUYIN。
       </p>
     </div>
   );

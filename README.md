@@ -1,6 +1,9 @@
 # vxture-ruyin
 
-Ruyin - the Business Workspace Runtime for Vxture AI-native business products.
+RUYIN - Intelligent Workbench: the Business Workspace Runtime for Vxture
+AI-native business products. The product and brand name is RUYIN, uppercase,
+with the tag "Intelligent Workbench"; lowercase "ruyin" appears only in
+identifiers (package scope, env vars, paths, log prefixes).
 This repo builds the local (desktop) runtime: an Electron shell plus an
 independent Node.js runtime daemon sharing an isomorphic TypeScript kernel
 (runtime-core) with the future Cloud Runtime.

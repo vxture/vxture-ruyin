@@ -13,6 +13,17 @@ lives in the platform repo (`D:\MyWebSite\vxture\vxture-platform`):
 `140-repo-governance-standard.md` (base), `070-docs-taxonomy.md` (docs
 numbering). Gaps are fixed in the platform standard first, then mirrored here.
 
+## Naming
+
+Brand = product = RUYIN, uppercase, with the tag "Intelligent Workbench"
+(owner, 2026-09-03). That is what users see: window title, installer and
+Start-menu name, the wordmark and the login/about pages. Lowercase "ruyin" is
+for identifiers only (@vxture scope, RUYIN_* env vars, paths, the daemon's
+log prefix). Do not reintroduce a parallel Chinese name next to the wordmark.
+One deliberate exception: apps/shell keeps app.setName("Ruyin") because that
+string keys the userData path on installed machines - it is a path, not a
+name.
+
 ## What is being built
 
 An Electron shell + an independent Node.js runtime daemon sharing an isomorphic

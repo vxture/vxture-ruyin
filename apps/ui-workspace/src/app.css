@@ -438,6 +438,11 @@ body {
 .about-block { text-align: center; padding: var(--spacing-lg) 0; }
 .logo-cn { font-weight: 700; font-size: var(--title-xl-font-size, 20px); }
 .logo-en { color: var(--muted-foreground); letter-spacing: 0.18em; }
+/* 品牌字标与标语：RUYIN 大写、字距拉开；Intelligent Workbench 弱化一档跟在后面。 */
+.brand-name { font-weight: 700; letter-spacing: 0.18em; font-size: var(--title-xl-font-size, 20px); }
+.brand-tag { color: var(--muted-foreground); letter-spacing: 0.04em; font-weight: 400; }
+.login-title .brand-name { font-size: var(--text-heading-2-font-size, 24px); }
+.login-title .brand-tag { display: block; font-size: var(--body-md-font-size); margin-top: 4px; }
 
 /* ---------- sidebar footer identity strip ---------- */
 .user-slot-wrap {

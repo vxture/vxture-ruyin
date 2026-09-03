@@ -70,7 +70,9 @@ void test("SettingsView: a system() fetch failure shows an error box without cra
   renderSection("about", api);
   expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
   // 这一节仍然照常渲染 —— system 只是还没有值，不是整节崩掉。
-  expect(screen.getByText("如影")).toBeInTheDocument();
+  expect(screen.getByText("RUYIN")).toBeInTheDocument();
+  expect(screen.getByText("Intelligent Workbench")).toBeInTheDocument();
+  expect(screen.queryByText(/如影/)).not.toBeInTheDocument();
 });
 
 void test("AboutSection: shows version/platform/arch once system loads, placeholders before", async () => {

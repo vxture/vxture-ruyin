@@ -488,13 +488,11 @@ function AboutSection({ system }: { system: SystemInfo | null }) {
     <div className="card">
       <div className="about-block">
         <p>
-          <span className="logo-cn">如影</span>{" "}
-          <span className="logo-en">RUYIN</span>
+          <span className="brand-name">RUYIN</span>
         </p>
+        <p className="brand-tag">Intelligent Workbench</p>
         <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
           Vxture AI 原生业务产品的本地智能工作环境
-          <br />
-          业务工作空间运行时 · Business Workspace Runtime
         </p>
         <div className="mono text-muted-foreground">
           Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
