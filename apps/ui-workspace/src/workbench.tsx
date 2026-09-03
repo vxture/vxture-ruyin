@@ -29,10 +29,16 @@ import {
   type AnchorHTMLAttributes,
 } from "react";
 import {
+  Button,
   Icon,
+  Popover,
+  PopoverTrigger,
   ShellBrand,
   ShellHeader,
   ShellIconButton,
+  ShellPanelContent,
+  ShellPanelHeader,
+  ShellPanelSection,
   ShellPageContainer,
   ShellSearchBox,
   ShellSidebarNav,
@@ -41,7 +47,7 @@ import {
   type ShellNavSection,
   type ShellSearchGroup,
 } from "@vxture/design-system";
-import { Api, type ProductInfo, type ProjectMeta } from "./api";
+import { Api, type ProductInfo, type ProjectMeta, type SessionInfo } from "./api";
 import { PROJECT_TABS, type TabId } from "./workspace-tabs";
 import { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
 import { DEMO_RECENT } from "./catalog";
@@ -94,14 +100,15 @@ const isTab = (s: string): s is TabId =>
  * （ADR-015），跨工作区访问会被服务端拒绝。用户看着屏幕却不知道自己在哪个
  * 工作区，那句拒绝就无从理解。
  */
-function useWorkspaceName(api: Api): string | undefined {
-  const [name, setName] = useState<string | undefined>();
+/** 会话（工作区名、租户名、console 基址）——标题栏的工作区控件用它。 */
+function useWorkspaceSession(api: Api): SessionInfo | undefined {
+  const [session, setSession] = useState<SessionInfo | undefined>();
   useEffect(() => {
     let alive = true;
     const read = async () => {
       try {
         const s = await api.session();
-        if (alive) setName(s.signedIn ? s.workspace?.name : undefined);
+        if (alive) setSession(s.signedIn ? s : undefined);
       } catch {
         /* 未接通时不显示，而不是显示一个猜的名字 */
       }
@@ -113,7 +120,7 @@ function useWorkspaceName(api: Api): string | undefined {
       clearInterval(timer);
     };
   }, [api]);
-  return name;
+  return session;
 }
 
 function useRuntimeHealth() {
@@ -249,7 +256,8 @@ export function Workbench({ api }: { api: Api }) {
     products.find((p) => p.id === openProjectMeta?.productId)?.name ??
     openProjectMeta?.productId;
   const [projectPending, setProjectPending] = useState(0);
-  const workspaceName = useWorkspaceName(api);
+  const session = useWorkspaceSession(api);
+  const workspaceName = session?.workspace?.name;
 
   const sections: ShellNavSection[] = useMemo(() => {
     const list: ShellNavSection[] = [
@@ -432,25 +440,59 @@ export function Workbench({ api }: { api: Api }) {
           {/* 当前工作区常驻。**此前它一个字都没有出现在项目面板上**，而项目、
               订阅、权益、数据边界全按工作区划分，跨工作区访问会被服务端拒绝
               —— 用户看着屏幕却不知道自己在哪个工作区，那句拒绝就无从理解。 */}
+          {/* 右侧一簇的顺序（2026-09-03 重排）：
+                ① 工作区（上下文，只读 + 下拉看详情）
+                ② Runtime 状态（只读）
+                ③ 未决确认（可操作、会变红）
+                ④ 设置（全局入口，固定在最右）
+              读的东西在左，动的东西在右；越常按的越靠外侧，手停下的位置就是
+              最右。通知紧挨设置，是各家桌面应用的惯例（VS Code / GitHub 皆如此）。 */}
           {workspaceName && (
-            // 原来这里是一个光秃秃的词，「这是什么」只写在 title 里 —— 而 title
-            // 要悬停才看得到，等于没说。加个图标和「工作区」二字，它才自己说明
-            // 自己是什么。
-            <span className="app-workspace" title={`当前工作区：${workspaceName}`}>
-              <Icon name="buildings" size="xs" />
-              <span className="app-workspace-label">工作区</span>
-              <span className="app-workspace-name">{workspaceName}</span>
-            </span>
+            // 图标 + 工作区名，不再写「工作区」三个字（owner 定）；点开是下拉，
+            // 说清它是哪个租户下的哪个工作区、以及怎么换——切换在平台做，本地
+            // 只是读它。
+            <Popover>
+              <PopoverTrigger asChild>
+                <button type="button" className="app-workspace" title={`当前工作区：${workspaceName}`}>
+                  <Icon name="buildings" size="xs" />
+                  <span className="app-workspace-name">{workspaceName}</span>
+                  <Icon name="caret-up-down" size="xs" className="app-workspace-caret" />
+                </button>
+              </PopoverTrigger>
+              <ShellPanelContent side="bottom" align="end" sideOffset={8}>
+                <ShellPanelHeader
+                  icon="buildings"
+                  title={workspaceName}
+                  metaRows={[
+                    ...(session?.org?.name
+                      ? [{ key: "org", icon: "role" as const, content: `租户：${session.org.name}` }]
+                      : []),
+                    { key: "scope", content: "本机的项目、订阅与数据边界都按这个工作区划分" },
+                  ]}
+                />
+                <ShellPanelSection>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() =>
+                      window.open(`${session?.consoleBase ?? "https://vxture.com"}/zh-CN/profile`, "_blank", "noopener")
+                    }
+                  >
+                    在平台切换工作区 ↗
+                  </Button>
+                </ShellPanelSection>
+              </ShellPanelContent>
+            </Popover>
           )}
+          <StatusBadge tone={health.ok ? "success" : "danger"} dot>
+            {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
+          </StatusBadge>
           {/* 常驻：未决确认在哪个视图都看得见。放进某个页面里等于又要求
               用户先找对地方，而那正是这条要修的问题。 */}
           <PendingInbox
             rows={pending}
             onOpen={(id) => setView({ kind: "workspace", id, tab: "overview" })}
           />
-          <StatusBadge tone={health.ok ? "success" : "danger"} dot>
-            {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
-          </StatusBadge>
           {/* 「安装桌面应用」（PWA）已移除，理由见 login.tsx 同处注释。 */}
           <ShellIconButton
             icon="settings"

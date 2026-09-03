@@ -473,6 +473,15 @@ export class Api {
     this.call<ProductInfo>(`/products/${id}/activate`, "POST");
   deactivateProduct = (id: string) =>
     this.call<ProductInfo>(`/products/${id}/deactivate`, "POST");
+  /**
+   * 一级供给：从产品能力面拉一次契约（ADR-012）。`fetched` = 落了新版本，
+   * `current` = 没变，`offline` = 拉不到（本地那份照用）。能力面未配置时 503。
+   */
+  fetchProduct = (id: string) =>
+    this.call<{ status: "fetched" | "current" | "offline"; version?: string; reason?: string }>(
+      `/products/${id}/fetch`,
+      "POST",
+    );
   /** 钉住生效版本（§18.4 回滚）。库里保留着旧版本，这是把它切回去的动作。 */
   pinProductVersion = (id: string, version: string) =>
     this.call<ProductInfo>(`/products/${id}/pin-version`, "POST", { version });
