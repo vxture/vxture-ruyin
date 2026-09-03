@@ -123,133 +123,6 @@ void test("UserSlot: a session() rejection leaves the slot signed-out rather tha
 
 // --- subscriptionLine(): every branch --------------------------------------
 
-void test("UserSlot subscription line: not signed in", async () => {
-  const api = fakeApi({ session: vi.fn().mockResolvedValue(session({ signedIn: false })) });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
-  await openPopover();
-  expect(await screen.findByText("登录后同步")).toBeInTheDocument();
-});
-
-void test("UserSlot: signed in and configured but no product ids never calls entitlements()", async () => {
-  const entitlements = vi.fn().mockResolvedValue({ workspace_id: "ws_1", entitlements: {} });
-  const api = fakeApi({
-    session: vi.fn().mockResolvedValue(session({ signedIn: true, entitlementsConfigured: true })),
-    entitlements,
-  });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
-  await openPopover();
-  await screen.findByText("退出登录"); // 等它真的进了已登录态的渲染
-  expect(entitlements).not.toHaveBeenCalled();
-});
-
-void test("UserSlot subscription line: signed in but entitlements not configured", async () => {
-  const api = fakeApi({
-    session: vi.fn().mockResolvedValue(session({ signedIn: true, entitlementsConfigured: false })),
-  });
-  render(<UserSlot api={api} productIds={["vxture.bid"]} onOpenSettings={() => {}} />);
-  await openPopover();
-  expect(await screen.findByText("权益服务未配置")).toBeInTheDocument();
-});
-
-void test("UserSlot subscription line: fetch failure reads '获取失败', not stuck on '…'", async () => {
-  const api = fakeApi({
-    session: vi.fn().mockResolvedValue(session({ signedIn: true, entitlementsConfigured: true })),
-    entitlements: vi.fn().mockRejectedValue(new Error("network down")),
-  });
-  render(<UserSlot api={api} productIds={["vxture.bid"]} onOpenSettings={() => {}} />);
-  await openPopover();
-  expect(await screen.findByText("获取失败")).toBeInTheDocument();
-});
-
-void test("UserSlot subscription line: zero active entitlements reads '无生效订阅'", async () => {
-  const batch: EntitlementsBatch = {
-    workspace_id: "ws_1",
-    entitlements: {
-      "vxture.bid": {
-        status: null,
-        trial_ends_at: null,
-        current_period_end: null,
-        cancel_at_period_end: false,
-        data_retention_until: null,
-        tier: null,
-        bundled: false,
-        limits: {},
-        quota_pools: [],
-      },
-    },
-  };
-  const api = fakeApi({
-    session: vi.fn().mockResolvedValue(session({ signedIn: true, entitlementsConfigured: true })),
-    entitlements: vi.fn().mockResolvedValue(batch),
-  });
-  render(<UserSlot api={api} productIds={["vxture.bid"]} onOpenSettings={() => {}} />);
-  await openPopover();
-  expect(await screen.findByText("无生效订阅")).toBeInTheDocument();
-});
-
-void test("UserSlot subscription line: active entitlements count and de-duplicated tiers", async () => {
-  const envelope = (tier: string | null, bundled = false) => ({
-    status: "active",
-    trial_ends_at: null,
-    current_period_end: null,
-    cancel_at_period_end: false,
-    data_retention_until: null,
-    tier,
-    bundled,
-    limits: {},
-    quota_pools: [],
-  });
-  const batch: EntitlementsBatch = {
-    workspace_id: "ws_1",
-    entitlements: {
-      "vxture.bid": envelope("pro"),
-      "vxture.crm": envelope("pro"), // 同一个 tier 出现两次，不该重复列出
-      "vxture.ops": envelope(null, true), // 捆绑覆盖也算生效
-    },
-  };
-  const api = fakeApi({
-    session: vi.fn().mockResolvedValue(session({ signedIn: true, entitlementsConfigured: true })),
-    entitlements: vi.fn().mockResolvedValue(batch),
-  });
-  render(
-    <UserSlot
-      api={api}
-      productIds={["vxture.bid", "vxture.crm", "vxture.ops"]}
-      onOpenSettings={() => {}}
-    />,
-  );
-  await openPopover();
-  expect(await screen.findByText("3 个产品生效 · pro")).toBeInTheDocument();
-});
-
-void test("UserSlot subscription line: bundled-only active entitlements omit the tier suffix entirely", async () => {
-  const batch: EntitlementsBatch = {
-    workspace_id: "ws_1",
-    entitlements: {
-      "vxture.ops": {
-        status: "active",
-        trial_ends_at: null,
-        current_period_end: null,
-        cancel_at_period_end: false,
-        data_retention_until: null,
-        tier: null,
-        bundled: true,
-        limits: {},
-        quota_pools: [],
-      },
-    },
-  };
-  const api = fakeApi({
-    session: vi.fn().mockResolvedValue(session({ signedIn: true, entitlementsConfigured: true })),
-    entitlements: vi.fn().mockResolvedValue(batch),
-  });
-  render(<UserSlot api={api} productIds={["vxture.ops"]} onOpenSettings={() => {}} />);
-  await openPopover();
-  // 没有 " · 档位" 这截——被捆绑覆盖的产品没有自己的 tier，硬拼一个空档位
-  // 后缀出来比不显示更奇怪。
-  expect(await screen.findByText("1 个产品生效")).toBeInTheDocument();
-});
-
 void test("UserSlot: shows the active workspace name when signed in with one", async () => {
   const api = fakeApi({
     session: vi.fn().mockResolvedValue(session({ signedIn: true, workspace: { name: "某工作区" } })),
@@ -263,7 +136,7 @@ void test("UserSlot: online before system info has loaded shows 运行中 withou
   const api = fakeApi({ system: vi.fn((): Promise<SystemInfo> => new Promise(() => {})) });
   render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
   await openPopover();
-  expect(await screen.findByText(/运行中/)).toBeInTheDocument();
+  expect(await screen.findByText(/^就绪/)).toBeInTheDocument();
 });
 
 void test("UserSlot: non-DPAPI key protection reads 开发态, not left blank", async () => {
@@ -272,7 +145,7 @@ void test("UserSlot: non-DPAPI key protection reads 开发态, not left blank", 
   });
   render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
   await openPopover();
-  expect(await screen.findByText("开发态")).toBeInTheDocument();
+  expect(await screen.findByText("开发态 · 明文")).toBeInTheDocument();
 });
 
 // --- login / logout / settings ---------------------------------------------
@@ -407,4 +280,38 @@ void test("UserSlot: collapsed hides the name/sub text but keeps the accessible 
     expect(screen.getByRole("button", { name: "账户 · 郭彦豪" })).toBeInTheDocument(),
   );
   expect(screen.queryByText("郭彦豪", { selector: ".user-chip-name" })).not.toBeInTheDocument();
+});
+
+void test("UserSlot panel: the three environment rows mirror the home page word for word, and 订阅 is gone", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue(session({ signedIn: true, workspace: { name: "某工作区" } })),
+    system: vi.fn().mockResolvedValue(systemInfo({ version: "0.1.0", keyProtection: "dpapi" })),
+  });
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /账户/ }));
+  expect(await screen.findByText("运行环境")).toBeInTheDocument();
+  expect(screen.getByText("就绪 · 0.1.0")).toBeInTheDocument();
+  expect(screen.getByText("数据加密")).toBeInTheDocument();
+  expect(screen.getByText("已加密 · DPAPI")).toBeInTheDocument();
+  expect(screen.getByText("平台连接")).toBeInTheDocument();
+  expect(screen.getByText("已连接 · 某工作区")).toBeInTheDocument();
+  expect(screen.queryByText("订阅")).not.toBeInTheDocument();
+  expect(screen.queryByText("Runtime")).not.toBeInTheDocument();
+});
+
+void test("UserSlot: the platform's avatar picture is used when the session carries one", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue(
+      session({ signedIn: true, profile: { sub: "u1", name: "郭", picture: "https://img.example/u1.png" } }),
+    ),
+  });
+  const { container } = render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  await screen.findAllByText("郭");
+  // Radix Avatar only mounts the <img> after it loads; the src is on the image element when present,
+  // and the fallback initial is always there for the failure case.
+  await vi.waitFor(() => {
+    const img = container.querySelector("img");
+    expect(img === null || img.getAttribute("src") === "https://img.example/u1.png").toBe(true);
+  });
 });

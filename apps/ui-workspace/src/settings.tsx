@@ -11,6 +11,9 @@
 
 import { useEffect, useState } from "react";
 import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
   Button,
   EmptyState,
   Input,
@@ -20,7 +23,7 @@ import {
   StatusBadge,
   useTheme,
 } from "@vxture/design-system";
-import { Api, ApiError, type ConnectorView, type SystemInfo, type UpdateCheck } from "./api";
+import { Api, ApiError, type ConnectorView, type SessionInfo, type SystemInfo, type UpdateCheck } from "./api";
 // SectionId/SETTINGS_SECTIONS live in their own module (settings-sections.ts)
 // so the sidebar can know the section list without pulling in this file's
 // DS-heavy SettingsView - see that file's header comment (TD-011②).
@@ -31,6 +34,7 @@ const UI_VERSION = "0.2.0";
 
 export function SettingsView({ api, section }: { api: Api; section: SectionId }) {
   const [system, setSystem] = useState<SystemInfo | null>(null);
+  const [session, setSession] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -38,13 +42,18 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
       .system()
       .then(setSystem)
       .catch((e) => setError(String((e as Error).message)));
+    // 账户页要展示会话里的身份；拿不到就按未登录呈现，不报错。
+    Promise.resolve()
+      .then(() => api.session())
+      .then(setSession)
+      .catch(() => setSession(null));
   }, [api]);
 
   return (
     <div className="flex flex-col gap-md">
       {/* 「设置」两个字已经在标题栏和侧栏里，这里不再写第三遍。 */}
       {error && <div className="error-box">{error}</div>}
-      {section === "account" && <AccountSection />}
+      {section === "account" && <AccountSection session={session} />}
       {section === "general" && <GeneralSection />}
       {section === "privacy" && <PrivacySection system={system} />}
       {section === "connectors" && <ConnectorsSection api={api} />}
@@ -76,15 +85,56 @@ function SettingRow({
 
 /* ---------------- 账户 ---------------- */
 
-function AccountSection() {
+/**
+ * 账户：登录后把会话里的身份**摆出来**（姓名、邮箱、租户、工作区），修改走
+ * 云平台的「个人信息」页（owner 2026-09-03 定：不能只留一个跳转页）。本机只读
+ * 会话，不改身份 —— 改在平台改，这里如实写「在线修改」。
+ */
+function AccountSection({ session }: { session: SessionInfo | null }) {
+  if (!session?.signedIn) {
+    return (
+      <div className="card">
+        <EmptyState
+          icon="user-circle"
+          title="账户由左下角的账户菜单管理"
+          description="在侧栏底部登录 Vxture 账号：同步订阅权益、调用云端 AI 能力、管理设备。登录走系统浏览器（PKCE），凭证只存于本机凭据库。"
+        />
+      </div>
+    );
+  }
+  const consoleBase = session.consoleBase || "https://vxture.com";
+  const profileUrl = `${consoleBase}/zh-CN/profile`;
+  const name = session.profile?.name ?? session.profile?.email ?? "Vxture 用户";
+  const initial = name.slice(0, 1);
   return (
-    <div className="card">
-      <EmptyState
-        icon="user-circle"
-        title="账户由左下角的账户菜单管理"
-        description="在侧栏底部登录 Vxture 账号：同步订阅权益、调用云端 AI 能力、管理设备。登录走系统浏览器（PKCE），凭证只存于本机凭据库。"
-      />
-    </div>
+    <>
+      <div className="card">
+        <div className="account-head">
+          <Avatar className="account-avatar">
+            {session.profile?.picture && <AvatarImage src={session.profile.picture} alt={name} />}
+            <AvatarFallback>{initial}</AvatarFallback>
+          </Avatar>
+          <div className="account-ident">
+            <div className="account-name">{name}</div>
+            {session.profile?.email && <div className="account-email">{session.profile.email}</div>}
+          </div>
+          <Button variant="outline" size="sm" onClick={() => window.open(profileUrl, "_blank", "noopener")}>
+            在线修改 ↗
+          </Button>
+        </div>
+        <SettingRow label="租户">
+          <span className="setting-value">{session.org?.name ?? "—"}</span>
+        </SettingRow>
+        <SettingRow label="工作区" hint="本机的项目、订阅与数据边界都按它划分；切换在平台完成">
+          <span className="setting-value">{session.workspace?.name ?? "—"}</span>
+        </SettingRow>
+        <SettingRow label="账户中心" hint="姓名、头像、密码、设备等在云平台的「个人信息」页修改">
+          <a className="setting-link" href={profileUrl} target="_blank" rel="noopener noreferrer">
+            {profileUrl}
+          </a>
+        </SettingRow>
+      </div>
+    </>
   );
 }
 
@@ -93,15 +143,21 @@ function AccountSection() {
 function GeneralSection() {
   const { mode, setMode, density, setDensity, fontSize, setFontSize } =
     useTheme();
+  /* 顺序（owner 2026-09-03 定）：语言 → 主题 → 密度 → 字号；控件等宽。 */
   return (
     <div className="card">
+      <SettingRow label="语言">
+        <NativeSelect disabled wrapperClassName="sel-lang">
+          <option>简体中文</option>
+        </NativeSelect>
+      </SettingRow>
       <SettingRow label="主题" hint="深色为默认基调；窗口按钮颜色随后续版本同步">
         <SegmentedControl
           ariaLabel="主题"
           items={[
             { value: "dark", label: "深色" },
             { value: "light", label: "浅色" },
-            { value: "system", label: "跟随系统" },
+            { value: "system", label: "系统" },
           ]}
           value={mode}
           onChange={setMode}
@@ -130,11 +186,6 @@ function GeneralSection() {
           value={fontSize}
           onChange={setFontSize}
         />
-      </SettingRow>
-      <SettingRow label="语言">
-        <NativeSelect disabled wrapperClassName="sel-lang">
-          <option>简体中文</option>
-        </NativeSelect>
       </SettingRow>
     </div>
   );
