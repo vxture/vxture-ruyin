@@ -16,6 +16,7 @@ import {
   AvatarImage,
   Button,
   EmptyState,
+  Icon,
   Input,
   NativeSelect,
   SectionHeader,
@@ -119,7 +120,8 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
             {session.profile?.email && <div className="account-email">{session.profile.email}</div>}
           </div>
           <Button variant="outline" size="sm" onClick={() => window.open(profileUrl, "_blank", "noopener")}>
-            在线修改 ↗
+            在线修改
+            <Icon name="external-link" size="xs" />
           </Button>
         </div>
         <SettingRow label="租户">

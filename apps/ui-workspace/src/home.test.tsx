@@ -123,7 +123,7 @@ void test("HomePage: the empty-state button opens the platform subscribe page in
     />,
   );
   const user = userEvent.setup();
-  await user.click(await screen.findByText("到 Vxture 平台订阅 ↗"));
+  await user.click(await screen.findByText("到 Vxture 平台订阅"));
   expect(globalThis.open).toHaveBeenCalledWith(
     "https://vxture.com/subscribe",
     "_blank",
@@ -157,8 +157,8 @@ void test("HomePage: the metric row is the three framework facts - runtime, encr
     />,
   );
   expect(screen.getByText("运行环境")).toBeInTheDocument();
-  expect(screen.getByText("就绪")).toBeInTheDocument();
-  expect(screen.getByText("0.2.0")).toBeInTheDocument();
+  expect(screen.getByText("已就绪")).toBeInTheDocument();
+  expect(screen.getByText("Runtime 0.2.0")).toBeInTheDocument();
 
   expect(screen.getByText("数据加密")).toBeInTheDocument();
   expect(await screen.findByText("已加密")).toBeInTheDocument();
@@ -400,7 +400,7 @@ void test("ProductCard: 打开 is the card's only action - 在线使用 lives on
     "打开",
   ]);
   // 那个入口仍然在，只是只有一处。
-  expect(screen.getByRole("button", { name: "在线使用 ↗" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "在线使用" })).toBeInTheDocument();
 });
 
 void test("ProductCard: a blocked product cannot be opened - no 打开, no 在线", () => {
@@ -409,7 +409,7 @@ void test("ProductCard: a blocked product cannot be opened - no 打开, no 在�
   });
   expect(screen.queryByRole("button", { name: "打开" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "在线 ↗" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "去平台订阅 ↗" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "去平台订阅" })).toBeInTheDocument();
 });
 
 void test("ProductCard: a blocked product says WHY - 打不开 and 因为退订所以打不开 are different things", () => {
@@ -466,7 +466,7 @@ void test("ProductCard: renew intent links to the renew flow, not first-purchase
       }),
     ],
   });
-  await userEvent.click(screen.getByRole("button", { name: "去平台续费 ↗" }));
+  await userEvent.click(screen.getByRole("button", { name: "去平台续费" }));
   expect(globalThis.open).toHaveBeenCalledWith(
     "https://vxture.com/subscribe?product=vxture.crm&intent=renew",
     "_blank",
@@ -487,7 +487,7 @@ void test("ProductCard: per-product operations moved off the home page - no 新�
 
 void test("HomePage: 我的智能体 的标题行链接是「在线使用」，落到 console 的应用中心", async () => {
   renderHome({ products: [product()] });
-  await userEvent.click(screen.getByRole("button", { name: "在线使用 ↗" }));
+  await userEvent.click(screen.getByRole("button", { name: "在线使用" }));
   expect(globalThis.open).toHaveBeenCalledWith(
     "https://vxture.com/zh-CN/appcenter",
     "_blank",
@@ -521,11 +521,11 @@ void test("热门智能体: every card says 了解详情, never a subscribe acti
   renderHome({ products: [] });
   // 这个链接落在目录页，不是某个产品的订阅流程 —— 所以按钮不写「订阅」，
   // 上没上线交给状态徽章说。写成「去平台订阅」是拿做不到的动作骗点击。
-  expect(screen.getAllByRole("button", { name: "了解详情 ↗" })).toHaveLength(
+  expect(screen.getAllByRole("button", { name: "了解详情" })).toHaveLength(
     RECOMMENDED.length,
   );
   expect(
-    screen.queryByRole("button", { name: "去平台订阅 ↗" }),
+    screen.queryByRole("button", { name: "去平台订阅" }),
   ).not.toBeInTheDocument();
 });
 
@@ -546,7 +546,7 @@ void test("热门智能体: says where the list came from and when - it is a sna
 
 void test("热门智能体: 浏览全部 opens the real catalog page", async () => {
   renderHome({ products: [] });
-  await userEvent.click(screen.getByRole("button", { name: "浏览全部 ↗" }));
+  await userEvent.click(screen.getByRole("button", { name: "浏览全部" }));
   expect(globalThis.open).toHaveBeenCalledWith(
     CATALOG_SOURCE.url,
     "_blank",
@@ -557,7 +557,7 @@ void test("热门智能体: 浏览全部 opens the real catalog page", async () 
 void test("热门智能体: a card's 了解详情 opens the catalog page in a new tab, and opens nothing local", async () => {
   const onOpen = vi.fn();
   renderHome({ products: [], onOpen });
-  await userEvent.click(screen.getAllByRole("button", { name: "了解详情 ↗" })[0]!);
+  await userEvent.click(screen.getAllByRole("button", { name: "了解详情" })[0]!);
   expect(globalThis.open).toHaveBeenCalledWith(
     CATALOG_SOURCE.url,
     "_blank",
@@ -883,7 +883,7 @@ void test("我的智能体 header: 同步产品版本 · 安装本地包 · 在�
   );
   const actions = document.querySelector(".section-actions") as HTMLElement;
   const names = within(actions).getAllByRole("button").map((b) => b.textContent);
-  expect(names).toEqual(["同步产品版本", "安装本地包", "在线使用 ↗"]);
+  expect(names).toEqual(["同步产品版本", "安装本地包", "从产品库安装", "在线使用"]);
 });
 
 void test("同步产品版本: fetches every product's contract; refreshes only when something new landed; a refusal reaches onError once", async () => {
@@ -968,7 +968,7 @@ void test("ProductCard: a failed version pin goes to onError; 智能体介绍 is
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "更新版本 v1.1.0" }));
   await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("版本不存在"));
-  const intro = screen.getByRole("link", { name: "智能体介绍 ↗" }) as HTMLAnchorElement;
+  const intro = screen.getByRole("link", { name: "智能体介绍" }) as HTMLAnchorElement;
   expect(intro.href).toBe("https://vxture.com/zh-CN/appcenter");
 });
 
@@ -980,4 +980,64 @@ void test("ProductCard: the warning about an unwired capability surface is style
   const note = await screen.findByRole("note");
   expect(note.className).toContain("pcard-alert--warning");
   expect(note.textContent).toContain("能力面未接通");
+});
+
+void test("ProductCard: clicking the card body selects it for the sidebar; buttons and links do not toggle", async () => {
+  const onSelectProduct = vi.fn();
+  render(
+    <HomePage
+      api={fakeApi()}
+      products={[product()]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+      selectedProductId={null}
+      onSelectProduct={onSelectProduct}
+    />,
+  );
+  const user = userEvent.setup();
+  const card = document.querySelector(".pcard") as HTMLElement;
+  await user.click(card.querySelector(".pcard-desc")!);
+  expect(onSelectProduct).toHaveBeenLastCalledWith("vxture.bid");
+  await user.click(screen.getByRole("link", { name: "智能体介绍" }));
+  expect(onSelectProduct).toHaveBeenCalledTimes(1);
+});
+
+void test("ProductCard: a selected card is marked, and clicking it again reports null (nothing selected)", async () => {
+  const onSelectProduct = vi.fn();
+  render(
+    <HomePage
+      api={fakeApi()}
+      products={[product()]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+      selectedProductId="vxture.bid"
+      onSelectProduct={onSelectProduct}
+    />,
+  );
+  const card = document.querySelector(".pcard") as HTMLElement;
+  expect(card.className).toContain("pcard--selected");
+  expect(card.getAttribute("aria-pressed")).toBe("true");
+  await userEvent.setup().click(card.querySelector(".pcard-desc")!);
+  expect(onSelectProduct).toHaveBeenLastCalledWith(null);
+});
+
+void test("我的智能体 header: 从产品库安装 toggles the registry list below the grid", async () => {
+  const registry = vi.fn().mockResolvedValue({ status: "unreachable", base: "b", reason: "没网", checkedAt: "t" });
+  render(
+    <HomePage api={fakeApi({ registry })} products={[]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={noop} />,
+  );
+  const user = userEvent.setup();
+  expect(screen.queryByText(/产品库没查到/)).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "从产品库安装" }));
+  expect(await screen.findByText(/产品库没查到 —— 没网/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "收起产品库" }));
+  expect(screen.queryByText(/产品库没查到/)).not.toBeInTheDocument();
 });

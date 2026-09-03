@@ -96,6 +96,9 @@ const isTab = (s: string): s is TabId =>
  * 工作区，那句拒绝就无从理解。
  */
 /** 会话（工作区名、租户名、console 基址）——标题栏的工作区控件用它。 */
+/** 侧栏「最近工作」最多几条（owner：不能无限长）。 */
+const RECENT_LIMIT = 8;
+
 function useWorkspaceSession(api: Api): SessionInfo | undefined {
   const [session, setSession] = useState<SessionInfo | undefined>();
   useEffect(() => {
@@ -251,17 +254,39 @@ export function Workbench({ api }: { api: Api }) {
     products.find((p) => p.id === openProjectMeta?.productId)?.name ??
     openProjectMeta?.productId;
   const [projectPending, setProjectPending] = useState(0);
+  /** 首页卡片的选中态（owner 定的联动）：选中 → 侧栏「最近工作」只留该智能体的项目。 */
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const session = useWorkspaceSession(api);
   const workspaceName = session?.workspace?.name;
 
+  // 滚动条平时隐藏，滚动时才现身（owner 定）：捕获阶段监听任何滚动，给根元素
+  // 打一个标记，停下 900ms 后摘掉；CSS 只在标记存在或悬停时画滑块。
+  useEffect(() => {
+    let timer: number | undefined;
+    const onScroll = () => {
+      document.documentElement.setAttribute("data-scrolling", "");
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => document.documentElement.removeAttribute("data-scrolling"), 900);
+    };
+    document.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("scroll", onScroll, true);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, []);
+
   const sections: ShellNavSection[] = useMemo(() => {
+    // 首页单独一组、不要组名（组头由 CSS 隐去）：一个「总览」分组下面只有
+    // 「首页」一项，是给一件东西起了两个名字。
     const list: ShellNavSection[] = [
       {
-        title: "总览",
+        title: "首页",
         items: [{ href: "#home", label: "首页", icon: "home" }],
       },
     ];
-    const mine = workspaces.filter((w) => w.workspaceId);
+    const mine = workspaces.filter(
+      (w) => w.workspaceId && (!selectedProductId || w.productId === selectedProductId),
+    );
     // 归属为空的另起一组：它们不是普通项目，是一份**待导入队列**（ADR-015）。
     // 混在一起会让「这是个不该长期存在的状态」这件事消失。
     const pendingImport = workspaces.filter((w) => !w.workspaceId);
@@ -269,9 +294,10 @@ export function Workbench({ api }: { api: Api }) {
       // 「最近工作」而不是「项目」：侧栏要回答的是「我刚才在做什么」，所以按
       // 新到旧排。产品名走 subLabel —— 项目名是他要找的东西，产品名是用来
       // 区分重名的上下文，两者不该挤在同一行里用连字符拼起来。
-      const recent = [...mine].sort((a, b) =>
-        b.createdAt.localeCompare(a.createdAt),
-      );
+      // 有上限：侧栏是「最近」，不是全部项目的清单；全部在首页与搜索里。
+      const recent = [...mine]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, RECENT_LIMIT);
       list.push({
         title: "最近工作",
         dividerBefore: true,
@@ -313,7 +339,7 @@ export function Workbench({ api }: { api: Api }) {
       });
     }
     return list;
-  }, [workspaces, products]);
+  }, [workspaces, products, selectedProductId]);
 
   const searchGroups: ShellSearchGroup[] = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -414,6 +440,17 @@ export function Workbench({ api }: { api: Api }) {
               className="app-brand cursor-pointer"
             />
           )}
+          {/* 工作区 + Runtime 紧跟在左侧区域之后（owner 2026-09-04 定），与品牌隔一段。 */}
+          <span className="app-header-context">
+          {session && workspaceName && (
+            // 租户 / 工作区菜单：租户 + 工作区、只读 AI 配额、租户管理链接
+            // （owner 2026-09-04 定的三项，见 tenant-menu.tsx）。
+            <TenantMenu api={api} session={session} productIds={products.map((p) => p.id)} />
+          )}
+          <StatusBadge tone={health.ok ? "success" : "danger"} dot>
+            {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
+          </StatusBadge>
+          </span>
         </span>
       }
       center={
@@ -431,7 +468,7 @@ export function Workbench({ api }: { api: Api }) {
         </div>
       }
       trailing={
-        <div className="no-drag flex items-center gap-xs">
+        <div className="no-drag flex items-center gap-xs app-header-trailing">
           {/* 当前工作区常驻。**此前它一个字都没有出现在项目面板上**，而项目、
               订阅、权益、数据边界全按工作区划分，跨工作区访问会被服务端拒绝
               —— 用户看着屏幕却不知道自己在哪个工作区，那句拒绝就无从理解。 */}
@@ -442,14 +479,6 @@ export function Workbench({ api }: { api: Api }) {
                 ④ 设置（全局入口，固定在最右）
               读的东西在左，动的东西在右；越常按的越靠外侧，手停下的位置就是
               最右。通知紧挨设置，是各家桌面应用的惯例（VS Code / GitHub 皆如此）。 */}
-          {session && workspaceName && (
-            // 租户 / 工作区菜单：租户 + 工作区、只读 AI 配额、租户管理链接
-            // （owner 2026-09-04 定的三项，见 tenant-menu.tsx）。
-            <TenantMenu api={api} session={session} productIds={products.map((p) => p.id)} />
-          )}
-          <StatusBadge tone={health.ok ? "success" : "danger"} dot>
-            {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
-          </StatusBadge>
           {/* 常驻：未决确认在哪个视图都看得见。放进某个页面里等于又要求
               用户先找对地方，而那正是这条要修的问题。 */}
           <PendingInbox
@@ -522,13 +551,14 @@ export function Workbench({ api }: { api: Api }) {
   );
 
   const sidebar = (
+    <div className={`app-sidebar h-full${view.kind === "home" ? " app-sidebar--home" : ""}`}>
     <ShellSidebarNav
       domainName={
         view.kind === "workspace"
           ? (openProductName ?? "产品")
           : view.kind === "settings"
             ? "设置"
-            : "工作台"
+            : ""
       }
       sections={
         view.kind === "workspace"
@@ -566,6 +596,7 @@ export function Workbench({ api }: { api: Api }) {
         </>
       }
     />
+    </div>
   );
 
   return (
@@ -603,6 +634,8 @@ export function Workbench({ api }: { api: Api }) {
               onCreated={openProject}
               onRefresh={refreshSidebar}
               onError={setError}
+              selectedProductId={selectedProductId}
+              onSelectProduct={setSelectedProductId}
             />
           )}
         </Suspense>

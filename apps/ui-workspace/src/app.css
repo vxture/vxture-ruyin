@@ -303,6 +303,7 @@ body {
   margin: 0;
   font-size: var(--font-size-body-md);
   font-weight: 600;
+  color: var(--color-foreground);
   line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -317,13 +318,26 @@ body {
   align-self: flex-start;
 }
 
+/* 组内 2px、组间 8px、区块间 12px（owner 2026-09-04 定的三档呼吸感）。 */
 .pcard-body {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-2xs, 4px);
+  gap: 8px;
   padding-left: 52px;
   min-width: 0;
 }
+/* 字号四级：名称 14/600 前景 · 说明与项目数 13/400 前景 85% · 标识与徽章 12 muted · 警示 13 warning。 */
+.pcard-desc {
+  color: var(--color-foreground);
+  opacity: 0.85;
+  font-size: var(--font-size-body-sm);
+  line-height: 1.45;
+}
+.pcard--selected {
+  border-color: var(--primary, var(--color-primary));
+  box-shadow: 0 0 0 1px var(--primary, var(--color-primary)) inset;
+}
+.pcard { cursor: default; }
 .pcard-desc {
   margin: 0;
   font-size: var(--font-size-body-sm);
@@ -347,7 +361,7 @@ body {
   display: flex;
   align-items: flex-start;
   gap: var(--spacing-2xs, 4px);
-  margin: 2px 0 0;
+  margin: 0;
   padding: var(--spacing-2xs, 4px) var(--spacing-xs);
   border-radius: var(--radius-sm, 6px);
   font-size: var(--font-size-body-sm);
@@ -374,10 +388,12 @@ body {
 /* 项目数缩进到文字列（与说明同一条左缘），不顶在卡片最左。 */
 .pcard-count {
   font-size: var(--font-size-body-sm);
-  color: var(--color-muted-foreground);
+  color: var(--color-foreground);
+  opacity: 0.85;
   white-space: nowrap;
   padding-left: 52px;
 }
+.pcard-count b { font-weight: 600; }
 .pcard-count b {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -457,9 +473,10 @@ body {
 }
 /* 左右 41px 是 DS 容器的默认留白；在只有一个内容列的工作台里那是纯损耗。
    纵向同理：header 之下立刻是内容，不需要再垫一段。 */
+/* 内容区左右各 32px（owner 2026-09-04 定）：与侧栏、与右边界都隔开一段。 */
 .workbench-page {
   padding-block: var(--spacing-md);
-  padding-inline: var(--spacing-lg);
+  padding-inline: 32px;
   max-width: none;
 }
 
@@ -883,3 +900,53 @@ body {
   font-size: var(--font-size-body-sm);
   color: var(--color-muted-foreground);
 }
+
+/* ---------- 2026-09-04 owner 的首页 / 导航一批 ---------- */
+
+/* 卡片：内边距四周一致 16px；头部 → 正文 8px；正文 → 底部分割线 12px。 */
+.pcard { padding: 16px; gap: 8px; }
+.pcard-head { row-gap: 4px; }
+.pcard-foot { margin-top: 4px; padding-top: 12px; }
+.pcard-badges { gap: 4px; }
+.pcard-badges [data-slot="badge"], .pcard .catalog-caps [data-slot="badge"] { font-size: 11px; }
+.pcard-ident { font-size: 12px; }
+.pcard-link { font-size: var(--font-size-body-sm); }
+
+/* 7. 滚动条：细、透明、不滚动时隐藏（Chromium）。 */
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+html[data-scrolling] *::-webkit-scrollbar-thumb,
+*:hover::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--foreground) 28%, transparent); }
+*::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--foreground) 45%, transparent); }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* 16. 标题栏：比内容区略深一档 + 一条底线，看得出范围；搜索框压低。 */
+.app-topbar {
+  background: color-mix(in srgb, var(--card) 88%, var(--foreground) 4%);
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+}
+.app-topbar [cmdk-root] > div { height: 28px; min-height: 28px; }
+/* 17. 工作区 + Runtime 紧跟品牌之后，隔一段。 */
+.app-header-context {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-left: var(--spacing-lg);
+}
+
+/* 9-12. 侧栏：不写域名文字，只留收缩按钮；首页组不画组头；导航项加高，
+   两行文字拉开；「最近工作」第一行小字是智能体，第二行是任务。 */
+.app-sidebar--home .h-header-sm .text-label-md { display: none; }
+.app-sidebar--home nav > div:first-child > button { display: none; }
+.app-sidebar--home nav > div:first-child { padding-top: var(--spacing-sm); padding-bottom: var(--spacing-sm); }
+.app-sidebar nav a { min-height: 44px; padding-block: 4px; }
+.app-sidebar nav a > span:last-child > span { flex-direction: column-reverse; gap: 3px; padding-block: 2px; }
+.app-sidebar nav a > span:last-child > span > span:first-child { font-size: var(--font-size-body-md); }
+.app-sidebar nav a > span:last-child > span > span:last-child {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.app-sidebar--home nav > div + div { padding-top: var(--spacing-sm); }

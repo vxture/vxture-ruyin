@@ -140,7 +140,7 @@ export function UserSlot({
    *   数据加密  已加密 · DPAPI / 开发态 · 明文
    *   平台连接  已连接 · 工作区 / 未登录
    */
-  const runtimeLine = online ? `就绪${system?.version ? ` · ${system.version}` : ""}` : "未连接";
+  const runtimeLine = online ? `已就绪${system?.version ? ` · Runtime ${system.version}` : ""}` : "未连接";
   const encryptionLine = system
     ? system.keyProtection === "dpapi"
       ? "已加密 · DPAPI"
