@@ -2,6 +2,11 @@
   "name": "@vxture/ruyin-core",
   "version": "0.1.0",
   "description": "Ruyin Workspace Runtime isomorphic kernel: ports, workspace lifecycle, harness state machine, hash-chained audit (design authority: docs/30-design/10-workspace-runtime.md, 50-harness.md, 60-technical-architecture.md section 6).",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vxture/vxture-ruyin.git",
+    "directory": "packages/runtime-core"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,7 +17,11 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.js.map",
+    "!dist/**/*.test.d.ts.map"
   ],
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
