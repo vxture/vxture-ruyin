@@ -79,9 +79,13 @@
         `"@vxture/ruyin-contract-schema": "0.1.0"`，依赖没先发，包在注册表上就指向一个
         不存在的版本。`check-publish-order.mjs` 按真实依赖拓扑校验，接入 static-checks，
         顺序颠倒与漏排包两种失败均反证可抓。
-- [ ] 版本策略定案（changesets vs 手动，08 OQ-2）。**当前口径**：版本写在各包的
-      package.json，推 `packages-v*` tag 触发；已存在的版本跳过，所以「发布」= 先改版本号。
-      是否引入 changesets 尚未定。
+- [x] 版本策略定案（2026-09-03，owner 定：**手工版本 + 守卫，不上 changesets**）。口径不变：
+      版本写在各包的 package.json，推 `packages-v*` tag 触发，已存在的版本跳过，所以
+      「发布」= 先改版本号。四个包、一个发布方，changesets 的工具链与机器开的 PR 开销大于收益。
+      **补上它缺的那道守卫**（`check-package-versions.mjs`，接入 static-checks）：以最近一次
+      `packages-v*` tag 为基线，包内容改了（*.test.ts 除外）而版本号没动 → 报错，版本倒退 → 报错；
+      依赖方不强制跟着升（钉旧版在 semver 上成立），只提示。**还没有 tag 时如实放行**，不拿假
+      基线装作检查过。反证：对 `--baseline HEAD~8` 跑，抓出当天改了内容没升版本的三个包。
 
 ## W6 · Phase C：双端与同步
 
@@ -284,13 +288,14 @@
 - 审计页对**每一条完好的链**都喊「哈希链断裂」：X-3 改名后界面那份类型没跟
 - 三处文件头说反了（改订轮次/瞬时挂起/取消都已实现却写着未做）
 
-### 守卫（八道，每道都故意弄坏验证过）
+### 守卫（九道，每道都故意弄坏验证过）
 
 `lint:contract`（R 系列）· `lint:api-shape`（X-1/B-3）· `lint:publish-order` ·
 `lint:shared-shapes`（跨进程类型 + 事件词表 + 标题栏高度）·
 `lint:update-policy`（owner 定的三条更新策略）· `lint:docs-numbering` ·
-`lint:tech-debt`（登记册可解析、自计数一致）· `lint:brand-assets`；
-（2026-09-03 更正：此处此前写「六道」，后两道加上后没改）
+`lint:tech-debt`（登记册可解析、自计数一致）· `lint:brand-assets` ·
+`lint:versions`（内容改了版本必须升，基线 = 最近的 packages-v* tag）；
+（2026-09-03 更正：此处此前写「六道」，后几道加上后没改）
 CI 另加 `packaged-smoke`（windows-latest，真启动 + 真排一份 PDF + 断言 DPAPI）。
 
 **已提为第六个必需检查（2026-09-02，#73）** —— owner 定：ruyin 是桌面分发仓，平台模板明文不适用，
