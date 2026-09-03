@@ -71,7 +71,7 @@ test("TenantMenu: trigger shows the workspace name only; opening shows tenant, w
   expect(await screen.findByText("某租户")).toBeInTheDocument();
   expect(screen.getByText("工作区：某工作区")).toBeInTheDocument();
   expect(await screen.findByText("AI 额度")).toBeInTheDocument();
-  expect(screen.getByText("剩余 250 / 1,000")).toBeInTheDocument();
+  expect(screen.getByText("已用 750 / 1,000 · 剩余 250")).toBeInTheDocument();
   expect(entitlements).toHaveBeenCalledWith(["vxture.bid"]);
   const admin = screen.getByRole("link", { name: /租户管理/ }) as HTMLAnchorElement;
   expect(admin.href).toBe("https://vxture.com/zh-CN/tenant-settings");
