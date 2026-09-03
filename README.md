@@ -33,10 +33,10 @@ The full design baseline lives under `docs/` (org taxonomy). Start at
 
 ```
 packages/   published libraries (@vxture scope): contract-schema, runtime-core,
-            product-sdk, cli
+            document, cli (product-sdk: planned, workplan W3)
 apps/       installer-only applications: local-host (runtime daemon),
             shell (Electron), ui-workspace (React)
-products/   transitional in-repo business products (bid)
+products/   the test fixture (bid) - kept on purpose, ships in the installer (TD-006)
 docs/       org-taxonomy documentation
 scripts/    guardrails and release tooling
 ```

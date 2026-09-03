@@ -337,7 +337,7 @@ runtime-core 版本 = Workspace Runtime 规范版本的实现版本
 
 ```text
 Phase A · 骨架贯通（验证架构，不求功能全）
-    contract-schema 包 + 校验器（R1–R11 可执行）
+    contract-schema 包 + 校验器（R 系列可执行；编号稀疏，清单见 03-A §15）
     runtime-core：Workspace 生命周期 + Harness 状态机（无 AI，模拟能力）
     local-host：SQLite 存储 + Local API
     Shell：启动 Runtime + 加载一个最小产品包（验签 → 校验 → iframe 装载）

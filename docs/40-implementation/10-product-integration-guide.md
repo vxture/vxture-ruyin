@@ -51,9 +51,9 @@ flowchart LR
 | 步骤 | 产出 | 校验 |
 |---|---|---|
 | 业务建模 | 对象 / 状态 / 工作空间类型草案 | 设计评审 |
-| 编写契约 | `ruyin.product.yaml` | 契约 lint（R1–R11） |
+| 编写契约 | `ruyin.product.yaml` | 契约 lint（R 系列，03-A §15） |
 | 产品 UI | Web bundle（经 SDK 访问 Runtime） | 沙箱内可运行 |
-| 本地调试 | 可跑通的开发包 | `ruyin dev` 加载 |
+| 本地调试 | 可跑通的开发包 | `ruyin dev` 加载（**尚未落地**；今天用守护进程的 `RUYIN_PRODUCTS_DIR` 开发目录） |
 | 验证测试 | 双运行时冒烟 + 验证规则测试 | 检查清单（§12） |
 | 打包发布 | `.ruyinpkg` + 双签 | Registry 审核（R12） |
 
@@ -206,12 +206,13 @@ const results = await ruyin.results.list(task.id);  // 含 Verification 与 Prov
 
 # 7. Step 4 · 本地开发与调试
 
-开发者工作流（CLI 随 Phase A 交付）：
+开发者工作流（`ruyin lint` 随 Phase A 交付；`ruyin pack` / `ruyin registry` 2026-09-03 交付；
+**`ruyin dev` 尚未落地** —— 下面这段是目标态，不是现状）：
 
 ```text
 ruyin dev ./my-product/
     ├── 加载未打包目录（跳过签名，标记开发模式水印）
-    ├── 契约热校验：保存即重跑 R1–R11，错误指明字段路径
+    ├── 契约热校验：保存即重跑全部 R 规则，错误指明字段路径
     ├── UI 热更新
     ├── AI 能力模拟：capabilities 可挂 mock 响应（无需真实云端）
     └── Checkpoint / 验证流程可单步触发
@@ -229,7 +230,7 @@ ruyin dev ./my-product/
 ## 8.1 契约层
 
 ```text
-ruyin lint ./my-product/        # R1–R11 静态检查（发布前 Registry 会重跑）
+ruyin lint ./my-product/        # R 系列静态检查（发布前 Registry 会重跑）
 ```
 
 ## 8.2 行为层
@@ -315,7 +316,7 @@ A：当前契约不开放 `execute_script` 类工具（06 §13：执行沙箱就
 # 12. 发布前检查清单
 
 ```text
-□ ruyin lint 零错误（R1–R11）
+□ ruyin lint 零错误（全部 R 规则）
 □ Workspace Type 与业务形态匹配（§4.2）
 □ 所有 generated 输出的任务含 human 验证
 □ sensitivity 标注经产品与安全双确认
