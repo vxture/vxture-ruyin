@@ -328,7 +328,9 @@ Runtime 拉 index.json → 验平台签名 → 下载 .ruyinpkg → 验双签（
 - **OQ-1 代码签名证书**：Windows Authenticode（OV/EV）未采购。未签名 = SmartScreen 拦阻 +
   企业环境不可接受。公开发布前必须解决；beta 渠道内测期可暂缺（受众可控）
 - **OQ-2 npm 包版本策略**：changesets 自动化 vs 手动 tag；runtime-core 版本 = 规范实现版本
-  （03-A §5 runtime.minimum 的校验对象），需要严格的 semver 纪律
+  （03-A §5 runtime.minimum 的校验对象），需要严格的 semver 纪律。
+  **已定（2026-09-03，owner）：手动版本 + 守卫。** `check-package-versions.mjs` 以最近的
+  `packages-v*` tag 为基线，内容改了版本没动即失败；semver 纪律靠这道守卫兜底而不是靠记得
 - **OQ-3 下载主机选址**：挂在哪台既有 worker、带宽余量、是否直接上 OSS —— 待平台线核实
 - **OQ-4 macOS / Linux 构建**：MVP 只出 win32-x64；后续平台矩阵与信创路线（06 §11）合并规划
 

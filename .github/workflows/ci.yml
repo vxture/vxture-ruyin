@@ -97,6 +97,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The version guardrail diffs against the newest packages-v* tag;
+          # a depth-1 checkout has neither the tag nor the history.
+          fetch-depth: 0
 
       - name: Whitespace and conflict-marker check
         run: git diff --check
@@ -123,6 +127,11 @@ jobs:
       # 技术债表是给工具读的：某一行多切一列，表格照常渲染，而清点会静静地数错。
       - name: Tech-debt table parses (TD counts must be trustworthy)
         run: node scripts/guardrails/check-tech-debt-table.mjs
+
+      # W5 版本策略（owner 定：手工版本 + 守卫）：包内容改了、版本号没动，发布
+      # 流水线会因「已发过」跳过它而全绿 —— 消费方拿到的还是旧包。
+      - name: Package version guardrail (content changed => version bumped)
+        run: node scripts/guardrails/check-package-versions.mjs
 
   # -- Contract lint (feed quality-gate) --------------------------------------
   # Runs the R-series semantic rules over every products/*/ruyin.product.yaml via the ruyin
