@@ -15,8 +15,9 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import test from "node:test";
@@ -237,6 +238,123 @@ test("connectors: development install -> project grant -> lan binding -> discove
     await registry.stopAll();
     closeRig(rig);
     rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 流 C 静态产品库的两个口。真跑 CLI 产出一份 registry 目录，用注入的 fetch 从
+ * 磁盘上"提供"它 —— 走的是真清单、真包、真安装管线。
+ */
+function buildRegistryFixture(): { dir: string; base: string; fetchImpl: typeof fetch } {
+  const root = mkdtempSync(join(tmpdir(), "ruyin-srv-reg-"));
+  const cli = fileURLToPath(new URL("../../../packages/cli/dist/main.js", import.meta.url));
+  const base = "https://dl.example.test/ruyin/products";
+  const built = spawnSync(process.execPath, [cli, "registry", productsDir, "--out", join(root, "reg"), "--base-url", base], { encoding: "utf8" });
+  assert.equal(built.status, 0, built.stderr);
+  const fetchImpl = (async (input: string | URL | Request) => {
+    const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (!href.startsWith(base + "/")) return new Response("", { status: 404 });
+    const file = join(root, "reg", decodeURIComponent(href.slice(base.length + 1)));
+    return existsSync(file) ? new Response(readFileSync(file), { status: 200 }) : new Response("", { status: 404 });
+  }) as unknown as typeof fetch;
+  return { dir: root, base, fetchImpl };
+}
+
+test("HTTP /registry: unreachable is a 200 with status unreachable (not an empty catalog); a good index marks installed versions and installability", async () => {
+  const down = await startServer({
+    registryBase: "https://dl.example.test/ruyin/products",
+    registryFetch: (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch,
+  });
+  try {
+    const res = await fetch(`${down.base}/registry`, { headers: down.headers });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { status: string; reason: string };
+    assert.equal(body.status, "unreachable");
+    assert.match(body.reason, /ECONNREFUSED/);
+  } finally {
+    closeRig(down);
+  }
+
+  const fixture = buildRegistryFixture();
+  const rig = await startServer({ registryBase: fixture.base, registryFetch: fixture.fetchImpl });
+  try {
+    const res = await fetch(`${rig.base}/registry`, { headers: rig.headers });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      status: string;
+      installable: boolean;
+      items: Array<{ id: string; version: string; signed: boolean; installed: boolean; installedVersions: string[] }>;
+    };
+    assert.equal(body.status, "ok");
+    // The rig requires signatures (production posture): the catalog is visible, not installable.
+    assert.equal(body.installable, false);
+    const bid = body.items.find((i) => i.id === "vxture.bid");
+    assert.ok(bid);
+    assert.equal(bid.signed, false);
+    // products/bid is the dev-mode builtin in this rig, so 1.0.0 shows as installed.
+    assert.equal(bid.installed, true);
+    assert.deepEqual(bid.installedVersions, ["1.0.0"]);
+  } finally {
+    closeRig(rig);
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("HTTP POST /registry/install: 503 when the index is unreachable, 404 for an unlisted entry, 403 unsigned in production, 201 in development", async () => {
+  const fixture = buildRegistryFixture();
+  const prod = await startServer({ registryBase: fixture.base, registryFetch: fixture.fetchImpl });
+  try {
+    const missing = await fetch(`${prod.base}/registry/install`, {
+      method: "POST",
+      headers: prod.json,
+      body: JSON.stringify({ id: "vxture.bid", version: "9.9.9" }),
+    });
+    assert.equal(missing.status, 404);
+    assert.equal(((await missing.json()) as { code: string }).code, "REGISTRY_ENTRY_NOT_FOUND");
+
+    const refused = await fetch(`${prod.base}/registry/install`, {
+      method: "POST",
+      headers: prod.json,
+      body: JSON.stringify({ id: "vxture.bid", version: "1.0.0" }),
+    });
+    assert.equal(refused.status, 403);
+    const body = (await refused.json()) as { code: string; message: string };
+    assert.equal(body.code, "PACKAGE_UNSIGNED");
+    assert.match(body.message, /not countersigned/);
+  } finally {
+    closeRig(prod);
+  }
+
+  const dev = await startServer({ registryBase: fixture.base, registryFetch: fixture.fetchImpl, requireSignedPackages: false });
+  try {
+    // 1.0.0 is already installed as the dev builtin in this rig; a registry
+    // install of the same version is refused by the installer, honestly.
+    const dup = await fetch(`${dev.base}/registry/install`, {
+      method: "POST",
+      headers: dev.json,
+      body: JSON.stringify({ id: "vxture.bid", version: "1.0.0" }),
+    });
+    assert.equal(dup.status, 422);
+    assert.equal(((await dup.json()) as { code: string }).code, "PACKAGE_INVALID");
+  } finally {
+    closeRig(dev);
+  }
+
+  const down = await startServer({
+    registryBase: fixture.base,
+    registryFetch: (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch,
+  });
+  try {
+    const res = await fetch(`${down.base}/registry/install`, {
+      method: "POST",
+      headers: down.json,
+      body: JSON.stringify({ id: "vxture.bid", version: "1.0.0" }),
+    });
+    assert.equal(res.status, 503);
+    assert.equal(((await res.json()) as { code: string }).code, "REGISTRY_UNREACHABLE");
+  } finally {
+    closeRig(down);
+    rmSync(fixture.dir, { recursive: true, force: true });
   }
 });
 

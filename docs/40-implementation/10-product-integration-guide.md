@@ -256,7 +256,9 @@ ruyin lint ./my-product/        # R1–R11 静态检查（发布前 Registry 会
 # 9. Step 6 · 打包与发布
 
 ```text
-ruyin pack ./my-product/          → my-product-1.0.0.ruyinpkg（含 CHECKSUMS）
+ruyin pack ./my-product/          → my-product-1.0.0.ruyinpkg（含 CHECKSUMS；2026-09-03 起可用，暂无 SIGNATURE，见 TD-037）
+ruyin registry ./products/ --out ./registry --base-url https://dl.vxture.com/ruyin/products
+                                  → 静态产品库：每个产品一个包 + index.json + SHA256SUMS
 ruyin sign --key <publisher-key>  → 附加发布者签名
 ruyin publish --registry vxture   → 提交 Registry
     ├── Registry 重跑 lint + 验签

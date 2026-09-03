@@ -1,7 +1,7 @@
 {
   "name": "@vxture/ruyin-cli",
   "version": "0.1.0",
-  "description": "Ruyin developer CLI: contract lint (dev/pack land in later batches, see docs/40-implementation/10-product-integration-guide.md).",
+  "description": "Ruyin developer CLI: contract lint, product packaging (.ruyinpkg) and the static registry index (docs/40-implementation/10-product-integration-guide.md; ruyin dev lands later).",
   "type": "module",
   "bin": {
     "ruyin": "dist/main.js"
@@ -18,7 +18,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json && node --experimental-test-coverage --test-coverage-include=\"dist/**/*.js\" --test-coverage-exclude=\"dist/**/*.test.js\" --test-coverage-lines=95 --test-coverage-branches=90 --test-coverage-functions=95 --test dist/main.test.js"
+    "test": "tsc -p tsconfig.json && node --experimental-test-coverage --test-coverage-include=\"dist/**/*.js\" --test-coverage-exclude=\"dist/**/*.test.js\" --test-coverage-lines=95 --test-coverage-branches=90 --test-coverage-functions=95 --test \"dist/**/*.test.js\""
   },
   "dependencies": {
     "@vxture/ruyin-contract-schema": "workspace:*"

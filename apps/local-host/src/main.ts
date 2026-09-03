@@ -14,6 +14,7 @@
  *   RUYIN_PLATFORM_API_BASE  entitlements API base (unset = C2 disabled)
  *   RUYIN_CONSOLE_BASE       console deep-link base (default https://vxture.com)
  *   RUYIN_UPDATE_FEED        update feed base (default: stable channel on dl)
+ *   RUYIN_REGISTRY_BASE      static product registry base (default: products dir on dl)
  *   RUYIN_CAPABILITY_BASE    business-product capability surface (unset = mock);
  *                            also the source for contract fetch (ADR-012)
  */
@@ -180,6 +181,10 @@ const server = createLocalApi({
   refreshEntitlements: () => syncEntitlements(),
   ...(process.env["RUYIN_UPDATE_FEED"]
     ? { updateFeedBase: process.env["RUYIN_UPDATE_FEED"] }
+    : {}),
+  // 流 C 静态产品库（70-repo-organization §7.4）；不设就是 dl 主机的 products 目录。
+  ...(process.env["RUYIN_REGISTRY_BASE"]
+    ? { registryBase: process.env["RUYIN_REGISTRY_BASE"] }
     : {}),
   // 一级供给：与能力调用同一条通路、同一个设置（ADR-012）。未配置能力面就没有
   // 可拉的地方，此时不注入——服务端据此如实回答，而不是静默无事发生。

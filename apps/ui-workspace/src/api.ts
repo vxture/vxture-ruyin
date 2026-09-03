@@ -51,6 +51,23 @@ export interface ProductInfo {
   supply: "contract_fetch" | "package" | "builtin";
 }
 
+/** 静态产品库（daemon /registry）的一条。`installable` 在外层：这台机器装不装得了未签名包。 */
+export interface RegistryItem {
+  id: string;
+  name: string;
+  version: string;
+  publisher: string;
+  runtime: { minimum: string };
+  size: number;
+  signed: boolean;
+  installed: boolean;
+  installedVersions: string[];
+}
+
+export type RegistryCatalog =
+  | { status: "ok"; base: string; generatedAt: string; checkedAt: string; installable: boolean; items: RegistryItem[] }
+  | { status: "unreachable"; base: string; reason: string; checkedAt: string };
+
 /** 一次安装的结果。`signed` 要照实说 —— 未签名的包是另一回事。 */
 export interface InstalledPackage {
   productId: string;
@@ -553,6 +570,9 @@ export class Api {
       "POST",
       via ? { type, root, connector: via.connector, source: via.source } : { type, root },
     );
+  registry = () => this.call<RegistryCatalog>("/registry");
+  installFromRegistry = (id: string, version: string) =>
+    this.call<InstalledPackage & { from: "registry" }>("/registry/install", "POST", { id, version });
   connectors = () => this.call<{ items: ConnectorView[] }>("/connectors");
   installConnector = (input: {
     id: string;

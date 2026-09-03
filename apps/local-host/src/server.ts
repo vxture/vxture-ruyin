@@ -28,6 +28,7 @@ import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import { apiError, REJECTION } from "./errors.js";
 import type { ToolProvider } from "@vxture/ruyin-contract-schema";
 import { ConnectorInstallRefusedError } from "./connector-registry.js";
+import { RegistryError, downloadPackage, fetchRegistryIndex } from "./registry-client.js";
 import { join as joinPath } from "node:path";
 import type { EventBus } from "./events.js";
 import { checkForUpdate } from "./updates.js";
@@ -87,6 +88,12 @@ export interface LocalApiDeps {
    * 未接通订阅面时缺省。
    */
   refreshEntitlements?: () => Promise<void>;
+  /**
+   * 静态产品库（流 C，MVP 形态）的基址；缺省 = dl 主机的 products 目录。
+   * `registryFetch` 只为测试注入，缺省用全局 fetch。
+   */
+  registryBase?: string;
+  registryFetch?: typeof fetch;
   /** 更新 feed 基址覆盖（dl 主机未落地前可指向测试 feed）；缺省见 updates.ts。 */
   updateFeedBase?: string;
   /** 运行时事件总线（TD-027）。不接就没有 /events，消费方回到轮询。 */
@@ -420,6 +427,91 @@ async function handle(
       ...(deps.updateFeedBase ? { feedBase: deps.updateFeedBase } : {}),
     });
     send(res, 200, check);
+    return;
+  }
+
+  // --- 静态产品库（流 C，MVP 形态；70-repo-organization §7.4）---
+  // GET /registry：读 index.json，标出本机已装的版本。查不到就是 unreachable，
+  // 不是「没有产品」—— 与更新检查同一条纪律。
+  if (method === "GET" && path === "/registry") {
+    const outcome = await fetchRegistryIndex({
+      ...(deps.registryBase ? { base: deps.registryBase } : {}),
+      ...(deps.registryFetch ? { fetchImpl: deps.registryFetch } : {}),
+    });
+    if (outcome.status !== "ok") {
+      send(res, 200, outcome);
+      return;
+    }
+    const installed = new Map(deps.registry.list().map((p) => [p.id, p.versions]));
+    send(res, 200, {
+      ...outcome,
+      // 生产拒装未签名包（§18.2），而静态库今天只有未签名包（TD-037）：先说清
+      // 这台机器装不装得了，别让用户点了「安装」才知道。
+      installable: deps.requireSignedPackages === false,
+      items: outcome.items.map((item) => ({
+        ...item,
+        installedVersions: installed.get(item.id) ?? [],
+        installed: (installed.get(item.id) ?? []).includes(item.version),
+      })),
+    });
+    return;
+  }
+
+  // POST /registry/install { id, version } - 下载并走同一条安装管线。
+  if (method === "POST" && path === "/registry/install") {
+    const body = await readJson(req);
+    const id = String(body["id"] ?? "");
+    const version = String(body["version"] ?? "");
+    const clientOpts = {
+      ...(deps.registryBase ? { base: deps.registryBase } : {}),
+      ...(deps.registryFetch ? { fetchImpl: deps.registryFetch } : {}),
+    };
+    const index = await fetchRegistryIndex(clientOpts);
+    if (index.status !== "ok") {
+      send(res, 503, apiError("REGISTRY_UNREACHABLE", index.reason, { retryable: true }));
+      return;
+    }
+    const entry = index.items.find((i) => i.id === id && i.version === version);
+    if (!entry) {
+      send(res, 404, apiError("REGISTRY_ENTRY_NOT_FOUND", `产品库里没有 ${id}@${version}`));
+      return;
+    }
+    let bytes: Buffer;
+    try {
+      bytes = await downloadPackage(entry, clientOpts);
+    } catch (cause) {
+      // 下载到的和清单说的对不上，或根本下不到：说清是哪一种，都不进安装管线。
+      send(
+        res,
+        502,
+        apiError("REGISTRY_DOWNLOAD_FAILED", cause instanceof Error ? cause.message : String(cause), {
+          retryable: !(cause instanceof RegistryError && /sha256|origin|bytes, index says/.test(cause.message)),
+        }),
+      );
+      return;
+    }
+    try {
+      const result = installPackage(bytes, {
+        storeDir: deps.registry.storeDir,
+        runtimeVersion: deps.version,
+        requireSignature: deps.requireSignedPackages !== false,
+      });
+      deps.registry.rescan();
+      send(res, 201, {
+        productId: result.productId,
+        version: result.version,
+        signed: result.signed,
+        from: "registry",
+      });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      // 未副署被拒是策略（403），别的安装失败是包的问题（422）—— 同 /products/install。
+      send(
+        res,
+        /not countersigned/.test(message) ? 403 : 422,
+        apiError(/not countersigned/.test(message) ? "PACKAGE_UNSIGNED" : "PACKAGE_INVALID", message),
+      );
+    }
     return;
   }
 
