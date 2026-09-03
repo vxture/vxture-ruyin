@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Avatar,
   AvatarFallback,
+  AvatarImage,
   Button,
   Icon,
   Popover,
@@ -20,12 +21,7 @@ import {
   ShellPanelSection,
   StatusBadge,
 } from "@vxture/design-system";
-import {
-  Api,
-  type EntitlementsBatch,
-  type SessionInfo,
-  type SystemInfo,
-} from "./api";
+import { Api, type SessionInfo, type SystemInfo } from "./api";
 
 /** Poll /auth/session until signedIn flips (login completes in the browser). */
 const LOGIN_POLL_MS = 2000;
@@ -45,8 +41,6 @@ export function UserSlot({
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [online, setOnline] = useState(false);
   const [session, setSession] = useState<SessionInfo | null>(null);
-  const [ent, setEnt] = useState<EntitlementsBatch | null>(null);
-  const [entError, setEntError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** Authorize URL of an in-flight login - fallback link when the automatic
    *  window.open is eaten by a popup blocker. */
@@ -87,25 +81,10 @@ export function UserSlot({
     };
   }, [api, refreshSession]);
 
-  // Entitlements: fetch once signed in and configured (45s TTL lives in the
-  // daemon, so an effect-per-session refresh is enough here).
-  useEffect(() => {
-    if (!session?.signedIn || !session.entitlementsConfigured) return;
-    if (productIds.length === 0) return;
-    let alive = true;
-    api
-      .entitlements(productIds)
-      .then((e) => {
-        if (alive) {
-          setEnt(e);
-          setEntError(null);
-        }
-      })
-      .catch((e: Error) => alive && setEntError(e.message));
-    return () => {
-      alive = false;
-    };
-  }, [session?.signedIn, session?.entitlementsConfigured, productIds, api]);
+  // 订阅那一行已去掉（owner 2026-09-03 定）：产品级的订阅事实在首页的产品卡上，
+  // 面板只说环境的三件事，与首页第一板块逐字一致。productIds 仍在签名里，
+  // 是为了不动 workbench 的调用；这里不再用它。
+  void productIds;
 
   const startLogin = async () => {
     setBusy(true);
@@ -135,7 +114,6 @@ export function UserSlot({
     setBusy(true);
     try {
       await api.logout();
-      setEnt(null);
       await refreshSession();
     } finally {
       setBusy(false);
@@ -155,19 +133,23 @@ export function UserSlot({
       ? "请重新登录以继续"
       : "未连接";
 
-  const subscriptionLine = () => {
-    if (!signedIn) return "登录后同步";
-    if (!session?.entitlementsConfigured) return "权益服务未配置";
-    if (entError) return "获取失败";
-    if (!ent) return "…";
-    const envs = Object.values(ent.entitlements);
-    const active = envs.filter((e) => e.tier !== null || e.bundled).length;
-    if (active === 0) return "无生效订阅";
-    const tiers = [
-      ...new Set(envs.map((e) => e.tier).filter((t): t is string => t !== null)),
-    ];
-    return `${active} 个产品生效${tiers.length > 0 ? ` · ${tiers.join("/")}` : ""}`;
-  };
+  /**
+   * 三行环境事实，**与首页第一板块逐字一致**（名称、结论、细节都同一套词，
+   * 中文不夹英文）：
+   *   运行环境  就绪 · 版本 / 未连接
+   *   数据加密  已加密 · DPAPI / 开发态 · 明文
+   *   平台连接  已连接 · 工作区 / 未登录
+   */
+  const runtimeLine = online ? `就绪${system?.version ? ` · ${system.version}` : ""}` : "未连接";
+  const encryptionLine = system
+    ? system.keyProtection === "dpapi"
+      ? "已加密 · DPAPI"
+      : "开发态 · 明文"
+    : "…";
+  const platformLine = signedIn
+    ? `已连接${session?.workspace?.name ? ` · ${session.workspace.name}` : ""}`
+    : "未登录";
+  const avatarSrc = signedIn ? session?.profile?.picture : undefined;
 
   return (
     <div className="user-slot-wrap">
@@ -181,7 +163,9 @@ export function UserSlot({
             }`}
           >
             <span className="user-chip-avatar">
+              {/* 平台有头像就用平台的；没有再落到首字。 */}
               <Avatar>
+                {avatarSrc && <AvatarImage src={avatarSrc} alt={displayName} />}
                 <AvatarFallback>{displayName.slice(0, 1)}</AvatarFallback>
               </Avatar>
               <span className={`user-chip-dot${online ? "" : " off"}`} />
@@ -207,6 +191,7 @@ export function UserSlot({
         </PopoverTrigger>
         <ShellPanelContent side="top" align="start" sideOffset={10}>
           <ShellPanelHeader
+            {...(avatarSrc ? { avatarSrc, avatarAlt: displayName } : {})}
             avatarFallback={displayName.slice(0, 1)}
             title={displayName}
             titleAside={
@@ -228,23 +213,9 @@ export function UserSlot({
             ]}
           />
           <ShellPanelSection>
-            <ShellPanelRow
-              icon="cpu"
-              label="Runtime"
-              value={online ? `运行中 · ${system?.version ?? ""}` : "未连接"}
-            />
-            <ShellPanelRow
-              icon="shield-check"
-              label="数据保护"
-              value={
-                system
-                  ? system.keyProtection === "dpapi"
-                    ? "DPAPI + 全库加密"
-                    : "开发态"
-                  : "…"
-              }
-            />
-            <ShellPanelRow icon="certificate" label="订阅" value={subscriptionLine()} />
+            <ShellPanelRow icon="cpu" label="运行环境" value={runtimeLine} />
+            <ShellPanelRow icon="shield-check" label="数据加密" value={encryptionLine} />
+            <ShellPanelRow icon="buildings" label="平台连接" value={platformLine} />
           </ShellPanelSection>
           {!signedIn && (
             <ShellPanelSection>

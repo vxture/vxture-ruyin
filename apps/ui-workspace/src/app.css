@@ -497,23 +497,49 @@ body {
 /* （.settings / .settings-nav / .settings-content 已随页内那根竖直导航一并
    删除：设置有了自己的框架，分区在侧栏里。留着这些规则，下一个人会以为页面
    里还该有第二根导航。） */
+/* 设置行：纵向布局（owner 2026-09-03 定，全局统一）。名称一行、说明一行（整行宽，
+   不再挤在一个窄列里换行）、控件在下面一行；页面高度够，纵向排反而清楚。
+   控件等宽：所有控件占同一个宽度，扫下来是一列而不是参差的几块。 */
 .setting-row {
-  display: grid;
-  grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);
-  gap: var(--spacing-sm) var(--spacing-lg);
-  padding: var(--spacing-sm) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-md) 0;
   border-top: 1px dashed var(--border);
-  align-items: start;
 }
-.setting-row:first-child { border-top: none; }
+.setting-row:first-child { border-top: none; padding-top: var(--spacing-xs); }
+.setting-row:last-child { padding-bottom: var(--spacing-xs); }
 .setting-label { font-weight: 600; }
 .setting-hint {
   font-weight: 400;
   color: var(--muted-foreground);
   font-size: var(--body-sm-font-size);
   margin-top: 2px;
+  max-width: 60em;
 }
-.setting-control { min-width: 0; }
+.setting-control {
+  min-width: 0;
+  width: 100%;
+  max-width: 420px;
+}
+/* 等宽只对表单控件（分段、下拉、输入框），徽章 / 文字 / 链接按内容宽。 */
+.setting-control > :is([role="radiogroup"], .sel-lang, .sel-narrow, input, select, textarea) { width: 100%; }
+.setting-control .sel-lang,
+.setting-control .sel-narrow { width: 100%; }
+.setting-value { font-size: var(--body-md-font-size); }
+.setting-link { color: var(--primary-text, var(--foreground)); text-decoration: underline; word-break: break-all; }
+
+/* 账户页：头像 + 姓名 / 邮箱 + 右侧「在线修改」。 */
+.account-head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding-bottom: var(--spacing-md);
+}
+.account-avatar { width: 48px; height: 48px; }
+.account-ident { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-right: auto; }
+.account-name { font-weight: 600; font-size: var(--title-md-font-size, 16px); }
+.account-email { color: var(--muted-foreground); font-size: var(--body-sm-font-size); }
 
 .about-block { text-align: center; padding: var(--spacing-lg) 0; }
 .logo-cn { font-weight: 700; font-size: var(--title-xl-font-size, 20px); }

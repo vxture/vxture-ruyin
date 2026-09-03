@@ -83,6 +83,11 @@ void test("AboutSection: shows version/platform/arch once system loads, placehol
 
 void test("GeneralSection: the three axes render with their labelled options, language is disabled", async () => {
   renderSection("general");
+  // 顺序（owner）：语言 → 主题 → 密度 → 字号；"系统" 不带"跟随"。
+  const labels = Array.from(document.querySelectorAll(".setting-label")).map((el) => el.firstChild?.textContent);
+  expect(labels).toEqual(["语言", "主题", "密度", "字号"]);
+  expect(screen.getByRole("radio", { name: "系统" })).toBeInTheDocument();
+  expect(screen.queryByRole("radio", { name: "跟随系统" })).not.toBeInTheDocument();
   expect(screen.getByRole("radiogroup", { name: "主题" })).toBeInTheDocument();
   expect(screen.getByRole("radiogroup", { name: "密度" })).toBeInTheDocument();
   expect(screen.getByRole("radiogroup", { name: "字号" })).toBeInTheDocument();
@@ -331,4 +336,56 @@ void test("Settings/连接器: a failed uninstall is reported, the list stays", 
   await user.click(within(list).getByRole("button", { name: "卸载" }));
   expect(await screen.findByText(/is not installed/)).toBeInTheDocument();
   expect(within(list).getByText("crm")).toBeInTheDocument();
+});
+
+void test("Settings/账户: signed in shows the identity - name, email, tenant, workspace - and 在线修改 goes to the platform profile page", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue({
+      signedIn: true,
+      profile: { sub: "u1", name: "郭彦豪", email: "yh@example.com" },
+      org: { id: "o1", name: "某租户" },
+      workspace: { id: "w1", name: "某工作区" },
+      issuer: "",
+      consoleBase: "https://vxture.com",
+      entitlementsConfigured: false,
+    }),
+  });
+  renderSection("account", api);
+  expect(await screen.findByText("郭彦豪")).toBeInTheDocument();
+  expect(screen.getByText("yh@example.com")).toBeInTheDocument();
+  expect(screen.getByText("某租户")).toBeInTheDocument();
+  expect(screen.getByText("某工作区")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "https://vxture.com/zh-CN/profile" })).toBeInTheDocument();
+  const open = vi.spyOn(window, "open").mockImplementation(() => null);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "在线修改 ↗" }));
+  expect(open).toHaveBeenCalledWith("https://vxture.com/zh-CN/profile", "_blank", "noopener");
+  open.mockRestore();
+  expect(screen.queryByText("账户由左下角的账户菜单管理")).not.toBeInTheDocument();
+});
+
+void test("Settings/账户: signed in without org/workspace names shows — rather than nothing; a picture renders an avatar image", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue({
+      signedIn: true,
+      profile: { sub: "u1", email: "only@example.com", picture: "https://img.example/a.png" },
+      issuer: "",
+      consoleBase: "",
+      entitlementsConfigured: false,
+    }),
+  });
+  const { container } = renderSection("account", api);
+  expect((await screen.findAllByText("only@example.com")).length).toBeGreaterThan(0);
+  expect(screen.getAllByText("—")).toHaveLength(2);
+  expect(screen.getByRole("link", { name: "https://vxture.com/zh-CN/profile" })).toBeInTheDocument();
+  await vi.waitFor(() => {
+    const img = container.querySelector("img");
+    expect(img === null || img.getAttribute("src") === "https://img.example/a.png").toBe(true);
+  });
+});
+
+void test("Settings/账户: a session() failure falls back to the signed-out guidance", async () => {
+  const api = fakeApi({ session: vi.fn().mockRejectedValue(new Error("daemon down")) });
+  renderSection("account", api);
+  expect(await screen.findByText("账户由左下角的账户菜单管理")).toBeInTheDocument();
 });
