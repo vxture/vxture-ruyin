@@ -170,6 +170,10 @@ export interface ContextItemMeta {
   id: string;
   type: string;
   source: string;
+  /** 发现它的连接器 id（ADR-005 接缝 ②）。 */
+  connector: string;
+  /** 连接器理解的引用：local-fs 是绝对路径，进程外连接器是资源 URI。 */
+  ref: string;
   name: string;
   bytes: number;
   modifiedAt: string;
@@ -227,8 +231,10 @@ export interface FolderGrant {
 
 export interface Binding {
   type: string;
-  root: string;
+  /** 契约的来源种类（local / lan / private …）。 */
+  source: string;
   connector: string;
+  root: string;
 }
 
 /**

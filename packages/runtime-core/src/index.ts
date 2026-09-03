@@ -35,6 +35,11 @@ export {
   NoWorkspaceError,
   ProjectNotFoundError,
   ProjectRuntime,
+  LOCAL_FS,
+  bindingRevoked,
+  folderGrants,
+  hasConnectorGrant,
+  isFolderGrant,
   isPathGranted,
 } from "./project.js";
 export type { ProjectView, PendingConfirmation } from "./project.js";

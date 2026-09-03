@@ -43,8 +43,11 @@ import type {
   AuditOutcome,
   Binding,
   StoredAuditEvent,
+  ConnectorGrant,
   ContextItemMeta,
+  ContextSource,
   FolderGrant,
+  Grant,
   RuntimePorts,
   ProjectMeta,
   ProjectStore,
@@ -54,12 +57,44 @@ function parseJsonArray<T>(raw: string | undefined): T[] {
   return raw ? (JSON.parse(raw) as T[]) : [];
 }
 
+/**
+ * 选择期复核：绑定建立时对得上的授权，现在还对得上吗。对不上就给出原因 ——
+ * 目录授权撤了、或连接器授权撤了，是两句不同的话，用户去不同的地方解决。
+ */
+export function bindingRevoked(binding: Binding, grants: Grant[]): string | undefined {
+  if (binding.connector === LOCAL_FS) {
+    return isPathGranted(binding.root, grants)
+      ? undefined
+      : `binding for "${binding.type}" points outside the granted folders (grant revoked?)`;
+  }
+  return hasConnectorGrant(binding.connector, grants)
+    ? undefined
+    : `binding for "${binding.type}" uses connector "${binding.connector}" which this project no longer grants (grant revoked?)`;
+}
+
 /** Normalized prefix containment; grants are folder roots (04 section 4.3). */
-export function isPathGranted(path: string, grants: FolderGrant[]): boolean {
+/** 内建文件连接器的 id。目录授权只对它成立；其余连接器走连接器授权。 */
+export const LOCAL_FS = "local-fs";
+
+/** 文件夹授权没有 `kind`（先于连接器授权存在，旧记录不回填）。 */
+export function isFolderGrant(grant: Grant): grant is FolderGrant {
+  return !("kind" in grant);
+}
+
+export function folderGrants(grants: Grant[]): FolderGrant[] {
+  return grants.filter(isFolderGrant);
+}
+
+/** 这个项目授权过该连接器吗（ADR-005：授权以项目为边界）。 */
+export function hasConnectorGrant(connector: string, grants: Grant[]): boolean {
+  return grants.some((g) => !isFolderGrant(g) && g.connector === connector);
+}
+
+export function isPathGranted(path: string, grants: Grant[]): boolean {
   const norm = (p: string) =>
     p.replaceAll("\\", "/").toLowerCase().replace(/\/+$/, "") + "/";
   const target = norm(path);
-  return grants.some((g) => target.startsWith(norm(g.path)));
+  return folderGrants(grants).some((g) => target.startsWith(norm(g.path)));
 }
 
 export class ContractInvalidError extends Error {
@@ -214,9 +249,9 @@ export class ProjectRuntime {
 
   // -- Context configuration (docs/30-design/40-context-architecture.md) ----
 
-  async listGrants(id: string): Promise<FolderGrant[]> {
+  async listGrants(id: string): Promise<Grant[]> {
     const { store } = await this.load(id);
-    return parseJsonArray<FolderGrant>(await store.getGrants());
+    return parseJsonArray<Grant>(await store.getGrants());
   }
 
   async addGrant(
@@ -225,7 +260,7 @@ export class ProjectRuntime {
     mode: FolderGrant["mode"] = "read",
   ): Promise<FolderGrant> {
     const { store } = await this.load(id);
-    const grants = parseJsonArray<FolderGrant>(await store.getGrants());
+    const grants = parseJsonArray<Grant>(await store.getGrants());
     const grant: FolderGrant = {
       id: this.ports.id.newId("grant"),
       path,
@@ -242,42 +277,95 @@ export class ProjectRuntime {
     return grant;
   }
 
+  /**
+   * 授权本项目使用一个连接器（ADR-005：授权以项目为边界，与文件夹授权同级）。
+   *
+   * 连接器必须已经装在宿主上 —— 授权一个不存在的东西不是「提前授权」，是一条
+   * 永远对不上的记录。授权本身不启动任何读取；读发生在绑定与选择那一步。
+   */
+  async addConnectorGrant(id: string, connector: string): Promise<ConnectorGrant> {
+    if (connector === LOCAL_FS) {
+      throw new Error("local-fs is granted per folder, not as a connector");
+    }
+    if (!this.ports.connectors?.get(connector)) {
+      throw new Error(`connector "${connector}" is not installed`);
+    }
+    const { store } = await this.load(id);
+    const grants = parseJsonArray<Grant>(await store.getGrants());
+    if (hasConnectorGrant(connector, grants)) {
+      throw new Error(`connector "${connector}" is already granted to this project`);
+    }
+    const grant: ConnectorGrant = {
+      id: this.ports.id.newId("grant"),
+      kind: "connector",
+      connector,
+      mode: "read",
+      createdAt: this.ports.clock.now(),
+    };
+    grants.push(grant);
+    await store.putGrants(JSON.stringify(grants));
+    await this.audit(store, id, "grant.changed", "user", {
+      action: "added",
+      connector,
+      mode: "read",
+    });
+    return grant;
+  }
+
   async listBindings(id: string): Promise<Binding[]> {
     const { store } = await this.load(id);
     return parseJsonArray<Binding>(await store.getBindings());
   }
 
   /**
-   * Bind a contract context type to a local root. Validated against the
-   * contract (type exists, allows the local source) and against the grants
-   * (root must be inside a granted folder - the runtime never touches paths
-   * the user did not grant, 04 section 4.3).
+   * Bind a contract context type to a root inside a connector. Validated
+   * against the contract (type exists, allows this source kind) and against
+   * the grants: a local-fs root must be inside a granted folder (the runtime
+   * never touches paths the user did not grant, 04 section 4.3); any other
+   * connector must be granted to this project (ADR-005). Both are re-checked
+   * at selection time - a grant revoked later invalidates the binding.
    */
   async setBinding(
     id: string,
-    input: { type: string; root: string; connector?: string },
+    input: {
+      type: string;
+      root: string;
+      connector?: string;
+      source?: ContextSource;
+    },
   ): Promise<Binding> {
     const { store, contract } = await this.load(id);
     const ctxType = contract.context.types.find((t) => t.id === input.type);
     if (!ctxType) {
       throw new Error(`context type "${input.type}" is not declared in the contract`);
     }
-    if (!ctxType.sources.includes("local")) {
-      throw new Error(`context type "${input.type}" does not allow the local source`);
+    const connector = input.connector ?? LOCAL_FS;
+    const source: ContextSource = input.source ?? "local";
+    if (!ctxType.sources.includes(source)) {
+      throw new Error(`context type "${input.type}" does not allow the ${source} source`);
     }
-    const grants = parseJsonArray<FolderGrant>(await store.getGrants());
-    if (!isPathGranted(input.root, grants)) {
-      throw new Error(
-        `binding root is outside every granted folder: ${input.root}`,
-      );
+    const grants = parseJsonArray<Grant>(await store.getGrants());
+    if (connector === LOCAL_FS) {
+      if (!isPathGranted(input.root, grants)) {
+        throw new Error(
+          `binding root is outside every granted folder: ${input.root}`,
+        );
+      }
+    } else {
+      if (!this.ports.connectors?.get(connector)) {
+        throw new Error(`connector "${connector}" is not installed`);
+      }
+      if (!hasConnectorGrant(connector, grants)) {
+        throw new Error(`connector "${connector}" is not granted to this project`);
+      }
     }
     const bindings = parseJsonArray<Binding>(await store.getBindings()).filter(
       (b) => b.type !== input.type,
     );
     const binding: Binding = {
       type: input.type,
-      source: "local",
-      connector: input.connector ?? "local-fs",
+      source,
+      connector,
       root: input.root,
     };
     bindings.push(binding);
@@ -285,6 +373,8 @@ export class ProjectRuntime {
     await this.audit(store, id, "binding.changed", "user", {
       type: input.type,
       root: input.root,
+      connector,
+      source,
     });
     return binding;
   }
@@ -302,12 +392,9 @@ export class ProjectRuntime {
     const bindings = parseJsonArray<Binding>(await store.getBindings());
     const binding = bindings.find((b) => b.type === type);
     if (!binding) return [];
-    const grants = parseJsonArray<FolderGrant>(await store.getGrants());
-    if (!isPathGranted(binding.root, grants)) {
-      throw new Error(
-        `binding for "${type}" points outside the granted folders (grant revoked?)`,
-      );
-    }
+    const grants = parseJsonArray<Grant>(await store.getGrants());
+    const revoked = bindingRevoked(binding, grants);
+    if (revoked) throw new Error(revoked);
     const connector = this.ports.connectors?.get(binding.connector);
     if (!connector) {
       throw new Error(`connector "${binding.connector}" is not available`);

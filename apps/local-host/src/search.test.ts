@@ -31,6 +31,7 @@ function meta(id: string, name: string): ContextItemMeta {
     name,
     type: "enterprise_capability",
     source: "local",
+    connector: "local-fs",
     ref: `C:/work/${name}`,
     bytes: 128,
     modifiedAt: "2026-09-01T00:00:00Z",

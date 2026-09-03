@@ -81,6 +81,10 @@ const SHARED = [
   ["AuditEvent", "AuditEvent", "packages/runtime-core/src/ports.ts"],
   ["LegacyAuditEvent", "LegacyAuditEvent", "packages/runtime-core/src/ports.ts"],
   ["ProductInfo", "ProductView", "apps/local-host/src/product-registry.ts"],
+  // ADR-005 把 connector 记到条目上、把 source 放宽到契约的来源种类 —— 界面那两份
+  // 副本此前一份少 ref、一份少 source，都是「源头有而界面没有」的那类漂移。
+  ["ContextItemMeta", "ContextItemMeta", "packages/runtime-core/src/ports.ts"],
+  ["Binding", "Binding", "packages/runtime-core/src/ports.ts"],
 ];
 
 const sources = new Map();

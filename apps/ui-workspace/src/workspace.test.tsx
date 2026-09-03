@@ -91,7 +91,7 @@ function grant(over: Partial<FolderGrant> = {}): FolderGrant {
 }
 
 function binding(over: Partial<Binding> = {}): Binding {
-  return { type: "tender_doc", root: "docs/tender", connector: "fs", ...over };
+  return { type: "tender_doc", source: "local", root: "docs/tender", connector: "fs", ...over };
 }
 
 function auditEvent(over: Partial<AuditEvent> = {}): AuditEvent {
@@ -242,7 +242,7 @@ void test("ProjectPanel: a context_confirm checkpoint shows the context table an
           { id: "cp1", kind: "context_confirm", subject: null, options: ["approve", "reject"], raisedAt: "2026-06-01T00:00:00.000Z" },
         ],
         contextSet: [
-          { id: "c1", type: "tender_doc", source: "fs", name: "招标文件.pdf", bytes: 2048, modifiedAt: "2026-06-01T00:00:00.000Z" },
+          { id: "c1", type: "tender_doc", source: "local", connector: "fs", ref: "docs/tender/招标文件.pdf", name: "招标文件.pdf", bytes: 2048, modifiedAt: "2026-06-01T00:00:00.000Z" },
         ],
       }),
     ]),
@@ -504,7 +504,7 @@ void test("ProjectPanel/Context: expanding a binding fetches and lists its conte
   const api = fakeApi({
     bindings: vi.fn().mockResolvedValue([binding({ type: "tender_doc", root: "docs/tender" })]),
     contextItems: vi.fn().mockResolvedValue([
-      { id: "c1", type: "tender_doc", source: "fs", name: "招标文件.pdf", bytes: 4096, modifiedAt: "2026-06-01T00:00:00.000Z" },
+      { id: "c1", type: "tender_doc", source: "local", connector: "fs", ref: "docs/tender/招标文件.pdf", name: "招标文件.pdf", bytes: 4096, modifiedAt: "2026-06-01T00:00:00.000Z" },
     ]),
   });
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);

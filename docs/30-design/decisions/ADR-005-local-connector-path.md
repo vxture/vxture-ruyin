@@ -75,3 +75,26 @@ Tool Gate 坐在它前面。
 
 安全边界与门控要求不因此放宽——本文「安全边界」一节全部照旧生效，
 **且因 skill 不再有权益关卡，Tool Gate 成为唯一的把关点，不能再拖。**
+
+## 实施记录（append-only）
+
+**2026-09-03 · 接缝落地（runtime-core）。** 「Harness 侧的插入点」五处的现状：
+
+| # | 接缝 | 状态 |
+|---|---|---|
+| ① | `Binding.source` 放宽为契约的 `ContextSource` | 落地。绑定同时记 `connector`；`root` 在进程外连接器里是资源 URI 前缀 |
+| ② | connector id 记在 `ContextItemMeta` 上 | 落地。`metaConnector()` 的推导已删；旧记录（字段出现前停在检查点的任务）按旧约定回退，回退处有注释 |
+| ③ | `ContextItem.content` 支持二进制 | 早已落地（2026-08-31，MVP M3） |
+| ④ | 连接器注册表可动态注册 | 落地为 `ConnectorLookup { get(id) }`：内核只要一个 `get`，表由宿主持有并在运行时写入 |
+| ⑤ | `ConnectorPort` 生命周期与健康检查 | 落地为可选的 `start / stop / health`；内核不调用，宿主的注册表调用 |
+
+「另需一个新端口」（工具执行端口）已于 2026-09-01 以 `ToolExecutorPort` 落地，
+Tool Gate 坐在它前面。
+
+**同批加的一样东西，本文原文没有明写但「授权以项目为边界」要求它**：
+`ConnectorGrant` —— 与文件夹授权并列存放、同样在选择期复核、同样进审计。
+一个装好的连接器不等于每个项目都能用它。
+
+**还没有的**：进程外连接器本身（MCP stdio 客户端 + `ConnectorPort` 实现 +
+宿主注册表 + 安装口）、连接器工具经 Tool Gate 暴露给模型、Streamable HTTP
+传输。各自在工作计划「通路二」一批与技术债登记里有名字，不在这里含混带过。

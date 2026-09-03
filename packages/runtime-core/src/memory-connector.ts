@@ -8,10 +8,16 @@ import type { Binding, ConnectorPort, ContextItem, ContextItemMeta } from "./por
 export class MemoryConnector implements ConnectorPort {
   private readonly byRoot = new Map<string, ContextItem[]>();
 
-  register(root: string, items: Array<Omit<ContextItem, "source">>): void {
+  /** `id` is what the host registers this connector under; items carry it. */
+  constructor(private readonly id: string = "memory") {}
+
+  register(
+    root: string,
+    items: Array<Omit<ContextItem, "source" | "connector"> & { source?: string }>,
+  ): void {
     this.byRoot.set(
       root,
-      items.map((i) => ({ ...i, source: "memory" })),
+      items.map((i) => ({ source: "local", ...i, connector: this.id })),
     );
   }
 

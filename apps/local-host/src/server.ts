@@ -17,6 +17,7 @@ import {
   type Binding,
   type FolderGrant,
   type ProjectRuntime,
+  folderGrants,
 } from "@vxture/ruyin-core";
 import { DEV_UI_HTML } from "./dev-ui.js";
 import type { ProductRegistry } from "./product-registry.js";
@@ -691,7 +692,8 @@ async function handle(
         const r = deps.writeArtifact(
           joinPath(dir, name),
           Buffer.from(content, "utf8"),
-          grants,
+          // 落盘看的是目录授权；连接器授权与写文件无关。
+          folderGrants(grants),
         );
         if (r.isError) failed.push(`${name}: ${r.content}`);
         else written.push(name);
@@ -796,7 +798,7 @@ async function handle(
       return;
     }
 
-    // GET/POST /projects/:id/grants  { path, mode? }
+    // GET/POST /projects/:id/grants  { path, mode? } | { connector }
     if (segments.length === 3 && segments[2] === "grants") {
       if (method === "GET") {
         send(res, 200, await deps.runtime.listGrants(projectId));
@@ -804,6 +806,11 @@ async function handle(
       }
       if (method === "POST") {
         const body = await readJson(req);
+        // 两种授权同一个入口：给一个目录，或给一个连接器（ADR-005，项目为界）。
+        if (typeof body["connector"] === "string" && body["connector"]) {
+          send(res, 201, await deps.runtime.addConnectorGrant(projectId, body["connector"]));
+          return;
+        }
         const grant = await deps.runtime.addGrant(
           projectId,
           String(body["path"] ?? ""),
@@ -814,7 +821,7 @@ async function handle(
       }
     }
 
-    // GET/POST /projects/:id/bindings  { type, root }
+    // GET/POST /projects/:id/bindings  { type, root, connector?, source? }
     if (segments.length === 3 && segments[2] === "bindings") {
       if (method === "GET") {
         send(res, 200, await deps.runtime.listBindings(projectId));
@@ -825,6 +832,13 @@ async function handle(
         const binding = await deps.runtime.setBinding(projectId, {
           type: String(body["type"] ?? ""),
           root: String(body["root"] ?? ""),
+          ...(typeof body["connector"] === "string" && body["connector"]
+            ? { connector: body["connector"] }
+            : {}),
+          // 来源种类由内核对照契约校验；这里只透传，不替它猜。
+          ...(typeof body["source"] === "string" && body["source"]
+            ? { source: body["source"] as Binding["source"] }
+            : {}),
         });
         // Index the newly bound content right away (04 section 5.1).
         const indexed = await deps.reindex(projectId, binding);
