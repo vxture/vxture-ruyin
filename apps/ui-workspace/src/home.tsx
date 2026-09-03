@@ -21,6 +21,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   Badge,
   Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   EmptyState,
   Icon,
   ListCardGrid,
@@ -150,33 +154,47 @@ function RegistryList({
   );
 }
 
-function InstallPackageButton({
+/**
+ * 「安装 ▾」：两条安装通道收进一个次级下拉（owner 2026-09-04 定）。订阅了就能
+ * 同步，装包只有产品随附本地资产 / 本地技能时才需要 —— 日常用户不该在标题行
+ * 看见两个安装按钮，开发者又得找得到侧载入口。
+ */
+function InstallMenu({
   api,
   onDone,
   onError,
+  registryOpen,
+  onToggleRegistry,
 }: {
   api: Api;
   onDone: () => void | Promise<void>;
   onError: (msg: string) => void;
+  registryOpen: boolean;
+  onToggleRegistry: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<InstalledPackage | null>(null);
   const pick = useRef<HTMLInputElement>(null);
   return (
     <span className="install-inline">
-      {/* 原生 file input 藏起来，由一个 DS 按钮代打开。
-          藏它不是为了好看：那个控件由浏览器渲染，按**浏览器的语言**显示
-          「Choose File / No file chosen」—— 一句改不掉的英文夹在中文界面里，
-          而且它长什么样每个平台还不一样。功能照旧走这个 input（同一个页面在
-          浏览器和壳里都要能用，不走只有壳能走的原生对话框）。 */}
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={busy}
-        onClick={() => pick.current?.click()}
-      >
-        {busy ? "正在安装……" : "安装本地包"}
-      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" disabled={busy}>
+            {busy ? "正在安装……" : "安装"}
+            <Icon name="caret-up-down" size="xs" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {/* 原生 file input 藏起来，由菜单项代打开。藏它不是为了好看：那个控件由
+              浏览器渲染，按**浏览器的语言**显示「Choose File / No file chosen」——
+              一句改不掉的英文夹在中文界面里。功能照旧走这个 input（同一个页面在
+              浏览器和壳里都要能用，不走只有壳能走的原生对话框）。 */}
+          <DropdownMenuItem onSelect={() => pick.current?.click()}>从本地包安装</DropdownMenuItem>
+          <DropdownMenuItem onSelect={onToggleRegistry}>
+            {registryOpen ? "收起产品库" : "从产品库拉取"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <input
           ref={pick}
           type="file"
@@ -427,8 +445,8 @@ export function HomePage({
             : "订阅状态尚未接通，以下为本地运行时已安装的产品。"
         }
         action={
-          /* 三个动作排在标题行右侧，主按钮在最右（owner 2026-09-03 定）：
-             同步产品版本 · 安装本地包 · 在线使用。 */
+          /* 三个动作排在标题行右侧，主按钮在最右（owner 2026-09-04 定）：
+             同步产品版本 · 安装 ▾（本地包 / 产品库）· 在线使用。 */
           <span className="section-actions">
             {products.length > 0 && (
               <Button
@@ -440,15 +458,13 @@ export function HomePage({
                 {syncing ? "正在同步……" : "同步产品版本"}
               </Button>
             )}
-            <InstallPackageButton api={api} onDone={onRefresh} onError={onError} />
-            <Button
-              variant="outline"
-              size="sm"
-              aria-pressed={registryOpen}
-              onClick={() => setRegistryOpen((v) => !v)}
-            >
-              {registryOpen ? "收起产品库" : "从产品库安装"}
-            </Button>
+            <InstallMenu
+              api={api}
+              onDone={onRefresh}
+              onError={onError}
+              registryOpen={registryOpen}
+              onToggleRegistry={() => setRegistryOpen((v) => !v)}
+            />
             {products.length > 0 && (
               <Button
                 size="sm"
