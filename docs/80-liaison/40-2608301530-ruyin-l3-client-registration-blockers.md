@@ -3,7 +3,11 @@
 - Stamp: 2608301530 (2026-08-30 15:30)
 - From: ruyin line
 - To: platform line (owns identity / entitlement infrastructure)
-- Status: open - awaiting platform-line action
+- Status: **(1)(2) met 2026-08-31, (3) open** (re-stated 2026-09-03; was: open - awaiting
+  platform-line action). (1) loopback redirect with port-agnostic matching, and `none` accepted at
+  the token endpoint; (2) `ruyin-beta` registered - both landed with vxture-platform `014f25b`
+  (#85), this line's own PR. (3) a base for `/platform/entitlements` that the user's device can
+  reach is still the platform's to provide; `RUYIN_PLATFORM_API_BASE` is the only thing to set here.
 - 关联: 本仓 `30-2607241450-ruyin-native-client-integration.md`（L3）的补充；
   三项均有**对生产端点的实测证据**（2026-08-30），非推测
 - 阻塞关系: 阻塞 **C1 登录闭环**（ruyin 侧代码已就绪并合入：daemon PKCE 客户端、

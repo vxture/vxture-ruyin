@@ -3,7 +3,20 @@
 - Stamp: 2607241450 (2026-07-24 14:50)
 - From: ruyin line
 - To: platform line (owns identity / entitlement / AI infrastructure)
-- Status: open - awaiting platform-line design confirmation
+- Status: **(a) met, (b) partial, (c) withdrawn** (re-stated 2026-09-03; facts as of 2026-08-31;
+  was: open - awaiting platform-line design confirmation).
+  (a) **met**: the platform now has native public-client support - PKCE without a secret,
+  port-agnostic loopback redirect matching, `none` in discovery, `ruyin` / `ruyin-beta` seeds -
+  landed through this line's own PR, vxture-platform `014f25b` (#85), merged 2026-08-31. Desktop
+  login is real end to end.
+  (b) **partial**: `/platform/entitlements` takes the user access token and the daemon proxies it
+  (`RUYIN_PLATFORM_API_BASE`). Still the platform's to provide: a base reachable from the user's
+  device (as of 2026-09-02 `api.vxture.com` does not route platform-api) and an endpoint listing
+  *all* subscriptions of the current workspace - C2 only answers for ids the client already knows.
+  Tracked on the workplan's MVP journey table.
+  (c) **withdrawn**: ADR-009 (2026-08-31) routes capability calls through the business product's
+  own cloud service, which holds the Atlas credentials - no platform change needed, and metering
+  stays server-side at Atlas as this letter asked. Nothing left here for the platform line.
 - 阻塞关系: **(c) 阻塞 W3**（Bid 单产品可用的真实 AI 调用）；(a)(b) 阻塞 W6（身份完整链）。
   W3 的上下文/索引/选择部分不受阻，已并行开发（mock gateway）
 
