@@ -132,6 +132,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout in this job: gh needs the repo named explicitly.
+          GH_REPO: ${{ github.repository }}
           CHANNEL: ${{ needs.build-installer.outputs.channel }}
           VERSION: ${{ needs.build-installer.outputs.version }}
           TAG: ${{ github.ref_name }}
