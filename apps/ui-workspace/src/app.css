@@ -937,6 +937,12 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   gap: var(--spacing-xs);
   margin-left: var(--spacing-lg);
 }
+/* Runtime 徽章：字号与标语「Intelligent Workbench」一致（11px），样式（圆点 + 描边）不变。 */
+.app-runtime > * {
+  font-size: var(--font-size-body-xs, 11px);
+  line-height: 1.2;
+  padding-block: 1px;
+}
 
 /* 9-12. 侧栏：不写域名文字，只留收缩按钮；首页组不画组头；导航项加高，
    两行文字拉开；「最近工作」第一行小字是智能体，第二行是任务。 */

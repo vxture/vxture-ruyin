@@ -575,7 +575,7 @@ void test("Workbench (electron chrome): the caption-button spacer appears, brows
   expect(container.querySelector(".caption-spacer")).toBeInTheDocument();
 });
 
-void test("Header workspace control: icon + name only (no 工作区 label); opens the tenant menu (tenant, workspace, quota, tenant admin); right-side order is workspace · runtime · pending · settings", async () => {
+void test("Header workspace control: icon + name only (no 工作区 label); opens the tenant menu (tenant, workspace, quota, tenant admin); Runtime left after the brand; tenant menu right before pending and settings", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi({
     products: vi.fn().mockResolvedValue([product()]),
@@ -604,14 +604,15 @@ void test("Header workspace control: icon + name only (no 工作区 label); open
   // pending + settings stay on the far right (trailing). Document order: brand < workspace < Runtime < 设置.
   const after = (a: Element, b: Element) =>
     (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-  const context = trigger.closest(".app-header-context") as HTMLElement;
-  expect(context).not.toBeNull();
-  const runtime = within(context).getByText(/Runtime/);
+  // 2026-09-04: Runtime sits right after the brand (leading); the tenant menu is on the right,
+  // before pending and settings. Document order: brand < Runtime < tenant menu < 设置.
+  const runtime = within(document.querySelector(".app-header-context") as HTMLElement).getByText(/Runtime/);
   const trailing = document.querySelector(".app-header-trailing") as HTMLElement;
+  expect(trailing.contains(trigger)).toBe(true);
   const settings = within(trailing).getByRole("button", { name: "设置" });
-  expect(after(trigger, runtime)).toBe(true);
-  expect(after(runtime, settings)).toBe(true);
-  expect(after(screen.getByRole("link", { name: "RUYIN" }), trigger)).toBe(true);
+  expect(after(screen.getByRole("link", { name: "RUYIN" }), runtime)).toBe(true);
+  expect(after(runtime, trigger)).toBe(true);
+  expect(after(trigger, settings)).toBe(true);
 });
 
 void test("Sidebar 最近工作: capped at 8, newest first; no 总览 group; domain row has no 工作台 text on home", async () => {

@@ -440,16 +440,11 @@ export function Workbench({ api }: { api: Api }) {
               className="app-brand cursor-pointer"
             />
           )}
-          {/* 工作区 + Runtime 紧跟在左侧区域之后（owner 2026-09-04 定），与品牌隔一段。 */}
-          <span className="app-header-context">
-          {session && workspaceName && (
-            // 租户 / 工作区菜单：租户 + 工作区、只读 AI 配额、租户管理链接
-            // （owner 2026-09-04 定的三项，见 tenant-menu.tsx）。
-            <TenantMenu api={api} session={session} productIds={products.map((p) => p.id)} />
-          )}
-          <StatusBadge tone={health.ok ? "success" : "danger"} dot>
-            {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
-          </StatusBadge>
+          {/* Runtime 紧跟在品牌之后（owner 2026-09-04 定），与品牌隔一段；字号与标语一致。 */}
+          <span className="app-header-context app-runtime">
+            <StatusBadge tone={health.ok ? "success" : "danger"} dot>
+              {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
+            </StatusBadge>
           </span>
         </span>
       }
@@ -472,13 +467,18 @@ export function Workbench({ api }: { api: Api }) {
           {/* 当前工作区常驻。**此前它一个字都没有出现在项目面板上**，而项目、
               订阅、权益、数据边界全按工作区划分，跨工作区访问会被服务端拒绝
               —— 用户看着屏幕却不知道自己在哪个工作区，那句拒绝就无从理解。 */}
-          {/* 右侧一簇的顺序（2026-09-03 重排）：
-                ① 工作区（上下文，只读 + 下拉看详情）
-                ② Runtime 状态（只读）
-                ③ 未决确认（可操作、会变红）
-                ④ 设置（全局入口，固定在最右）
+          {/* 右侧一簇的顺序（2026-09-04 定）：
+                ① 租户 / 工作区（上下文，下拉看详情）
+                ② 未决确认（可操作、会变红）
+                ③ 设置（全局入口，固定在最右）
+              Runtime 在左侧品牌之后。
               读的东西在左，动的东西在右；越常按的越靠外侧，手停下的位置就是
               最右。通知紧挨设置，是各家桌面应用的惯例（VS Code / GitHub 皆如此）。 */}
+          {/* 租户 / 工作区菜单在右侧（owner 2026-09-04 定）：租户 + 工作区、只读 AI 配额、
+              租户管理链接（tenant-menu.tsx）。 */}
+          {session && workspaceName && (
+            <TenantMenu api={api} session={session} productIds={products.map((p) => p.id)} />
+          )}
           {/* 常驻：未决确认在哪个视图都看得见。放进某个页面里等于又要求
               用户先找对地方，而那正是这条要修的问题。 */}
           <PendingInbox
