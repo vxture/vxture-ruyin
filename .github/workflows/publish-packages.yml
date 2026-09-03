@@ -56,8 +56,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
-      # tag 号必须等于四个包的版本号（步调一致）；预发布版必须带 -beta.N / -rc.N /
-      # -alpha.N 后缀，发布脚本据此打同名 dist-tag，正式版才落 latest。
+      # tag 号必须等于四个包的版本号（步调一致）；预发布版必须带 -beta.N /
+      # -alpha.N 后缀（只这两种，不要 rc），发布脚本据此打同名 dist-tag，正式版才落 latest。
       - name: Version guardrail (tag == package version, lockstep, shape)
         run: node scripts/guardrails/check-package-versions.mjs --tag "${GITHUB_REF_NAME}"
         shell: bash

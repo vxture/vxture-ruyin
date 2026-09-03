@@ -97,7 +97,7 @@ Two independent version lines, the industry-standard way:
 - npm packages (packages/): one version for all four, released by tag
   `packages-vX.Y.Z`. Stable versions publish under the npm dist-tag
   `latest` (what `npm install` picks by default). Pre-releases carry a
-  semver suffix - `X.Y.Z-beta.1`, `-rc.1`, `-alpha.1` - and publish under
+  semver suffix - `X.Y.Z-beta.1` or `-alpha.1`, nothing else - and publish under
   the dist-tag of the same name, so they never become `latest` and `^X.Y.Z`
   ranges never pick them up. The dist-tag is derived from the version by the
   publish script; nothing to remember. While the line is 0.x, `latest` means

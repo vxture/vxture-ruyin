@@ -332,7 +332,7 @@ Runtime 拉 index.json → 验平台签名 → 下载 .ruyinpkg → 验双签（
   **已定（2026-09-03，owner）：手动版本 + 守卫。** `check-package-versions.mjs` 以最近的
   `packages-v*` tag 为基线，内容改了版本没动即失败；semver 纪律靠这道守卫兜底而不是靠记得。
   **版本定位同日定**：四个包步调一致（一个版本号，tag 即版本号）；正式版落 npm dist-tag
-  `latest`，预发布版 `X.Y.Z-(alpha|beta|rc).N` 落同名 dist-tag，由发布脚本从版本号推出
+  `latest`，预发布版 `X.Y.Z-(alpha|beta).N` 落同名 dist-tag（三种足够，不要 rc），由发布脚本从版本号推出
 - **OQ-3 下载主机选址**：挂在哪台既有 worker、带宽余量、是否直接上 OSS —— 待平台线核实
 - **OQ-4 macOS / Linux 构建**：MVP 只出 win32-x64；后续平台矩阵与信创路线（06 §11）合并规划
 
