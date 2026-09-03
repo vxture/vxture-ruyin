@@ -24,7 +24,8 @@ Three things deliberately stay capitalized "Ruyin", not uppercase (owner):
 the installer, Start-menu and executable name (productName / artifactName,
 "Ruyin-Setup-x.y.z.exe"); apps/shell's app.setName("Ruyin"), which keys the
 userData path on installed machines and is a path, not a name; and prose in
-docs, which may keep writing "Ruyin" / "Ruyin (如影)" as ordinary text.
+docs, which may keep writing "Ruyin" (with its Chinese name) as ordinary
+text.
 Lowercase "ruyin" is for identifiers only (@vxture scope, RUYIN_* env vars,
 paths, the daemon's log prefix).
 
