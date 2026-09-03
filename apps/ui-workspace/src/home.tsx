@@ -2,11 +2,11 @@
  * Home - the work entry point of a CLIENT WORK RUNTIME (20-specs/10 §1.1/§5.2).
  *
  * 产品主体在平台：平台订阅了 → 本地可用；平台 0 订阅 → 本地无可用产品，但运行
- * 环境仍在，并据此引导用户到平台订阅（console 深链）。因此**「我的产品」这一栏
+ * 环境仍在，并据此引导用户到平台订阅（console 深链）。因此**「我的智能体」这一栏
  * 由订阅状态 + 本地已装运行时共同决定，绝不硬编码**——编造的产品会让用户以为
  * 自己拥有并不存在的订阅。
  *
- * 「热门推荐」是另一句话：「平台上有这些」，不声称所有权，动作只有外链。它的
+ * 「智能体广场」是另一句话：「平台上有这些」，不声称所有权，动作只有外链。它的
  * 数据是平台目录的静态快照（catalog.ts，有出处有日期），接上目录端点后即删。
  *
  * 订阅数据面（C2 entitlements）尚无桌面可达端点（liaison L3-b）：未接通时诚实
@@ -414,7 +414,7 @@ export function HomePage({
       />
 
       <Section
-        title="我的产品"
+        title="我的智能体"
         icon="package"
         level={2}
         description={
@@ -456,13 +456,13 @@ export function HomePage({
             icon="package"
             title={
               signedIn
-                ? "当前账号没有可用的业务产品"
-                : "登录后同步你的业务产品"
+                ? "当前账号没有可用的智能体"
+                : "登录后同步你的智能体"
             }
             description={
               signedIn
-                ? "运行环境已就绪。业务产品由 Vxture 平台订阅提供——在平台订阅后即可在这里使用。"
-                : "运行环境已就绪。登录 Vxture 账号后，你订阅的业务产品会出现在这里。"
+                ? "运行环境已就绪。智能体由 Vxture 平台订阅提供——在平台订阅后即可在这里使用。"
+                : "运行环境已就绪。登录 Vxture 账号后，你订阅的智能体会出现在这里。"
             }
             action={
               <Button
@@ -498,10 +498,10 @@ export function HomePage({
           视口、这一段 margin-top:auto）。 */}
       <div className="home-catalog">
       <Section
-        title="热门推荐"
+        title="智能体广场"
         icon="sparkles"
         level={2}
-        description="平台目录里靠前的三个智能体。这里只作了解，订阅在平台完成。"
+        description="平台广场里靠前的三个智能体。这里只作了解，订阅在平台完成。"
         action={
           <Button
             variant="outline"
@@ -514,7 +514,7 @@ export function HomePage({
           </Button>
         }
       >
-        {/* 与「我的产品」同一种卡（pcard）：图标同样大、文字同样对齐，扫过去
+        {/* 与「我的智能体」同一种卡（pcard）：图标同样大、文字同样对齐，扫过去
             是一个页面而不是两套控件。差别只在动作：这里永远没有「打开」。 */}
         <ListCardGrid>
           {RECOMMENDED.map((c) => (
@@ -605,7 +605,7 @@ function ProductCard({
   product: ProductInfo;
   projects: ProjectMeta[];
   subscribeUrl: (id?: string, intent?: "subscribe" | "renew") => string;
-  /** 「产品介绍」落到平台应用中心（还没有 per-product 深链，不拼猜出来的地址）。 */
+  /** 「智能体介绍」落到平台应用中心（智能体广场）（还没有 per-product 深链，不拼猜出来的地址）。 */
   consoleBase: string;
   /** daemon 说能力面是 mock（TD-033）。运行环境层面的事实，每张卡都受影响。 */
   capabilityMock: boolean;
@@ -709,7 +709,7 @@ function ProductCard({
       </header>
 
       <div className="pcard-body">
-        <p className="pcard-desc">{BLURBS[product.id] ?? "Vxture 业务产品"}</p>
+        <p className="pcard-desc">{BLURBS[product.id] ?? "Vxture 智能体"}</p>
         {/* 警示与说明要分得开：说明是灰字，警示走 DS 的 warning 语气（色 + 图标 +
             浅底），扫一眼就知道这是「要留意」而不是「介绍」。 */}
         {!usable && product.reason && (
@@ -745,7 +745,7 @@ function ProductCard({
         <span className="pcard-actions">
           {usable ? (
             <>
-              {/* 主按钮「打开」放最右且加宽；左侧一条「产品介绍」文字链（落平台
+              {/* 主按钮「打开」放最右且加宽；左侧一条「智能体介绍」文字链（落平台
                   应用中心）；库里有更新的版本时多一个「更新版本」。在线使用仍只在
                   板块标题行出现一次。 */}
               <a
@@ -754,7 +754,7 @@ function ProductCard({
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                产品介绍 ↗
+                智能体介绍 ↗
               </a>
               {newer && (
                 <Button
