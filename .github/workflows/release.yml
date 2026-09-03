@@ -83,6 +83,15 @@ jobs:
         shell: bash
         run: node scripts/release/make-manifest.mjs "${{ steps.meta.outputs.channel }}" "${{ steps.meta.outputs.version }}"
 
+      # Flow C, MVP form (70-repo-organization s7.4): the static product
+      # registry - one .ruyinpkg per product under products/ plus index.json.
+      # Unsigned until the Registry root exists (TD-012 / TD-037); the index
+      # says so per entry. Staged with the installer; published with it once
+      # L2 lands (dl.vxture.com/ruyin/products/).
+      - name: Build static product registry
+        shell: bash
+        run: node packages/cli/dist/main.js registry products --out apps/shell/release/products --base-url https://dl.vxture.com/ruyin/products
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -94,6 +103,7 @@ jobs:
             apps/shell/release/latest.yml
             apps/shell/release/manifest.json
             apps/shell/release/SHA256SUMS
+            apps/shell/release/products/**
 
   publish:
     name: publish

@@ -754,3 +754,116 @@ void test("HomePage: a blocked (not_entitled) card does not also get 未接通 -
   expect(screen.getByText("未订阅")).toBeInTheDocument();
   expect(screen.queryByText("未接通")).not.toBeInTheDocument();
 });
+
+/* ---------------- 静态产品库（流 C）------------------------------------------ */
+
+const bidItem = {
+  id: "vxture.bid",
+  name: "标书编写",
+  version: "1.0.0",
+  publisher: "vxture",
+  runtime: { minimum: "0.1.0" },
+  size: 12345,
+  signed: false,
+  installed: false,
+  installedVersions: [],
+};
+
+function homeWith(api: Api) {
+  return render(
+    <HomePage
+      api={api}
+      products={[]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+}
+
+void test("HomePage/产品库: nothing is fetched until opened; unreachable says so and does not read as empty", async () => {
+  const registry = vi.fn().mockResolvedValue({ status: "unreachable", base: "https://dl", reason: "index unreachable: ECONNREFUSED", checkedAt: "t" });
+  const api = fakeApi({ registry });
+  homeWith(api);
+  expect(registry).not.toHaveBeenCalled();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "从产品库安装" }));
+  expect(await screen.findByText(/产品库没查到 —— index unreachable: ECONNREFUSED/)).toBeInTheDocument();
+  expect(screen.getByText(/这不代表产品库是空的/)).toBeInTheDocument();
+  expect(registry).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole("button", { name: "收起产品库" }));
+  expect(screen.queryByText(/产品库没查到/)).not.toBeInTheDocument();
+  // Reopening does not refetch - the catalog is kept.
+  await user.click(screen.getByRole("button", { name: "从产品库安装" }));
+  expect(registry).toHaveBeenCalledTimes(1);
+});
+
+void test("HomePage/产品库: an installable catalog lists packages with 未签名 and installs on click, then refreshes", async () => {
+  const registry = vi
+    .fn()
+    .mockResolvedValueOnce({ status: "ok", base: "https://dl", generatedAt: "g", checkedAt: "t", installable: true, items: [bidItem] })
+    .mockResolvedValue({ status: "ok", base: "https://dl", generatedAt: "g", checkedAt: "t", installable: true, items: [{ ...bidItem, installed: true }] });
+  const installFromRegistry = vi.fn().mockResolvedValue({ productId: "vxture.bid", version: "1.0.0", signed: false, from: "registry" });
+  const onRefresh = vi.fn();
+  const api = fakeApi({ registry, installFromRegistry });
+  render(
+    <HomePage api={api} products={[]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={onRefresh} onError={noop} />,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "从产品库安装" }));
+  const list = await screen.findByLabelText("产品库");
+  expect(within(list).getByText("标书编写")).toBeInTheDocument();
+  expect(within(list).getByText("未签名")).toBeInTheDocument();
+  await user.click(within(list).getByRole("button", { name: "安装" }));
+  expect(installFromRegistry).toHaveBeenCalledWith("vxture.bid", "1.0.0");
+  expect(await within(list).findByText("已安装")).toBeInTheDocument();
+  expect(onRefresh).toHaveBeenCalled();
+});
+
+void test("HomePage/产品库: a production machine can see the catalog but is told it will not install unsigned packages", async () => {
+  const api = fakeApi({
+    registry: vi.fn().mockResolvedValue({ status: "ok", base: "https://dl", generatedAt: "g", checkedAt: "t", installable: false, items: [bidItem] }),
+  });
+  homeWith(api);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "从产品库安装" }));
+  const list = await screen.findByLabelText("产品库");
+  expect(within(list).getByText("本机不装未签名包")).toBeInTheDocument();
+  expect(within(list).queryByRole("button", { name: "安装" })).not.toBeInTheDocument();
+});
+
+void test("HomePage/产品库: an empty catalog says so; a failed fetch and a failed install go to onError", async () => {
+  const onError = vi.fn();
+  const empty = fakeApi({
+    registry: vi.fn().mockResolvedValue({ status: "ok", base: "https://dl", generatedAt: "g", checkedAt: "t", installable: true, items: [] }),
+  });
+  const first = render(
+    <HomePage api={empty} products={[]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={onError} />,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "从产品库安装" }));
+  expect(await screen.findByText("产品库里目前没有产品包")).toBeInTheDocument();
+  first.unmount();
+
+  const failing = fakeApi({
+    registry: vi
+      .fn()
+      .mockRejectedValueOnce(new Error("daemon down"))
+      .mockResolvedValue({ status: "ok", base: "https://dl", generatedAt: "g", checkedAt: "t", installable: true, items: [bidItem] }),
+    installFromRegistry: vi.fn().mockRejectedValue(new Error("package sha256 mismatch")),
+  });
+  render(
+    <HomePage api={failing} products={[]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={onError} />,
+  );
+  await user.click(screen.getByRole("button", { name: "从产品库安装" }));
+  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("daemon down"));
+  // Second open refetches because the first attempt left no catalog.
+  await user.click(screen.getByRole("button", { name: "收起产品库" }));
+  await user.click(screen.getByRole("button", { name: "从产品库安装" }));
+  const list = await screen.findByLabelText("产品库");
+  await user.click(within(list).getByRole("button", { name: "安装" }));
+  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("package sha256 mismatch"));
+});

@@ -232,6 +232,14 @@ const WRAPPER_CASES: WrapperCase[] = [
     body: { connector: "crm" },
   },
   { name: "connectors", call: (api) => api.connectors(), method: "GET", path: "/connectors" },
+  { name: "registry", call: (api) => api.registry(), method: "GET", path: "/registry" },
+  {
+    name: "installFromRegistry",
+    call: (api) => api.installFromRegistry("vxture.bid", "1.0.0"),
+    method: "POST",
+    path: "/registry/install",
+    body: { id: "vxture.bid", version: "1.0.0" },
+  },
   {
     name: "installConnector",
     call: (api) => api.installConnector({ id: "crm", command: "node", args: ["crm.js"], source: "lan" }),

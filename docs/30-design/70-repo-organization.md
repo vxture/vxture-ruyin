@@ -279,6 +279,25 @@ Runtime 拉 index.json → 验平台签名 → 下载 .ruyinpkg → 验双签（
 订阅授权（Entitlement 过滤该用户可见的产品）在平台 API 侧完成，静态清单只是分发面——
 **信任模型与目标态完全一致，只是没有动态服务**。
 
+**落地状态（2026-09-03）。** 产出侧：`ruyin pack <productDir>` 打一个 `.ruyinpkg`
+（zip 容器 + CHECKSUMS，**无 SIGNATURE** —— 没有签名根就不写占位签名），
+`ruyin registry <productsDir> --out <dir> --base-url <url>` 打全部产品并写
+`index.json` + `SHA256SUMS`；release.yml 随安装包一起暂存 `products/`。清单格式：
+
+```json
+{ "schema": "ruyin-registry/1", "generatedAt": "...", "baseUrl": "...",
+  "items": [ { "id", "name", "version", "publisher", "runtime": { "minimum" },
+              "file", "url", "sha256", "size", "signed": false } ] }
+```
+
+消费侧：守护进程 `GET /registry`（读 index，标出本机已装版本，说明这台机器装不装得了
+未签名包）、`POST /registry/install { id, version }`（下载 → 与清单核对 size / sha256 /
+同源 → 走 `installPackage` 同一条管线）。基址 `RUYIN_REGISTRY_BASE`，缺省即上面目录树。
+
+**与上图的差距，照实说**：上图写的「验平台签名」两处今天都不存在 —— index 未签名
+（只靠到 dl 主机的 TLS），包未签名（生产 `installPackage` 拒装，静态库在正式版里
+**只能看不能装**）。两者同一个根因：Registry 根证书（TD-012）；登记为 TD-037。
+
 ---
 
 # 8. docs/ 迁移：temp/ → 十段编号

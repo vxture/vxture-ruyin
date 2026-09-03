@@ -31,6 +31,7 @@ import {
 import {
   Api,
   type InstalledPackage,
+  type RegistryCatalog,
   type ProductInfo,
   type SessionInfo,
   type ProjectMeta,
@@ -44,6 +45,102 @@ import { CATALOG, CATALOG_SOURCE } from "./catalog";
  * （Local Web 访问模式从第一天起就成立）。壳里 file input 一样弹系统选择框，
  * 少一条只有壳能走的路。
  */
+/**
+ * 静态产品库（流 C，MVP 形态）。点开才去问 —— 首页每次加载都去拉 index 是把
+ * 一个可有可无的目录变成首屏的依赖。三种回答各说各的：查不到（不是「没有产品」）、
+ * 有但这台机器装不了（未签名，生产拒装）、有且能装。
+ */
+function RegistryRow({
+  api,
+  onDone,
+  onError,
+}: {
+  api: Api;
+  onDone: () => void | Promise<void>;
+  onError: (msg: string) => void;
+}) {
+  const [catalog, setCatalog] = useState<RegistryCatalog | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const load = async () => {
+    setBusy("__catalog");
+    try {
+      setCatalog(await api.registry());
+    } catch (e) {
+      onError(String((e as Error).message));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const install = async (id: string, version: string) => {
+    setBusy(`${id}@${version}`);
+    try {
+      await api.installFromRegistry(id, version);
+      await onDone();
+      await load();
+    } catch (e) {
+      onError(String((e as Error).message));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="install-row" style={{ flexDirection: "column", alignItems: "flex-start" }}>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={busy === "__catalog"}
+        onClick={() => {
+          const next = !open;
+          setOpen(next);
+          if (next && catalog === null) void load();
+        }}
+      >
+        {open ? "收起产品库" : "从产品库安装"}
+      </Button>
+      {open && catalog?.status === "unreachable" && (
+        <span className="text-body-sm text-muted-foreground">
+          产品库没查到 —— {catalog.reason}。这不代表产品库是空的，只代表这次没问到。
+        </span>
+      )}
+      {open && catalog?.status === "ok" && catalog.items.length === 0 && (
+        <span className="text-body-sm text-muted-foreground">产品库里目前没有产品包</span>
+      )}
+      {open && catalog?.status === "ok" && catalog.items.length > 0 && (
+        <ul className="row-list" aria-label="产品库">
+          {catalog.items.map((item) => (
+            <li key={`${item.id}@${item.version}`} className="row-item">
+              <span className="row-main">
+                {item.name}{" "}
+                <span className="mono text-muted-foreground">
+                  {item.id} v{item.version}
+                </span>
+              </span>
+              {/* 签没签名照实说：今天静态库里的包都未签名，生产拒装。 */}
+              <span className="row-tag">{item.signed ? "已副署" : "未签名"}</span>
+              {item.installed ? (
+                <span className="text-body-sm text-muted-foreground">已安装</span>
+              ) : catalog.installable ? (
+                <Button
+                  size="sm"
+                  disabled={busy !== null}
+                  onClick={() => void install(item.id, item.version)}
+                >
+                  {busy === `${item.id}@${item.version}` ? "正在安装……" : "安装"}
+                </Button>
+              ) : (
+                <span className="text-body-sm text-muted-foreground" title="正式版拒绝安装未经 Vxture Registry 副署的包（TD-012 / TD-037）">
+                  本机不装未签名包
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function InstallPackageRow({
   api,
   onDone,
@@ -337,6 +434,7 @@ export function HomePage({
           </ListCardGrid>
         )}
         <InstallPackageRow api={api} onDone={onRefresh} onError={onError} />
+        <RegistryRow api={api} onDone={onRefresh} onError={onError} />
       </Section>
 
       <Section

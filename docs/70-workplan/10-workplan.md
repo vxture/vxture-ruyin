@@ -58,7 +58,11 @@
 - [x] tag↔版本一致性闸（2026-09-01）：`v*` tag 与 `apps/shell/package.json` 不符即 release 失败。此前版本只取自 package.json——**推 `v0.2.0` 而包里还是 `0.1.0`，会产出 `Ruyin-Setup-0.1.0.exe` 并当作 v0.2.0 发布，产物、更新 feed、下载清单全都带着一个没人发布过的版本号，而没有任何东西会报错**
 - [x] ~~签名步~~ **不做（2026-09-02，owner 定：不采购证书，TD-001 转 standing）**。`signAndEditExecutable` 已于同日回开，但那是为了写入应用图标——**它不等于签名**，没有证书时 electron-builder 只编辑不签。连锁后果已一并处置：**自动更新改为不做**（见下一条）
 - [ ] dl 主机上载（**前置：liaison L2**）——publish job 已留占位，L2 落地后换 tailnet-ssh-connect + rsync 原子切换
-- [ ] products/ 静态清单目录（流 C 的 MVP Registry）
+- [x] products/ 静态清单目录（流 C 的 MVP Registry，2026-09-03）：`ruyin pack` / `ruyin registry`
+      产出包与 `index.json`（无签名、清单里逐条写明 `signed: false`），release.yml 随安装包暂存；
+      守护进程 `GET /registry` + `POST /registry/install`（下载与清单核对 size / sha256 / 同源后走
+      既有安装管线）；首页「从产品库安装」三种回答各说各的（查不到 ≠ 空、能看不能装、能装）。
+      **正式版只能看不能装**（未签名，TD-037）—— 那是 TD-012 的事，这里不绕。
 - [x] **自动更新：MVP 不做，改为浏览器下载 + 手动安装（2026-09-02 · TD-021 closed）**。曾于 2026-09-01 整套接过 electron-updater（检查 + 闸门 + 意图 + 下载安装），**现已整段拆掉** —— 它在 Windows 上默认校验更新包签名，而 owner 定了不采购证书：要么关掉那道校验、让更新通道接受任何来自 feed 的包，要么不自动安装。**选了后者。**<br>**是拆掉不是留着不用**：壳里的 electron-updater 与依赖、守护进程的 install/intent/闸门、以及已无发布方的 `update-intent` 事件类型全部移除 —— 留着一条走不通的路，下一个人会以为它还能走。<br>**保留并加强了检查那一半**：`GET /updates/check` 现在还给出 `downloadUrl` 与 `channel`，地址由**刚校验过的那份 feed 自己的 `path`** 拼出、落在同一个渠道目录，**检查哪个渠道就下载哪个渠道**；feed 没写文件名就不给地址（猜出来的地址点下去是 404）。界面写明渠道 —— 不写明渠道的下载链接是有害的。<br>**这个功能最早的毛病仍被钉着**：不发请求就断言「当前已是最新」。`unreachable` 是独立状态，绝不折叠进「最新」，守卫盯着
 
 ## W5 · npm 发布流
