@@ -142,14 +142,18 @@ export function TenantMenu({
           )}
           {quota.status === "ok" &&
             quota.lines.map((line) => (
+              /* 与平台租户面板同一种读法（TenantPanel：进度条是**已用**占配额的比例，
+                 文案「已用 / 配额」），桌面端多写一个「剩余」—— 用户来看的就是还剩多少。 */
               <ShellPanelMeterRow
                 key={line.metric}
-                icon="cpu"
+                icon="coins"
                 label={line.label}
                 valueLabel={
-                  line.limit > 0 ? `剩余 ${fmt(line.remaining)} / ${fmt(line.limit)}` : `剩余 ${fmt(line.remaining)}`
+                  line.limit > 0
+                    ? `已用 ${fmt(line.limit - line.remaining)} / ${fmt(line.limit)} · 剩余 ${fmt(line.remaining)}`
+                    : `剩余 ${fmt(line.remaining)}`
                 }
-                percent={line.limit > 0 ? Math.max(0, Math.min(100, (line.remaining / line.limit) * 100)) : 100}
+                percent={line.limit > 0 ? Math.max(0, Math.min(100, ((line.limit - line.remaining) / line.limit) * 100)) : 0}
               />
             ))}
         </ShellPanelSection>
