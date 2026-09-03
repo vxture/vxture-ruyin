@@ -6,7 +6,7 @@
  * 由订阅状态 + 本地已装运行时共同决定，绝不硬编码**——编造的产品会让用户以为
  * 自己拥有并不存在的订阅。
  *
- * 「智能体广场」是另一句话：「平台上有这些」，不声称所有权，动作只有外链。它的
+ * 「热门智能体」是另一句话：「平台上有这些」，不声称所有权，动作只有外链。它的
  * 数据是平台目录的静态快照（catalog.ts，有出处有日期），接上目录端点后即删。
  *
  * 订阅数据面（C2 entitlements）尚无桌面可达端点（liaison L3-b）：未接通时诚实
@@ -498,10 +498,10 @@ export function HomePage({
           视口、这一段 margin-top:auto）。 */}
       <div className="home-catalog">
       <Section
-        title="智能体广场"
+        title="热门智能体"
         icon="sparkles"
         level={2}
-        description="平台广场里靠前的三个智能体。这里只作了解，订阅在平台完成。"
+        description="平台上排在前面的三个智能体。这里只作了解，订阅在平台完成。"
         action={
           <Button
             variant="outline"

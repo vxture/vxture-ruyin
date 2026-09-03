@@ -500,9 +500,9 @@ void test("HomePage: 我的智能体 的标题行链接是「在线使用」，�
 // 这一栏说的是「平台上有这些」，不是「你有这些」。两者混淆正是首页那条硬规则
 // （不得硬编码产品）要防的事，所以下面几条测的核心就是这条边界。
 
-void test("智能体广场: renders the platform catalog with its real 正式版 / 开发中 status", () => {
+void test("热门智能体: renders the platform catalog with its real 正式版 / 开发中 status", () => {
   renderHome({ products: [] });
-  expect(screen.getByText("智能体广场")).toBeInTheDocument();
+  expect(screen.getByText("热门智能体")).toBeInTheDocument();
   const released = RECOMMENDED.filter((c) => c.status === "released");
   const building = RECOMMENDED.filter((c) => c.status === "building");
   for (const c of RECOMMENDED) {
@@ -517,7 +517,7 @@ void test("智能体广场: renders the platform catalog with its real 正式版
   }
 });
 
-void test("智能体广场: every card says 了解详情, never a subscribe action the link cannot honour", () => {
+void test("热门智能体: every card says 了解详情, never a subscribe action the link cannot honour", () => {
   renderHome({ products: [] });
   // 这个链接落在目录页，不是某个产品的订阅流程 —— 所以按钮不写「订阅」，
   // 上没上线交给状态徽章说。写成「去平台订阅」是拿做不到的动作骗点击。
@@ -529,7 +529,7 @@ void test("智能体广场: every card says 了解详情, never a subscribe acti
   ).not.toBeInTheDocument();
 });
 
-void test("智能体广场: NOTHING in the catalog is openable - 打开 belongs to products you actually have", () => {
+void test("热门智能体: NOTHING in the catalog is openable - 打开 belongs to products you actually have", () => {
   renderHome({ products: [] });
   // 这是这一栏与「我的智能体」之间那条线。目录里出现一个「打开」，就等于告诉
   // 用户他拥有一个其实没有的订阅 —— 首页那条硬规则防的正是这个。
@@ -537,14 +537,14 @@ void test("智能体广场: NOTHING in the catalog is openable - 打开 belongs 
   expect(screen.queryByRole("button", { name: "在线 ↗" })).not.toBeInTheDocument();
 });
 
-void test("智能体广场: says where the list came from and when - it is a snapshot, not live", () => {
+void test("热门智能体: says where the list came from and when - it is a snapshot, not live", () => {
   renderHome({ products: [] });
   expect(
     screen.getByText(`取自 Vxture 平台目录（${CATALOG_SOURCE.capturedAt} 快照）。`),
   ).toBeInTheDocument();
 });
 
-void test("智能体广场: 浏览全部 opens the real catalog page", async () => {
+void test("热门智能体: 浏览全部 opens the real catalog page", async () => {
   renderHome({ products: [] });
   await userEvent.click(screen.getByRole("button", { name: "浏览全部 ↗" }));
   expect(globalThis.open).toHaveBeenCalledWith(
@@ -554,7 +554,7 @@ void test("智能体广场: 浏览全部 opens the real catalog page", async () 
   );
 });
 
-void test("智能体广场: a card's 了解详情 opens the catalog page in a new tab, and opens nothing local", async () => {
+void test("热门智能体: a card's 了解详情 opens the catalog page in a new tab, and opens nothing local", async () => {
   const onOpen = vi.fn();
   renderHome({ products: [], onOpen });
   await userEvent.click(screen.getAllByRole("button", { name: "了解详情 ↗" })[0]!);
@@ -567,7 +567,7 @@ void test("智能体广场: a card's 了解详情 opens the catalog page in a ne
   expect(onOpen).not.toHaveBeenCalled();
 });
 
-void test("智能体广场: capability tags come from the catalog entry, not invented per card", () => {
+void test("热门智能体: capability tags come from the catalog entry, not invented per card", () => {
   renderHome({ products: [] });
   const first = CATALOG[0]!;
   for (const cap of first.capabilities) {
