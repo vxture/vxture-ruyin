@@ -65,7 +65,7 @@ AI 用量（ai.credit 等 counter 型）
 | §5 镜像仓库 profile | ➖ 不适用 | 无容器镜像；npm 包走 GitHub Packages（org 既有 NODE_AUTH_TOKEN 基建） |
 | §6 环境与部署 bootstrap | 🔁 缩减 | 只需 `beta` / `production` 两个 Environment，指向下载主机而非应用主机 |
 | §7 数据层（服务器 DB） | ➖ 不适用 | 无服务器库；SQLite 结构由应用内迁移管理（06 §7），另立仓内规范 |
-| §8 护栏 | 🔁 按形态启用 | docs-numbering 必上；契约 lint（R1–R11）**新增为本仓特有护栏**；DDL/catalog 类不启用 |
+| §8 护栏 | 🔁 按形态启用 | docs-numbering 必上；契约 lint（R 系列，权威清单在 03-A §15）**新增为本仓特有护栏**；DDL/catalog 类不启用 |
 | §9 SCA 门 | ✅ 原样继承 | osv-scanner pinned + `--config` 扫 pnpm-lock |
 | §10 骨架与 docs 分类 | ✅ 继承（源码槽位按本形态） | 见 §4、§8 |
 | 偏离纪律 | ✅ 遵守 | §4–§7 的剖面替换属"模板不适用"而非静默偏离，仍按三步向平台报备（§10 liaison） |
@@ -98,13 +98,14 @@ vxture-ruyin/
 ├── packages/                       # 可发布的库（npm → GitHub Packages）
 │   ├── contract-schema/            # @vxture/ruyin-contract-schema
 │   ├── runtime-core/               # @vxture/ruyin-core（同构内核，云端 Runtime 消费）
-│   ├── product-sdk/                # @vxture/ruyin-product-sdk（07 §6.2）
-│   └── cli/                        # ruyin lint / dev / pack（07 §7–§9）
+│   ├── document/                   # @vxture/ruyin-document（mdast 表示 + docx/PDF 渲染，ADR-016/017）
+│   ├── product-sdk/                # @vxture/ruyin-product-sdk（07 §6.2）—— **尚未建**，W3
+│   └── cli/                        # ruyin lint / pack / registry（dev 尚未落地，07 §7–§9）
 ├── apps/                           # 不发布 npm，只进安装包
 │   ├── local-host/                 # Node Runtime 守护进程（06 §4）
 │   ├── shell/                      # Electron 壳 + electron-builder 配置
 │   └── ui-workspace/               # Workspace UI（React）
-├── products/                       # MVP 内置产品源码（后期迁出为独立产品仓）
+├── products/                       # 测试夹具（bid 契约，无产品代码；有意长期留仓，TD-006）
 │   └── bid/
 └── pnpm-workspace.yaml             # packages/* + apps/* + products/*
 ```
@@ -113,9 +114,10 @@ vxture-ruyin/
 
 - **packages/ 与 apps/ 的分界 = 是否被仓外消费**。云端 Runtime 与未来产品团队只消费
   packages/ 的 npm 包，绝不引用本仓源码（对齐平台"依赖 = 已发布 npm 包 + API 契约"的硬约束，方向对等适用）
-- products/ 是过渡：MVP 期 Bid 产品与 Runtime 同仓联调最快；契约与 SDK 稳定后按 03-A 分发模型迁出
+- products/ 是**测试夹具**，不是过渡（2026-09-02 owner 定，TD-006 转 standing）：只有一份契约、
+  没有产品代码，也不会有；它随安装包发出，所以首页不空。原文「契约与 SDK 稳定后迁出」的框架已撤
 - `package.json` 预置机检契约脚本名：`type-check:all`、`lint`、`lint:docs-numbering`、
-  **`lint:contract`**（本仓特有：对 products/*/ruyin.product.yaml 跑 R1–R11）
+  **`lint:contract`**（本仓特有：对 products/*/ruyin.product.yaml 跑全部 R 规则）
 
 ---
 
@@ -137,7 +139,7 @@ vxture-ruyin/
 
 | 流 | 构件 | 通道 | 消费者 |
 |---|---|---|---|
-| A | npm 包（contract-schema / runtime-core / product-sdk / cli） | GitHub Packages（@vxture scope，org NODE_AUTH_TOKEN 既有基建） | 云端 Runtime、产品团队 |
+| A | npm 包（contract-schema / runtime-core / document / cli；product-sdk 待建） | GitHub Packages（@vxture scope，org NODE_AUTH_TOKEN 既有基建） | 云端 Runtime、产品团队 |
 | B | 安装包（NSIS `.exe` + blockmap + `latest.yml` 更新 feed） | **网站平台下载（主通道，§7）** | 最终用户 |
 | C | 产品包（`.ruyinpkg`） | MVP：与 B 同一下载主机的静态目录 + 清单文件；后期：Registry 服务（03-A §18.3） | Runtime 拉取 |
 

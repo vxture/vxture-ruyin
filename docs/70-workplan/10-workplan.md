@@ -284,11 +284,13 @@
 - 审计页对**每一条完好的链**都喊「哈希链断裂」：X-3 改名后界面那份类型没跟
 - 三处文件头说反了（改订轮次/瞬时挂起/取消都已实现却写着未做）
 
-### 守卫（六道，每道都故意弄坏验证过）
+### 守卫（八道，每道都故意弄坏验证过）
 
 `lint:contract`（R 系列）· `lint:api-shape`（X-1/B-3）· `lint:publish-order` ·
 `lint:shared-shapes`（跨进程类型 + 事件词表 + 标题栏高度）·
-`lint:update-policy`（owner 定的三条更新策略）· `lint:docs-numbering`；
+`lint:update-policy`（owner 定的三条更新策略）· `lint:docs-numbering` ·
+`lint:tech-debt`（登记册可解析、自计数一致）· `lint:brand-assets`；
+（2026-09-03 更正：此处此前写「六道」，后两道加上后没改）
 CI 另加 `packaged-smoke`（windows-latest，真启动 + 真排一份 PDF + 断言 DPAPI）。
 
 **已提为第六个必需检查（2026-09-02，#73）** —— owner 定：ruyin 是桌面分发仓，平台模板明文不适用，

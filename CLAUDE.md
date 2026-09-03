@@ -23,12 +23,15 @@ document-number mapping 01..08 used in cross-references).
 ## Source layout and the publishing boundary
 
 - `packages/` - published to GitHub Packages (@vxture scope), consumed OUTSIDE
-  this repo: contract-schema, runtime-core, product-sdk, cli. The cloud runtime
-  consumes these as npm packages, never this repo's source.
+  this repo: contract-schema, runtime-core, document, cli. The cloud runtime
+  consumes these as npm packages, never this repo's source. (product-sdk is
+  planned, not present - workplan W3; do not list it as if it existed.)
 - `apps/` - never published as packages; shipped only inside the installer:
   local-host (runtime daemon), shell (Electron), ui-workspace (React).
-- `products/` - transitional in-repo products (bid). Moves out once the
-  contract + SDK stabilize (TD-006).
+- `products/` - the test fixture (bid), kept in-repo on purpose (TD-006,
+  standing): no product code lives here and none will; it ships inside the
+  installer so the home page is not empty, which is why it must look like
+  what it is (TD-033).
 
 ## Branch model and release channels
 
@@ -84,9 +87,10 @@ user tokens live only in the user's OS credential store.
   by the client (30-design/70 section 2.1).
 - runtime-core stays host-agnostic: no Node/Electron APIs in the kernel, hosts
   implement the ports (30-design/60 section 6).
-- Contract validation rules R1-R14 are the single authority
-  (30-design/30-contract-schema.md); the `lint:contract` guardrail enforces
-  them once the CLI lands (TD-004).
+- The contract validation rules (R-series, sparse numbering - the authority
+  is the table in 30-design/30-contract-schema.md section 15, never a range
+  written here) are the single authority; the `lint:contract` guardrail
+  enforces them (TD-004 closed).
 
 ## Docs taxonomy
 
