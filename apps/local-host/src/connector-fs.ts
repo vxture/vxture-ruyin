@@ -104,6 +104,7 @@ export class LocalFsConnector implements ConnectorPort {
           id: itemId(full),
           type: binding.type,
           source: "local",
+          connector: "local-fs",
           ref: full,
           name: relative(binding.root, full).split(sep).join("/"),
           bytes: stat.size,

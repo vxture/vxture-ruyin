@@ -734,6 +734,7 @@ test("gate: a context_item reference must be in this task's context set", () => 
         id: "item_1",
         type: "tender_document",
         source: "local",
+        connector: "local-fs",
         ref: "C:/work/t.md",
         name: "t.md",
         bytes: 4,
@@ -1119,6 +1120,17 @@ async function bindTender(
     runtime.setBinding(projectId, { type: "tender_document", root: "/elsewhere" }),
     /outside every granted folder/,
   );
+  // A connector that is not local-fs is contained by a connector grant, not
+  // by folder grants (ADR-005): without one the binding is refused.
+  await assert.rejects(
+    runtime.setBinding(projectId, {
+      type: "tender_document",
+      root: "/granted/tenders",
+      connector: "memory",
+    }),
+    /not granted to this project/,
+  );
+  await runtime.addConnectorGrant(projectId, "memory");
   await runtime.setBinding(projectId, {
     type: "tender_document",
     root: "/granted/tenders",
@@ -1160,7 +1172,46 @@ test("selection pipeline: high sensitivity gates on context_confirm, then comple
   assert.equal(payload.persistence, "none");
   assert.equal(payload.confirmed_by, "user");
   assert.match(payload.context_items[0]!.content_hash, /^sha256:[0-9a-f]{64}$/);
+  // ADR-005: every connector call is on record - which connector, not only which item.
+  assert.ok(payload.context_items.every((i) => (i as { connector?: string }).connector === "memory"));
   assert.ok(verifyAuditChain(ports.crypto, meta.id, events));
+});
+
+test("connector grant revoked after binding: selection refuses and says which grant is gone", async () => {
+  const { ports, runtime, connector } = makeSelectionFixture();
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  await bindTender(runtime, connector, meta.id);
+
+  // Revoke by rewriting the grant table without the connector grant - the
+  // folder grant stays, so the failure must name the connector, not the folder.
+  const store = await ports.storage.openProjectStore(meta.id);
+  assert.ok(store);
+  const grants = JSON.parse((await store.getGrants()) ?? "[]") as Array<{ kind?: string }>;
+  await store.putGrants(JSON.stringify(grants.filter((g) => g.kind !== "connector")));
+
+  await assert.rejects(
+    runtime.discoverContext(meta.id, "tender_document"),
+    /uses connector "memory" which this project no longer grants/,
+  );
+  const harness = await runtime.createHarness(meta.id);
+  const instance = await runTask(harness, "analyze_tender");
+  assert.equal(instance.state, "failed");
+  assert.match(instance.error ?? "", /no longer grants/);
+  assert.deepEqual(instance.capabilityOutputs, {});
+});
+
+test("connector grant: local-fs is per folder, an uninstalled connector cannot be granted, no double grant", async () => {
+  const { runtime } = makeSelectionFixture();
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  await assert.rejects(runtime.addConnectorGrant(meta.id, "local-fs"), /granted per folder/);
+  await assert.rejects(runtime.addConnectorGrant(meta.id, "crm"), /not installed/);
+  const grant = await runtime.addConnectorGrant(meta.id, "memory");
+  assert.equal(grant.kind, "connector");
+  await assert.rejects(runtime.addConnectorGrant(meta.id, "memory"), /already granted/);
+  // Folder grants and connector grants share one table and are told apart by kind.
+  const all = await runtime.listGrants(meta.id);
+  assert.equal(all.length, 1);
+  assert.ok("kind" in all[0]!);
 });
 
 test("selection pipeline: declining the context stops the task", async () => {
@@ -1215,6 +1266,7 @@ test("上下文承载：二进制以字节 + 媒体类型过线，不被降级�
       content: { kind: "binary", mediaType: "application/pdf", bytes },
     },
   ]);
+  await runtime.addConnectorGrant(meta.id, "memory");
   await runtime.setBinding(meta.id, {
     type: "tender_document",
     root: "/granted/tenders",
@@ -1274,6 +1326,7 @@ test("上下文承载：读不了的资料如实标 unavailable，既不编内�
       content: { kind: "unavailable", reason: 'unrecognized file type ".tif"' },
     },
   ]);
+  await runtime.addConnectorGrant(meta.id, "memory");
   await runtime.setBinding(meta.id, {
     type: "tender_document",
     root: "/granted/tenders",

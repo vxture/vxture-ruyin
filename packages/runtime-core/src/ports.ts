@@ -7,6 +7,14 @@
  * Anything host-specific enters through these interfaces.
  */
 
+import type { ContextSource } from "@vxture/ruyin-contract-schema";
+
+/**
+ * 契约允许的来源种类（03-A §9），原样再导出：绑定要说自己是哪一种，而这个
+ * 枚举只能有一份 —— 在这里再抄一遍，下一次契约加一种来源时这里就悄悄过期。
+ */
+export type { ContextSource };
+
 export interface ClockPort {
   /** ISO-8601 timestamp. */
   now(): string;
@@ -84,6 +92,12 @@ export interface ToolOffer {
  */
 export type ContentOrigin =
   | { kind: "local_file"; connector: string }
+  /**
+   * 经进程外连接器取回的资料（ADR-005 通路二）。`source` 是契约的来源种类
+   * （lan / private …），因为「来自内网某个系统」与「用户机器上的一个文件」
+   * 在提供方那里不是一回事 —— 前者的作者是那个系统，不是我们的用户。
+   */
+  | { kind: "connector"; connector: string; source: string }
   | { kind: "caller" }
   | { kind: "tool_result"; tool: string };
 
@@ -240,6 +254,29 @@ export interface FolderGrant {
   createdAt: string;
 }
 
+/**
+ * 项目级的连接器授权（ADR-005「授权以项目为边界 —— 与文件夹 Grant 同级」）。
+ *
+ * 文件夹授权说的是「这个项目可以读这个目录」；连接器授权说的是「这个项目可以
+ * 通过这个连接器取资料」。两者都是用户的显式动作，都在选择期复核，都进审计。
+ * 一个已装好的连接器**不等于**每个项目都能用它 —— 装是机器级的事，用是项目级
+ * 的事。
+ */
+export interface ConnectorGrant {
+  id: string;
+  kind: "connector";
+  /** 连接器 id（`ConnectorLookup` 里的键）。 */
+  connector: string;
+  mode: "read";
+  createdAt: string;
+}
+
+/**
+ * 授权表里并列存放的两种授权。文件夹授权没有 `kind` 字段 —— 它先于连接器授权
+ * 存在，已落库的记录不会带这个字段，而给旧记录回填等于替用户改一份授权。
+ */
+export type Grant = FolderGrant | ConnectorGrant;
+
 /** Binding of a contract context type to an actual source (04 section 3). */
 /**
  * 一份由本项目的任务产出、并因此可以作为下游任务上下文的文档。
@@ -262,8 +299,20 @@ export interface ProjectArtifact {
 
 export interface Binding {
   type: string;
-  source: "local";
+  /**
+   * 来源种类，取自契约允许的列表（03-A §9）。ADR-005 接缝 ①：曾是字面量
+   * `"local"`，于是局域网 / 私有服务的绑定在类型上就写不出来。
+   */
+  source: ContextSource;
+  /** 绑定经由哪个连接器（`"local-fs"`，或已安装连接器的 id）。 */
   connector: string;
+  /**
+   * 在连接器里的位置：local-fs 是绝对目录；进程外连接器是资源 URI 前缀
+   * （连接器 `discover()` 只返回落在这个前缀下的条目）。
+   *
+   * 边界各归各的：目录由文件夹授权兜住，连接器绑定由连接器授权兜住 —— 两者
+   * 都在选择期复核，授权撤了绑定就失效。
+   */
   root: string;
 }
 
@@ -271,6 +320,12 @@ export interface ContextItemMeta {
   id: string;
   type: string;
   source: string;
+  /**
+   * 发现这个条目的连接器 id。ADR-005 接缝 ②：此前由 `source` 按约定推导
+   * （local → local-fs，其余把 source 当 id 用），两个同源连接器一装就撞。
+   * 读取时按它取连接器；没有它的旧记录按旧约定回退（见 harness）。
+   */
+  connector: string;
   /** Connector-understood reference (local-fs: absolute path). */
   ref: string;
   name: string;
@@ -282,10 +337,40 @@ export interface ContextItem extends ContextItemMeta {
   content: ContextContent;
 }
 
-/** Context source access (04 section 4). */
+/** 连接器的健康状况（04 §4.1 生命周期）。`checkedAt` 说明这是何时的事实。 */
+export interface ConnectorHealth {
+  ok: boolean;
+  detail?: string;
+  checkedAt: string;
+}
+
+/**
+ * Context source access (04 section 4).
+ *
+ * 读，只读：连接器把资料带进 Context Set，动作走 `ToolExecutorPort`。
+ *
+ * 生命周期三件是可选的（ADR-005 接缝 ⑤）：内建的 local-fs 没有进程可起可停，
+ * 进程外的 MCP 连接器有。宿主的注册表在装载时 `start()`、卸载时 `stop()`、
+ * 被问到时 `health()`；内核本身不调用它们 —— 内核只读。
+ */
 export interface ConnectorPort {
   discover(binding: Binding): Promise<ContextItemMeta[]>;
   read(item: ContextItemMeta): Promise<ContextItem>;
+  start?(): Promise<void>;
+  stop?(): Promise<void>;
+  health?(): Promise<ConnectorHealth>;
+}
+
+/**
+ * 内核按 id 找连接器的口（ADR-005 接缝 ④）。
+ *
+ * 只要 `get` —— 一个 `Map` 就满足它，但把类型收窄到这一个方法说清了一件事：
+ * **谁拿着这份表、什么时候往里放东西，是宿主的事**。装一个新连接器不必重启
+ * 守护进程：宿主往同一份表里 `set`，下一次选择就看得见。内核从不枚举它 ——
+ * 「有哪些连接器」是宿主的界面要回答的问题，不是选择管线的。
+ */
+export interface ConnectorLookup {
+  get(id: string): ConnectorPort | undefined;
 }
 
 /**
@@ -488,8 +573,11 @@ export interface RuntimePorts {
   id: IdPort;
   crypto: CryptoPort;
   gateway: AIGatewayPort;
-  /** Connector registry by connector id (e.g. "local-fs"). */
-  connectors?: Map<string, ConnectorPort>;
+  /**
+   * Connector lookup by id (e.g. "local-fs"). A plain Map works; hosts that
+   * install connectors at runtime hand in the same object they mutate.
+   */
+  connectors?: ConnectorLookup;
   ranker?: RankerPort;
   /** Executes tools the Tool Gate lets through. */
   tools?: ToolExecutorPort;

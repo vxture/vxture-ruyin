@@ -19,6 +19,7 @@ function metaFor(path: string, name: string): ContextItemMeta {
     id: `itm_${name}`,
     type: "tender_document",
     source: "local",
+    connector: "local-fs",
     ref: path,
     name,
     bytes: statSync(path).size,

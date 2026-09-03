@@ -42,19 +42,19 @@ import {
   RUNTIME_ACTOR,
 } from "./audit.js";
 import { TransientError } from "./ports.js";
-import { isPathGranted } from "./project.js";
+import { LOCAL_FS, bindingRevoked, folderGrants, isPathGranted } from "./project.js";
 import { decideTool, validateToolCall } from "./tool-gate.js";
 import type {
   AIGatewayPort,
   Binding,
   ClockPort,
-  ConnectorPort,
+  ConnectorLookup,
   AuditOutcome,
   ContextContent,
   ContextItemMeta,
   CryptoPort,
   FactContent,
-  FolderGrant,
+  Grant,
   IdPort,
   RankerPort,
   ContextFact,
@@ -273,7 +273,7 @@ export interface HarnessDeps {
   id: IdPort;
   crypto: CryptoPort;
   gateway: AIGatewayPort;
-  connectors: Map<string, ConnectorPort>;
+  connectors: ConnectorLookup;
   ranker?: RankerPort | undefined;
   /** Executes tools the gate lets through; absent = no tool is on offer. */
   tools?: ToolExecutorPort | undefined;
@@ -766,7 +766,7 @@ export class Harness {
   > {
     const { contract, store, connectors, ranker } = this.deps;
     const bindings = jsonArray<Binding>(await store.getBindings());
-    const grants = jsonArray<FolderGrant>(await store.getGrants());
+    const grants = jsonArray<Grant>(await store.getGrants());
     const requiredIds = new Set(
       contract.context.types.filter((t) => t.required).map((t) => t.id),
     );
@@ -789,6 +789,7 @@ export class Harness {
           id: `art_${a.type}_${a.path}`,
           type,
           source: "project",
+          connector: LOCAL_FS,
           ref: a.path,
           name: a.path.split(/[\\/]/).pop() ?? a.path,
           bytes: a.bytes,
@@ -797,13 +798,10 @@ export class Harness {
       }
       if (binding) {
         // Grants may have changed since the binding was created - revalidate
-        // (04 section 4.3: the runtime never reads outside granted folders).
-        if (!isPathGranted(binding.root, grants)) {
-          return {
-            ok: false,
-            reason: `binding for "${type}" points outside the granted folders (grant revoked?)`,
-          };
-        }
+        // (04 section 4.3: the runtime never reads outside granted folders,
+        // and never through a connector the project no longer grants).
+        const revoked = bindingRevoked(binding, grants);
+        if (revoked) return { ok: false, reason: revoked };
         const connector = connectors.get(binding.connector);
         if (!connector) {
           return {
@@ -875,7 +873,8 @@ export class Harness {
     if (instance.contextSet) {
       transmissionItems = [];
       for (const meta of instance.contextSet) {
-        const connector = connectors.get(metaConnector(meta));
+        const connectorId = itemConnector(meta);
+        const connector = connectors.get(connectorId);
         if (!connector) {
           return this.fail(instance, `connector for item "${meta.id}" unavailable`);
         }
@@ -884,12 +883,18 @@ export class Harness {
           type: item.type,
           name: item.name,
           content: toFactContent(item.content, crypto),
-          origin: { kind: "local_file", connector: metaConnector(meta) },
+          origin:
+            connectorId === LOCAL_FS
+              ? { kind: "local_file", connector: connectorId }
+              : { kind: "connector", connector: connectorId, source: item.source },
         });
         transmissionItems.push({
           id: item.id,
           type: item.type,
           source: item.source,
+          // 经哪个连接器出去的。ADR-005：每次连接器调用落审计（连接器、资源、
+          // 内容哈希，不落原文）—— 资源与哈希本来就在这条记录里，这里补上连接器。
+          connector: connectorId,
           // The full local reference stays here, in the audit - it is not sent
           // to the provider, which has no business knowing the user''s paths.
           ref: item.ref,
@@ -1170,7 +1175,8 @@ export class Harness {
     const needsApproval: ToolCall[] = [];
     const refusals: Array<{ tool: string; reason: string }> = [];
     const refusalMessages: TurnMessage[] = [];
-    const grants = jsonArray<FolderGrant>(await this.deps.store.getGrants());
+    // 工具校验的是路径参数，看的是目录授权；连接器授权与它无关。
+    const grants = folderGrants(jsonArray<Grant>(await this.deps.store.getGrants()));
     const askCache = new Set(instance.askCache ?? []);
 
     for (const call of calls) {
@@ -1254,7 +1260,7 @@ export class Harness {
     calls: ToolCall[],
   ): Promise<TurnMessage[]> {
     const out: TurnMessage[] = [];
-    const grants = jsonArray<FolderGrant>(await this.deps.store.getGrants());
+    const grants = folderGrants(jsonArray<Grant>(await this.deps.store.getGrants()));
     for (const call of calls) {
       // journal-before-write (50-harness 8.2): the intent is on record before
       // the effect, so recovery can tell "never ran" from "ran, unrecorded".
@@ -1558,12 +1564,17 @@ function jsonArray<T>(raw: string | undefined): T[] {
   return raw ? (JSON.parse(raw) as T[]) : [];
 }
 
-/** Connector id an item was discovered through (by source convention). */
-function metaConnector(meta: ContextItemMeta): string {
-  // 项目产出（`project`）就是落在授权目录里的本地文件，读它和读用户绑定的
-  // 文件是同一条路。source 仍旧记成 project，因为审计要说得清出处 —— 一份
-  // 我们自己写出来的文档，和用户给的资料，来路不是一回事。
-  if (meta.source === "local" || meta.source === "project") return "local-fs";
+/**
+ * Connector id an item was discovered through.
+ *
+ * 新记录自带 `connector`（ADR-005 接缝 ②）。旧记录 —— 这个字段出现之前就
+ * 停在人工检查点、重启后恢复的任务 —— 按旧约定回退：本地与项目产出都是落在
+ * 授权目录里的文件，走 local-fs；其余把 source 当 id 用（那正是旧约定撞车的
+ * 地方，但对已存的记录只能这么解读）。
+ */
+function itemConnector(meta: ContextItemMeta): string {
+  if (meta.connector) return meta.connector;
+  if (meta.source === "local" || meta.source === "project") return LOCAL_FS;
   return meta.source;
 }
 
