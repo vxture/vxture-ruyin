@@ -19,7 +19,7 @@
  *
  * 另外两条，任何时候都查（owner 2026-09-03 定：按行业最简单的那套）：
  *   - **步调一致**：四个包同一个版本号，tag 就是那个版本号（`packages-v0.2.0`），
- *     不用记谁是哪一版。版本号只允许 `X.Y.Z` 或 `X.Y.Z-(alpha|beta|rc).N`。
+ *     不用记谁是哪一版。版本号只允许 `X.Y.Z` 或 `X.Y.Z-(alpha|beta).N`（owner：三种足够，不要 rc）。
  *   - **`--tag packages-vX.Y.Z`**（发布工作流传入）：tag 号必须等于包版本号 ——
  *     推 `packages-v0.2.0` 而包里还是 0.1.0，会以 0.2.0 的名义发出一份没人升过的包。
  */
@@ -46,7 +46,7 @@ function compareVersions(a, b) {
   return 0;
 }
 
-const VERSION_SHAPE = /^\d+\.\d+\.\d+(?:-(alpha|beta|rc)\.\d+)?$/;
+const VERSION_SHAPE = /^\d+\.\d+\.\d+(?:-(alpha|beta)\.\d+)?$/;
 
 const argv = process.argv.slice(2);
 const tagFlag = argv.indexOf("--tag");
@@ -72,7 +72,7 @@ if (baselineFlag >= 0 && !baseline) {
   const early = [];
   for (const j of pkgs) {
     if (!VERSION_SHAPE.test(j.version)) {
-      early.push(`${j.name}: version "${j.version}" is not X.Y.Z or X.Y.Z-(alpha|beta|rc).N`);
+      early.push(`${j.name}: version "${j.version}" is not X.Y.Z or X.Y.Z-(alpha|beta).N`);
     }
   }
   const versions = new Set(pkgs.map((j) => j.version));

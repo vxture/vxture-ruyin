@@ -15,7 +15,7 @@
  *
  * **3. dist-tag 按版本号定，不靠人记。** 行业惯例：`latest` 是 `npm install 包名`
  * 不带版本时装到的那个，只能指向正式版；预发布版用 semver 后缀
- * （`1.2.0-beta.1` / `-rc.1` / `-alpha.1`）并以同名 dist-tag 发布，`^1.2.0` 这类范围
+ * （`1.2.0-beta.1` / `-alpha.1`；owner 定：三种足够，不要 rc）并以同名 dist-tag 发布，`^1.2.0` 这类范围
  * 默认不会匹配到它。npm 的默认行为是每次 publish 都把 latest 移到新发的版本上 ——
  * 发预发布版忘了带 --tag，全世界的 npm install 就都装到预发布版。这里从版本号推
  * tag，没有第二个要记的地方。
@@ -42,12 +42,12 @@ function pkg(dir) {
 }
 
 /**
- * 版本号 → dist-tag。`0.1.0` → latest；`1.2.0-beta.1` → beta；`-rc.N` → rc；
- * `-alpha.N` → alpha。别的后缀不认：那是拼错了，不是新渠道。
+ * 版本号 → dist-tag。`0.1.0` → latest；`1.2.0-beta.1` → beta；`-alpha.N` → alpha。
+ * 别的后缀（包括 rc）不认：那是拼错了，不是新渠道。
  */
 export function distTagFor(version) {
-  const m = /^\d+\.\d+\.\d+(?:-(alpha|beta|rc)\.\d+)?$/.exec(version);
-  if (!m) throw new Error(`version "${version}" is not X.Y.Z or X.Y.Z-(alpha|beta|rc).N`);
+  const m = /^\d+\.\d+\.\d+(?:-(alpha|beta)\.\d+)?$/.exec(version);
+  if (!m) throw new Error(`version "${version}" is not X.Y.Z or X.Y.Z-(alpha|beta).N`);
   return m[1] ?? "latest";
 }
 
