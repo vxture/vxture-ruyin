@@ -572,3 +572,36 @@ void test("Workbench (electron chrome): the caption-button spacer appears, brows
   expect(container.querySelector(".caption-spacer")).toBeInTheDocument();
 });
 
+void test("Header workspace control: icon + name only (no 工作区 label); opens a dropdown with the tenant and a platform link; right-side order is workspace · runtime · pending · settings", async () => {
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue({
+      signedIn: true,
+      consoleBase: "https://vxture.com",
+      workspace: { name: "某工作区" },
+      org: { name: "某租户" },
+      issuer: "",
+      entitlementsConfigured: false,
+    }),
+  });
+  render(<Workbench api={api} />);
+  const trigger = await screen.findByRole("button", { name: /某工作区/ });
+  expect(trigger.textContent).not.toContain("工作区名");
+  expect(screen.queryByText("工作区", { exact: true })).not.toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(trigger);
+  expect(await screen.findByText("租户：某租户")).toBeInTheDocument();
+  const open = vi.spyOn(window, "open").mockImplementation(() => null);
+  await user.click(screen.getByRole("button", { name: "在平台切换工作区 ↗" }));
+  expect(open).toHaveBeenCalledWith("https://vxture.com/zh-CN/profile", "_blank", "noopener");
+  open.mockRestore();
+
+  // Order: workspace (context) before the runtime badge, before pending, before settings.
+  const trailing = trigger.closest(".no-drag") as HTMLElement;
+  const after = (a: Element, b: Element) =>
+    (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  const runtime = within(trailing).getByText(/Runtime/);
+  const settings = within(trailing).getByRole("button", { name: "设置" });
+  expect(after(trigger, runtime)).toBe(true);
+  expect(after(runtime, settings)).toBe(true);
+});

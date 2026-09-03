@@ -11,7 +11,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HomePage } from "./home";
-import { CATALOG, CATALOG_SOURCE } from "./catalog";
+import { CATALOG, CATALOG_SOURCE, RECOMMENDED } from "./catalog";
 import { Api, type ProductInfo, type ProjectMeta, type SessionInfo } from "./api";
 
 function product(over: Partial<ProductInfo> = {}): ProductInfo {
@@ -50,6 +50,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
     session: vi.fn().mockResolvedValue(null),
     system: vi.fn().mockResolvedValue(null),
     installPackage: vi.fn(),
+    fetchProduct: vi.fn().mockResolvedValue({ status: "current" }),
     activateProduct: vi.fn(),
     deactivateProduct: vi.fn(),
     createProject: vi.fn(),
@@ -502,13 +503,18 @@ void test("HomePage: 我的产品 的标题行链接是「在线使用」，落�
 void test("热门推荐: renders the platform catalog with its real 正式版 / 开发中 status", () => {
   renderHome({ products: [] });
   expect(screen.getByText("热门推荐")).toBeInTheDocument();
-  const released = CATALOG.filter((c) => c.status === "released");
-  const building = CATALOG.filter((c) => c.status === "building");
-  for (const c of CATALOG) {
+  const released = RECOMMENDED.filter((c) => c.status === "released");
+  const building = RECOMMENDED.filter((c) => c.status === "building");
+  for (const c of RECOMMENDED) {
     expect(screen.getByText(c.name)).toBeInTheDocument();
   }
   expect(screen.getAllByText("正式版")).toHaveLength(released.length);
   expect(screen.getAllByText("开发中")).toHaveLength(building.length);
+  // Only the top three (owner): the rest of the catalog is not on the home page.
+  expect(RECOMMENDED).toHaveLength(3);
+  for (const c of CATALOG.slice(3)) {
+    expect(screen.queryByText(c.name)).not.toBeInTheDocument();
+  }
 });
 
 void test("热门推荐: every card says 了解详情, never a subscribe action the link cannot honour", () => {
@@ -516,7 +522,7 @@ void test("热门推荐: every card says 了解详情, never a subscribe action 
   // 这个链接落在目录页，不是某个产品的订阅流程 —— 所以按钮不写「订阅」，
   // 上没上线交给状态徽章说。写成「去平台订阅」是拿做不到的动作骗点击。
   expect(screen.getAllByRole("button", { name: "了解详情 ↗" })).toHaveLength(
-    CATALOG.length,
+    RECOMMENDED.length,
   );
   expect(
     screen.queryByRole("button", { name: "去平台订阅 ↗" }),
@@ -589,7 +595,7 @@ void test("InstallPackageRow: a DS button opens the picker - the browser-rendere
   // 改不掉，每个平台长得还不一样 —— 所以藏起来，由按钮代打开。功能仍走这个 input。
   expect(input).toBeInTheDocument();
   const clicked = vi.spyOn(input, "click");
-  await userEvent.click(screen.getByRole("button", { name: "安装本地产品包" }));
+  await userEvent.click(screen.getByRole("button", { name: "安装本地包" }));
   expect(clicked).toHaveBeenCalledTimes(1);
 });
 
@@ -866,4 +872,112 @@ void test("HomePage/产品库: an empty catalog says so; a failed fetch and a fa
   const list = await screen.findByLabelText("产品库");
   await user.click(within(list).getByRole("button", { name: "安装" }));
   await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("package sha256 mismatch"));
+});
+
+/* ---------------- 我的产品：标题行动作与卡片动作（2026-09-03 重排）---------------- */
+
+void test("我的产品 header: 同步产品版本 · 安装本地包 · 在线使用, with 在线使用 as the primary action on the right", async () => {
+  const api = fakeApi();
+  render(
+    <HomePage api={api} products={[product()]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={noop} />,
+  );
+  const actions = document.querySelector(".section-actions") as HTMLElement;
+  const names = within(actions).getAllByRole("button").map((b) => b.textContent);
+  expect(names).toEqual(["同步产品版本", "安装本地包", "在线使用 ↗"]);
+});
+
+void test("同步产品版本: fetches every product's contract; refreshes only when something new landed; a refusal reaches onError once", async () => {
+  const fetchProduct = vi
+    .fn()
+    .mockResolvedValueOnce({ status: "current" })
+    .mockResolvedValueOnce({ status: "fetched", version: "1.1.0" });
+  const onRefresh = vi.fn();
+  const api = fakeApi({ fetchProduct });
+  render(
+    <HomePage
+      api={api}
+      products={[product({ id: "a", name: "A" }), product({ id: "b", name: "B" })]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={onRefresh}
+      onError={noop}
+    />,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "同步产品版本" }));
+  await vi.waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+  expect(fetchProduct).toHaveBeenCalledWith("a");
+  expect(fetchProduct).toHaveBeenCalledWith("b");
+
+  const onError = vi.fn();
+  const refusing = fakeApi({
+    fetchProduct: vi.fn().mockRejectedValue(new Error("契约拉取需要已配置的产品能力面")),
+  });
+  render(
+    <HomePage api={refusing} products={[product({ id: "c", name: "C" }), product({ id: "d", name: "D" })]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={onError} />,
+  );
+  await user.click(screen.getAllByRole("button", { name: "同步产品版本" })[1]!);
+  await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+  expect(onError).toHaveBeenCalledWith("契约拉取需要已配置的产品能力面");
+});
+
+void test("ProductCard: 更新版本 appears only when the store holds a newer version than the active one, and pins it", async () => {
+  const pinProductVersion = vi.fn().mockResolvedValue({});
+  const onRefresh = vi.fn();
+  const api = fakeApi({ pinProductVersion });
+  const { unmount } = render(
+    <HomePage
+      api={api}
+      products={[product({ version: "1.0.0", versions: ["1.0.0", "1.2.0", "1.1.0"] })]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={onRefresh}
+      onError={noop}
+    />,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "更新版本 v1.2.0" }));
+  expect(pinProductVersion).toHaveBeenCalledWith("vxture.bid", "1.2.0");
+  await vi.waitFor(() => expect(onRefresh).toHaveBeenCalled());
+  unmount();
+
+  render(
+    <HomePage api={fakeApi()} products={[product({ version: "1.2.0", versions: ["1.0.0", "1.2.0"] })]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={noop} />,
+  );
+  expect(screen.queryByRole("button", { name: /更新版本/ })).not.toBeInTheDocument();
+});
+
+void test("ProductCard: a failed version pin goes to onError; 产品介绍 is a link to the platform catalog", async () => {
+  const onError = vi.fn();
+  render(
+    <HomePage
+      api={fakeApi({ pinProductVersion: vi.fn().mockRejectedValue(new Error("版本不存在")) })}
+      products={[product({ version: "1.0.0", versions: ["1.0.0", "1.1.0"] })]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={onError}
+    />,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "更新版本 v1.1.0" }));
+  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("版本不存在"));
+  const intro = screen.getByRole("link", { name: "产品介绍 ↗" }) as HTMLAnchorElement;
+  expect(intro.href).toBe("https://vxture.com/zh-CN/appcenter");
+});
+
+void test("ProductCard: the warning about an unwired capability surface is styled as a warning, not as description text", async () => {
+  const api = fakeApi({ system: vi.fn().mockResolvedValue({ keyProtection: "dpapi", capabilitySurface: "mock" }) });
+  render(
+    <HomePage api={api} products={[product()]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={noop} />,
+  );
+  const note = await screen.findByRole("note");
+  expect(note.className).toContain("pcard-alert--warning");
+  expect(note.textContent).toContain("能力面未接通");
 });

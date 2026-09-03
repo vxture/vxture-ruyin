@@ -39,6 +39,12 @@ export const CATALOG_SOURCE = {
   capturedAt: "2026-09-02",
 } as const;
 
+/**
+ * 首页只放前三个（owner 2026-09-03 定：只放推荐度最高的三个）。目录页本身没有
+ * 「推荐度」字段，这里取的是**平台目录页的顺序**——那是平台自己的排序，不是我拟的。
+ */
+export const RECOMMENDED_COUNT = 3;
+
 export const CATALOG: CatalogEntry[] = [
   {
     category: "智能体 · 专注训练",
@@ -112,3 +118,6 @@ export const DEMO_RECENT: ReadonlyArray<{ project: string; product: string }> = 
   { project: "城市轨道信号系统投标", product: "标书方案智能体" },
   { project: "2026 Q3 经营复盘", product: "经营分析智能体" },
 ];
+
+/** 首页展示的那三个：目录顺序的前三。 */
+export const RECOMMENDED: CatalogEntry[] = CATALOG.slice(0, RECOMMENDED_COUNT);

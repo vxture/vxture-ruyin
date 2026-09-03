@@ -23,7 +23,6 @@ import {
   Button,
   EmptyState,
   Icon,
-  ListCard,
   ListCardGrid,
   Section,
   StatusBadge,
@@ -36,7 +35,19 @@ import {
   type SessionInfo,
   type ProjectMeta,
 } from "./api";
-import { CATALOG, CATALOG_SOURCE } from "./catalog";
+import { CATALOG_SOURCE, RECOMMENDED } from "./catalog";
+
+/** x.y.z 比较（与 installer.ts 同一口径）；用于「有没有比生效版本更新的已装版本」。 */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(".");
+  const pb = b.split(".");
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = Number.parseInt(pa[i] ?? "0", 10) || 0;
+    const nb = Number.parseInt(pb[i] ?? "0", 10) || 0;
+    if (na !== nb) return na - nb;
+  }
+  return 0;
+}
 
 /**
  * 装一个 .ruyinpkg（§18.2）。
@@ -141,7 +152,7 @@ function RegistryRow({
   );
 }
 
-function InstallPackageRow({
+function InstallPackageButton({
   api,
   onDone,
   onError,
@@ -154,7 +165,7 @@ function InstallPackageRow({
   const [done, setDone] = useState<InstalledPackage | null>(null);
   const pick = useRef<HTMLInputElement>(null);
   return (
-    <div className="install-row">
+    <span className="install-inline">
       {/* 原生 file input 藏起来，由一个 DS 按钮代打开。
           藏它不是为了好看：那个控件由浏览器渲染，按**浏览器的语言**显示
           「Choose File / No file chosen」—— 一句改不掉的英文夹在中文界面里，
@@ -166,7 +177,7 @@ function InstallPackageRow({
         disabled={busy}
         onClick={() => pick.current?.click()}
       >
-        {busy ? "正在安装……" : "安装本地产品包"}
+        {busy ? "正在安装……" : "安装本地包"}
       </Button>
       <input
           ref={pick}
@@ -182,7 +193,7 @@ function InstallPackageRow({
             setDone(null);
             void api
               .installPackage(file)
-              .then(async (r) => {
+              .then(async (r: InstalledPackage) => {
                 setDone(r);
                 await onDone();
               })
@@ -190,15 +201,14 @@ function InstallPackageRow({
               .finally(() => setBusy(false));
           }}
         />
-      {/* 「正在安装」已经写在按钮上了，不再在旁边说第二遍。 */}
+      {/* 签没签名要照实说：未签名的包是另一回事，不该和签过的长一个样。 */}
       {done && (
         <span className="text-body-sm text-muted-foreground">
           已安装 {done.productId}@{done.version}
-          {/* 签没签名要照实说：未签名的包是另一回事，不该和签过的长一个样。 */}
           {done.signed ? "（已副署）" : "（未签名）"}
         </span>
       )}
-    </div>
+    </span>
   );
 }
 
@@ -234,6 +244,7 @@ function StatusCards({
 }: {
   items: ReadonlyArray<{
     id: string;
+    icon: React.ComponentProps<typeof Icon>["name"];
     label: string;
     value: string;
     /** 可见的一小截事实：版本号、工作区名。**不是解释**。 */
@@ -246,14 +257,18 @@ function StatusCards({
   return (
     <ul className="status-cards" aria-label="运行时概况">
       {items.map((it) => (
-        <li key={it.id} className="status-card" title={it.hint}>
-          <span className="status-card-head">
-            <span className={`status-dot status-dot--${it.tone}`} aria-hidden />
-            <span className="status-label">{it.label}</span>
+        /* 图标占两行、左边一列；右边名称一行、结论一行，左对齐（owner 2026-09-03 定）。 */
+        <li key={it.id} className={`status-card status-card--${it.tone}`} title={it.hint}>
+          <span className="status-card-icon" aria-hidden>
+            <Icon name={it.icon} size="md" />
           </span>
-          <span className="status-card-body">
-            <span className="status-value">{it.value}</span>
-            {it.detail && <span className="status-detail">{it.detail}</span>}
+          <span className="status-card-text">
+            <span className="status-label">{it.label}</span>
+            <span className="status-card-body">
+              <span className={`status-dot status-dot--${it.tone}`} aria-hidden />
+              <span className="status-value">{it.value}</span>
+              {it.detail && <span className="status-detail">{it.detail}</span>}
+            </span>
           </span>
         </li>
       ))}
@@ -282,6 +297,31 @@ export function HomePage({
   onError: (msg: string) => void;
 }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  /**
+   * 同步产品版本：对每个产品拉一次契约（一级供给，ADR-012）。拉到新版本的落进
+   * 产品库，卡上随即出现「更新版本」；这里**不自动切换**生效版本 —— 切版本是
+   * 用户看着卡片按一下的事，不是同步顺手做掉的事。
+   */
+  const syncVersions = async (ids: string[]) => {
+    setSyncing(true);
+    try {
+      let fetched = 0;
+      let firstError: string | null = null;
+      for (const id of ids) {
+        try {
+          const r = await api.fetchProduct(id);
+          if (r.status === "fetched") fetched += 1;
+        } catch (e) {
+          firstError ??= String((e as Error).message);
+        }
+      }
+      if (firstError) onError(firstError);
+      if (fetched > 0) await onRefresh();
+    } finally {
+      setSyncing(false);
+    }
+  };
   const [system, setSystem] = useState<{
     keyProtection: string;
     capabilitySurface?: string;
@@ -336,6 +376,7 @@ export function HomePage({
         items={[
           {
             id: "runtime",
+            icon: "cpu",
             label: "运行环境",
             value: health.ok ? "就绪" : "未连接",
             detail: health.ok ? (health.version ?? "") : "",
@@ -346,6 +387,7 @@ export function HomePage({
           },
           {
             id: "protection",
+            icon: "shield-check",
             label: "数据加密",
             value: encrypted ? "已加密" : "开发态",
             detail: encrypted ? "DPAPI" : "明文",
@@ -359,6 +401,7 @@ export function HomePage({
             // 本地有什么产品，工作区决定数据归谁。看不见这一条，用户就无从
             // 理解「为什么这里是空的」和「跨工作区为什么被拒」。
             id: "platform",
+            icon: "buildings",
             label: "平台连接",
             value: signedIn ? "已连接" : "未登录",
             detail: signedIn ? (session?.workspace?.name ?? "") : "",
@@ -380,17 +423,31 @@ export function HomePage({
             : "订阅状态尚未接通，以下为本地运行时已安装的产品。"
         }
         action={
-          products.length > 0 ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                window.open(APPCENTER_URL(consoleBase), "_blank", "noopener")
-              }
-            >
-              在线使用 ↗
-            </Button>
-          ) : undefined
+          /* 三个动作排在标题行右侧，主按钮在最右（owner 2026-09-03 定）：
+             同步产品版本 · 安装本地包 · 在线使用。 */
+          <span className="section-actions">
+            {products.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={syncing}
+                onClick={() => void syncVersions(products.map((p) => p.id))}
+              >
+                {syncing ? "正在同步……" : "同步产品版本"}
+              </Button>
+            )}
+            <InstallPackageButton api={api} onDone={onRefresh} onError={onError} />
+            {products.length > 0 && (
+              <Button
+                size="sm"
+                onClick={() =>
+                  window.open(APPCENTER_URL(consoleBase), "_blank", "noopener")
+                }
+              >
+                在线使用 ↗
+              </Button>
+            )}
+          </span>
         }
       >
         {products.length === 0 ? (
@@ -424,6 +481,7 @@ export function HomePage({
                 product={p}
                 projects={workspaces.filter((w) => w.productId === p.id)}
                 subscribeUrl={subscribeUrl}
+                consoleBase={consoleBase}
                 capabilityMock={capabilityMock}
                 onOpen={onOpen}
                 onCreated={onCreated}
@@ -433,15 +491,17 @@ export function HomePage({
             ))}
           </ListCardGrid>
         )}
-        <InstallPackageRow api={api} onDone={onRefresh} onError={onError} />
         <RegistryRow api={api} onDone={onRefresh} onError={onError} />
       </Section>
 
+      {/* 靠底：订阅少时推荐区贴着页面底部，订阅多时随内容顺延向下（.home 撑满
+          视口、这一段 margin-top:auto）。 */}
+      <div className="home-catalog">
       <Section
         title="热门推荐"
         icon="sparkles"
         level={2}
-        description="平台上已上线和在建的智能体。这里只作了解，订阅在平台完成。"
+        description="平台目录里靠前的三个智能体。这里只作了解，订阅在平台完成。"
         action={
           <Button
             variant="outline"
@@ -454,36 +514,44 @@ export function HomePage({
           </Button>
         }
       >
+        {/* 与「我的产品」同一种卡（pcard）：图标同样大、文字同样对齐，扫过去
+            是一个页面而不是两套控件。差别只在动作：这里永远没有「打开」。 */}
         <ListCardGrid>
-          {CATALOG.map((c) => (
-            <ListCard
-              key={c.name}
-              icon="agent"
-              title={c.name}
-              description={c.summary}
-              status={
-                <StatusBadge tone={c.status === "released" ? "success" : "neutral"}>
-                  {c.status === "released" ? "正式版" : "开发中"}
-                </StatusBadge>
-              }
-              meta={
-                <div className="catalog-meta">
-                  <span className="catalog-category">{c.category}</span>
-                  <div className="catalog-caps">
-                    {c.capabilities.map((cap) => (
-                      <Badge key={cap} variant="secondary">
-                        {cap}
-                      </Badge>
-                    ))}
-                    {c.version && (
-                      <span className="product-ident">v{c.version}</span>
-                    )}
-                  </div>
+          {RECOMMENDED.map((c) => (
+            <article key={c.name} className="pcard pcard--catalog">
+              <header className="pcard-head">
+                <span className="pcard-icon" aria-hidden>
+                  <Icon name="agent" size="lg" />
+                </span>
+                <span className="pcard-titles">
+                  <h3 className="pcard-title">{c.name}</h3>
+                  <p className="pcard-ident">
+                    {c.category}
+                    {c.version && <span className="pcard-ver"> v{c.version}</span>}
+                  </p>
+                </span>
+                <span className="pcard-badges">
+                  <StatusBadge tone={c.status === "released" ? "success" : "neutral"}>
+                    {c.status === "released" ? "正式版" : "开发中"}
+                  </StatusBadge>
+                </span>
+              </header>
+              <div className="pcard-body">
+                <p className="pcard-desc">{c.summary}</p>
+                <div className="catalog-caps">
+                  {c.capabilities.map((cap) => (
+                    <Badge key={cap} variant="secondary">
+                      {cap}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <footer className="pcard-foot">
+                <span className="pcard-count" />
+                <span className="pcard-actions">
                   {/* 统一「了解详情」，**不写「订阅」**：这个链接落在目录页，
                       不是某个产品的订阅流程；写成「去平台订阅」是拿一个做不到
-                      的动作骗点击。真要订阅走本栏顶上的「浏览全部」，或者产品
-                      已经在「我的产品」里时用那张卡自己的商业入口。
-                      上没上线由状态徽章说，不必再让按钮说第二遍。 */}
+                      的动作骗点击。上没上线由状态徽章说，不必再让按钮说第二遍。 */}
                   <Button
                     variant="outline"
                     size="sm"
@@ -493,9 +561,9 @@ export function HomePage({
                   >
                     了解详情 ↗
                   </Button>
-                </div>
-              }
-            />
+                </span>
+              </footer>
+            </article>
           ))}
         </ListCardGrid>
         {/* 出处要写明：这份清单不是实时的，用户有权知道自己在看一份快照。 */}
@@ -503,6 +571,7 @@ export function HomePage({
           取自 Vxture 平台目录（{CATALOG_SOURCE.capturedAt} 快照）。
         </p>
       </Section>
+      </div>
     </div>
   );
 }
@@ -525,6 +594,7 @@ function ProductCard({
   product,
   projects,
   subscribeUrl,
+  consoleBase,
   capabilityMock,
   onOpen,
   onCreated,
@@ -535,6 +605,8 @@ function ProductCard({
   product: ProductInfo;
   projects: ProjectMeta[];
   subscribeUrl: (id?: string, intent?: "subscribe" | "renew") => string;
+  /** 「产品介绍」落到平台应用中心（还没有 per-product 深链，不拼猜出来的地址）。 */
+  consoleBase: string;
   /** daemon 说能力面是 mock（TD-033）。运行环境层面的事实，每张卡都受影响。 */
   capabilityMock: boolean;
   onOpen: (projectId: string) => void;
@@ -544,6 +616,26 @@ function ProductCard({
 }) {
   const [opening, setOpening] = useState(false);
   const usable = product.availability === "available";
+
+  /**
+   * 库里有没有比生效版本更新的版本 —— 「同步产品版本」拉下来的，或装包装进来的。
+   * 有才显示「更新版本」（owner 2026-09-03 定），按一下就把生效版本钉过去。
+   */
+  const newer = [...product.versions]
+    .filter((v) => compareVersions(v, product.version) > 0)
+    .sort(compareVersions)
+    .pop();
+  const updateTo = async (version: string) => {
+    setOpening(true);
+    try {
+      await api.pinProductVersion(product.id, version);
+      await onRefresh();
+    } catch (e) {
+      onError(String((e as Error).message));
+    } finally {
+      setOpening(false);
+    }
+  };
 
   // 本地/总：本地是这台机器上真有的，总数要等平台给出跨设备口径。**两者相等
   // 时只报一个数** —— 「3/3」在没有第二个来源时是噪音，不是信息。
@@ -595,37 +687,41 @@ function ProductCard({
     <article className={`pcard${usable ? "" : " pcard--blocked"}`}>
       {/* 一、身份。图标 + 标题一行，徽章是这一行唯一靠右的东西 —— 标题行右端
           是状态的固定位置，扫一列卡片时不必每张重新找。 */}
+      {/* 图标占两行；右边名称一行、标识 + 版本一行（行距收紧）；徽章靠右
+          （owner 2026-09-03 定）。 */}
       <header className="pcard-head">
         <span className="pcard-icon" aria-hidden>
-          <Icon name="cube" size="sm" />
+          <Icon name="cube" size="lg" />
         </span>
-        <h3 className="pcard-title">{product.name}</h3>
-        {badge}
-        {/* 「未接通」与订阅徽章并列而不是替换：「已订阅」和「能力面没接」是两件
-            都成立的事。只标在能打开的卡上 —— 打不开的卡不会跑任务，也就没有
-            「拿到占位输出当成果」这回事。 */}
-        {usable && capabilityMock && <StatusBadge tone="warning">未接通</StatusBadge>}
+        <span className="pcard-titles">
+          <h3 className="pcard-title">{product.name}</h3>
+          <p className="pcard-ident" title={`产品标识 ${product.id}，当前生效版本 ${product.version}`}>
+            {product.id} <span className="pcard-ver">v{product.version}</span>
+          </p>
+        </span>
+        <span className="pcard-badges">
+          {badge}
+          {/* 「未接通」与订阅徽章并列而不是替换：「已订阅」和「能力面没接」是两件
+              都成立的事。只标在能打开的卡上 —— 打不开的卡不会跑任务，也就没有
+              「拿到占位输出当成果」这回事。 */}
+          {usable && capabilityMock && <StatusBadge tone="warning">未接通</StatusBadge>}
+        </span>
       </header>
 
-      {/* 二、副标题：产品标识与版本**连在一起**。它们回答的是同一个问题——
-          「这是哪个产品的哪一版」——拆成两处（标识在这里、版本在下面的读数行）
-          会逼读者把一句话的两半自己拼回去。 */}
       <div className="pcard-body">
-        <p className="pcard-ident" title={`产品标识 ${product.id}，当前生效版本 ${product.version}`}>
-          {product.id} <span className="pcard-ver">v{product.version}</span>
-        </p>
         <p className="pcard-desc">{BLURBS[product.id] ?? "Vxture 业务产品"}</p>
-        {/* 不可用的要说清为什么。「打不开」和「因为退订所以打不开」在用户那里
-            是两件事，后者他知道该去哪解决。 */}
+        {/* 警示与说明要分得开：说明是灰字，警示走 DS 的 warning 语气（色 + 图标 +
+            浅底），扫一眼就知道这是「要留意」而不是「介绍」。 */}
         {!usable && product.reason && (
-          <p className="pcard-reason">{product.reason}</p>
+          <p className="pcard-alert pcard-alert--warning" role="note">
+            <Icon name="info" size="xs" />
+            <span>{product.reason}</span>
+          </p>
         )}
-        {/* 徽章说「是什么」，这一行说「意味着什么」：现在跑任务得到的不是成果。
-            owner 定的判据是「拿到安装包的人能不能分清『在工作』与『没接上』」，
-            所以卡仍可打开 —— 要分清，不是要拦住。 */}
         {usable && capabilityMock && (
-          <p className="pcard-reason">
-            能力面未接通：现在发起任务只会得到占位输出，不是真实成果
+          <p className="pcard-alert pcard-alert--warning" role="note">
+            <Icon name="info" size="xs" />
+            <span>能力面未接通：现在发起任务只会得到占位输出，不是真实成果</span>
           </p>
         )}
       </div>
@@ -648,11 +744,32 @@ function ProductCard({
         </span>
         <span className="pcard-actions">
           {usable ? (
-            /* 只有「打开」。在线使用已经由板块标题行统一提供，每张卡再放一个
-               指向同一个地址的按钮，是把一个入口复制 N 份。 */
-            <Button size="sm" disabled={opening} onClick={() => void open()}>
-              {opening ? "打开中……" : "打开"}
-            </Button>
+            <>
+              {/* 主按钮「打开」放最右且加宽；左侧一条「产品介绍」文字链（落平台
+                  应用中心）；库里有更新的版本时多一个「更新版本」。在线使用仍只在
+                  板块标题行出现一次。 */}
+              <a
+                className="pcard-link"
+                href={APPCENTER_URL(consoleBase)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                产品介绍 ↗
+              </a>
+              {newer && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={opening}
+                  onClick={() => void updateTo(newer)}
+                >
+                  更新版本 v{newer}
+                </Button>
+              )}
+              <Button className="pcard-open" size="sm" disabled={opening} onClick={() => void open()}>
+                {opening ? "打开中……" : "打开"}
+              </Button>
+            </>
           ) : (
             <>
               {/* §18.5：退订/停用的产品不可打开，但数据仍在、仍可导出。

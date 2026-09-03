@@ -186,20 +186,35 @@ body {
 @media (max-width: 720px) {
   .status-cards { grid-template-columns: 1fr; }
 }
+/* 图标一列占两行，右边名称 / 结论两行左对齐；留白放宽（owner 2026-09-03 定）。 */
 .status-card {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: var(--spacing-sm);
   min-width: 0;
-  padding: var(--spacing-xs) var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md, 8px);
   background: var(--color-card, transparent);
 }
-.status-card-head {
+.status-card-icon {
   display: inline-flex;
   align-items: center;
-  gap: var(--spacing-2xs, 4px);
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-3, rgba(127, 127, 127, 0.12));
+  color: var(--color-muted-foreground);
+  flex-shrink: 0;
+}
+.status-card--ok .status-card-icon { color: var(--color-success, #22c55e); }
+.status-card--warn .status-card-icon { color: var(--color-warning, #f59e0b); }
+.status-card--danger .status-card-icon { color: var(--color-danger, #ef4444); }
+.status-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 .status-card-body {
@@ -253,36 +268,60 @@ body {
 }
 .pcard--blocked { opacity: 0.82; }
 
+/* 图标占两行（名称行 + 标识行），右边两行行距收紧，徽章靠右。
+   一条对齐轴：图标列宽 40 + gap 12 = 52px，说明、警示、项目数全部缩进到它。 */
 .pcard-head {
   display: flex;
   align-items: center;
-  gap: var(--spacing-xs);
+  gap: var(--spacing-sm);
   min-width: 0;
+  /* 徽章在名称右侧；卡片窄到放不下时徽章整组换到下一行，名称不被压成省略号。 */
+  flex-wrap: wrap;
+  row-gap: var(--spacing-2xs, 4px);
 }
 .pcard-icon {
   display: inline-flex;
-  color: var(--color-muted-foreground);
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-3, rgba(127, 127, 127, 0.12));
+  color: var(--color-foreground);
   flex-shrink: 0;
+}
+.pcard-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  /* 名称至少留 140px 再让徽章换行；徽章推到行尾：状态永远在标题行右端。 */
+  flex: 1 1 140px;
+  margin-right: auto;
 }
 .pcard-title {
   margin: 0;
   font-size: var(--font-size-body-md);
   font-weight: 600;
+  line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  /* 徽章推到行尾：状态永远在标题行右端。 */
-  margin-right: auto;
+}
+.pcard-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs, 4px);
+  flex-shrink: 0;
+  align-self: flex-start;
 }
 
-/* 说明与标识缩进到标题左缘 —— 图标是装饰，标题才是这张卡的左缘。
-   26px = 图标列宽 + gap。 */
 .pcard-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding-left: 26px;
+  gap: var(--spacing-2xs, 4px);
+  padding-left: 52px;
   min-width: 0;
 }
 .pcard-desc {
@@ -296,17 +335,30 @@ body {
   margin: 0;
   font-family: var(--code-sm-font-family, ui-monospace, monospace);
   font-size: var(--code-sm-font-size, 12px);
+  line-height: 1.25;
   color: var(--color-muted-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .pcard-ver { color: var(--color-foreground); opacity: 0.8; }
-.pcard-reason {
-  margin: 0;
+/* 警示：与说明分得开 —— warning 语气的色 + 图标 + 浅底，不是又一行灰字。 */
+.pcard-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-2xs, 4px);
+  margin: 2px 0 0;
+  padding: var(--spacing-2xs, 4px) var(--spacing-xs);
+  border-radius: var(--radius-sm, 6px);
   font-size: var(--font-size-body-sm);
-  color: var(--color-muted-foreground);
+  line-height: 1.4;
 }
+.pcard-alert--warning {
+  color: var(--color-warning, #b45309);
+  background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 35%, transparent);
+}
+.pcard-alert > svg { flex-shrink: 0; margin-top: 2px; }
 
 /* 横线下这一行：左边项目数，右边动作。一行说完，不再上下叠成两行。 */
 .pcard-foot {
@@ -319,10 +371,12 @@ body {
   padding-top: var(--spacing-xs);
   border-top: 1px solid var(--color-border);
 }
+/* 项目数缩进到文字列（与说明同一条左缘），不顶在卡片最左。 */
 .pcard-count {
   font-size: var(--font-size-body-sm);
   color: var(--color-muted-foreground);
   white-space: nowrap;
+  padding-left: 52px;
 }
 .pcard-count b {
   font-weight: 600;
@@ -333,9 +387,35 @@ body {
 .pcard-actions {
   display: inline-flex;
   align-items: center;
-  gap: var(--spacing-xs);
+  gap: var(--spacing-sm);
   margin-left: auto;
 }
+/* 主按钮加宽：它是这张卡存在的理由，不该和一个辅助按钮一样窄。 */
+.pcard-open { min-width: 96px; }
+.pcard-link {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted-foreground);
+  text-decoration: none;
+}
+.pcard-link:hover { color: var(--color-foreground); text-decoration: underline; }
+
+/* 标题行右侧的动作簇：主按钮在最右。 */
+.section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  /* 动作簇不参与挤压：窄窗口下宁可自己换行，也不能把标题压成一列字。 */
+  flex-shrink: 0;
+}
+.install-inline { display: inline-flex; }
+.install-inline input[type="file"] { display: none; }
+
+/* 推荐区靠底：订阅少时贴着页面底部，多时随内容顺延。父容器高度是自适应的，
+   百分比 min-height 拿不到参照，所以按视口算：视口减去标题栏与页面上下留白。 */
+.home { min-height: calc(100vh - 48px - 2 * var(--spacing-lg, 24px)); }
+.home-catalog { margin-top: auto; }
 
 /* 推荐卡的 meta：分类一行、能力标签一行、动作一行。三行各说一件事，
    挤在一行里读起来是一串没有断句的词。 */
@@ -684,17 +764,24 @@ body {
 
 /* 当前工作区：常驻，两态都在。原来只有一个光秃秃的名字，「这是什么」写在
    title 里 —— 而 title 要悬停才看得到，等于没说。 */
+/* 工作区：图标 + 名称 + 下拉箭头，是个按钮（下拉看租户与切换入口）。 */
 .app-workspace {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-2xs, 4px);
   font-size: var(--font-size-body-sm);
   color: var(--color-muted-foreground);
-  padding-inline: var(--spacing-xs);
+  padding: 2px var(--spacing-xs);
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
   white-space: nowrap;
   min-width: 0;
+  cursor: pointer;
+  font: inherit;
 }
-.app-workspace-label { opacity: 0.7; }
+.app-workspace:hover { background: var(--surface-3, rgba(127, 127, 127, 0.12)); }
+.app-workspace-caret { opacity: 0.6; }
 .app-workspace-name {
   color: var(--color-foreground);
   max-width: 160px;
