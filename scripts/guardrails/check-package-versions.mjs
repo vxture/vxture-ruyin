@@ -16,6 +16,12 @@
  * 还没有任何 `packages-v*` tag 时什么都没发过，也就没有「发过的内容」可比 —— 如实
  * 说明后通过，而不是拿一个假基线装作检查过。`--baseline <ref>` 可指定别的基线
  * （本地自查、或故意弄坏来验证守卫本身）。
+ *
+ * 另外两条，任何时候都查（owner 2026-09-03 定：按行业最简单的那套）：
+ *   - **步调一致**：四个包同一个版本号，tag 就是那个版本号（`packages-v0.2.0`），
+ *     不用记谁是哪一版。版本号只允许 `X.Y.Z` 或 `X.Y.Z-(alpha|beta|rc).N`。
+ *   - **`--tag packages-vX.Y.Z`**（发布工作流传入）：tag 号必须等于包版本号 ——
+ *     推 `packages-v0.2.0` 而包里还是 0.1.0，会以 0.2.0 的名义发出一份没人升过的包。
  */
 
 import { execFileSync } from "node:child_process";
@@ -40,12 +46,52 @@ function compareVersions(a, b) {
   return 0;
 }
 
+const VERSION_SHAPE = /^\d+\.\d+\.\d+(?:-(alpha|beta|rc)\.\d+)?$/;
+
 const argv = process.argv.slice(2);
+const tagFlag = argv.indexOf("--tag");
+const releaseTag = tagFlag >= 0 ? argv[tagFlag + 1] : undefined;
+if (tagFlag >= 0 && !releaseTag) {
+  console.error("[versions] --tag needs a tag name");
+  process.exit(2);
+}
 const baselineFlag = argv.indexOf("--baseline");
 let baseline = baselineFlag >= 0 ? argv[baselineFlag + 1] : undefined;
 if (baselineFlag >= 0 && !baseline) {
   console.error("[versions] --baseline needs a ref");
   process.exit(2);
+}
+
+// -- Always: one version across the publishable packages, in the allowed shape,
+// and (when publishing) equal to the tag. These need no baseline.
+{
+  const pkgs = readdirSync(pkgRoot, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => JSON.parse(readFileSync(join(pkgRoot, e.name, "package.json"), "utf8")))
+    .filter((j) => !j.private);
+  const early = [];
+  for (const j of pkgs) {
+    if (!VERSION_SHAPE.test(j.version)) {
+      early.push(`${j.name}: version "${j.version}" is not X.Y.Z or X.Y.Z-(alpha|beta|rc).N`);
+    }
+  }
+  const versions = new Set(pkgs.map((j) => j.version));
+  if (versions.size > 1) {
+    early.push("packages are not in lockstep: " + pkgs.map((j) => j.name + "@" + j.version).join(", ") + " - one version for all four, the tag is that version");
+  }
+  if (releaseTag) {
+    const m = /^packages-v(.+)$/.exec(releaseTag);
+    if (!m) early.push(`tag "${releaseTag}" is not packages-vX.Y.Z`);
+    else if (versions.size === 1 && !versions.has(m[1])) {
+      early.push(`tag ${releaseTag} says ${m[1]} but the packages say ${[...versions][0]} - bump the packages or tag the version that is in the tree`);
+    }
+  }
+  if (early.length > 0) {
+    console.error("[versions]:");
+    for (const p of early) console.error(`  - ${p}`);
+    process.exit(1);
+  }
+  if (releaseTag) console.log(`[versions] tag ${releaseTag} matches the packages' version`);
 }
 
 if (!baseline) {
