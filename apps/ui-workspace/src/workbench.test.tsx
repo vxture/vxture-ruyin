@@ -572,9 +572,10 @@ void test("Workbench (electron chrome): the caption-button spacer appears, brows
   expect(container.querySelector(".caption-spacer")).toBeInTheDocument();
 });
 
-void test("Header workspace control: icon + name only (no 工作区 label); opens a dropdown with the tenant and a platform link; right-side order is workspace · runtime · pending · settings", async () => {
+void test("Header workspace control: icon + name only (no 工作区 label); opens the tenant menu (tenant, workspace, quota, tenant admin); right-side order is workspace · runtime · pending · settings", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi({
+    products: vi.fn().mockResolvedValue([product()]),
     session: vi.fn().mockResolvedValue({
       signedIn: true,
       consoleBase: "https://vxture.com",
@@ -590,11 +591,11 @@ void test("Header workspace control: icon + name only (no 工作区 label); open
   expect(screen.queryByText("工作区", { exact: true })).not.toBeInTheDocument();
   const user = userEvent.setup();
   await user.click(trigger);
-  expect(await screen.findByText("租户：某租户")).toBeInTheDocument();
-  const open = vi.spyOn(window, "open").mockImplementation(() => null);
-  await user.click(screen.getByRole("button", { name: "在平台切换工作区 ↗" }));
-  expect(open).toHaveBeenCalledWith("https://vxture.com/zh-CN/profile", "_blank", "noopener");
-  open.mockRestore();
+  expect(await screen.findByText("某租户")).toBeInTheDocument();
+  expect(screen.getByText("工作区：某工作区")).toBeInTheDocument();
+  expect((screen.getByRole("link", { name: /租户管理/ }) as HTMLAnchorElement).href).toBe(
+    "https://vxture.com/zh-CN/tenant-settings",
+  );
 
   // Order: workspace (context) before the runtime badge, before pending, before settings.
   const trailing = trigger.closest(".no-drag") as HTMLElement;
