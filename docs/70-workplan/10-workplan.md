@@ -44,7 +44,7 @@
 里程碑：**本地招标文件 → 需求矩阵 → 方案生成 → 人工确认 → 导出，全程审计可查。**
 
 - [x] Context Runtime：local-fs 连接器（Grant 域内、深度/数量/大小限额）+ Grant/Binding 模型（绑定校验 + 选择期 Grant 复核）+ FTS5 索引与相关性排序（**CJK 分词已修，2026-09-01 · TD-022**：默认 unicode61 对中文实测四条查询全 0 命中，改 trigram 并迁移老库，两字词由 LIKE 子串扫描兜底）+ Selection 管线（候选→排序→每类型限额）+ **context_confirm 门**（高敏上下文执行前人工确认）+ **transmission.inference 审计事件**（哈希不落内容，04 §7.3 落地）
-- [ ] AI Gateway 真实对接（**前置：liaison L3 平台侧就绪**）+ Transmission Gate + 审计哈希链
+- [ ] 能力面真实对接 —— **本仓这一侧已就绪，等的是某个业务产品有一个真实部署的云端服务**实现 ADR-009 的回合协议（`POST /products/{id}/capabilities/{capability}/turn`），`RUYIN_CAPABILITY_BASE` 才有东西可配。已落地：`CapabilityClient`、基址单点配置、未配置时回落 mock 且**启动播报如实说明**（2026-09-02 补上；此前 `main.ts` 的注释承诺了播报却一行没有，界面那半见 TD-033）。传输侧的 `context_confirm` 门与 `transmission.inference` 审计事件见上一条；审计哈希链 W2 已落地。<br>**2026-09-03 更正**：此前写「前置：liaison L3 平台侧就绪」。ADR-009（2026-08-31）取的正是「经业务产品云端中转、**不需要平台侧任何改动**」那一条，L3(c) 已被它取代 —— 这盏黄灯挂错了人，且与下文 MVP 外部依赖表（归属：**产品线**）自相矛盾
 - [x] Workspace UI（`apps/ui-workspace`，React + Vite）：Checkpoint 卡片（context_confirm 展示 Context Set / verification_review 展示验证结论）、Grant/绑定面板、契约驱动的状态转换按钮（confirm:human 弹确认）、任务发起（自动选择 / 手动 JSON）、审计表；daemon 静态托管于 `/`（壳与浏览器同源同页），Dev Console 迁 `/dev`；打包进安装包 resources/ui
 - [x] **验证修订轮 + 恢复重放**（Harness 侧）——**这条曾长期标着未做，而它其实早已实现**：`MAX_REVISIONS` 有界、末端恒为人（`verify: revisions are bounded and the end is always a person`），中断任务由 `interruptedResumePoint` + `recoverAll` 重入且不重做已完成的能力（`harness: recovery resumes an interrupted task without redoing finished work`）。同批还有瞬时错误退避挂起与取消。2026-09-01 复核用例后更正
 - [ ] `packages/product-sdk`：桥 API 面冻结（40-implementation/10 §6.2 基线）
@@ -85,12 +85,18 @@
 
 - [ ] Cloud Runtime 宿主接入 runtime-core（平台侧协同）
 - [ ] Sync Engine：三向对比 + 冲突 UI + 离线队列
-- [ ] 身份完整链：PKCE / 设备绑定 / 宽限期（**前置：liaison L3**）
+- [ ] 身份完整链：PKCE / 设备绑定 / 宽限期（此前写「前置：liaison L3」；**L3(a) 已于 2026-08-31 满足**，见下）
   - [x] C1 客户端侧先行落地（2026-08-30）：daemon PKCE public client（S256 +
     loopback 回调 + RS256 验签拒 none/HS* + refresh 续票 + 会话 DPAPI 密封 +
     吊销退出）+ C2 权益客户端（45s TTL 不落库，`RUYIN_PLATFORM_API_BASE` 注入）
     + 账户弹层/开通深链 UI + 壳外链走系统浏览器；8 项鉴权单测。
-    **闭环待平台侧登记回调 / ruyin-beta / 权益基址**（80-liaison/40，附实测）
+    **闭环已于 2026-08-31 打通**：平台侧的 public client 能力由本线提 PR 落地（vxture-platform
+    `014f25b`：`token_endpoint_auth_method` 列与约束、public client 分支、loopback 回调端口无关
+    匹配、discovery 列 `none`、ruyin / ruyin-beta 种子），80-liaison/40 的 (1)(2) 据此满足。
+    (3) 权益基址：本仓侧以 `RUYIN_PLATFORM_API_BASE` 注入即通；用户设备可达的基址
+    （截至 2026-09-02，api.vxture.com 未路由 platform-api）与「本工作区全部订阅清单」端点仍待
+    平台（见 MVP 旅程表「产品到本地」）。**2026-09-03 更正**：此句此前仍写着「闭环待平台侧
+    登记回调 / ruyin-beta / 权益基址」，而那三件里两件早已落地
 - [x] **Conformance 测试套件 C1–C7**（2026-09-01 · `runtime-core/src/conformance.ts`）
       —— 不依赖平台、不依赖任何具体产品，因此**不必等 W6 的其余部分**。
       导出 `runConformance()`，当前在内存 ports 与 SQLite ports 上各跑一遍；
@@ -102,7 +108,7 @@
 |---|---|---|
 | L1 | 桌面分发剖面报备 + 建议平台沉淀 profile 标准 | 无（纪律性报备） |
 | L2 | `dl.vxture.com` 边缘 vhost + 下载主机选址（08 OQ-3） | W4 |
-| L3 | 原生客户端三件：PKCE 客户端注册 / entitlement 原生凭证 / AI Gateway 端点与服务端计量口径 | W3、W6 |
+| L3 | 原生客户端三件：PKCE 客户端注册 / entitlement 原生凭证 / AI Gateway 端点与服务端计量口径 | (a) 已满足（2026-08-31，平台 `014f25b`）；(b) 部分 —— 用户设备可达基址与全量订阅清单端点待平台；(c) **由 ADR-009 取代，撤回**，不再阻塞 W3 |
 
 ---
 
@@ -128,7 +134,7 @@
 | **资料进入上下文** | ✅ | **本仓这一侧已交付**：承载面容纳非文本（M3）、媒体类型过线、审计记录齐全。**「读懂 PDF / Word」不是本仓的活** —— 解析属业务语义，归产品（ADR-011 的同一条界线；owner 2026-09-02 定性：ruyin 摆桌椅板凳，菜有人做）。TD-018 据此关闭。此前两版把它记成本仓欠账，还一度误写「归 Atlas」 |
 | 任务循环：agent 迭代 → 工具过闸 → 人在回路 | ✅ | |
 | **停在等人那一刻** | ✅ | 系统通知 + header 常驻未决入口（M4） |
-| **产出落到本地** | ⚠️ | 字节能落盘了（M2）；**生成 .docx 仍缺渲染技能与结构化表示**（ADR-013 的 C，TD-019） |
+| **产出落到本地** | ✅ | 字节能落盘（M2）；结构化表示与渲染已交付（2026-09-01，ADR-016/017 · TD-019/023 已关闭）：`@vxture/ruyin-document` 以 mdast 为内部表示、Markdown 上线，渲染 `.docx` 与 `.pdf`（PDF 经壳里的 Chromium），表达不了的构件拒渲而不是少渲。**2026-09-03 更正**：此格此前仍写着「生成 .docx 仍缺渲染技能与结构化表示」，而本页下文「MVP 之后」一节早已记着它落地 —— 同一份文档前后两说 |
 
 ### 范围（六项，均与产品无关）
 
@@ -281,7 +287,10 @@
 `lint:update-policy`（owner 定的三条更新策略）· `lint:docs-numbering`；
 CI 另加 `packaged-smoke`（windows-latest，真启动 + 真排一份 PDF + 断言 DPAPI）。
 
-**咨询性，不是必需检查** —— 必需上下文恒为五个，加第六个属治理变更，待 owner 定。
+**已提为第六个必需检查（2026-09-02，#73）** —— owner 定：ruyin 是桌面分发仓，平台模板明文不适用，
+本仓自决、不等平台标准；CLAUDE.md「Required checks」是权威。**2026-09-03 更正**：此处此前写着
+「咨询性，不是必需检查 —— 必需上下文恒为五个，加第六个属治理变更，待 owner 定」，在 #73 合入后
+即过期 —— 一句写着「待定」的话读起来和真的待定一模一样。
 
 ### 开发工具
 
