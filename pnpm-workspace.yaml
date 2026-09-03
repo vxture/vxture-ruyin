@@ -60,3 +60,7 @@ overrides:
   "js-yaml@<4.3.1": ">=4.3.1 <5"
   "nanoid@<3.3.18": ">=3.3.18 <4"
   "postcss@<8.5.23": ">=8.5.23 <9"
+  # 2026-09-03: @xmldom/xmldom < 0.9.12 GHSA-6gmq-8vp8-gcm6, transitive via
+  # plist <- @electron/osx-sign <- app-builder-lib (electron-builder 25, build-time
+  # only, never shipped). Bounded to 0.x like the batch above.
+  "@xmldom/xmldom@<0.9.12": ">=0.9.12 <1"
