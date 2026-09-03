@@ -399,14 +399,15 @@ export function Workbench({ api }: { api: Api }) {
               </span>
             </>
           ) : (
-            /* 字标只写 RUYIN：标记已经在左边了，再把「如影」写出来是同一个
-               身份说两遍，而标题栏的宽度要留给用户正在做的事。 */
+            /* 品牌 = 产品 = RUYIN（大写），标语 Intelligent Workbench（owner 2026-09-03 定）。
+               字标只写 RUYIN：标记已经在左边了，再写一个中文名是同一个身份说两遍，
+               而标题栏的宽度要留给用户正在做的事。 */
             <ShellBrand
               label="RUYIN"
-              tag="Workspace"
+              tag="Intelligent Workbench"
               href="#home"
               logoSrc="/logo.svg"
-              logoAlt="Ruyin"
+              logoAlt="RUYIN"
               className="app-brand cursor-pointer"
             />
           )}

@@ -28,7 +28,9 @@ import { isRenderPdfRequest, parsePdfSelfCheck, type RenderPdfReply } from "./pd
 import { extractDaemonEvents, type DaemonEventKind } from "./daemon-events.js";
 import { diffPending } from "./pending-notify.js";
 
-// userData 路径由它决定，而不是 productName。
+// userData 路径由它决定，而不是 productName。**这里的 "Ruyin" 是路径键，不是
+// 展示名**：展示名是 RUYIN（productName / 窗口标题 / 界面字标）。改了这一行，
+// 已装机器的 %APPDATA%\Ruyin 会整个换目录，登录态与 Chromium 配置全部丢失。
 app.setName("Ruyin");
 
 /**
@@ -243,7 +245,7 @@ async function waitForHealth(timeoutMs = 15_000): Promise<void> {
         });
         if (mine.ok) return;
         throw new Error(
-          `port ${PORT} is already held by another Ruyin runtime that this app ` +
+          `port ${PORT} is already held by another RUYIN runtime that this app ` +
             `did not start. Stop it (or close the window that owns it) and try again.`,
         );
       }
@@ -345,7 +347,7 @@ function openWindow(): void {
     height: 840,
     minWidth: 960,
     minHeight: 600,
-    title: "Ruyin",
+    title: "RUYIN",
     // Modern chrome: hide the native frame, float the Windows caption
     // buttons over the app's own top bar (which declares a drag region).
     // Dark-first tech-console identity: colors match the DS dark background
