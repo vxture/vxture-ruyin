@@ -3,9 +3,10 @@
 # Signing is intentionally absent until the Authenticode cert lands (TD-001);
 # electron-builder skips signing when no cert is configured.
 appId: com.vxture.ruyin
-# 品牌 = 产品 = RUYIN（大写，owner 2026-09-03 定）：开始菜单、可执行文件、卸载项都用它。
-# appId 不动，升级才能落在同一个安装上；userData 路径键在 main.ts 的 app.setName。
-productName: RUYIN
+# 安装包 / 开始菜单 / 可执行文件 / 卸载项用首字母大写的 Ruyin（owner 2026-09-03 定）；
+# 产品内展示的品牌字标是 RUYIN。appId 不动，升级才能落在同一个安装上；userData
+# 路径键在 main.ts 的 app.setName。
+productName: Ruyin
 # The shell has zero runtime npm dependencies (the daemon travels as a
 # self-contained extraResources tree), so electron-builder's dependency
 # install/rebuild steps are disabled - they fight pnpm workspaces.
@@ -55,7 +56,7 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  artifactName: RUYIN-Setup-${version}.${ext}
+  artifactName: Ruyin-Setup-${version}.${ext}
 # Generic provider => electron-updater feed (latest.yml) is emitted alongside
 # the installer. Channel URL is finalized when L2 (dl host) lands; release.yml
 # rewrites it per channel at publish time.

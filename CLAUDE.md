@@ -16,13 +16,17 @@ numbering). Gaps are fixed in the platform standard first, then mirrored here.
 ## Naming
 
 Brand = product = RUYIN, uppercase, with the tag "Intelligent Workbench"
-(owner, 2026-09-03). That is what users see: window title, installer and
-Start-menu name, the wordmark and the login/about pages. Lowercase "ruyin" is
-for identifiers only (@vxture scope, RUYIN_* env vars, paths, the daemon's
-log prefix). Do not reintroduce a parallel Chinese name next to the wordmark.
-One deliberate exception: apps/shell keeps app.setName("Ruyin") because that
-string keys the userData path on installed machines - it is a path, not a
-name.
+(owner, 2026-09-03). That is what the product shows about itself: the
+wordmark in the title bar, the document title, the login and about pages.
+Do not reintroduce a parallel Chinese name next to the wordmark.
+
+Three things deliberately stay capitalized "Ruyin", not uppercase (owner):
+the installer, Start-menu and executable name (productName / artifactName,
+"Ruyin-Setup-x.y.z.exe"); apps/shell's app.setName("Ruyin"), which keys the
+userData path on installed machines and is a path, not a name; and prose in
+docs, which may keep writing "Ruyin" / "Ruyin (如影)" as ordinary text.
+Lowercase "ruyin" is for identifiers only (@vxture scope, RUYIN_* env vars,
+paths, the daemon's log prefix).
 
 ## What is being built
 

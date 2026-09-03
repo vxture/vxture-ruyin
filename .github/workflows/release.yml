@@ -56,7 +56,7 @@ jobs:
             CHANNEL=stable
             # A v-tag names the version, so the two must agree. Without this
             # check, tagging v0.2.0 while the package still says 0.1.0 builds
-            # RUYIN-Setup-0.1.0.exe and publishes it AS v0.2.0 — the artifact,
+            # Ruyin-Setup-0.1.0.exe and publishes it AS v0.2.0 — the artifact,
             # the update feed and the download manifest would all carry a
             # version nobody released, and nothing would say so.
             TAG_VERSION="${GITHUB_REF_NAME#v}"
