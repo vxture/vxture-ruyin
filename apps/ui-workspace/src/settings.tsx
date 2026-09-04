@@ -64,7 +64,7 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
   const view = resolveSection(section);
 
   return (
-    <div className="flex flex-col gap-md">
+    <div className="settings-page">
       {/* 「设置」两个字已经在标题栏和侧栏里，这里不再写第三遍。 */}
       {error && <div className="error-box">{error}</div>}
       {view === "account" && <AccountSection session={session} />}
