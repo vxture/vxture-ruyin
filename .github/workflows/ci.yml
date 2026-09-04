@@ -133,6 +133,11 @@ jobs:
       - name: Package version guardrail (content changed => version bumped)
         run: node scripts/guardrails/check-package-versions.mjs
 
+      # 界面样式表里写了一个设计系统没有的 token，CSS 不报错：整条声明作废，
+      # 元素静静地继续用继承值 —— 或者更糟，用上硬编码回退，从此不跟主题走。
+      - name: CSS token guardrail (app.css var() must resolve in the DS)
+        run: node scripts/guardrails/check-css-tokens.mjs
+
   # -- Contract lint (feed quality-gate) --------------------------------------
   # Runs the R-series semantic rules over every products/*/ruyin.product.yaml via the ruyin
   # CLI (design authority: docs/30-design/30-contract-schema.md section 15).
