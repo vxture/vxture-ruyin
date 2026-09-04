@@ -248,6 +248,19 @@ const WRAPPER_CASES: WrapperCase[] = [
     path: "/connectors",
     body: { id: "crm", command: "node", args: ["crm.js"], source: "lan" },
   },
+  {
+    name: "testConnector",
+    call: (api) => api.testConnector({ id: "crm", command: "node", args: ["crm.js"] }),
+    method: "POST",
+    path: "/connectors/test",
+    body: { id: "crm", command: "node", args: ["crm.js"] },
+  },
+  {
+    name: "activateConnector",
+    call: (api) => api.activateConnector("crm"),
+    method: "POST",
+    path: "/connectors/crm/activate",
+  },
   { name: "removeConnector", call: (api) => api.removeConnector("crm"), method: "DELETE", path: "/connectors/crm" },
   { name: "audit", call: (api) => api.audit("prj_1"), method: "GET", path: "/projects/prj_1/audit" },
   {

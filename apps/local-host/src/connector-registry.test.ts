@@ -129,3 +129,96 @@ test("registry: load brings up everything in the manifest; an unreadable manifes
   assert.ok(log2.some((l) => /unreadable/.test(l)));
   rmSync(dataDir, { recursive: true, force: true });
 });
+
+test("registry: probe answers whether a command connects, and leaves nothing behind", async () => {
+  const { registry, dataDir, lookup } = fresh();
+  const ok = await registry.probe({ id: "crm", command: process.execPath, args: [FAKE] });
+  assert.equal(ok.ok, true);
+  assert.ok(ok.tools.length > 0, "a connected server reports its tools");
+  // **试连不落盘、不注册**：添加页要在写下任何东西之前先问一句。
+  assert.equal(lookup.size, 0);
+  assert.ok(!existsSync(join(dataDir, CONNECTORS_FILE)));
+
+  const bad = await registry.probe({ id: "crm", command: process.execPath, args: ["--eval", "process.exit(3)"] });
+  assert.equal(bad.ok, false);
+  assert.ok((bad.detail ?? "").length > 0, "a failure carries its reason");
+  assert.equal(lookup.size, 0);
+
+  const empty = await registry.probe({ id: "crm", command: "" });
+  assert.equal(empty.ok, false);
+  assert.match(empty.detail ?? "", /命令不能为空/);
+  rmSync(dataDir, { recursive: true, force: true });
+});
+
+test("registry: a stashed connector is persisted but never started, and activate re-tests it", async () => {
+  const { registry, dataDir, lookup } = fresh();
+  const view = await registry.install({
+    id: "crm",
+    command: process.execPath,
+    args: ["--eval", "process.exit(3)"],
+    source: "lan",
+    state: "stashed",
+  });
+  assert.equal(view.state, "stashed");
+  assert.equal(view.health.ok, false);
+  // 暂存的**不进 lookup**：一个连不上的连接器留在任务能拿到的清单里，
+  // 是把待办伪装成能力。
+  assert.equal(lookup.size, 0);
+  const manifest = JSON.parse(readFileSync(join(dataDir, CONNECTORS_FILE), "utf8")) as {
+    items: Array<{ id: string; state: string }>;
+  };
+  assert.deepEqual(manifest.items.map((i) => [i.id, i.state]), [["crm", "stashed"]]);
+
+  // 启用会重新试一次；换个状态不会让它连上。
+  await assert.rejects(registry.activate("crm"), /still cannot start/);
+  assert.equal(lookup.size, 0, "a failed activate leaves nothing half-registered");
+  assert.equal((await registry.list())[0]?.state, "stashed");
+
+  await assert.rejects(registry.activate("nope"), /not installed/);
+  rmSync(dataDir, { recursive: true, force: true });
+});
+
+test("registry: activate turns a stashed connector that now works into an active one", async () => {
+  const { registry, dataDir, lookup } = fresh();
+  await registry.install({ id: "crm", command: process.execPath, args: [FAKE], source: "lan", state: "stashed" });
+  assert.equal(lookup.size, 0);
+  const view = await registry.activate("crm");
+  assert.equal(view.state, "active");
+  assert.equal(view.health.ok, true);
+  assert.equal(lookup.size, 1);
+  // 已经是 active 的再启用一次是空操作，不该重起一遍进程。
+  const again = await registry.activate("crm");
+  assert.equal(again.state, "active");
+  assert.equal(lookup.size, 1);
+  const manifest = JSON.parse(readFileSync(join(dataDir, CONNECTORS_FILE), "utf8")) as {
+    items: Array<{ state: string }>;
+  };
+  assert.equal(manifest.items[0]?.state, "active");
+  await registry.stopAll();
+  rmSync(dataDir, { recursive: true, force: true });
+});
+
+test("registry: load skips stashed entries, and a manifest written before state existed counts as active", async () => {
+  const { registry, dataDir, lookup } = fresh();
+  writeFileSync(
+    join(dataDir, CONNECTORS_FILE),
+    JSON.stringify({
+      items: [
+        // 旧清单：**没有 state**。默认成暂存会让一次升级静静地停掉所有连接器。
+        { id: "old", transport: "stdio", command: process.execPath, args: [FAKE], source: "lan", installedAt: "t" },
+        { id: "held", transport: "stdio", command: process.execPath, args: [FAKE], source: "lan", installedAt: "t", state: "stashed" },
+      ],
+    }),
+  );
+  await registry.load();
+  assert.deepEqual(
+    (await registry.list()).map((c) => [c.id, c.state]),
+    [
+      ["old", "active"],
+      ["held", "stashed"],
+    ],
+  );
+  assert.deepEqual([...lookup.keys()], ["old"]);
+  await registry.stopAll();
+  rmSync(dataDir, { recursive: true, force: true });
+});

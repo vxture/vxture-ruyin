@@ -36,6 +36,8 @@ function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
 
 function fakeApi(over: Partial<Api> = {}): Api {
   return {
+    testConnector: vi.fn().mockResolvedValue({ ok: true, tools: [] }),
+    activateConnector: vi.fn().mockResolvedValue({}),
     system: vi.fn().mockResolvedValue(systemInfo()),
     checkUpdate: vi.fn(),
     ...over,
@@ -271,6 +273,7 @@ void test("UpdatesSection: checkUpdate() rejecting reads '检查失败', not sil
 /* ---------------- 连接器 ---------------- */
 
 const crmView = {
+  state: "active" as const,
   id: "crm",
   transport: "stdio" as const,
   command: "node",
@@ -299,28 +302,120 @@ void test("Settings/连接器: lists installed connectors with live health, and 
   expect(api.removeConnector).toHaveBeenCalledWith("crm");
 });
 
-void test("Settings/连接器: install sends id/command/args/source; a 403 refusal is shown verbatim, not softened", async () => {
+void test("Settings/连接器: 添加是独立一页；必须先测通才能启用，测不通可以暂存", async () => {
+  const testConnector = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: false, tools: [], detail: "ECONNREFUSED 127.0.0.1:8931" })
+    .mockResolvedValueOnce({ ok: true, tools: ["crm_search"] });
+  const installConnector = vi.fn().mockResolvedValue(crmView);
   const api = fakeApi({
     connectors: vi.fn().mockResolvedValue({ items: [] }),
-    installConnector: vi
-      .fn()
-      .mockRejectedValue(new Error("connector installation is refused until connectors arrive signed (TD-012)")),
+    testConnector,
+    installConnector,
   });
   renderSection("connectors", api);
-  expect(await screen.findByText("尚未安装任何连接器")).toBeInTheDocument();
+  expect(await screen.findByText("尚未安装任何连接器。")).toBeInTheDocument();
   const user = userEvent.setup();
-  await user.type(screen.getByPlaceholderText("连接器 id，如 crm"), "crm");
-  await user.type(screen.getByPlaceholderText(/^命令/), "node");
-  await user.type(screen.getByPlaceholderText("参数（空格分隔，可空）"), "crm.js --port 1");
+
+  // 列表页只回答「我有什么」；表单在另一页（owner 2026-09-04 第 12 条）。
+  expect(screen.queryByPlaceholderText("如 crm")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "添加连接器" }));
+  await user.type(screen.getByPlaceholderText("如 crm"), "crm");
+  await user.type(screen.getByPlaceholderText(/^如 node/), "node");
+  await user.type(screen.getByPlaceholderText("--port 8931"), "crm.js --port 1");
   await user.selectOptions(screen.getByLabelText("来源种类"), "private");
-  await user.click(screen.getByRole("button", { name: "安装并启动" }));
-  expect(api.installConnector).toHaveBeenCalledWith({
+
+  // 没测过之前，「添加并启用」是关着的：没测就写进去，等于把「能用」这件事
+  // 留给下一个打开它的人去发现。
+  expect(screen.getByRole("button", { name: "添加并启用" })).toBeDisabled();
+
+  await user.click(screen.getByRole("button", { name: "测试连接" }));
+  expect(testConnector).toHaveBeenCalledWith({
+    id: "crm",
+    command: "node",
+    args: ["crm.js", "--port", "1"],
+  });
+  // 连不上时原因照原样转达，并给出「暂存」这条路。
+  expect(await screen.findByText(/ECONNREFUSED 127\.0\.0\.1:8931/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "添加并启用" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "暂存（不启用）" }));
+  expect(installConnector).toHaveBeenLastCalledWith({
     id: "crm",
     command: "node",
     args: ["crm.js", "--port", "1"],
     source: "private",
+    state: "stashed",
   });
-  expect(await screen.findByText(/refused until connectors arrive signed \(TD-012\)/)).toBeInTheDocument();
+
+  // 再来一次，这次测通：暂存那个入口消失，主按钮开启。
+  await user.click(screen.getByRole("button", { name: "添加连接器" }));
+  await user.type(screen.getByPlaceholderText("如 crm"), "crm");
+  await user.type(screen.getByPlaceholderText(/^如 node/), "node");
+  await user.click(screen.getByRole("button", { name: "测试连接" }));
+  expect(await screen.findByText(/连接成功/)).toBeInTheDocument();
+  expect(screen.getByText(/crm_search/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "暂存（不启用）" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "添加并启用" }));
+  expect(installConnector).toHaveBeenLastCalledWith({
+    id: "crm",
+    command: "node",
+    args: [],
+    source: "lan",
+  });
+});
+
+void test("Settings/连接器: 测通了但对方没报工具，说清楚 —— 契约里的 connector 工具会接不上", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({ items: [] }),
+    testConnector: vi.fn().mockResolvedValue({ ok: true, tools: [] }),
+  });
+  renderSection("connectors", api);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "添加连接器" }));
+  await user.type(screen.getByPlaceholderText("如 crm"), "x");
+  await user.type(screen.getByPlaceholderText(/^如 node/), "node");
+  await user.click(screen.getByRole("button", { name: "测试连接" }));
+  expect(await screen.findByText(/没有报出任何工具/)).toBeInTheDocument();
+});
+
+void test("Settings/连接器: 测试本身失败（守护进程没答话）也如实说，且不当成测通", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({ items: [] }),
+    testConnector: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
+  });
+  renderSection("connectors", api);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "添加连接器" }));
+  await user.type(screen.getByPlaceholderText("如 crm"), "x");
+  await user.type(screen.getByPlaceholderText(/^如 node/), "node");
+  await user.click(screen.getByRole("button", { name: "测试连接" }));
+  expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "添加并启用" })).toBeDisabled();
+  // 返回列表这条路一直在。
+  await user.click(screen.getByRole("button", { name: "返回列表" }));
+  expect(await screen.findByText("尚未安装任何连接器。")).toBeInTheDocument();
+});
+
+void test("Settings/连接器: 暂存的那个标「已暂存」，启用会重测；还是连不上就照实说", async () => {
+  const stashed = { ...crmView, state: "stashed" as const, health: { ok: false, detail: "已暂存，未启用", checkedAt: "t" }, tools: [] };
+  const activateConnector = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('connector "crm" still cannot start: ECONNREFUSED'))
+    .mockResolvedValueOnce(crmView);
+  const connectors = vi
+    .fn()
+    .mockResolvedValue({ items: [stashed] });
+  const api = fakeApi({ connectors, activateConnector });
+  renderSection("connectors", api);
+  expect(await screen.findByText("已暂存")).toBeInTheDocument();
+  // 暂存 ≠ 装了没跑起来：不该显示成「未运行」。
+  expect(screen.queryByText(/^未运行/)).not.toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "启用" }));
+  expect(await screen.findByText(/still cannot start: ECONNREFUSED/)).toBeInTheDocument();
+  connectors.mockResolvedValue({ items: [crmView] });
+  await user.click(screen.getByRole("button", { name: "启用" }));
+  expect(await screen.findByText("运行中")).toBeInTheDocument();
 });
 
 void test("Settings/连接器: an assembly without a registry (503) says so and hides the install form", async () => {
@@ -334,27 +429,33 @@ void test("Settings/连接器: an assembly without a registry (503) says so and 
   expect(screen.queryByRole("button", { name: "安装并启动" })).not.toBeInTheDocument();
 });
 
-void test("Settings/连接器: a generic failure to list is shown as a failure (not as 尚未安装), install success clears the form and reloads", async () => {
+void test("Settings/连接器: a generic failure to list is shown as a failure (not as 尚未安装), and a successful add returns to a reloaded list", async () => {
   const connectors = vi
     .fn()
     .mockRejectedValueOnce(new Error("daemon unreachable"))
     .mockResolvedValue({ items: [crmView] });
   const api = fakeApi({
     connectors,
+    testConnector: vi.fn().mockResolvedValue({ ok: true, tools: ["crm_search"] }),
     installConnector: vi.fn().mockResolvedValue(crmView),
   });
   renderSection("connectors", api);
   expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
-  expect(screen.queryByText("尚未安装任何连接器")).not.toBeInTheDocument();
+  expect(screen.queryByText("尚未安装任何连接器。")).not.toBeInTheDocument();
 
   const user = userEvent.setup();
-  const idInput = screen.getByPlaceholderText("连接器 id，如 crm") as HTMLInputElement;
+  await user.click(screen.getByRole("button", { name: "添加连接器" }));
+  const idInput = screen.getByPlaceholderText("如 crm") as HTMLInputElement;
   await user.type(idInput, " crm ");
-  await user.type(screen.getByPlaceholderText(/^命令/), "node");
-  await user.click(screen.getByRole("button", { name: "安装并启动" }));
+  await user.type(screen.getByPlaceholderText(/^如 node/), "node");
+  await user.click(screen.getByRole("button", { name: "测试连接" }));
+  await screen.findByText(/连接成功/);
+  await user.click(screen.getByRole("button", { name: "添加并启用" }));
+  // id 两端的空格要修掉：用户不该因为多按了一下空格而装出一个别的 id。
   expect(api.installConnector).toHaveBeenCalledWith({ id: "crm", command: "node", args: [], source: "lan" });
-  await vi.waitFor(() => expect(idInput.value).toBe(""));
+  // 添加成功后回到列表，而且列表是重新拉过的。
   expect(await screen.findByText("运行中")).toBeInTheDocument();
+  expect(screen.queryByPlaceholderText("如 crm")).not.toBeInTheDocument();
   expect(screen.queryByText("daemon unreachable")).not.toBeInTheDocument();
 });
 
@@ -520,4 +621,30 @@ void test("Settings/软件更新: four blocks; the channel is a select with only
   expect(channel.disabled).toBe(true);
   expect(Array.from(channel.options).map((o) => o.value)).toEqual(["stable"]);
   expect(document.body.textContent).toContain("不会自动下载或自动安装");
+});
+
+void test("Settings/连接器: 生产拒装（403）在添加页照原样转达，人不会以为是自己填错了", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({ items: [] }),
+    testConnector: vi.fn().mockResolvedValue({ ok: true, tools: ["crm_search"] }),
+    installConnector: vi
+      .fn()
+      .mockRejectedValue(
+        new Error("connector installation is refused until connectors arrive signed (TD-012)"),
+      ),
+  });
+  renderSection("connectors", api);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "添加连接器" }));
+  await user.type(screen.getByPlaceholderText("如 crm"), "crm");
+  await user.type(screen.getByPlaceholderText(/^如 node/), "node");
+  await user.click(screen.getByRole("button", { name: "测试连接" }));
+  await screen.findByText(/连接成功/);
+  await user.click(screen.getByRole("button", { name: "添加并启用" }));
+  // 测通了但装不进去 —— 那是策略，不是配置错。原话给用户，他能读到 TD-012。
+  expect(
+    await screen.findByText((t) => t.includes("refused until connectors arrive signed")),
+  ).toBeInTheDocument();
+  // 还停在添加页，输入没被清掉：他可能只是想换台机器再来。
+  expect((screen.getByPlaceholderText("如 crm") as HTMLInputElement).value).toBe("crm");
 });

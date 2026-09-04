@@ -485,19 +485,18 @@ function SystemSection({ system }: { system: SystemInfo | null }) {
  * 界面照实转达，不把「拒绝」包装成「暂不可用」。
  */
 function ConnectorsSection({ api }: { api: Api }) {
+  const [page, setPage] = useState<"list" | "add">("list");
   const [items, setItems] = useState<ConnectorView[] | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [id, setId] = useState("");
-  const [command, setCommand] = useState("");
-  const [args, setArgs] = useState("");
-  const [source, setSource] = useState<"lan" | "private">("lan");
 
   const reload = async () => {
     try {
       setItems((await api.connectors()).items);
       setUnavailable(null);
+      // 拉成功了就把上一次的错误擦掉：一条讲「拉不到」的红字压在一张拉到了的
+      // 列表下面，比没有提示更糟 —— 它说的事已经不成立了。
+      setFailed(null);
     } catch (e) {
       // 503 = 这套装配没有注册表。这不是错误，是一个事实，单独说。
       if (e instanceof ApiError && e.status === 503) {
@@ -513,28 +512,6 @@ function ConnectorsSection({ api }: { api: Api }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api]);
 
-  const install = async () => {
-    setBusy(true);
-    setFailed(null);
-    try {
-      await api.installConnector({
-        id: id.trim(),
-        command: command.trim(),
-        // 空格分参数够用了：这是开发态的口子，真正的安装走签名包（TD-036）。
-        args: args.trim() ? args.trim().split(/\s+/) : [],
-        source,
-      });
-      setId("");
-      setCommand("");
-      setArgs("");
-      await reload();
-    } catch (e) {
-      setFailed(String((e as Error).message));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const remove = async (target: string) => {
     setFailed(null);
     try {
@@ -544,82 +521,229 @@ function ConnectorsSection({ api }: { api: Api }) {
       setFailed(String((e as Error).message));
     }
   };
+  const enable = async (target: string) => {
+    setFailed(null);
+    try {
+      await api.activateConnector(target);
+      await reload();
+    } catch (e) {
+      // 「还是连不上」不该被包装成「启用失败」：原因照原样转达。
+      setFailed(String((e as Error).message));
+    }
+  };
+
+  if (page === "add") {
+    return (
+      <AddConnectorPage
+        api={api}
+        onBack={() => setPage("list")}
+        onAdded={async () => {
+          setPage("list");
+          await reload();
+        }}
+      />
+    );
+  }
 
   return (
-    <>
-      <div className="card">
-        <SettingRow
-          label="已安装的连接器"
-          hint="局域网 / 私有服务经本机 MCP 连接器进入项目上下文；每个项目要单独授权才能用"
-        >
-          {unavailable ? (
-            <span className="text-body-sm text-muted-foreground">{unavailable}</span>
-          ) : items === null ? (
-            "…"
-          ) : items.length === 0 ? (
-            <span className="text-body-sm text-muted-foreground">尚未安装任何连接器</span>
-          ) : (
-            <ul className="row-list" aria-label="已安装的连接器">
-              {items.map((c) => (
-                <li key={c.id} className="row-item">
-                  <code className="row-main" title={`${c.command} ${c.args.join(" ")}`}>
-                    {c.id}
-                  </code>
-                  <span className="row-tag">{c.source}</span>
-                  {/* 暴露了哪些工具：契约里 provider: connector 的工具要靠同名才接得上，
-                      用户对着契约就能看出接没接。 */}
-                  {c.tools.length > 0 && (
-                    <span className="text-body-sm text-muted-foreground mono">
-                      {`工具：${c.tools.join("、")}`}
-                    </span>
-                  )}
-                  {/* 健康是问出来的：一个「已安装」不说它此刻活着没有。 */}
-                  <StatusBadge tone={c.health.ok ? "success" : "warning"}>
-                    {c.health.ok ? "运行中" : `未运行${c.health.detail ? "：" + c.health.detail : ""}`}
-                  </StatusBadge>
-                  <Button variant="ghost" size="sm" onClick={() => void remove(c.id)}>
-                    卸载
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </SettingRow>
-      </div>
-      {!unavailable && (
-        <div className="card">
-          <SettingRow
-            label="安装连接器（stdio）"
-            hint="一个 MCP 服务器的启动命令。签名信任锚就位前，正式版会拒绝安装并说明原因（TD-036）"
-          >
-            <div className="flex flex-col gap-sm">
-              <Input value={id} onChange={(e) => setId(e.target.value)} placeholder="连接器 id，如 crm" />
-              <Input
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                placeholder="命令，如 node，或 MCP 服务器可执行文件的完整路径"
-              />
-              <Input value={args} onChange={(e) => setArgs(e.target.value)} placeholder="参数（空格分隔，可空）" />
-              <NativeSelect
-                aria-label="来源种类"
-                value={source}
-                onChange={(e) => setSource(e.target.value === "private" ? "private" : "lan")}
-                wrapperClassName="sel-narrow"
-              >
-                <option value="lan">lan · 局域网系统</option>
-                <option value="private">private · 私有服务</option>
-              </NativeSelect>
-              <div>
-                <Button disabled={busy || !id.trim() || !command.trim()} onClick={() => void install()}>
-                  {busy ? "正在安装…" : "安装并启动"}
+    <SettingsBlock
+      icon="plugs-connected"
+      title="已安装的连接器"
+      desc="局域网 / 私有服务经本机 MCP 连接器进入项目上下文；每个项目还要单独授权才能用"
+      aside={
+        unavailable ? undefined : (
+          <Button variant="outline" size="sm" onClick={() => setPage("add")}>
+            添加连接器
+          </Button>
+        )
+      }
+    >
+      {failed && <div className="update-line update-line--warn">{failed}</div>}
+      {unavailable ? (
+        <p className="set-note">{unavailable}</p>
+      ) : items === null ? (
+        <p className="set-note">…</p>
+      ) : items.length === 0 ? (
+        <p className="set-note">尚未安装任何连接器。</p>
+      ) : (
+        <ul className="row-list" aria-label="已安装的连接器">
+          {items.map((c) => (
+            <li key={c.id} className="row-item">
+              <code className="row-main" title={`${c.command} ${c.args.join(" ")}`}>
+                {c.id}
+              </code>
+              <span className="row-tag">{c.source}</span>
+              {/* 暴露了哪些工具：契约里 provider: connector 的工具要靠同名才接得上，
+                  用户对着契约就能看出接没接。 */}
+              {c.tools.length > 0 && (
+                <span className="text-body-sm text-muted-foreground mono">
+                  {`工具：${c.tools.join("、")}`}
+                </span>
+              )}
+              {/* 三种状态各说各的：暂存 ≠ 装了但没跑起来。前者是用户当时的选择，
+                  后者是这一刻的故障 —— 混成一句话，用户不知道该改配置还是该点启用。 */}
+              {c.state === "stashed" ? (
+                <StatusBadge tone="neutral">已暂存</StatusBadge>
+              ) : (
+                <StatusBadge tone={c.health.ok ? "success" : "warning"}>
+                  {c.health.ok
+                    ? "运行中"
+                    : `未运行${c.health.detail ? "：" + c.health.detail : ""}`}
+                </StatusBadge>
+              )}
+              {c.state === "stashed" && (
+                <Button variant="outline" size="sm" onClick={() => void enable(c.id)}>
+                  启用
                 </Button>
-              </div>
-              {failed && <div className="update-line update-line--warn">{failed}</div>}
-            </div>
-          </SettingRow>
-        </div>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => void remove(c.id)}>
+                卸载
+              </Button>
+            </li>
+          ))}
+        </ul>
       )}
-    </>
+    </SettingsBlock>
+  );
+}
+
+/**
+ * 添加连接器 —— **独立一页**（owner 2026-09-04 第 12 条）。
+ *
+ * 列表页回答「我有什么」，这一页回答「再加一个」。原来两件事挤在同一个分区里，
+ * 于是一个只想看看装了什么的人，先看到的是一张表单。
+ *
+ * 流程里有一步**测试**：先起一次进程、握手、读工具清单，再决定写不写。
+ * 通不过也能**暂存** —— 现场连不上是常事（服务没开、端口没通），把配置留下来
+ * 比让用户重新敲一遍强；但暂存的不启动、不进任务能拿到的清单，它是待办不是能力。
+ */
+function AddConnectorPage({
+  api,
+  onBack,
+  onAdded,
+}: {
+  api: Api;
+  onBack: () => void;
+  onAdded: () => void | Promise<void>;
+}) {
+  const [id, setId] = useState("");
+  const [command, setCommand] = useState("");
+  const [args, setArgs] = useState("");
+  const [source, setSource] = useState<"lan" | "private">("lan");
+  const [busy, setBusy] = useState<"test" | "save" | null>(null);
+  const [probe, setProbe] = useState<{ ok: boolean; tools: string[]; detail?: string } | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const argv = () => (args.trim() ? args.trim().split(/\s+/) : []);
+  const ready = id.trim().length > 0 && command.trim().length > 0;
+
+  const test = async () => {
+    setBusy("test");
+    setFailed(null);
+    setProbe(null);
+    try {
+      setProbe(await api.testConnector({ id: id.trim(), command: command.trim(), args: argv() }));
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const save = async (stashed: boolean) => {
+    setBusy("save");
+    setFailed(null);
+    try {
+      await api.installConnector({
+        id: id.trim(),
+        command: command.trim(),
+        // 空格分参数够用了：这是开发态的口子，真正的安装走签名包（TD-036）。
+        args: argv(),
+        source,
+        ...(stashed ? { state: "stashed" as const } : {}),
+      });
+      await onAdded();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <SettingsBlock
+      icon="plugs-connected"
+      title="添加连接器（stdio）"
+      desc="一个 MCP 服务器的启动命令。先测一次，再决定启用还是暂存"
+      aside={
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          返回列表
+        </Button>
+      }
+    >
+      <Row label="连接器 id">
+        <Input value={id} onChange={(e) => setId(e.target.value)} placeholder="如 crm" />
+      </Row>
+      <Row label="命令">
+        <Input
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          placeholder="如 node，或 MCP 服务器可执行文件的完整路径"
+        />
+      </Row>
+      <Row label="参数" note="空格分隔，可以留空。">
+        <Input value={args} onChange={(e) => setArgs(e.target.value)} placeholder="--port 8931" />
+      </Row>
+      <Row label="来源种类" note="契约里声明 lan / private 的上下文类型才能绑到它。">
+        <NativeSelect
+          aria-label="来源种类"
+          value={source}
+          onChange={(e) => setSource(e.target.value === "private" ? "private" : "lan")}
+        >
+          <option value="lan">lan · 局域网系统</option>
+          <option value="private">private · 私有服务</option>
+        </NativeSelect>
+      </Row>
+
+      <div className="add-actions">
+        <Button variant="outline" disabled={!ready || busy !== null} onClick={() => void test()}>
+          {busy === "test" ? "正在测试…" : "测试连接"}
+        </Button>
+        {/* 主按钮只在测通之后亮：没测过就写进去，等于把「能用」这件事留给
+            下一个打开它的人去发现。 */}
+        <Button disabled={!ready || busy !== null || probe?.ok !== true} onClick={() => void save(false)}>
+          {busy === "save" ? "正在添加…" : "添加并启用"}
+        </Button>
+        {probe && !probe.ok && (
+          <Button variant="ghost" disabled={busy !== null} onClick={() => void save(true)}>
+            暂存（不启用）
+          </Button>
+        )}
+      </div>
+
+      {probe?.ok && (
+        <p className="update-line">
+          连接成功
+          {probe.tools.length > 0 ? (
+            <>
+              ，对方报了 {probe.tools.length} 个工具：
+              <span className="mono"> {probe.tools.join("、")}</span>
+            </>
+          ) : (
+            "，但对方没有报出任何工具 —— 契约里 provider: connector 的工具会接不上"
+          )}
+        </p>
+      )}
+      {probe && !probe.ok && (
+        <p className="update-line update-line--warn">
+          连不上{probe.detail ? "：" + probe.detail : ""}。可以改配置再测，或先暂存 —— 暂存的不会启动，也不会被任务用到。
+        </p>
+      )}
+      {failed && <div className="update-line update-line--warn">{failed}</div>}
+      <p className="set-note">
+        签名信任锚就位前，正式版会拒绝安装并说明原因（TD-036）；测试本身不落盘，起一下就结束。
+      </p>
+    </SettingsBlock>
   );
 }
 
