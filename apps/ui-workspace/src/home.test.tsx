@@ -291,15 +291,20 @@ void test("ProductCard: the badge tells the four states apart - 已订阅 / 本�
   expect(screen.getByText("已停用")).toBeInTheDocument();
 });
 
-void test("ProductCard: code and version read as one subtitle - vxture.bid v2.3.0", () => {
+void test("ProductCard: the code sits under the name; the version lives bottom-left, flush with the icon, followed by the count and its unit", () => {
   renderHome({
     products: [product({ id: "vxture.bid", version: "2.3.0" })],
-    workspaces: [],
+    workspaces: [workspace(), workspace({ id: "prj_2" })],
   });
-  // 标识和版本回答的是同一个问题（哪个产品的哪一版），所以连在一行里；
-  // 拆到两处会逼读者把一句话的两半自己拼回去。
-  const ident = document.querySelector(".pcard-ident");
-  expect(ident?.textContent?.replace(/s+/g, " ").trim()).toBe("vxture.bid v2.3.0");
+  // owner 2026-09-04：名称下面只留产品 code；版本移到左下角、顶头对齐图标，
+  // 关键数字紧随其后，单位「项目」是再小再淡的一档。
+  expect(document.querySelector(".pcard-ident")?.textContent?.trim()).toBe("vxture.bid");
+  const meta = document.querySelector(".pcard-foot > .pcard-meta") as HTMLElement;
+  expect(meta.querySelector(".pcard-version")?.textContent).toBe("v2.3.0");
+  expect(meta.querySelector(".pcard-count b")?.textContent).toBe("2");
+  expect(meta.querySelector(".pcard-unit")?.textContent).toBe("项目");
+  // Order in the footer: version first, then the count (spacing is CSS, not text).
+  expect(Array.from(meta.children).map((c) => c.className)).toEqual(["pcard-version", "pcard-count"]);
 });
 
 void test("ProductCard: the project count sits on the 打开 row and says it in one breath", () => {

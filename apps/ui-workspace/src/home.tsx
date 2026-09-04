@@ -558,10 +558,7 @@ export function HomePage({
                 </span>
                 <span className="pcard-titles">
                   <h3 className="pcard-title">{c.name}</h3>
-                  <p className="pcard-ident">
-                    {c.category}
-                    {c.version && <span className="pcard-ver"> v{c.version}</span>}
-                  </p>
+                  <p className="pcard-ident">{c.category}</p>
                 </span>
                 <span className="pcard-badges">
                   <StatusBadge tone={c.status === "released" ? "success" : "neutral"}>
@@ -580,7 +577,9 @@ export function HomePage({
                 </div>
               </div>
               <footer className="pcard-foot">
-                <span className="pcard-count" />
+                <span className="pcard-meta">
+                  {c.version && <span className="pcard-version">v{c.version}</span>}
+                </span>
                 <span className="pcard-actions">
                   {/* 统一「了解详情」，**不写「订阅」**：这个链接落在目录页，
                       不是某个产品的订阅流程；写成「去平台订阅」是拿一个做不到
@@ -741,9 +740,7 @@ function ProductCard({
         </span>
         <span className="pcard-titles">
           <h3 className="pcard-title">{product.name}</h3>
-          <p className="pcard-ident" title={`产品标识 ${product.id}，当前生效版本 ${product.version}`}>
-            {product.id} <span className="pcard-ver">v{product.version}</span>
-          </p>
+          <p className="pcard-ident" title={`产品标识 ${product.id}`}>{product.id}</p>
         </span>
         <span className="pcard-badges">
           {badge}
@@ -778,15 +775,19 @@ function ProductCard({
       <footer className="pcard-foot">
         {/* 「11/22」不写成「本地项目/总计项目」—— 那行标签比它解释的数字还长。
             口径进 tooltip：要用一句话说清的东西，不该常年占着版面。 */}
-        <span
-          className="pcard-count"
-          title={
-            total > local
-              ? `本地项目 ${local} / 总计 ${total}`
-              : `本机上属于该产品的项目：${local}`
-          }
-        >
-          <b>{total > local ? `${local}/${total}` : local}</b> 项目
+        {/* 左下角顶头对齐图标：版本（淡，hover 亮）→ 关键数字 → 单位（小、淡）。 */}
+        <span className="pcard-meta">
+          <span className="pcard-version" title={`当前生效版本 ${product.version}`}>v{product.version}</span>
+          <span
+            className="pcard-count"
+            title={
+              total > local
+                ? `本地项目 ${local} / 总计 ${total}`
+                : `本机上属于该产品的项目：${local}`
+            }
+          >
+            <b>{total > local ? `${local}/${total}` : local}</b> <span className="pcard-unit">项目</span>
+          </span>
         </span>
         <span className="pcard-actions">
           {usable ? (

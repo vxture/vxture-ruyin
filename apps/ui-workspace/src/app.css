@@ -293,7 +293,7 @@ body {
 .pcard-titles {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 4px;
   min-width: 0;
   /* 名称至少留 140px 再让徽章换行；徽章推到行尾：状态永远在标题行右端。 */
   flex: 1 1 140px;
@@ -355,7 +355,6 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pcard-ver { color: var(--color-foreground); opacity: 0.8; }
 /* 警示：与说明分得开 —— warning 语气的色 + 图标 + 浅底，不是又一行灰字。 */
 .pcard-alert {
   display: flex;
@@ -385,15 +384,35 @@ body {
   padding-top: var(--spacing-xs);
   border-top: 1px solid var(--color-border);
 }
-/* 项目数缩进到文字列（与说明同一条左缘），不顶在卡片最左。 */
+/* 左下角一组元信息，顶头对齐图标（owner 2026-09-04 定）：版本淡、hover 亮；
+   关键数字紧随其后留一段；单位「项目」再小再淡一档。 */
+.pcard-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pcard-version {
+  font-family: var(--code-sm-font-family, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+.pcard:hover .pcard-version { opacity: 1; }
 .pcard-count {
   font-size: var(--font-size-body-sm);
   color: var(--color-foreground);
   opacity: 0.85;
   white-space: nowrap;
-  padding-left: 52px;
 }
-.pcard-count b { font-weight: 600; }
+.pcard-count b { font-weight: 600; font-size: var(--font-size-body-md); }
+.pcard-unit {
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  margin-left: 1px;
+}
 .pcard-count b {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -408,12 +427,14 @@ body {
 }
 /* 主按钮加宽：它是这张卡存在的理由，不该和一个辅助按钮一样窄。 */
 .pcard-open { min-width: 96px; }
+/* 低频文字链：再小再淡一档（owner 2026-09-04 定），hover 才回到正常深浅。 */
 .pcard-link {
-  font-size: var(--font-size-body-sm);
+  font-size: 12px;
   color: var(--color-muted-foreground);
+  opacity: 0.7;
   text-decoration: none;
 }
-.pcard-link:hover { color: var(--color-foreground); text-decoration: underline; }
+.pcard-link:hover { color: var(--color-foreground); opacity: 1; text-decoration: underline; }
 
 /* 标题行右侧的动作簇：主按钮在最右。 */
 .section-actions {
@@ -910,7 +931,6 @@ body {
 .pcard-badges { gap: 4px; }
 .pcard-badges [data-slot="badge"], .pcard .catalog-caps [data-slot="badge"] { font-size: 11px; }
 .pcard-ident { font-size: 12px; }
-.pcard-link { font-size: var(--font-size-body-sm); }
 
 /* 7. 滚动条：细、透明、不滚动时隐藏（Chromium）。 */
 /* 只写给真正会滚的容器（主内容区、DS 的 overflow 容器、文本域），不用 `*`：
