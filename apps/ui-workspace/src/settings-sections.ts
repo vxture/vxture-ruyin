@@ -4,7 +4,6 @@
 export type SectionId =
   | "account"
   | "general"
-  | "privacy"
   | "connectors"
   | "updates"
   | "about";
@@ -18,9 +17,20 @@ export type SectionId =
  */
 export const SETTINGS_SECTIONS: Array<{ id: SectionId; label: string; icon: string }> = [
   { id: "account", label: "账户", icon: "role" },
-  { id: "general", label: "通用", icon: "settings" },
-  { id: "privacy", label: "数据与隐私", icon: "lock" },
+  { id: "general", label: "通用设置", icon: "settings" },
   { id: "connectors", label: "连接器", icon: "plugs-connected" },
   { id: "updates", label: "软件更新", icon: "arrow-down" },
   { id: "about", label: "关于", icon: "info" },
 ];
+
+/**
+ * 旧的分区 id → 现在的分区（owner 2026-09-04 重组）。
+ *
+ * `general`（偏好三轴）整组搬进「账户」做第二个板块，`privacy` 的内容接管
+ * 「通用设置」这个位置。**旧链接不能变成白屏**：地址栏里可能还留着
+ * `#settings/privacy`，侧栏收起时用户也可能从历史回来。
+ */
+export function resolveSection(id: string): SectionId {
+  if (id === "privacy") return "general";
+  return (SETTINGS_SECTIONS.some((s) => s.id === id) ? id : "account") as SectionId;
+}

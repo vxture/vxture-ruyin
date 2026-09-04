@@ -29,9 +29,11 @@ import { Api, ApiError, type ConnectorView, type SessionInfo, type SystemInfo, t
 // so the sidebar can know the section list without pulling in this file's
 // DS-heavy SettingsView - see that file's header comment (TD-011②).
 export { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
-import type { SectionId } from "./settings-sections";
+import { resolveSection, type SectionId } from "./settings-sections";
 
 const UI_VERSION = "0.2.0";
+/** 界面语言偏好（本机）。DS 管排版三轴，语言这一项归本文件。 */
+const LANG_KEY = "ruyin-language";
 
 export function SettingsView({ api, section }: { api: Api; section: SectionId }) {
   const [system, setSystem] = useState<SystemInfo | null>(null);
@@ -50,16 +52,84 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
       .catch(() => setSession(null));
   }, [api]);
 
+  // 旧地址（#settings/privacy）不该变成白屏，见 settings-sections.ts。
+  const view = resolveSection(section);
+
   return (
     <div className="flex flex-col gap-md">
       {/* 「设置」两个字已经在标题栏和侧栏里，这里不再写第三遍。 */}
       {error && <div className="error-box">{error}</div>}
-      {section === "account" && <AccountSection session={session} />}
-      {section === "general" && <GeneralSection />}
-      {section === "privacy" && <PrivacySection system={system} />}
-      {section === "connectors" && <ConnectorsSection api={api} />}
-      {section === "updates" && <UpdatesSection system={system} api={api} />}
-      {section === "about" && <AboutSection system={system} />}
+      {view === "account" && <AccountSection session={session} />}
+      {view === "general" && <SystemSection system={system} />}
+      {view === "connectors" && <ConnectorsSection api={api} />}
+      {view === "updates" && <UpdatesSection system={system} api={api} />}
+      {view === "about" && <AboutSection system={system} />}
+    </div>
+  );
+}
+
+/**
+ * 二级板块（owner 2026-09-04 定的统一标题模式）：小图标 + 标题 + 一句说明，
+ * 内容整体缩进到标题文字的左缘。
+ *
+ * 分区里不再只有一张大 card 平铺所有行：一个分区往往在讲两三件不同的事
+ * （账户 = 身份 + 偏好；通用设置 = 存在哪儿 + 怎么加密 + 什么会离开本机），
+ * 挤在同一张卡里读者得自己找分界线。图标是给扫视用的锚点，不是装饰。
+ */
+function SettingsBlock({
+  icon,
+  title,
+  desc,
+  aside,
+  children,
+}: {
+  icon: React.ComponentProps<typeof Icon>["name"];
+  title: string;
+  desc?: string;
+  /** 板块级动作，靠右（例如账号信息的「在线修改」）。 */
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="card set-block">
+      <header className="set-block-head">
+        <span className="set-block-icon" aria-hidden>
+          <Icon name={icon} size="sm" />
+        </span>
+        <div className="set-block-titles">
+          <h3 className="set-block-title">{title}</h3>
+          {desc && <p className="set-block-desc">{desc}</p>}
+        </div>
+        {aside && <span className="set-block-aside">{aside}</span>}
+      </header>
+      <div className="set-block-body">{children}</div>
+    </section>
+  );
+}
+
+/** 一行事实：名称 + 值（+ 可选徽章）。值缺失写「—」，不留空。 */
+function FactRow({
+  label,
+  value,
+  badge,
+  mono,
+}: {
+  label: string;
+  value?: React.ReactNode;
+  badge?: React.ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="fact-row">
+      <span className="fact-label">{label}</span>
+      <span className={mono ? "fact-value mono" : "fact-value"}>
+        {value === undefined || value === null || value === "" ? (
+          <span className="fact-empty">—</span>
+        ) : (
+          value
+        )}
+      </span>
+      {badge && <span className="fact-badge">{badge}</span>}
     </div>
   );
 }
@@ -94,66 +164,112 @@ function SettingRow({
 function AccountSection({ session }: { session: SessionInfo | null }) {
   if (!session?.signedIn) {
     return (
-      <div className="card">
-        <EmptyState
-          icon="user-circle"
-          title="账户由左下角的账户菜单管理"
-          description="在侧栏底部登录 Vxture 账号：同步订阅权益、调用云端 AI 能力、管理设备。登录走系统浏览器（PKCE），凭证只存于本机凭据库。"
-        />
-      </div>
+      <>
+        <div className="card">
+          <EmptyState
+            icon="user-circle"
+            title="账户由左下角的账户菜单管理"
+            description="在侧栏底部登录 Vxture 账号：同步订阅权益、调用云端 AI 能力、管理设备。登录走系统浏览器（PKCE），凭证只存于本机凭据库。"
+          />
+        </div>
+        <PreferencesBlock />
+      </>
     );
   }
-  const consoleBase = session.consoleBase || "https://vxture.com";
-  const profileUrl = `${consoleBase}/zh-CN/profile`;
-  const name = session.profile?.name ?? session.profile?.email ?? "Vxture 用户";
-  const initial = name.slice(0, 1);
+  const p = session.profile;
+  const profileUrl = `${session.consoleBase || "https://vxture.com"}/zh-CN/profile`;
+  const name = p?.name ?? p?.email ?? "Vxture 用户";
+  const verified = (ok?: boolean) =>
+    ok === undefined ? undefined : ok ? (
+      <StatusBadge tone="success">已验证</StatusBadge>
+    ) : (
+      <StatusBadge tone="warning">未验证</StatusBadge>
+    );
   return (
     <>
-      <div className="card">
-        <div className="account-head">
-          <Avatar className="account-avatar">
-            {session.profile?.picture && <AvatarImage src={session.profile.picture} alt={name} />}
-            <AvatarFallback>{initial}</AvatarFallback>
-          </Avatar>
-          <div className="account-ident">
-            <div className="account-name">{name}</div>
-            {session.profile?.email && <div className="account-email">{session.profile.email}</div>}
-          </div>
+      <SettingsBlock
+        icon="role"
+        title="账号信息"
+        desc="全部取自登录后的会话，本机只读；修改在平台的「个人信息」页完成"
+        aside={
           <Button variant="outline" size="sm" onClick={() => window.open(profileUrl, "_blank", "noopener")}>
             在线修改
             <Icon name="external-link" size="xs" />
           </Button>
+        }
+      >
+        <div className="account-head">
+          <Avatar className="account-avatar">
+            {p?.picture && <AvatarImage src={p.picture} alt={name} />}
+            <AvatarFallback>{name.slice(0, 1)}</AvatarFallback>
+          </Avatar>
+          <div className="account-ident">
+            <div className="account-name">{name}</div>
+            {p?.email && <div className="account-email">{p.email}</div>}
+          </div>
         </div>
-        <SettingRow label="租户">
-          <span className="setting-value">{session.org?.name ?? "—"}</span>
-        </SettingRow>
-        <SettingRow label="工作区" hint="本机的项目、订阅与数据边界都按它划分；切换在平台完成">
-          <span className="setting-value">{session.workspace?.name ?? "—"}</span>
-        </SettingRow>
-        <SettingRow label="账户中心" hint="姓名、头像、密码、设备等在云平台的「个人信息」页修改">
-          <a className="setting-link" href={profileUrl} target="_blank" rel="noopener noreferrer">
-            {profileUrl}
-          </a>
-        </SettingRow>
-      </div>
+        {/* 逐项摆出来。**不显示 sub（uuid）** —— 那是给机器对账的，不是给人看的
+            （owner 2026-09-04 定）。缺的字段写「—」而不是藏起来：那一横说明的是
+            「平台没在 token 里给」，本身就是信息。 */}
+        <FactRow label="姓名" value={p?.name} />
+        <FactRow label="用户名" value={p?.username} mono />
+        <FactRow label="邮箱" value={p?.email} badge={verified(p?.emailVerified)} />
+        <FactRow label="电话" value={p?.phone} badge={verified(p?.phoneVerified)} />
+        <FactRow
+          label="角色"
+          value={
+            p?.roles && p.roles.length > 0 ? (
+              <span className="fact-chips">
+                {p.roles.map((r) => (
+                  <StatusBadge key={r} tone="neutral">
+                    {r}
+                  </StatusBadge>
+                ))}
+              </span>
+            ) : undefined
+          }
+        />
+        <FactRow label="语言地区" value={p?.locale} mono />
+        <FactRow label="租户" value={session.org?.name} />
+        <FactRow label="工作区" value={session.workspace?.name} />
+      </SettingsBlock>
+      <PreferencesBlock />
     </>
   );
 }
 
-/* ---------------- 通用 ---------------- */
-
-function GeneralSection() {
-  const { mode, setMode, density, setDensity, fontSize, setFontSize } =
-    useTheme();
-  /* 顺序（owner 2026-09-03 定）：语言 → 主题 → 密度 → 字号；控件等宽。 */
+/**
+ * 偏好设置（owner 2026-09-04：从「通用」整组搬到账户之下）。
+ *
+ * **四项都是本机的事**，与账号无关：换台机器不跟着走，也不上传。三条排版轴由
+ * DS 的 ThemeProvider 自己写进 localStorage（`vx-theme` / `vx-density` /
+ * `vx-font-size`），语言这一项由本文件存 `ruyin-language`。
+ */
+function PreferencesBlock() {
+  const { mode, setMode, density, setDensity, fontSize, setFontSize } = useTheme();
+  const [lang, setLang] = useState(
+    () => localStorage.getItem(LANG_KEY) ?? "zh-CN",
+  );
+  const pickLang = (next: string) => {
+    localStorage.setItem(LANG_KEY, next);
+    setLang(next);
+  };
   return (
-    <div className="card">
-      <SettingRow label="语言">
-        <NativeSelect disabled wrapperClassName="sel-lang">
-          <option>简体中文</option>
+    <SettingsBlock
+      icon="settings"
+      title="偏好设置"
+      desc="只作用于这台机器上的这个应用，记录在本机，不随账号同步"
+    >
+      <SettingRow label="语言" hint="更多语言随后开放">
+        <NativeSelect
+          wrapperClassName="sel-lang"
+          value={lang}
+          onChange={(e) => pickLang(e.target.value)}
+        >
+          <option value="zh-CN">简体中文</option>
         </NativeSelect>
       </SettingRow>
-      <SettingRow label="主题" hint="深色为默认基调；窗口按钮颜色随后续版本同步">
+      <SettingRow label="主题" hint="深色为默认基调；窗口按钮颜色随之同步">
         <SegmentedControl
           ariaLabel="主题"
           items={[
@@ -189,13 +305,17 @@ function GeneralSection() {
           onChange={setFontSize}
         />
       </SettingRow>
-    </div>
+    </SettingsBlock>
   );
 }
 
-/* ---------------- 数据与隐私 ---------------- */
+/* ---------------- 通用设置（原「数据与隐私」的内容）---------------- */
 
-function PrivacySection({ system }: { system: SystemInfo | null }) {
+/**
+ * 通用设置：数据在哪儿、怎么加密、什么会离开本机。三件事三个板块 ——
+ * 原先它们挤在两张卡里，而「目录」和「加密」不是同一个问题。
+ */
+function SystemSection({ system }: { system: SystemInfo | null }) {
   const [policy, setPolicy] = useState(
     localStorage.getItem("ruyin-transmission-policy") ?? "sensitivity",
   );
@@ -205,57 +325,68 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
   };
   return (
     <>
-      <div className="card">
-        <SettingRow label="数据目录" hint="全部业务数据在本机，此目录之外不落任何内容">
-          <span className="mono">{system?.dataDir ?? "…"}</span>
-        </SettingRow>
-        <SettingRow label="产品目录">
-          <span className="mono">{system?.productsDir ?? "…"}</span>
-        </SettingRow>
-{/* 加密链写在这里而不是首页那张卡上：卡是「不出事就不必看」的指示灯，
-            这里才是想核实的人会来的地方。**不写「三次加密」** —— 数据只加密一次，
-            另外两层是密钥怎么被锁起来；把层数说成加密次数，在有人核实的那一刻
-            会反过来伤掉信任（owner 2026-09-04 问及说服力时定的口径）。 */}
-        <SettingRow
-          label="静态加密"
-          hint="业务数据落盘即加密。一次加密，密钥再套两层保护 —— 每层各自保护什么，逐条写在下面"
-        >
-          {system ? (
-            <>
-              <ul className="crypto-chain">
-                <li>
-                  <span className="crypto-what">业务数据</span>
-                  <span className="crypto-how">每个项目库整库加密 · SQLCipher（AES-256）</span>
-                </li>
-                <li>
-                  <span className="crypto-what">库密钥</span>
-                  <span className="crypto-how">一库一把随机密钥 · AES-256-GCM 封装在主密钥下</span>
-                </li>
-                <li>
-                  <span className="crypto-what">主密钥</span>
-                  <span className="crypto-how">
-                    {system.keyProtection === "dpapi"
-                      ? "Windows DPAPI 保护（当前用户作用域），不落明文"
-                      : "明文存放 —— 本平台没有 OS 级密钥保护"}
-                  </span>
-                </li>
-              </ul>
-              {/* 说清楚哪些**没**加密，比多列两个算法名更能说明这段话可信。 */}
-              <p className="crypto-note">
-                会话凭证由主密钥单独密封；产品契约与本机配置不加密 —— 它们按设计就是公开信息。
-              </p>
-              {system.keyProtection === "dpapi" ? (
-                <StatusBadge tone="success">主密钥由 Windows DPAPI 保护</StatusBadge>
-              ) : (
-                <StatusBadge tone="warning">开发态：主密钥明文存储，不可用于真实数据</StatusBadge>
-              )}
-            </>
-          ) : (
-            "…"
-          )}
-        </SettingRow>
-      </div>
-      <div className="card">
+      <SettingsBlock
+        icon="folder-open"
+        title="存储位置"
+        desc="全部业务数据在本机，这两个目录之外不落任何内容"
+      >
+        <FactRow label="数据目录" value={system?.dataDir} mono />
+        <FactRow label="产品目录" value={system?.productsDir} mono />
+        {/* 「能不能改」是 owner 问过的（2026-09-04）。答案照实写在界面上，而不是
+            放一个改不动的输入框：目录在守护进程启动时确定（RUYIN_DATA_DIR），
+            改它要停下运行时、搬走已加密的库、再重新指过去 —— 中途失败会留下
+            两份数据，而两份加密数据比没有更糟。登记在 TD-039。 */}
+        <p className="set-note">
+          目录在运行时启动时确定（<span className="mono">RUYIN_DATA_DIR</span>）。
+          界面内暂不支持修改：改动要停下运行时并搬移已加密的库，半途失败会留下两份数据。
+        </p>
+      </SettingsBlock>
+
+      <SettingsBlock
+        icon="lock"
+        title="静态加密"
+        desc="业务数据落盘即加密。一次加密，密钥再套两层保护 —— 每层各自保护什么，逐条写在下面"
+      >
+        {system ? (
+          <>
+            <ul className="crypto-chain">
+              <li>
+                <span className="crypto-what">业务数据</span>
+                <span className="crypto-how">每个项目库整库加密 · SQLCipher（AES-256）</span>
+              </li>
+              <li>
+                <span className="crypto-what">库密钥</span>
+                <span className="crypto-how">一库一把随机密钥 · AES-256-GCM 封装在主密钥下</span>
+              </li>
+              <li>
+                <span className="crypto-what">主密钥</span>
+                <span className="crypto-how">
+                  {system.keyProtection === "dpapi"
+                    ? "Windows DPAPI 保护（当前用户作用域），不落明文"
+                    : "明文存放 —— 本平台没有 OS 级密钥保护"}
+                </span>
+              </li>
+            </ul>
+            {/* 说清楚哪些**没**加密，比多列两个算法名更能说明这段话可信。 */}
+            <p className="crypto-note">
+              会话凭证由主密钥单独密封；产品契约与本机配置不加密 —— 它们按设计就是公开信息。
+            </p>
+            {system.keyProtection === "dpapi" ? (
+              <StatusBadge tone="success">主密钥由 Windows DPAPI 保护</StatusBadge>
+            ) : (
+              <StatusBadge tone="warning">开发态：主密钥明文存储，不可用于真实数据</StatusBadge>
+            )}
+          </>
+        ) : (
+          "…"
+        )}
+      </SettingsBlock>
+
+      <SettingsBlock
+        icon="cloud"
+        title="推理与审计"
+        desc="什么会离开这台机器，以及每一次离开留下什么记录"
+      >
         <SettingRow
           label="推理传输策略"
           hint="上下文送云端推理前的确认粒度；策略引擎接入后生效（当前高敏感内容始终需确认）"
@@ -270,15 +401,12 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
             onChange={pickPolicy}
           />
         </SettingRow>
-        <SettingRow
+        <FactRow
           label="审计"
-          hint="每次传输与执行都有哈希链审计，可在项目的「审计」板块查看与本地校验"
-        >
-          <span className="text-body-sm text-muted-foreground">
-            推理传输 ≠ 数据存储：传输临时、不持久化
-          </span>
-        </SettingRow>
-      </div>
+          value="每次传输与执行都有哈希链审计，可在项目的「审计」板块查看与本地校验"
+        />
+        <p className="set-note">推理传输 ≠ 数据存储：传输临时、不持久化。</p>
+      </SettingsBlock>
     </>
   );
 }
@@ -450,6 +578,13 @@ function ConnectorsSection({ api }: { api: Api }) {
  * **查不到 ≠ 已是最新。** 这个功能的上一版不发请求就断言「当前已是最新」并附
  * 时间戳；现在 `unreachable` 是一个正式状态，绝不折叠进「最新」。
  */
+/**
+ * 软件更新：四件事四个板块（owner 2026-09-04）—— 现在装的是什么、去问一次、
+ * 从哪个渠道问、以及问到了之后怎么装。
+ *
+ * 最后一块不是客套话：**本应用不自动安装**（TD-021，owner 定不采购签名证书后
+ * 的连带结果）。把「怎么装」写在这里，用户点下载之前就知道接下来要自己动手。
+ */
 function UpdatesSection({
   system,
   api,
@@ -476,78 +611,73 @@ function UpdatesSection({
   };
 
   return (
-    <div className="card">
-      <SettingRow label="当前版本">
-        <span className="mono">
-          Runtime {system?.version ?? "…"} · UI {UI_VERSION}
-        </span>
-      </SettingRow>
-      <SettingRow label="启动时间">
-        <span className="mono">{system?.startedAt ?? "…"}</span>
-      </SettingRow>
-      <SettingRow
-        label="检查更新"
-        hint="向发布渠道询问是否有新版本；不会下载任何东西"
-      >
-        <div>
-          <Button variant="outline" disabled={busy} onClick={() => void check()}>
+    <>
+      <SettingsBlock icon="info" title="当前版本" desc="这台机器上正在跑的是哪一版">
+        <FactRow label="运行时" value={system ? `Runtime ${system.version}` : undefined} mono />
+        <FactRow label="界面" value={`UI ${UI_VERSION}`} mono />
+        <FactRow label="平台" value={system ? `${system.platform}-${system.arch}` : undefined} mono />
+        <FactRow label="启动时间" value={system?.startedAt} mono />
+      </SettingsBlock>
+
+      <SettingsBlock
+        icon="arrow-down"
+        title="检查更新"
+        desc="向发布渠道询问是否有新版本；只是问一句，不会下载任何东西"
+        aside={
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => void check()}>
             {busy ? "正在检查…" : "检查更新"}
           </Button>
-          {failed && (
-            <div className="update-line update-line--warn">
-              检查失败：{failed}
-            </div>
-          )}
-          {result?.status === "current" && (
-            <div className="update-line">
-              已是最新（{result.latest}）
-            </div>
-          )}
-          {result?.status === "available" && (
-            <div className="update-line update-line--new">
-              有新版本 <span className="mono">{result.latest}</span>
-              （当前 <span className="mono">{result.current}</span>
-              {/* 渠道要写在明面上：用户有权知道自己要装的是 stable 还是 beta。
-                  更新源没写明渠道时**不提它** —— 猜一个渠道名是拿错话冒充事实。 */}
-              {result.channel && (
+        }
+      >
+        {!result && !failed && !busy && (
+          <p className="set-note">还没查过。查一次也不会自动下载。</p>
+        )}
+        {failed && <div className="update-line update-line--warn">检查失败：{failed}</div>}
+        {result?.status === "current" && (
+          <div className="update-line">已是最新（{result.latest}）</div>
+        )}
+        {result?.status === "available" && (
+          <div className="update-line update-line--new">
+            有新版本 <span className="mono">{result.latest}</span>
+            （当前 <span className="mono">{result.current}</span>
+            {/* 渠道要写在明面上：用户有权知道自己要装的是 stable 还是 beta。
+                更新源没写明渠道时**不提它** —— 猜一个渠道名是拿错话冒充事实。 */}
+            {result.channel && (
+              <>
+                ，<span className="mono">{result.channel}</span> 渠道
+              </>
+            )}
+            ）
+            <div className="update-actions">
+              {result.downloadUrl ? (
                 <>
-                  ，<span className="mono">{result.channel}</span> 渠道
-                </>
-              )}
-              ）
-              <div className="update-actions">
-                {result.downloadUrl ? (
-                  <>
-                    <Button
-                      onClick={() =>
-                        window.open(result.downloadUrl, "_blank", "noopener")
-                      }
-                    >
-                      下载安装包 ↗
-                    </Button>
-                    <span className="text-body-sm text-muted-foreground">
-                      在浏览器里下载，下载完自己运行它 —— 本应用不会自动安装。
-                    </span>
-                  </>
-                ) : (
-                  // feed 里没有 path。**不拼一个猜出来的地址**：点下去拿到 404，
-                  // 用户会以为是产品坏了。照实说这一次拿不到地址。
-                  <span className="text-body-sm update-line--warn">
-                    这次没能拿到安装包地址（更新源里没写文件名）。
+                  <Button onClick={() => window.open(result.downloadUrl, "_blank", "noopener")}>
+                    下载安装包
+                    <Icon name="external-link" size="xs" />
+                  </Button>
+                  <span className="text-body-sm text-muted-foreground">
+                    在浏览器里下载，下载完自己运行它。
                   </span>
-                )}
-              </div>
+                </>
+              ) : (
+                // feed 里没有 path。**不拼一个猜出来的地址**：点下去拿到 404，
+                // 用户会以为是产品坏了。照实说这一次拿不到地址。
+                <span className="text-body-sm update-line--warn">
+                  这次没能拿到安装包地址（更新源里没写文件名）。
+                </span>
+              )}
             </div>
-          )}
-          {result?.status === "unreachable" && (
-            <div className="update-line update-line--warn">
-              没查到——{result.reason}。
-              <br />
-              这不代表你已是最新，只代表这次没问到。
-            </div>
-          )}
-        </div>
-      </SettingRow>
+          </div>
+        )}
+        {result?.status === "unreachable" && (
+          <div className="update-line update-line--warn">
+            没查到——{result.reason}。
+            <br />
+            这不代表你已是最新，只代表这次没问到。
+          </div>
+        )}
+      </SettingsBlock>
+
       {/* 这一句的理由**换到第三个版本了**，前两个都随实现变化而过期：
           ① 「随下载与安装一并开放」—— 那两样开放之后它没跟着改；
           ② 「切换渠道会连带允许降级」—— 那是 electron-updater 的 `channel`
@@ -555,13 +685,32 @@ function UpdatesSection({
           ③ 现在：本机只发 stable，切到 beta 那边**没有包**，检查会 unreachable。
           之所以把这段历史留着：一处解释性文案连着两次比它解释的东西活得更久，
           说明它值得被当成会过期的东西看待，而不是写完就忘。 */}
-      <SettingRow
-        label="更新渠道"
-        hint="当前只发布 stable。切到其他渠道那边还没有包，检查会查不到——等有了再开放"
+      <SettingsBlock
+        icon="list"
+        title="更新渠道"
+        desc="从哪个渠道问新版本。当前只发布 stable —— 别的渠道那边还没有包，切过去检查会查不到"
       >
-        <span className="text-body-sm text-muted-foreground">stable</span>
-      </SettingRow>
-    </div>
+        <SettingRow label="渠道">
+          <NativeSelect wrapperClassName="sel-narrow" value="stable" disabled>
+            <option value="stable">stable（正式）</option>
+          </NativeSelect>
+        </SettingRow>
+      </SettingsBlock>
+
+      <SettingsBlock
+        icon="package"
+        title="安装方式"
+        desc="本应用不会自动下载或自动安装 —— 更新由你自己决定什么时候装"
+      >
+        <FactRow label="检查" value="手动，或每次打开设置时你点一下" />
+        <FactRow label="下载" value="浏览器下载，安装包落在你的下载目录" />
+        <FactRow label="安装" value="双击安装包，覆盖安装，业务数据不动" />
+        <p className="set-note">
+          安装包未做代码签名，Windows SmartScreen 首次会警告一次（「更多信息 → 仍要运行」）。
+          这是警告不是封锁 —— 照实说，而不是让你在装到一半时才遇到它。
+        </p>
+      </SettingsBlock>
+    </>
   );
 }
 

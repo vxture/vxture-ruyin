@@ -99,6 +99,12 @@ export interface LocalApiDeps {
   /** 运行时事件总线（TD-027）。不接就没有 /events，消费方回到轮询。 */
   events?: EventBus;
   /**
+   * 界面生效主题的**中转**，不是状态：界面告诉守护进程，守护进程广播给壳
+   * （窗口按钮的颜色由壳画，而壳看不见页面）。只在内存里，不落盘 ——
+   * 权威始终是界面自己的 localStorage，重启后界面第一次渲染就会再说一遍。
+   */
+  chromeTheme?: { get(): "dark" | "light"; set(theme: "dark" | "light"): void };
+  /**
    * 把字节写进授权目录。导出用它 —— **导出不是特权动作**，它写的仍然是用户
    * 授权过的目录，凭什么绕过同一套护栏。
    */
@@ -512,6 +518,23 @@ async function handle(
         apiError(/not countersigned/.test(message) ? "PACKAGE_UNSIGNED" : "PACKAGE_INVALID", message),
       );
     }
+    return;
+  }
+
+  // --- 界面主题中转（壳画窗口按钮，看不见页面）---
+  if (method === "GET" && path === "/ui/theme") {
+    send(res, 200, { theme: deps.chromeTheme?.get() ?? "dark" });
+    return;
+  }
+  if (method === "POST" && path === "/ui/theme") {
+    const body = await readJson(req);
+    const theme = body["theme"] === "light" ? "light" : "dark";
+    // 值没变就不广播：class 属性会因为密度 / 字号的切换反复变动，每次都广播
+    // 等于把一条通知通道当轮询用。
+    const changed = deps.chromeTheme?.get() !== theme;
+    deps.chromeTheme?.set(theme);
+    if (changed) deps.events?.publish({ kind: "ui-theme" });
+    send(res, 200, { theme });
     return;
   }
 

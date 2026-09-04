@@ -10,6 +10,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@vxture/design-system";
 import { Api, type SessionInfo } from "./api";
+import { syncChromeTheme } from "./chrome-theme";
 import { useHostChrome } from "./host-chrome";
 
 // Workbench (~570 lines, plus its own lazy-loaded home/settings/workspace
@@ -56,6 +57,10 @@ export function SessionGate({ api }: { api: Api }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // 窗口按钮的颜色跟着界面主题走（chrome-theme.ts）。放在这里而不是工作台里：
+  // 登录页也是一整屏，那时右上角同样有三个按钮。
+  useEffect(() => syncChromeTheme(api), [api]);
 
   if (session === "loading") {
     return (

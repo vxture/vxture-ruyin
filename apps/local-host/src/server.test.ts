@@ -30,6 +30,7 @@ import { KeyManager } from "./keys.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { ConnectorRegistry } from "./connector-registry.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
+import { EventBus } from "./events.js";
 import { LocalToolExecutor } from "./tool-executor.js";
 import { loadProducts } from "./products.js";
 import { ProductRegistry } from "./product-registry.js";
@@ -887,5 +888,44 @@ void test("HTTP: 安装与意图两个端点已经不存在（不是留着不用
     assert.equal(intent.status, 404);
   } finally {
     closeRig(rig);
+  }
+});
+
+test("ui theme relay: GET defaults to dark, POST stores it and publishes once per real change", async () => {
+  const events = new EventBus();
+  const seen: string[] = [];
+  events.subscribe((e) => seen.push(e.kind));
+  let theme: "dark" | "light" = "dark";
+  const rig = await startServer({
+    events,
+    chromeTheme: { get: () => theme, set: (t) => { theme = t; } },
+  });
+  try {
+    const read = async () =>
+      (await (await fetch(`${rig.base}/ui/theme`, { headers: rig.headers })).json()) as {
+        theme: string;
+      };
+    assert.deepEqual(await read(), { theme: "dark" });
+
+    const post = (value: unknown) =>
+      fetch(`${rig.base}/ui/theme`, {
+        method: "POST",
+        headers: rig.json,
+        body: JSON.stringify({ theme: value }),
+      });
+
+    assert.deepEqual(await (await post("light")).json(), { theme: "light" });
+    assert.deepEqual(await read(), { theme: "light" });
+    // 同一个值再报一次不广播：<html> 的 class 会因为密度 / 字号反复变动，
+    // 每次都广播等于把一条通知通道当轮询用。
+    await post("light");
+    assert.deepEqual(seen, ["ui-theme"]);
+    await post("dark");
+    assert.deepEqual(seen, ["ui-theme", "ui-theme"]);
+    // 认不出的值一律当深色 —— 绝不因为一句读不懂的话把窗口按钮翻成亮的。
+    assert.deepEqual(await (await post("neon")).json(), { theme: "dark" });
+    assert.equal(theme, "dark");
+  } finally {
+    rig.server.close();
   }
 });

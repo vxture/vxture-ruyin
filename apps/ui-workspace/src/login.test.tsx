@@ -47,6 +47,8 @@ function signedIn(overrides: Partial<SessionInfo> = {}): SessionInfo {
 
 function fakeApi(overrides: Partial<Api> = {}): Api {
   return {
+    // 窗口按钮的颜色同步（chrome-theme.ts）在 SessionGate 挂载时就会上报一次。
+    setChromeTheme: vi.fn().mockResolvedValue({ theme: "dark" }),
     session: vi.fn().mockResolvedValue(signedOut()),
     login: vi.fn().mockResolvedValue({ authorizeUrl: "https://accounts.vxture.com/authorize" }),
     ...overrides,

@@ -25,7 +25,7 @@
  * 被发现的功能。
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
@@ -197,11 +197,24 @@ const workbench = readFileSync(
 );
 const shellMain = readFileSync(join(repoRoot, "apps/shell/src/main.ts"), "utf8");
 const band = /height="(sm|md|lg|xl)"/.exec(workbench)?.[1];
-const overlay = /titleBarOverlay:\s*\{[^}]*height:\s*(\d+)/s.exec(shellMain)?.[1];
+/**
+ * 壳这一侧的高度 2026-09-04 从 main.ts 的内联字面量搬到了 caption-overlay.ts
+ * 的 `CAPTION_HEIGHT`（窗口按钮要随主题换色，颜色表抽出去才能脱离 Electron
+ * 测）。两处形状都认：搬家不该让这条不变量悄悄失效 —— 那正是这道守卫当天
+ * 抓到的（读不到高度它直接报错，而不是当成通过）。
+ */
+const captionOverlaySrc = existsSync(
+  join(repoRoot, "apps/shell/src/caption-overlay.ts"),
+)
+  ? readFileSync(join(repoRoot, "apps/shell/src/caption-overlay.ts"), "utf8")
+  : "";
+const overlay =
+  /CAPTION_HEIGHT\s*=\s*(\d+)/.exec(captionOverlaySrc)?.[1] ??
+  /titleBarOverlay:\s*\{[^}]*height:\s*(\d+)/s.exec(shellMain)?.[1];
 if (!band) {
   problems.push("workbench.tsx 里读不到 ShellHeader 的 height 档位");
 } else if (!overlay) {
-  problems.push("shell/main.ts 里读不到 titleBarOverlay.height");
+  problems.push("读不到壳那边的标题栏高度（caption-overlay.ts 的 CAPTION_HEIGHT，或 main.ts 的 titleBarOverlay.height）");
 } else if (Number(overlay) !== HEADER_PX[band]) {
   problems.push(
     `标题栏高度对不上：界面是 ${band}（${HEADER_PX[band]}px），壳的 ` +

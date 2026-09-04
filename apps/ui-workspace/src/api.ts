@@ -168,7 +168,9 @@ export interface ProjectExport {
 /** 运行时事件（daemon /events）。只说什么变了，不带业务数据。 */
 export type RuntimeEvent =
   | { kind: "task"; projectId: string; taskInstance: string }
-  | { kind: "pending" };
+  | { kind: "pending" }
+  /** 界面主题变了；壳据此重画窗口按钮（见 chrome-theme.ts）。 */
+  | { kind: "ui-theme" };
 
 export interface StateItem {
   name: string;
@@ -359,7 +361,19 @@ export function auditView(event: StoredAuditEvent): {
 
 export interface SessionInfo {
   signedIn: boolean;
-  profile?: { sub: string; name?: string; email?: string; picture?: string };
+  /** 身份投射（daemon `session()`）。字段缺失 = 平台没在 token 里给。 */
+  profile?: {
+    sub: string;
+    name?: string;
+    username?: string;
+    email?: string;
+    emailVerified?: boolean;
+    phone?: string;
+    phoneVerified?: boolean;
+    locale?: string;
+    roles?: string[];
+    picture?: string;
+  };
   org?: { id?: string; name?: string };
   workspace?: { id?: string; name?: string };
   issuer: string;
@@ -595,6 +609,12 @@ export class Api {
   contextItems = (id: string, type: string) =>
     this.call<ContextItemMeta[]>(`/projects/${id}/context/${type}`);
   system = () => this.call<SystemInfo>("/system");
+  /**
+   * 上报生效主题，供壳给 Windows 的窗口按钮上色。**中转，不是设置** ——
+   * 偏好本身存在本机 localStorage（DS 的 ThemeProvider）。
+   */
+  setChromeTheme = (theme: "dark" | "light") =>
+    this.call<{ theme: string }>("/ui/theme", "POST", { theme });
   session = () => this.call<SessionInfo>("/auth/session");
   login = () => this.call<{ authorizeUrl: string }>("/auth/login", "POST");
   logout = () => this.call<{ ok: boolean }>("/auth/logout", "POST");

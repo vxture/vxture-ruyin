@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@vxture/design-system";
 import { SettingsView, type SectionId } from "./settings";
@@ -81,52 +81,82 @@ void test("AboutSection: shows version/platform/arch once system loads, placehol
   expect(await screen.findByText("Runtime 0.2.0 · win32-x64")).toBeInTheDocument();
 });
 
-void test("GeneralSection: the three axes render with their labelled options, language is disabled", async () => {
-  renderSection("general");
-  // 顺序（owner）：语言 → 主题 → 密度 → 字号；"系统" 不带"跟随"。
-  const labels = Array.from(document.querySelectorAll(".setting-label")).map((el) => el.firstChild?.textContent);
+void test("偏好设置（在账户之下）: language + the three axes, in that order, each persisted on this machine", async () => {
+  localStorage.clear();
+  renderSection("account");
+  // owner 2026-09-04：偏好整组从「通用」搬到账户之下，顺序 语言 → 主题 → 密度 → 字号。
+  const labels = Array.from(document.querySelectorAll(".setting-label")).map(
+    (el) => el.firstChild?.textContent,
+  );
   expect(labels).toEqual(["语言", "主题", "密度", "字号"]);
-  expect(screen.getByRole("radio", { name: "系统" })).toBeInTheDocument();
-  expect(screen.queryByRole("radio", { name: "跟随系统" })).not.toBeInTheDocument();
   expect(screen.getByRole("radiogroup", { name: "主题" })).toBeInTheDocument();
   expect(screen.getByRole("radiogroup", { name: "密度" })).toBeInTheDocument();
   expect(screen.getByRole("radiogroup", { name: "字号" })).toBeInTheDocument();
-  const langSelect = screen.getByRole("combobox");
-  expect(langSelect).toBeDisabled();
-  expect(within(langSelect).getByText("简体中文")).toBeInTheDocument();
+  expect(screen.getByRole("radio", { name: "系统" })).toBeInTheDocument();
+  expect(screen.queryByRole("radio", { name: "跟随系统" })).not.toBeInTheDocument();
+
+  // 四项都记在本机：三条轴由 DS 写 vx-*，语言由本文件写 ruyin-language。
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("radio", { name: "宽松" }));
+  await user.click(screen.getByRole("radio", { name: "浅色" }));
+  await user.click(screen.getByRole("radio", { name: "大" }));
+  await vi.waitFor(() => expect(localStorage.getItem("vx-density")).toBe("comfortable"));
+  // 三条轴的键名归 DS（vx-*），这里断言的是「都落到了本机」，不是某个具体键名 ——
+  // 键名是 DS 的实现细节，写死它会在 DS 改名那天变成一条假红。
+  const keys = Object.keys(localStorage).filter((k) => k.startsWith("vx-"));
+  expect(keys.length).toBeGreaterThanOrEqual(2);
+  expect(document.documentElement.className).toContain("density-comfortable");
+  // 语言只有一个选项，所以它的存储由 select 的 change 触发；先证明键位存在。
+  expect(screen.getByRole("combobox")).toHaveValue("zh-CN");
 });
 
-void test("PrivacySection: data dir / product dir / key protection reflect system info", async () => {
+void test("偏好设置: picking the language writes it to this machine", () => {
+  localStorage.clear();
+  renderSection("account");
+  const select = screen.getByRole("combobox");
+  // 只有一个选项，所以用 change 事件直接证明「选了就记下来」这条通路是活的 ——
+  // 第二种语言落地那天，机制已经在这儿了。
+  fireEvent.change(select, { target: { value: "zh-CN" } });
+  expect(localStorage.getItem("ruyin-language")).toBe("zh-CN");
+});
+
+void test("偏好设置: an already-stored language is read back on mount, not reset", () => {
+  localStorage.setItem("ruyin-language", "zh-CN");
+  renderSection("account");
+  expect(screen.getByRole("combobox")).toHaveValue("zh-CN");
+});
+
+void test("通用设置: data dir / product dir / key protection reflect system info", async () => {
   const api = fakeApi({
     system: vi.fn().mockResolvedValue(
       systemInfo({ dataDir: "C:/data", productsDir: "D:/products", keyProtection: "dpapi" }),
     ),
   });
-  renderSection("privacy", api);
+  renderSection("general", api);
   expect(await screen.findByText("C:/data")).toBeInTheDocument();
   expect(screen.getByText("D:/products")).toBeInTheDocument();
   expect(screen.getByText("主密钥由 Windows DPAPI 保护")).toBeInTheDocument();
 });
 
-void test("PrivacySection: plaintext key protection shows the dev-mode warning, not the DPAPI badge", async () => {
+void test("通用设置: plaintext key protection shows the dev-mode warning, not the DPAPI badge", async () => {
   const api = fakeApi({
     system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "plaintext" })),
   });
-  renderSection("privacy", api);
+  renderSection("general", api);
   expect(await screen.findByText("开发态：主密钥明文存储，不可用于真实数据")).toBeInTheDocument();
   expect(screen.queryByText("主密钥由 Windows DPAPI 保护")).not.toBeInTheDocument();
 });
 
-void test("PrivacySection: the transmission policy defaults to 'sensitivity', persists the pick to localStorage", async () => {
-  renderSection("privacy");
+void test("通用设置: the transmission policy defaults to 'sensitivity', persists the pick to localStorage", async () => {
+  renderSection("general");
   const user = userEvent.setup();
   await user.click(await screen.findByText("全部需确认"));
   expect(localStorage.getItem("ruyin-transmission-policy")).toBe("always");
 });
 
-void test("PrivacySection: an already-stored policy is read back on mount, not reset to the default", async () => {
+void test("通用设置: an already-stored policy is read back on mount, not reset to the default", async () => {
   localStorage.setItem("ruyin-transmission-policy", "always");
-  renderSection("privacy");
+  renderSection("general");
   const group = await screen.findByRole("radiogroup", { name: "推理传输策略" });
   expect(within(group).getByRole("radio", { name: "全部需确认" })).toHaveAttribute(
     "aria-checked",
@@ -183,7 +213,7 @@ void test("UpdatesSection: an available update offers the exact package, with it
   vi.stubGlobal("open", vi.fn());
   renderSection("updates", api);
   await clickCheck();
-  await userEvent.setup().click(await screen.findByRole("button", { name: "下载安装包 ↗" }));
+  await userEvent.setup().click(await screen.findByRole("button", { name: /下载安装包/ }));
   expect(globalThis.open).toHaveBeenCalledWith(
     "https://dl.example.com/ruyin/stable/Ruyin-Setup-0.3.0.exe",
     "_blank",
@@ -194,7 +224,8 @@ void test("UpdatesSection: an available update offers the exact package, with it
   const line = document.querySelector(".update-line--new");
   expect(line?.textContent).toContain("stable");
   // 本应用不会自动安装 —— 这句话必须说出来，否则用户会等着它自己装。
-  expect(screen.getByText(/本应用不会自动安装/)).toBeInTheDocument();
+  // 「不自动安装」现在是「安装方式」那个板块在说，不再挂在下载按钮旁边。
+  expect(document.body.textContent).toContain("不会自动下载或自动安装");
 });
 
 void test("UpdatesSection: no path in the feed means no link - never a guessed URL", async () => {
@@ -205,7 +236,7 @@ void test("UpdatesSection: no path in the feed means no link - never a guessed U
   await clickCheck();
   // 猜出来的地址点下去是 404，而用户会以为是产品坏了。照实说这次拿不到。
   expect(await screen.findByText(/更新源里没写文件名/)).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "下载安装包 ↗" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /下载安装包/ })).not.toBeInTheDocument();
 });
 
 void test("UpdatesSection: unreachable is a distinct status, never folded into 'current'", async () => {
@@ -351,11 +382,13 @@ void test("Settings/账户: signed in shows the identity - name, email, tenant, 
     }),
   });
   renderSection("account", api);
-  expect(await screen.findByText("郭彦豪")).toBeInTheDocument();
-  expect(screen.getByText("yh@example.com")).toBeInTheDocument();
+  // 姓名出现两次：卡头的大字与「姓名」那一行。
+  expect((await screen.findAllByText("郭彦豪")).length).toBeGreaterThan(0);
+  expect(screen.getAllByText("yh@example.com").length).toBeGreaterThan(0);
   expect(screen.getByText("某租户")).toBeInTheDocument();
   expect(screen.getByText("某工作区")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "https://vxture.com/zh-CN/profile" })).toBeInTheDocument();
+  // 「账户中心」那一行链接去掉了（owner 2026-09-04）：右上角的「在线修改」已经是同一个去处。
+  expect(screen.queryByRole("link", { name: "https://vxture.com/zh-CN/profile" })).not.toBeInTheDocument();
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "在线修改" }));
@@ -376,8 +409,8 @@ void test("Settings/账户: signed in without org/workspace names shows — rath
   });
   const { container } = renderSection("account", api);
   expect((await screen.findAllByText("only@example.com")).length).toBeGreaterThan(0);
-  expect(screen.getAllByText("—")).toHaveLength(2);
-  expect(screen.getByRole("link", { name: "https://vxture.com/zh-CN/profile" })).toBeInTheDocument();
+  // 缺的字段写「—」：姓名 / 用户名 / 电话 / 角色 / 语言地区 / 租户 / 工作区 都没给。
+  expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(6);
   await vi.waitFor(() => {
     const img = container.querySelector("img");
     expect(img === null || img.getAttribute("src") === "https://img.example/a.png").toBe(true);
@@ -390,9 +423,9 @@ void test("Settings/账户: a session() failure falls back to the signed-out gui
   expect(await screen.findByText("账户由左下角的账户菜单管理")).toBeInTheDocument();
 });
 
-void test("Settings/数据与隐私: the encryption chain spells out all three layers, says what is NOT encrypted, and never claims '三次加密'", async () => {
+void test("Settings/通用设置: the encryption chain spells out all three layers, says what is NOT encrypted, and never claims '三次加密'", async () => {
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "dpapi" })) });
-  const { container } = renderSection("privacy", api);
+  const { container } = renderSection("general", api);
   const rows = await screen.findAllByRole("listitem");
   expect(rows.map((r) => r.textContent)).toEqual([
     "业务数据每个项目库整库加密 · SQLCipher（AES-256）",
@@ -405,11 +438,72 @@ void test("Settings/数据与隐私: the encryption chain spells out all three l
   expect(screen.getByText("主密钥由 Windows DPAPI 保护")).toBeInTheDocument();
 });
 
-void test("Settings/数据与隐私: without OS key protection the master-key row and the badge both say so", async () => {
+void test("Settings/通用设置: without OS key protection the master-key row and the badge both say so", async () => {
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "plaintext" })) });
-  renderSection("privacy", api);
+  renderSection("general", api);
   expect(await screen.findByText("明文存放 —— 本平台没有 OS 级密钥保护")).toBeInTheDocument();
   expect(screen.getByText("开发态：主密钥明文存储，不可用于真实数据")).toBeInTheDocument();
   // 库仍然是加密的 —— 暴露的是主密钥，别把两件事混成一件。
   expect(screen.getByText("每个项目库整库加密 · SQLCipher（AES-256）")).toBeInTheDocument();
+});
+
+void test("Settings/账户: every claim the platform gave is shown - username, phone, roles, locale - and the uuid never is", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue({
+      signedIn: true,
+      profile: {
+        sub: "8f14e45f-ea3b-4d1c-9a2b-000000000000",
+        name: "郭彦豪",
+        username: "yanhao",
+        email: "yh@example.com",
+        emailVerified: true,
+        phone: "+86 138 0000 0000",
+        phoneVerified: false,
+        locale: "zh-CN",
+        roles: ["tenant.admin", "workspace.member"],
+      },
+      org: { id: "o1", name: "某租户" },
+      workspace: { id: "w1", name: "某工作区" },
+      issuer: "",
+      consoleBase: "https://vxture.com",
+      entitlementsConfigured: false,
+    }),
+  });
+  renderSection("account", api);
+  // 每一项声明都摆出来（owner 2026-09-04：除了 uuid，其他都展示）。
+  expect(await screen.findByText("yanhao")).toBeInTheDocument();
+  expect(screen.getByText("+86 138 0000 0000")).toBeInTheDocument();
+  expect(screen.getByText("tenant.admin")).toBeInTheDocument();
+  expect(screen.getByText("workspace.member")).toBeInTheDocument();
+  expect(screen.getByText("zh-CN")).toBeInTheDocument();
+  expect(screen.getByText("已验证")).toBeInTheDocument();
+  expect(screen.getByText("未验证")).toBeInTheDocument();
+  // uuid 是给机器对账的，不给人看。
+  expect(document.body.textContent).not.toContain("8f14e45f");
+});
+
+void test("Settings/通用设置: three blocks - storage, encryption, inference - each with a heading, and the data dir is read-only with the reason", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data", productsDir: "D:/products" })),
+  });
+  renderSection("general", api);
+  const titles = Array.from(document.querySelectorAll(".set-block-title")).map((e) => e.textContent);
+  expect(titles).toEqual(["存储位置", "静态加密", "推理与审计"]);
+  expect(await screen.findByText("C:/data")).toBeInTheDocument();
+  // 目录只读，并写明为什么（owner 问过能不能改）。
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  expect(document.body.textContent).toContain("RUYIN_DATA_DIR");
+  expect(document.body.textContent).toContain("界面内暂不支持修改");
+});
+
+void test("Settings/软件更新: four blocks; the channel is a select with only stable; nothing is auto-installed", async () => {
+  const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ version: "0.1.0" })) });
+  renderSection("updates", api);
+  const titles = Array.from(document.querySelectorAll(".set-block-title")).map((e) => e.textContent);
+  expect(titles).toEqual(["当前版本", "检查更新", "更新渠道", "安装方式"]);
+  const channel = screen.getByRole("combobox") as HTMLSelectElement;
+  expect(channel.value).toBe("stable");
+  expect(channel.disabled).toBe(true);
+  expect(Array.from(channel.options).map((o) => o.value)).toEqual(["stable"]);
+  expect(document.body.textContent).toContain("不会自动下载或自动安装");
 });
