@@ -542,6 +542,40 @@ body {
 /* 设置行：纵向布局（owner 2026-09-03 定，全局统一）。名称一行、说明一行（整行宽，
    不再挤在一个窄列里换行）、控件在下面一行；页面高度够，纵向排反而清楚。
    控件等宽：所有控件占同一个宽度，扫下来是一列而不是参差的几块。 */
+/* ---------- 单行类的行：一处定义，账户 / 通用设置 / 软件更新 共用 ----------
+   行高一个值、虚下划线一种画法（owner 2026-09-04 第 7 条：全局一致）。
+   `.setting-row` 与 `.fact-row` 都是它的皮肤 —— 一个放控件，一个放事实，
+   但行高、分隔线、名称列的宽度必须一样，否则同一个设置页里三种页面三种节奏。 */
+:root {
+  --set-row-h: 44px;
+  --set-label-w: 7.5em;
+  --set-control-w: 320px;
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-height: var(--set-row-h);
+  padding: var(--spacing-2xs) 0;
+  border-top: 1px dashed var(--border);
+  font-size: var(--body-sm-font-size);
+  min-width: 0;
+}
+.set-row:first-child { border-top: none; }
+.set-row-label { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
+/* 控件列定宽：四项**严格对齐**，滑块铺满这一格（owner 第 6 条）。 */
+.set-row-control { flex: 0 0 var(--set-control-w); min-width: 0; }
+.set-row-control > * { width: 100%; }
+.set-row-value { min-width: 0; word-break: break-word; }
+/* 说明单独一行、整行宽 —— 不再挤进名称列里换行（owner 第 10 条）。 */
+.set-row-note {
+  margin: 0 0 var(--spacing-xs);
+  padding-left: 0;
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+  max-width: 62em;
+}
+
 .setting-row {
   display: flex;
   flex-direction: column;
@@ -1094,17 +1128,27 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 }
 
 /* 事实行：名称定宽一列，值一列，徽章跟在值后面。 */
+/* 个人信息那几行原来挤在 5px 的上下内边距里（owner 第 1 条：太密集）。
+   现在与设置行同一个行高、同一条虚线、同一个名称列宽。 */
 .fact-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--spacing-sm);
-  padding: 5px 0;
+  min-height: var(--set-row-h);
+  padding: var(--spacing-2xs) 0;
   border-top: 1px dashed var(--border);
   font-size: var(--body-sm-font-size);
 }
 .fact-row:first-child { border-top: none; }
-.fact-label { flex: 0 0 6em; color: var(--muted-foreground); }
-.fact-value { min-width: 0; word-break: break-all; }
+.fact-label { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
+.fact-value { min-width: 0; word-break: break-word; }
+/* 同一行里的第二段事实（工作区跟在租户后面，owner 第 4 条）：用一个淡分隔点。 */
+.fact-sep {
+  color: var(--muted-foreground);
+  opacity: 0.5;
+  padding: 0 6px;
+}
+.fact-action { margin-left: auto; flex-shrink: 0; }
 .fact-empty { color: var(--muted-foreground); opacity: 0.6; }
 .fact-badge { flex-shrink: 0; }
 .fact-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }

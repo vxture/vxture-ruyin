@@ -85,10 +85,12 @@ void test("偏好设置（在账户之下）: language + the three axes, in that
   localStorage.clear();
   renderSection("account");
   // owner 2026-09-04：偏好整组从「通用」搬到账户之下，顺序 语言 → 主题 → 密度 → 字号。
-  const labels = Array.from(document.querySelectorAll(".setting-label")).map(
-    (el) => el.firstChild?.textContent,
-  );
+  const labels = Array.from(document.querySelectorAll(".set-row-label")).map((el) => el.textContent);
   expect(labels).toEqual(["语言", "主题", "密度", "字号"]);
+  // 一行一个、不带说明（owner 第 5 条）：这四行里没有解释性小字。
+  expect(document.querySelectorAll(".set-row-note")).toHaveLength(0);
+  // 控件列定宽，四项严格对齐（第 6 条）：四个控件格的类名一致，宽度由 CSS 一处定。
+  expect(document.querySelectorAll(".set-row-control")).toHaveLength(4);
   expect(screen.getByRole("radiogroup", { name: "主题" })).toBeInTheDocument();
   expect(screen.getByRole("radiogroup", { name: "密度" })).toBeInTheDocument();
   expect(screen.getByRole("radiogroup", { name: "字号" })).toBeInTheDocument();
@@ -385,8 +387,19 @@ void test("Settings/账户: signed in shows the identity - name, email, tenant, 
   // 姓名出现两次：卡头的大字与「姓名」那一行。
   expect((await screen.findAllByText("郭彦豪")).length).toBeGreaterThan(0);
   expect(screen.getAllByText("yh@example.com").length).toBeGreaterThan(0);
-  expect(screen.getByText("某租户")).toBeInTheDocument();
-  expect(screen.getByText("某工作区")).toBeInTheDocument();
+  // 显示名（原「姓名」）；租户与工作区并在一行，中间一个淡分隔点。
+  expect(screen.getByText("显示名")).toBeInTheDocument();
+  expect(screen.getByText("当前租户")).toBeInTheDocument();
+  const tenantRow = screen.getByText("当前租户").closest(".fact-row") as HTMLElement;
+  expect(tenantRow.textContent).toContain("某租户");
+  expect(tenantRow.textContent).toContain("某工作区");
+  const switchBtn = within(tenantRow).getByRole("button", { name: /切换租户/ });
+  const openSwitch = vi.spyOn(window, "open").mockImplementation(() => null);
+  await userEvent.setup().click(switchBtn);
+  // 本机换不了租户：token 里只有一个 active_org，平台 v2 已弃用 tenants 声明 ——
+  // 所以这个按钮只能是去平台切换的入口，而不是一个本地下拉。
+  expect(openSwitch).toHaveBeenCalledWith("https://vxture.com/zh-CN/profile", "_blank", "noopener");
+  openSwitch.mockRestore();
   // 「账户中心」那一行链接去掉了（owner 2026-09-04）：右上角的「在线修改」已经是同一个去处。
   expect(screen.queryByRole("link", { name: "https://vxture.com/zh-CN/profile" })).not.toBeInTheDocument();
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
@@ -482,13 +495,14 @@ void test("Settings/账户: every claim the platform gave is shown - username, p
   expect(document.body.textContent).not.toContain("8f14e45f");
 });
 
-void test("Settings/通用设置: three blocks - storage, encryption, inference - each with a heading, and the data dir is read-only with the reason", async () => {
+void test("Settings/通用设置: four blocks - storage, encryption, inference policy, audit - and the data dir is read-only with the reason", async () => {
   const api = fakeApi({
     system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data", productsDir: "D:/products" })),
   });
   renderSection("general", api);
   const titles = Array.from(document.querySelectorAll(".set-block-title")).map((e) => e.textContent);
-  expect(titles).toEqual(["存储位置", "静态加密", "推理与审计"]);
+  // 推理与审计拆成两块（owner 第 9 条）：可选的与不可选的不该同一块。
+  expect(titles).toEqual(["存储位置", "静态加密", "推理策略", "安全审计"]);
   expect(await screen.findByText("C:/data")).toBeInTheDocument();
   // 目录只读，并写明为什么（owner 问过能不能改）。
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
