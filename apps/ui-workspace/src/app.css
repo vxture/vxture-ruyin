@@ -1162,7 +1162,15 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 .crypto-note { opacity: 0.85; }
 /* 事实行尾的动作（「打开目录」）：顶到右端，不去挤值那一列 —— 值是这一行的
    主角，路径本来就长。 */
-.fact-action { margin-left: auto; flex-shrink: 0; }
+/* 行尾的动作位。可以放不止一个（数据目录那一行有「打开目录」和「更改…」），
+   所以它自己是一个带间距的行内容器。 */
+.fact-action {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+}
 /* 换目录那层弹窗：沿用页面里那套行度量，别在弹层里另起一套节奏。 */
 .move-dlg { display: flex; flex-direction: column; gap: var(--spacing-xs); min-width: 0; }
 .move-dlg .fact-row:first-child { border-top: none; }
@@ -1227,14 +1235,21 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   font-size: var(--body-sm-font-size);
 }
 .fact-label { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
-.fact-value { min-width: 0; word-break: break-word; }
+.fact-value {
+  min-width: 0;
+  /* 单行 + 省略号。路径可以很长（用户自己选的位置），让它换行会把这一行撑成
+     两行、破掉全局那个 44px 的行高（owner 2026-09-04 要的是一个行高）。完整
+     路径在 title 里，而真正要去那儿的人有「打开目录」。 */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 /* 同一行里的第二段事实（工作区跟在租户后面，owner 第 4 条）：用一个淡分隔点。 */
 .fact-sep {
   color: var(--muted-foreground);
   opacity: 0.5;
   padding: 0 6px;
 }
-.fact-action { margin-left: auto; flex-shrink: 0; }
 .fact-empty { color: var(--muted-foreground); opacity: 0.6; }
 .fact-badge { flex-shrink: 0; }
 .fact-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }

@@ -177,7 +177,11 @@ function FactRow({
   return (
     <div className="fact-row">
       <span className="fact-label">{label}</span>
-      <span className={mono ? "fact-value mono" : "fact-value"}>
+      {/* 值被省略号截掉时，悬停要能看全 —— 只有字符串值能这么挂。 */}
+      <span
+        className={mono ? "fact-value mono" : "fact-value"}
+        {...(typeof value === "string" && value ? { title: value } : {})}
+      >
         {value === undefined || value === null || value === "" ? (
           <span className="fact-empty">—</span>
         ) : (
@@ -382,8 +386,6 @@ function PreferencesBlock() {
  * 原先它们挤在两张卡里，而「目录」和「加密」不是同一个问题。
  */
 function SystemSection({ system, api }: { system: SystemInfo | null; api: Api }) {
-  // 壳在不在，决定要不要给「打开目录」——浏览器里那一下没有人会接。
-  const hostChrome = useHostChrome();
   const [policy, setPolicy] = useState(
     localStorage.getItem("ruyin-transmission-policy") ?? "sensitivity",
   );
@@ -398,34 +400,12 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
         title="存储位置"
         desc="全部业务数据在本机，这两个目录之外不落任何内容"
       >
-        <FactRow
-          label="数据目录"
-          value={system?.dataDir}
-          mono
-          {...(system?.dataDir && hostChrome === "electron"
-            ? {
-                /* 「打开目录」而不是「改目录」：**大多数人想要的是看一眼**，
-                   而不是搬家（owner 2026-09-05：默认目录要让人不想改）。给了这
-                   一下，剩下真需要换盘的人才去用下面那条会重启的路。
-                   浏览器里不给这个按钮 —— 那里没有壳，按下去什么都不会发生。 */
-                action: (
-                  <Button variant="ghost" size="sm" onClick={() => void api.openDataDir()}>
-                    <Icon name="folder-open" size="xs" />
-                    打开目录
-                  </Button>
-                ),
-              }
-            : {})}
-        />
+        {/* 数据目录**连它的两个动作一起**由一个组件出（owner 2026-09-05 指出：
+            「打开目录」在行上、「更改目录」在下面另一块，同一个对象的两个动作分
+            在两处）。行是「数据在哪」，两个按钮是能对它做的两件事 —— 一个看一眼、
+            一个换位置。 */}
+        <DataDirRow system={system} api={api} />
         <FactRow label="产品目录" value={system?.productsDir} mono />
-        {/* 目录**可以改了**（owner 2026-09-04 定；TD-039 由「不给改」改写为
-            「重启期迁移」）。搬移发生在下一次启动、开库之前 —— 那一刻没有任何
-            句柄，也就不存在半开半搬的状态。 */}
-        {/* 一次性操作不占常驻位置（owner 2026-09-05）：这一块回答「数据在哪」，
-            换位置是从这里发起的一个**动作** —— 按钮开弹层，弹层里走完选目录、
-            确认、重启。原来把输入框、「检查目标」、「重启并搬移」三样连同一段
-            长说明一直摆在页面上，等于把我们的状态机摊给用户看。 */}
-        <DataDirMoveEntry system={system} api={api} />
       </SettingsBlock>
 
       <SettingsBlock
@@ -771,14 +751,43 @@ function AddConnectorPage({ api }: { api: Api }) {
  * 页面上不再有输入框与「检查目标」：校验是我们的事，不是用户要记得先按的一步。
  * 它现在发生在用户选完目录之后，结果直接写在确认那一屏里。
  */
-function DataDirMoveEntry({ system, api }: { system: SystemInfo | null; api: Api }) {
+function DataDirRow({ system, api }: { system: SystemInfo | null; api: Api }) {
+  // 壳在不在，决定给不给这两个按钮：系统目录框与资源管理器都只有壳弹得出来，
+  // 浏览器里给了就是给两条走不通的路。
   const hostChrome = useHostChrome();
   const [open, setOpen] = useState(false);
   const pending = system?.dataDirPending;
   const last = system?.lastMove;
+  const shell = hostChrome === "electron" && Boolean(system?.dataDir);
 
   return (
     <>
+      <FactRow
+        label="数据目录"
+        value={system?.dataDir}
+        mono
+        {...(shell
+          ? {
+              action: (
+                <>
+                  {/* 「打开目录」在前：**大多数人想要的是看一眼**，而不是搬家。
+                      默认目录要让人不想改，那就先让人找得到它。 */}
+                  <Button variant="ghost" size="sm" onClick={() => void api.openDataDir()}>
+                    <Icon name="folder-open" size="xs" />
+                    打开目录
+                  </Button>
+                  {/* 排着一次搬移时不给「更改」：那时该做的是重启或取消，
+                      而不是再选一个新目标。 */}
+                  {!pending && (
+                    <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+                      更改…
+                    </Button>
+                  )}
+                </>
+              ),
+            }
+          : {})}
+      />
       {/* 排着一次搬移时，这一块要说清楚现在是什么状态 —— 它比「换位置」这个
           动作更重要，所以放在最前面。 */}
       {pending && (
@@ -806,30 +815,22 @@ function DataDirMoveEntry({ system, api }: { system: SystemInfo | null; api: Api
         </p>
       )}
 
-      <div className="add-actions">
-        {pending ? (
-          <>
-            <Button size="sm" onClick={() => void api.restartApp()}>
-              立即重启并搬移
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void api.cancelDataDir().then(() => window.location.reload())}
-            >
-              取消这次搬移
-            </Button>
-          </>
-        ) : (
-          /* 浏览器里不给：系统目录框只有壳弹得出来，给了按钮就是给一条走不通的路。 */
-          hostChrome === "electron" && (
-            <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-              <Icon name="folder-open" size="xs" />
-              更改数据目录…
-            </Button>
-          )
-        )}
-      </div>
+      {/* 待搬状态下的两个动作跟着那条提醒走：它们说的是「这次搬移」，不是
+          「这个目录」—— 所以不在行上。 */}
+      {pending && (
+        <div className="add-actions">
+          <Button size="sm" onClick={() => void api.restartApp()}>
+            立即重启并搬移
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void api.cancelDataDir().then(() => window.location.reload())}
+          >
+            取消这次搬移
+          </Button>
+        </div>
+      )}
       {open && (
         <DataDirMoveDialog
           api={api}
