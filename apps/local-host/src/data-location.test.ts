@@ -12,7 +12,9 @@ import {
   applyPendingMove,
   checkTarget,
   performMove,
+  hasData,
   readLocation,
+  resolveDataDir,
   treeSize,
   verifyMoved,
   writeLocation,
@@ -250,4 +252,74 @@ void test("applyPendingMove: 搬完之后再启动，不会再报一次「搬了
   assert.equal(second.movedNow, false);
   assert.equal(second.dataDir, dst);
   assert.equal(second.outcome.status, "moved");
+});
+
+void test("resolveDataDir: 指针说了算", () => {
+  const locFile = join(tmp(), "location.json");
+  const chosen = tmp();
+  writeLocation(locFile, { dataDir: chosen });
+  const r = resolveDataDir(locFile, tmp(), tmp());
+  assert.equal(r.dataDir, chosen);
+  assert.equal(r.pinnedLegacy, false);
+});
+
+void test("resolveDataDir: 老位置有数据 → 钉在老位置并写下指针，**一个字节都不搬**", () => {
+  const legacy = tmp();
+  seed(legacy);
+  const locFile = join(tmp(), "location.json");
+  const preferred = join(tmp(), "new-default");
+
+  const r = resolveDataDir(locFile, preferred, legacy);
+  assert.equal(r.dataDir, legacy);
+  assert.equal(r.pinnedLegacy, true);
+  // 指针落盘了：下一次启动不必再靠探测。
+  assert.equal(readLocation(locFile).dataDir, legacy);
+  // 数据还在原处，新默认位置压根没被建出来。
+  assert.equal(readFileSync(join(legacy, "runtime", "master.key.dpapi"), "utf8"), "KEY");
+  assert.equal(existsSync(preferred), false);
+});
+
+void test("resolveDataDir: 全新机器 → 用新默认位置，不写指针（少一处要保持一致的状态）", () => {
+  const locFile = join(tmp(), "location.json");
+  const preferred = join(tmp(), "fresh");
+  const emptyLegacy = tmp();
+  const r = resolveDataDir(locFile, preferred, emptyLegacy);
+  assert.equal(r.dataDir, preferred);
+  assert.equal(r.pinnedLegacy, false);
+  assert.equal(existsSync(locFile), false);
+});
+
+void test("resolveDataDir: 老目录建出来了但是空的，不算「有数据」—— 那是装过没登录过的机器", () => {
+  const legacy = tmp();
+  mkdirSync(join(legacy, "runtime"), { recursive: true });
+  const locFile = join(tmp(), "location.json");
+  const preferred = join(tmp(), "fresh");
+  assert.equal(hasData(legacy), false);
+  assert.equal(resolveDataDir(locFile, preferred, legacy).dataDir, preferred);
+});
+
+void test("resolveDataDir: 钉老位置时不能把已经排好的搬家丢掉", () => {
+  const legacy = tmp();
+  seed(legacy);
+  const locFile = join(tmp(), "location.json");
+  const target = join(tmp(), "target");
+  // 上一次会话里排了一次搬家，但那时指针里还没有 dataDir（刚升级上来）。
+  writeLocation(locFile, { pending: target });
+  const r = resolveDataDir(locFile, join(tmp(), "fresh"), legacy);
+  assert.equal(r.dataDir, legacy);
+  assert.equal(readLocation(locFile).pending, target);
+});
+
+void test("resolveDataDir: 指针指向不能用的位置（拔掉的盘、被删的目录）→ 回落默认位置", () => {
+  const locFile = join(tmp(), "location.json");
+  // 拿一个**普通文件**当父目录：两个平台都是 ENOTDIR，立刻失败，不必依赖
+  // 「某个盘符不存在」或 /proc 这类平台特有的东西 —— 那种写法在另一个系统上
+  // 可能不是「快速失败」，而是别的行为。
+  const blocker = join(tmp(), "not-a-dir");
+  writeFileSync(blocker, "x");
+  writeLocation(locFile, { dataDir: join(blocker, "child") });
+  const preferred = join(tmp(), "fresh");
+  const r = resolveDataDir(locFile, preferred, undefined);
+  // 应用照旧起来，而不是在开库那一步崩掉 —— 那在用户眼里就是「装完打不开」。
+  assert.equal(r.dataDir, preferred);
 });
