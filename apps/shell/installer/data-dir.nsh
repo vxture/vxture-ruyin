@@ -60,15 +60,19 @@ Function RuyinDataDirPageShow
     Abort
   ${EndIf}
 
-  !insertmacro MUI_HEADER_TEXT "选择数据目录" "业务数据与密钥放在哪里。装好之后也可以在设置里改。"
-
-  ${NSD_CreateLabel} 0 0 100% 34u "RUYIN 的业务数据（项目库、产品库、密钥）会放在下面这个目录。数据整库加密，密钥按当前 Windows 用户封装 —— 所以请选一个只有你自己使用的位置，不要选可移动磁盘或共享目录。"
+  ; 标题写在对话框里，**不用 `MUI_HEADER_TEXT`**：electron-builder 把自定义
+  ; include 放在公共头部，那时 MUI2 还没被引进来，于是那个宏在这里根本不存在 ——
+  ; CI 上报的就是这一行（`!include: error ... on line 63`）。本地探针脚本先引
+  ; MUI2 再引本文件，所以没复现出来；探针现在按真实顺序来了。
+  ${NSD_CreateLabel} 0 0 100% 12u "选择数据目录"
+  Pop $0
+  ${NSD_CreateLabel} 0 14u 100% 34u "RUYIN 的业务数据（项目库、产品库、密钥）会放在下面这个目录。数据整库加密，密钥按当前 Windows 用户封装 —— 所以请选一个只有你自己使用的位置，不要选可移动磁盘或共享目录。装好之后也可以在设置里改。"
   Pop $0
 
-  ${NSD_CreateDirRequest} 0 40u 75% 12u "$LOCALAPPDATA\Ruyin\data"
+  ${NSD_CreateDirRequest} 0 54u 75% 12u "$LOCALAPPDATA\Ruyin\data"
   Pop $RuyinDataDirField
 
-  ${NSD_CreateButton} 80% 39u 20% 14u "浏览…"
+  ${NSD_CreateButton} 80% 53u 20% 14u "浏览…"
   Pop $0
   ${NSD_OnClick} $0 RuyinBrowseDataDir
 
