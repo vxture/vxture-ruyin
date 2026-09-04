@@ -113,7 +113,7 @@ void test("PrivacySection: plaintext key protection shows the dev-mode warning, 
     system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "plaintext" })),
   });
   renderSection("privacy", api);
-  expect(await screen.findByText("开发态：主密钥明文存储")).toBeInTheDocument();
+  expect(await screen.findByText("开发态：主密钥明文存储，不可用于真实数据")).toBeInTheDocument();
   expect(screen.queryByText("主密钥由 Windows DPAPI 保护")).not.toBeInTheDocument();
 });
 
@@ -388,4 +388,28 @@ void test("Settings/账户: a session() failure falls back to the signed-out gui
   const api = fakeApi({ session: vi.fn().mockRejectedValue(new Error("daemon down")) });
   renderSection("account", api);
   expect(await screen.findByText("账户由左下角的账户菜单管理")).toBeInTheDocument();
+});
+
+void test("Settings/数据与隐私: the encryption chain spells out all three layers, says what is NOT encrypted, and never claims '三次加密'", async () => {
+  const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "dpapi" })) });
+  const { container } = renderSection("privacy", api);
+  const rows = await screen.findAllByRole("listitem");
+  expect(rows.map((r) => r.textContent)).toEqual([
+    "业务数据每个项目库整库加密 · SQLCipher（AES-256）",
+    "库密钥一库一把随机密钥 · AES-256-GCM 封装在主密钥下",
+    "主密钥Windows DPAPI 保护（当前用户作用域），不落明文",
+  ]);
+  // 一次加密 + 两层密钥保护。把层数说成加密次数是在核实的那一刻会崩掉的话。
+  expect(container.textContent).not.toContain("三次加密");
+  expect(container.textContent).toContain("产品契约与本机配置不加密");
+  expect(screen.getByText("主密钥由 Windows DPAPI 保护")).toBeInTheDocument();
+});
+
+void test("Settings/数据与隐私: without OS key protection the master-key row and the badge both say so", async () => {
+  const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "plaintext" })) });
+  renderSection("privacy", api);
+  expect(await screen.findByText("明文存放 —— 本平台没有 OS 级密钥保护")).toBeInTheDocument();
+  expect(screen.getByText("开发态：主密钥明文存储，不可用于真实数据")).toBeInTheDocument();
+  // 库仍然是加密的 —— 暴露的是主密钥，别把两件事混成一件。
+  expect(screen.getByText("每个项目库整库加密 · SQLCipher（AES-256）")).toBeInTheDocument();
 });
