@@ -180,9 +180,10 @@ export function checkTarget(from: string, to: string): CheckResult {
   const probe = join(probeDir, `.ruyin-write-probe-${Date.now()}`);
   try {
     writeFileSync(probe, "probe");
-    rmSync(probe, { force: true });
   } catch (e) {
     return { ok: false, reason: `目标目录不可写：${(e as Error).message}` };
+  } finally {
+    quietRemove(probe);
   }
 
   const bytes = treeSize(src);
@@ -208,8 +209,8 @@ export function checkTarget(from: string, to: string): CheckResult {
   } catch {
     sameVolume = false;
   } finally {
-    rmSync(landing, { force: true });
-    rmSync(takeoff, { force: true });
+    quietRemove(landing);
+    quietRemove(takeoff);
   }
   return { ok: true, sameVolume, bytes, ...(free === undefined ? {} : { freeBytes: free }) };
 }
@@ -425,17 +426,32 @@ export function resolveDataDir(
   return { dataDir: resolve(preferred), pinnedLegacy: false };
 }
 
+/**
+ * 删掉一个探针文件，**删不掉也不抛**。
+ *
+ * `rmSync(..., { force: true })` 只吞 ENOENT。父目录本身不是目录时（把一个普通
+ * 文件当目录用），lstat 会抛 ENOTDIR —— 而这行清理写在 `finally` 里，一抛就
+ * 冲出了外面那层 try/catch，把「这个目录不可用」变成了「进程崩了」。CI 2026-09-05
+ * 就是这么红的（Linux 上抛，Windows 上不抛，本机因此测不出来）。
+ */
+function quietRemove(path: string): void {
+  try {
+    rmSync(path, { force: true });
+  } catch {
+    // 探针留在那儿也不碍事：它是零字节的一个文件，下一次会被覆盖。
+  }
+}
+
 /** 能不能在这儿建目录、写文件。 */
 function usable(dir: string): boolean {
-  const probe = join(dir, ".ruyin-write-probe");
   try {
     mkdirSync(dir, { recursive: true });
+    const probe = join(dir, ".ruyin-write-probe");
     writeFileSync(probe, "probe");
+    quietRemove(probe);
     return true;
   } catch {
     return false;
-  } finally {
-    rmSync(probe, { force: true });
   }
 }
 
