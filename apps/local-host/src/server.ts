@@ -118,6 +118,18 @@ export interface LocalApiDeps {
    * 数据目录搬家（TD-039）。**没有它时这几个端点不存在** —— 指针文件的位置是
    * 宿主给的，没有宿主注入的部署（测试里直接起 server）不该假装能搬家。
    */
+  /**
+   * 系统目录选择框的中转（TD-039）。宿主注入 —— 没有它时这几个端点不存在：
+   * 没有壳的部署（浏览器访问、测试里直接起 server）弹不出系统框，那就别假装能弹。
+   */
+  folderPick?: {
+    /** 发起一次询问，挂着等壳送结果回来。 */
+    ask(start?: string): Promise<{ path?: string; cancelled?: boolean }>;
+    /** 壳送回结果（取消时不带路径）。 */
+    settle(path?: string): void;
+    /** 壳要问的起始目录。 */
+    start(): string | undefined;
+  };
   dataMove?: {
     /** 能不能搬到那儿去，没有副作用。 */
     check(target: string): {
@@ -599,6 +611,35 @@ async function handle(
   if (method === "POST" && path === "/ui/open-data-dir") {
     deps.events?.publish({ kind: "app-open-data-dir" });
     send(res, 202, { ok: true });
+    return;
+  }
+
+  /**
+   * POST /ui/pick-folder - 弹系统目录选择框，**把这条请求挂着**，直到壳把结果
+   * 送回来（下面那条 result）。界面因此可以直接 await：「选个目录」在用户眼里是
+   * 一个动作，在代码里也该是一个动作，而不是发一次、再轮询几次。
+   *
+   * 只允许一个人在等：第二次请求会把前一个顶掉（并告诉它 cancelled），否则一次
+   * 误触就能在服务端攒下一串永远等不到答复的挂起请求。
+   */
+  if (method === "POST" && path === "/ui/pick-folder" && deps.folderPick) {
+    const body = await readJson(req);
+    const start = typeof body["start"] === "string" ? body["start"] : undefined;
+    const outcome = await deps.folderPick.ask(start);
+    send(res, 200, outcome);
+    return;
+  }
+  // 壳把用户选的结果送回来。取消时不带 path —— 那是一个正常结果，不是错误。
+  if (method === "POST" && path === "/ui/pick-folder/result" && deps.folderPick) {
+    const body = await readJson(req);
+    const picked = typeof body["path"] === "string" && body["path"].trim() ? body["path"] : undefined;
+    deps.folderPick.settle(picked);
+    send(res, 200, { ok: true });
+    return;
+  }
+  // 壳来问「要我弹在哪儿」。事件不带数据，所以起始目录在这儿取。
+  if (method === "GET" && path === "/ui/pick-folder" && deps.folderPick) {
+    send(res, 200, { start: deps.folderPick.start() });
     return;
   }
 

@@ -172,7 +172,8 @@ export type RuntimeEvent =
   /** 界面主题变了；壳据此重画窗口按钮（见 chrome-theme.ts）。 */
   | { kind: "ui-theme" }
   | { kind: "app-restart" }
-  | { kind: "app-open-data-dir" };
+  | { kind: "app-open-data-dir" }
+  | { kind: "app-pick-folder" };
 
 export interface StateItem {
   name: string;
@@ -666,6 +667,19 @@ export class Api {
    * （它才是知道 dataDir 的那个），界面只是提出这个请求。
    */
   openDataDir = () => this.call<{ ok: boolean }>("/ui/open-data-dir", "POST");
+  /**
+   * 弹系统目录选择框，等用户选完。
+   *
+   * 这是一个**长等待**的请求：守护进程把它挂着，直到壳把结果送回来（或者超时）。
+   * 界面因此可以直接 `await`，不必自己轮询 —— 「选个目录」在用户眼里是一个动作，
+   * 代码里也该是一个动作。
+   */
+  pickFolder = (start?: string) =>
+    this.call<{ path?: string; cancelled?: boolean }>(
+      "/ui/pick-folder",
+      "POST",
+      start ? { start } : {},
+    );
   /**
    * 上报生效主题，供壳给 Windows 的窗口按钮上色。**中转，不是设置** ——
    * 偏好本身存在本机 localStorage（DS 的 ThemeProvider）。

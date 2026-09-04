@@ -280,6 +280,14 @@ const WRAPPER_CASES: WrapperCase[] = [
   { name: "cancelDataDir", call: (api) => api.cancelDataDir(), method: "DELETE", path: "/system/data-dir" },
   { name: "restartApp", call: (api) => api.restartApp(), method: "POST", path: "/ui/restart" },
   { name: "openDataDir", call: (api) => api.openDataDir(), method: "POST", path: "/ui/open-data-dir" },
+  {
+    name: "pickFolder",
+    call: (api) => api.pickFolder("C:/data"),
+    method: "POST",
+    path: "/ui/pick-folder",
+    body: { start: "C:/data" },
+  },
+  { name: "pickFolder（不带起始目录）", call: (api) => api.pickFolder(), method: "POST", path: "/ui/pick-folder", body: {} },
   { name: "audit", call: (api) => api.audit("prj_1"), method: "GET", path: "/projects/prj_1/audit" },
   {
     name: "contextItems",

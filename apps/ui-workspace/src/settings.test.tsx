@@ -644,10 +644,11 @@ void test("Settings/通用设置: four blocks - storage, encryption, inference p
   // 数据安不安全，不是一个密码学状态词。
   expect(titles).toEqual(["存储位置", "数据加密", "推理策略", "安全审计"]);
   expect(await screen.findByText("C:/data")).toBeInTheDocument();
-  // 目录可以改了（owner 2026-09-04；TD-039 改写为「重启期迁移」），并且要说清楚
-  // 它是在什么时候搬的 —— 「重启时、开库之前」是这件事安全的全部理由。
-  expect(screen.getByPlaceholderText(/RuyinData/)).toBeInTheDocument();
-  expect(document.body.textContent).toContain("打开任何数据库之前");
+  // 目录可以改，但**页面上只有一个按钮**（owner 2026-09-05）：一次性操作不占
+  // 常驻位置，表单在弹层里。浏览器里连按钮都没有（系统目录框只有壳弹得出来），
+  // 所以这条只钉「没有常驻表单」。
+  expect(screen.queryByPlaceholderText(/RuyinData/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "检查目标" })).not.toBeInTheDocument();
 });
 
 void test("Settings/存储位置: 壳里给「打开目录」，浏览器里不给（那一下没有人会接）", async () => {
@@ -688,109 +689,210 @@ void test("Settings/存储位置: 壳里给「打开目录」，浏览器里不�
   expect(screen.queryByRole("button", { name: /打开目录/ })).not.toBeInTheDocument();
 });
 
-void test("Settings/存储位置: 换目录要先校验；校验不通过就不给排队", async () => {
-  const checkDataDir = vi.fn().mockResolvedValue({ ok: false, reason: "目标目录里已经有东西了。" });
-  const requestDataDir = vi.fn();
-  const api = fakeApi({
-    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
-    checkDataDir,
-    requestDataDir,
+/**
+ * 换目录这一组用例跟着交互一起重写（owner 2026-09-05：一次性操作不该常驻页面）。
+ * 判据也跟着变了：页面上**只该有一个按钮**，表单在弹层里，而校验是选完目录之后
+ * 自动发生的一步 —— 不是用户要记得先按的一步。
+ */
+function shellUa(): () => void {
+  const ua = navigator.userAgent;
+  Object.defineProperty(navigator, "userAgent", {
+    value: `${ua} Electron/40.0.0`,
+    configurable: true,
   });
-  renderSection("general", api);
-  const user = userEvent.setup();
-  await user.type(await screen.findByPlaceholderText(/RuyinData/), "D:\Taken");
-  // 没校验之前主按钮就是关着的：排一次注定失败的搬家，失败要等到下次启动才
-  // 出现，那时用户已经忘了自己做过什么。
+  return () => Object.defineProperty(navigator, "userAgent", { value: ua, configurable: true });
+}
+
+async function renderStorage(api: Api) {
+  const restore = shellUa();
+  vi.resetModules();
+  const { SettingsView: View } = await import("./settings");
+  const r = render(
+    <ThemeProvider defaultMode="dark" defaultDensity="default">
+      <View api={api} section="general" />
+    </ThemeProvider>,
+  );
+  return { ...r, restore };
+}
+
+void test("Settings/存储位置: 页面上只有一个按钮 —— 输入框与「检查目标」都在弹层里", async () => {
+  const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })) });
+  const { restore } = await renderStorage(api);
+  const entry = await screen.findByRole("button", { name: /更改数据目录/ });
+  // 常驻页面上不该有这些：它们是一次性操作的零件。
+  expect(screen.queryByRole("button", { name: "检查目标" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "重启并搬移" })).not.toBeInTheDocument();
+  expect(screen.queryByPlaceholderText(/RuyinData/)).not.toBeInTheDocument();
+
+  await userEvent.setup().click(entry);
+  // 弹层里先摆事实：当前在哪、要搬到哪（还没选）。
+  expect(await screen.findByText("更改数据目录")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /选择目录/ })).toBeInTheDocument();
+  // 没选目录之前，会关掉应用的那个按钮是关着的。
   expect(screen.getByRole("button", { name: "重启并搬移" })).toBeDisabled();
-  await user.click(screen.getByRole("button", { name: "检查目标" }));
-  expect(checkDataDir).toHaveBeenCalledWith("D:\Taken");
-  expect(await screen.findByText("目标目录里已经有东西了。")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "重启并搬移" })).toBeDisabled();
-  expect(requestDataDir).not.toHaveBeenCalled();
+  restore();
 });
 
-void test("Settings/存储位置: 校验通过后说清同盘还是跨盘，排队之后请壳重启", async () => {
+void test("Settings/存储位置: 选完目录自动校验 —— 用户不必记得「还要按一下检查」", async () => {
+  const pickFolder = vi.fn().mockResolvedValue({ path: "D:\RuyinData" });
+  const checkDataDir = vi.fn().mockResolvedValue({ ok: true, sameVolume: false, bytes: 5 * 1024 * 1024 });
   const api = fakeApi({
     system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
-    checkDataDir: vi.fn().mockResolvedValue({ ok: true, sameVolume: false, bytes: 5 * 1024 * 1024 }),
+    pickFolder,
+    checkDataDir,
     requestDataDir: vi.fn().mockResolvedValue({ pending: "D:\RuyinData", ok: true }),
     restartApp: vi.fn().mockResolvedValue({ ok: true }),
   });
-  renderSection("general", api);
+  const { restore } = await renderStorage(api);
   const user = userEvent.setup();
-  await user.type(await screen.findByPlaceholderText(/RuyinData/), "D:\RuyinData");
-  await user.click(screen.getByRole("button", { name: "检查目标" }));
-  // 跨盘要复制并核对，那要等；同盘是改名。这句差别必须说，否则用户不知道该不该
-  // 现在按下去。
-  expect(await screen.findByText(/跨盘，要复制并逐文件核对/)).toBeInTheDocument();
-  expect(screen.getByText(/5.0 MB/)).toBeInTheDocument();
+  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(screen.getByRole("button", { name: /选择目录/ }));
+
+  // 目录框从当前位置开始浏览 —— 用户多半是在它旁边找一个位置。
+  expect(pickFolder).toHaveBeenCalledWith("C:/data");
+  expect(checkDataDir).toHaveBeenCalledWith("D:\RuyinData");
+  // 跨盘要等，同盘瞬间 —— 这句差别必须说，否则用户不知道该不该现在按。
+  expect(await screen.findByText(/跨盘，要逐文件复制并核对/)).toBeInTheDocument();
+
   await user.click(screen.getByRole("button", { name: "重启并搬移" }));
   expect(api.requestDataDir).toHaveBeenCalledWith("D:\RuyinData");
-  // 排队之后必须真的重启 —— 搬移只在开库之前发生，不重启这件事永远不会生效。
   await vi.waitFor(() => expect(api.restartApp).toHaveBeenCalled());
+  restore();
 });
 
-void test("Settings/存储位置: 排着一次搬移时只给「立即重启」与「取消」，不再给填新目标", async () => {
+void test("Settings/存储位置: 用户在系统框里取消 —— 什么都不变，也不报错", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
+    pickFolder: vi.fn().mockResolvedValue({ cancelled: true }),
+    checkDataDir: vi.fn(),
+  });
+  const { restore } = await renderStorage(api);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(screen.getByRole("button", { name: /选择目录/ }));
+  // 取消是正常结果：不校验、不报错、按钮仍然关着。
+  expect(api.checkDataDir).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "重启并搬移" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /选择目录/ })).toBeInTheDocument();
+  restore();
+});
+
+void test("Settings/存储位置: 目标不可用时把原因写在弹层里，且不给按「重启并搬移」", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
+    pickFolder: vi.fn().mockResolvedValue({ path: "D:\Taken" }),
+    checkDataDir: vi.fn().mockResolvedValue({ ok: false, reason: "目标目录里已经有东西了。" }),
+    requestDataDir: vi.fn(),
+  });
+  const { restore } = await renderStorage(api);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(screen.getByRole("button", { name: /选择目录/ }));
+  expect(await screen.findByText("目标目录里已经有东西了。")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "重启并搬移" })).toBeDisabled();
+  expect(api.requestDataDir).not.toHaveBeenCalled();
+  restore();
+});
+
+void test("Settings/存储位置: 排队那一步失败就停在原地 —— 不重启，也不假装排上了", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
+    pickFolder: vi.fn().mockResolvedValue({ path: "D:\X" }),
+    checkDataDir: vi.fn().mockResolvedValue({ ok: true, sameVolume: true, bytes: 1024 }),
+    requestDataDir: vi.fn().mockRejectedValue(new Error("目标目录里已经有东西了。")),
+    restartApp: vi.fn(),
+  });
+  const { restore } = await renderStorage(api);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(screen.getByRole("button", { name: /选择目录/ }));
+  await screen.findByText(/同一个盘，改名即可/);
+  await user.click(screen.getByRole("button", { name: "重启并搬移" }));
+  expect(await screen.findByText("目标目录里已经有东西了。")).toBeInTheDocument();
+  // 排不上就别重启：重启之后什么也不会发生，用户只会更糊涂。
+  expect(api.restartApp).not.toHaveBeenCalled();
+  restore();
+});
+
+void test("Settings/存储位置: 已排队时给「立即重启」与「取消」，不再给更改入口", async () => {
+  const api = fakeApi({
+    system: vi
+      .fn()
+      .mockResolvedValue(systemInfo({ dataDir: "C:/data", dataDirPending: "D:\RuyinData" })),
+    restartApp: vi.fn().mockResolvedValue({ ok: true }),
+    cancelDataDir: vi.fn().mockResolvedValue({ pending: null }),
+  });
+  const { restore } = await renderStorage(api);
+  expect(await screen.findByText(/已排好一次搬移，重启后生效/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /更改数据目录/ })).not.toBeInTheDocument();
+  await userEvent.setup().click(screen.getByRole("button", { name: "立即重启并搬移" }));
+  expect(api.restartApp).toHaveBeenCalled();
+  restore();
+});
+
+void test("Settings/存储位置: 取消排队之后要刷新 —— 页面不能还挂着一条已经没了的待搬", async () => {
+  const reload = vi.fn();
+  const original = window.location;
+  Object.defineProperty(window, "location", {
+    value: { ...original, reload, hash: "" },
+    configurable: true,
+    writable: true,
+  });
   const api = fakeApi({
     system: vi
       .fn()
       .mockResolvedValue(systemInfo({ dataDir: "C:/data", dataDirPending: "D:\RuyinData" })),
     cancelDataDir: vi.fn().mockResolvedValue({ pending: null }),
   });
-  renderSection("general", api);
-  expect(await screen.findByText(/已排好一次搬移，重启后生效/)).toBeInTheDocument();
-  expect(screen.queryByPlaceholderText(/RuyinData/)).not.toBeInTheDocument();
-  const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "取消这次搬移" }));
+  const { restore } = await renderStorage(api);
+  await userEvent.setup().click(await screen.findByRole("button", { name: "取消这次搬移" }));
   expect(api.cancelDataDir).toHaveBeenCalled();
+  await vi.waitFor(() => expect(reload).toHaveBeenCalled());
+  Object.defineProperty(window, "location", { value: original, configurable: true, writable: true });
+  restore();
 });
 
-void test("Settings/存储位置: 守护进程答不上来时照原样转达，且不排队", async () => {
+void test("Settings/存储位置: 弹层能关掉，什么也不发生", async () => {
   const api = fakeApi({
     system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
-    checkDataDir: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
     requestDataDir: vi.fn(),
-  });
-  renderSection("general", api);
-  const user = userEvent.setup();
-  await user.type(await screen.findByPlaceholderText(/RuyinData/), "D:\X");
-  await user.click(screen.getByRole("button", { name: "检查目标" }));
-  expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
-  expect(api.requestDataDir).not.toHaveBeenCalled();
-});
-
-void test("Settings/存储位置: 排队那一步失败就停在原地 —— 不重启，也不假装排上了", async () => {
-  const api = fakeApi({
-    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
-    checkDataDir: vi.fn().mockResolvedValue({ ok: true, sameVolume: true, bytes: 1024 }),
-    requestDataDir: vi.fn().mockRejectedValue(new Error("目标目录里已经有东西了。")),
     restartApp: vi.fn(),
   });
-  renderSection("general", api);
+  const { restore } = await renderStorage(api);
   const user = userEvent.setup();
-  await user.type(await screen.findByPlaceholderText(/RuyinData/), "D:\X");
-  await user.click(screen.getByRole("button", { name: "检查目标" }));
-  expect(await screen.findByText(/同一个盘，改名即可/)).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "重启并搬移" }));
-  expect(await screen.findByText("目标目录里已经有东西了。")).toBeInTheDocument();
-  // 排不上就别重启：重启之后什么也不会发生，用户只会更糊涂。
+  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(screen.getByRole("button", { name: "取消" }));
+  await vi.waitFor(() => expect(screen.queryByText("更改数据目录")).not.toBeInTheDocument());
+  expect(api.requestDataDir).not.toHaveBeenCalled();
   expect(api.restartApp).not.toHaveBeenCalled();
+
+  // Esc 也要能关：弹层的关闭有两条路（按钮、Esc/点遮罩），两条都得通 ——
+  // 只接一条的话，用户按 Esc 会以为应用卡住了。
+  await user.click(screen.getByRole("button", { name: /更改数据目录/ }));
+  await screen.findByText("更改数据目录");
+  await user.keyboard("{Escape}");
+  await vi.waitFor(() => expect(screen.queryByText("更改数据目录")).not.toBeInTheDocument());
+  restore();
 });
 
-void test("Settings/存储位置: 已排队时「立即重启」就是请壳重启；撤销失败也如实说", async () => {
+void test("Settings/存储位置: 选目录这一步本身失败也照原样转达", async () => {
   const api = fakeApi({
-    system: vi
-      .fn()
-      .mockResolvedValue(systemInfo({ dataDir: "C:/data", dataDirPending: "D:\RuyinData" })),
-    restartApp: vi.fn().mockResolvedValue({ ok: true }),
-    cancelDataDir: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
+    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
+    pickFolder: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
   });
-  renderSection("general", api);
+  const { restore } = await renderStorage(api);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "立即重启并搬移" }));
-  expect(api.restartApp).toHaveBeenCalled();
-  await user.click(screen.getByRole("button", { name: "取消这次搬移" }));
+  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(screen.getByRole("button", { name: /选择目录/ }));
   expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
+  restore();
+});
+
+void test("Settings/存储位置: 浏览器里不给更改入口 —— 系统目录框只有壳弹得出来", async () => {
+  const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })) });
+  renderSection("general", api);
+  expect(await screen.findByText("C:/data")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /更改数据目录/ })).not.toBeInTheDocument();
 });
 
 void test("Settings/存储位置: 上次搬移失败要如实说，并且说清数据还在原处", async () => {

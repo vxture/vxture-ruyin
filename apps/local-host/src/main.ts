@@ -45,6 +45,7 @@ import { fetchContract } from "./contract-fetch.js";
 import { EventBus } from "./events.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
+import { FolderPick } from "./folder-pick.js";
 import {
   applyPendingMove,
   checkTarget,
@@ -97,6 +98,12 @@ const token = process.env["RUYIN_TOKEN"] ?? randomBytes(24).toString("hex");
 // holds the credentials for Atlas). Unset = mock, and the daemon says so -
 // "not wired up" must never look like "working".
 const capabilityBase = process.env["RUYIN_CAPABILITY_BASE"] ?? "";
+
+/**
+ * 目录选择框的中转。事件发出去、请求挂着等 —— 详见 folder-pick.ts 的头注释。
+ * 在 events 建好之后才能发通知，所以用一个惰性引用：这一行在 events 之前。
+ */
+const folderPick = new FolderPick(5 * 60_000, () => events.publish({ kind: "app-pick-folder" }));
 
 /** 界面生效主题的中转值（见下面 chromeTheme 与 events.ts 的 ui-theme）。 */
 let chromeTheme: "dark" | "light" = "dark";
@@ -246,6 +253,12 @@ const server = createLocalApi({
     set: (theme) => {
       chromeTheme = theme;
     },
+  },
+  // 目录选择框的中转：界面请求挂着等，壳弹框、送结果回来。
+  folderPick: {
+    ask: (start?: string) => folderPick.ask(start),
+    settle: (picked?: string) => folderPick.settle(picked),
+    start: () => folderPick.start(),
   },
   // 搬家的三个动作都落在宿主这一侧：守护进程知道目录布局，指针文件的位置由
   // 宿主给（见 locationFile）。校验没有副作用，请求只写意图 —— 真正的搬移永远
