@@ -1160,6 +1160,9 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 .crypto-what { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
 .crypto-how { min-width: 0; }
 .crypto-note { opacity: 0.85; }
+/* 事实行尾的动作（「打开目录」）：顶到右端，不去挤值那一列 —— 值是这一行的
+   主角，路径本来就长。 */
+.fact-action { margin-left: auto; flex-shrink: 0; }
 
 /* ---------- 设置：二级板块（owner 2026-09-04 的统一标题模式）---------- */
 /* 小图标 + 标题 + 说明，内容缩进到标题文字的左缘（图标 24 + gap 8 = 32px）。 */

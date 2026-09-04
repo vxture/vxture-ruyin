@@ -650,6 +650,44 @@ void test("Settings/通用设置: four blocks - storage, encryption, inference p
   expect(document.body.textContent).toContain("打开任何数据库之前");
 });
 
+void test("Settings/存储位置: 壳里给「打开目录」，浏览器里不给（那一下没有人会接）", async () => {
+  const openDataDir = vi.fn().mockResolvedValue({ ok: true });
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
+    openDataDir,
+  });
+  // 壳里：navigator.userAgent 带 Electron（host-chrome 就看这一个）。
+  const ua = navigator.userAgent;
+  Object.defineProperty(navigator, "userAgent", {
+    value: `${ua} Electron/40.0.0`,
+    configurable: true,
+  });
+  vi.resetModules();
+  const { SettingsView: Shell } = await import("./settings");
+  const { unmount } = render(
+    <ThemeProvider defaultMode="dark" defaultDensity="default">
+      <Shell api={api} section="general" />
+    </ThemeProvider>,
+  );
+  const btn = await screen.findByRole("button", { name: /打开目录/ });
+  await userEvent.setup().click(btn);
+  // 请求里**不带路径**：打开哪个目录由守护进程说（server.test.ts 那条钉的是
+  // 另一半 —— 事件里也没有路径）。
+  expect(openDataDir).toHaveBeenCalledWith();
+  unmount();
+
+  Object.defineProperty(navigator, "userAgent", { value: ua, configurable: true });
+  vi.resetModules();
+  const { SettingsView: Web } = await import("./settings");
+  render(
+    <ThemeProvider defaultMode="dark" defaultDensity="default">
+      <Web api={api} section="general" />
+    </ThemeProvider>,
+  );
+  expect(await screen.findByText("C:/data")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /打开目录/ })).not.toBeInTheDocument();
+});
+
 void test("Settings/存储位置: 换目录要先校验；校验不通过就不给排队", async () => {
   const checkDataDir = vi.fn().mockResolvedValue({ ok: false, reason: "目标目录里已经有东西了。" });
   const requestDataDir = vi.fn();

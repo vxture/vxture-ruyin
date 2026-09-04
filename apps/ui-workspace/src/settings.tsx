@@ -39,6 +39,7 @@ import {
 export { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
 import { resolveSection, type SectionId } from "./settings-sections";
 import { NoticeBar } from "./notice-bar";
+import { useHostChrome } from "./host-chrome";
 
 const UI_VERSION = "0.2.0";
 
@@ -158,11 +159,14 @@ function FactRow({
   value,
   badge,
   mono,
+  action,
 }: {
   label: string;
   value?: React.ReactNode;
   badge?: React.ReactNode;
   mono?: boolean;
+  /** 行尾的一个动作（如「打开目录」）。顶到右端，不挤值那一列。 */
+  action?: React.ReactNode;
 }) {
   return (
     <div className="fact-row">
@@ -175,6 +179,7 @@ function FactRow({
         )}
       </span>
       {badge && <span className="fact-badge">{badge}</span>}
+      {action && <span className="fact-action">{action}</span>}
     </div>
   );
 }
@@ -371,6 +376,8 @@ function PreferencesBlock() {
  * 原先它们挤在两张卡里，而「目录」和「加密」不是同一个问题。
  */
 function SystemSection({ system, api }: { system: SystemInfo | null; api: Api }) {
+  // 壳在不在，决定要不要给「打开目录」——浏览器里那一下没有人会接。
+  const hostChrome = useHostChrome();
   const [policy, setPolicy] = useState(
     localStorage.getItem("ruyin-transmission-policy") ?? "sensitivity",
   );
@@ -385,7 +392,25 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
         title="存储位置"
         desc="全部业务数据在本机，这两个目录之外不落任何内容"
       >
-        <FactRow label="数据目录" value={system?.dataDir} mono />
+        <FactRow
+          label="数据目录"
+          value={system?.dataDir}
+          mono
+          {...(system?.dataDir && hostChrome === "electron"
+            ? {
+                /* 「打开目录」而不是「改目录」：**大多数人想要的是看一眼**，
+                   而不是搬家（owner 2026-09-05：默认目录要让人不想改）。给了这
+                   一下，剩下真需要换盘的人才去用下面那条会重启的路。
+                   浏览器里不给这个按钮 —— 那里没有壳，按下去什么都不会发生。 */
+                action: (
+                  <Button variant="ghost" size="sm" onClick={() => void api.openDataDir()}>
+                    <Icon name="folder-open" size="xs" />
+                    打开目录
+                  </Button>
+                ),
+              }
+            : {})}
+        />
         <FactRow label="产品目录" value={system?.productsDir} mono />
         {/* 目录**可以改了**（owner 2026-09-04 定；TD-039 由「不给改」改写为
             「重启期迁移」）。搬移发生在下一次启动、开库之前 —— 那一刻没有任何

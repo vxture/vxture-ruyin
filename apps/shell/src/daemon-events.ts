@@ -5,7 +5,12 @@
  * parsing that main.ts's streamDaemonEvents() drives.
  */
 
-export type DaemonEventKind = "task" | "pending" | "ui-theme" | "app-restart";
+export type DaemonEventKind =
+  | "task"
+  | "pending"
+  | "ui-theme"
+  | "app-restart"
+  | "app-open-data-dir";
 
 export interface DaemonEventFrame {
   kind: DaemonEventKind;

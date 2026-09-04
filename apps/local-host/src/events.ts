@@ -27,7 +27,15 @@ export type RuntimeEvent =
    * Web 客户端）。用在数据目录搬家上：搬家必须在开库之前做，所以只能是「下次
    * 启动时搬」，而用户按下确认之后总得有人真的把应用重开一次。
    */
-  | { kind: "app-restart" };
+  | { kind: "app-restart" }
+  /**
+   * 请壳在资源管理器里打开数据目录。**事件不带路径** —— 照本总线的规矩：只说
+   * 什么发生了，不说是什么。壳收到之后自己去 `GET /system` 取 `dataDir`。
+   *
+   * 这不只是为了守规矩：路径要是跟着事件走，界面就成了「让壳打开任意目录」的
+   * 一条通路。而界面是纯 Web 客户端 —— 同一个页面在浏览器里也开着。
+   */
+  | { kind: "app-open-data-dir" };
 
 type Listener = (event: RuntimeEvent) => void;
 

@@ -594,6 +594,14 @@ async function handle(
     return;
   }
 
+  // POST /ui/open-data-dir - 请壳在资源管理器里打开数据目录。同上：只发事件，
+  // **不接受路径参数** —— 打开哪个目录由守护进程说，界面无权指定。
+  if (method === "POST" && path === "/ui/open-data-dir") {
+    deps.events?.publish({ kind: "app-open-data-dir" });
+    send(res, 202, { ok: true });
+    return;
+  }
+
   // --- 界面主题中转（壳画窗口按钮，看不见页面）---
   if (method === "GET" && path === "/ui/theme") {
     send(res, 200, { theme: deps.chromeTheme?.get() ?? "dark" });

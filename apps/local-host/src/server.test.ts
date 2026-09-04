@@ -1026,3 +1026,24 @@ test("ui restart: 请壳重启就是发一条事件 —— 界面是纯 Web 客�
     closeRig(rig);
   }
 });
+
+test("ui open-data-dir: 只发一条不带路径的事件 —— 打开哪个目录由守护进程说", async () => {
+  const events = new EventBus();
+  const seen: unknown[] = [];
+  events.subscribe((e) => seen.push(e));
+  const rig = await startServer({ events });
+  try {
+    const res = await fetch(`${rig.base}/ui/open-data-dir`, {
+      method: "POST",
+      headers: rig.json,
+      // 界面就算硬塞一个路径进来，也不该有任何效果。
+      body: JSON.stringify({ path: "C:\Windows\System32" }),
+    });
+    assert.equal(res.status, 202);
+    // 事件里**只有 kind**：路径要是跟着事件走，界面就成了「让壳打开任意目录」
+    // 的一条通路，而同一个页面在浏览器里也开着。
+    assert.deepEqual(seen, [{ kind: "app-open-data-dir" }]);
+  } finally {
+    closeRig(rig);
+  }
+});
