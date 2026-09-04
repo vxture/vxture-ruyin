@@ -675,3 +675,18 @@ void test("Scrollbars: any scroll marks the document as scrolling, and the mark 
     vi.useRealTimers();
   }
 });
+
+void test("Workbench: 认不出来的地址什么也不做 —— 不清空视图，也不跳回首页", async () => {
+  const { Workbench } = await import("./workbench");
+  render(<Workbench api={fakeApi()} />);
+  await screen.findByTestId("home-stub");
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "设置" }));
+  expect(await screen.findByTestId("settings-stub")).toBeInTheDocument();
+
+  // 地址栏里可能出现谁也不认识的东西（手改、旧链接、外部跳转）。那种情况下
+  // **停在原地**比回首页好：用户没有要求换页，把他正在看的东西换掉才是意外。
+  window.location.hash = "nope/whatever";
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  expect(screen.getByTestId("settings-stub")).toBeInTheDocument();
+});
