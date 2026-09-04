@@ -212,13 +212,44 @@ function PrivacySection({ system }: { system: SystemInfo | null }) {
         <SettingRow label="产品目录">
           <span className="mono">{system?.productsDir ?? "…"}</span>
         </SettingRow>
-        <SettingRow label="静态加密" hint="每个项目独立密钥，SQLCipher 加密">
+{/* 加密链写在这里而不是首页那张卡上：卡是「不出事就不必看」的指示灯，
+            这里才是想核实的人会来的地方。**不写「三次加密」** —— 数据只加密一次，
+            另外两层是密钥怎么被锁起来；把层数说成加密次数，在有人核实的那一刻
+            会反过来伤掉信任（owner 2026-09-04 问及说服力时定的口径）。 */}
+        <SettingRow
+          label="静态加密"
+          hint="业务数据落盘即加密。一次加密，密钥再套两层保护 —— 每层各自保护什么，逐条写在下面"
+        >
           {system ? (
-            system.keyProtection === "dpapi" ? (
-              <StatusBadge tone="success">主密钥由 Windows DPAPI 保护</StatusBadge>
-            ) : (
-              <StatusBadge tone="warning">开发态：主密钥明文存储</StatusBadge>
-            )
+            <>
+              <ul className="crypto-chain">
+                <li>
+                  <span className="crypto-what">业务数据</span>
+                  <span className="crypto-how">每个项目库整库加密 · SQLCipher（AES-256）</span>
+                </li>
+                <li>
+                  <span className="crypto-what">库密钥</span>
+                  <span className="crypto-how">一库一把随机密钥 · AES-256-GCM 封装在主密钥下</span>
+                </li>
+                <li>
+                  <span className="crypto-what">主密钥</span>
+                  <span className="crypto-how">
+                    {system.keyProtection === "dpapi"
+                      ? "Windows DPAPI 保护（当前用户作用域），不落明文"
+                      : "明文存放 —— 本平台没有 OS 级密钥保护"}
+                  </span>
+                </li>
+              </ul>
+              {/* 说清楚哪些**没**加密，比多列两个算法名更能说明这段话可信。 */}
+              <p className="crypto-note">
+                会话凭证由主密钥单独密封；产品契约与本机配置不加密 —— 它们按设计就是公开信息。
+              </p>
+              {system.keyProtection === "dpapi" ? (
+                <StatusBadge tone="success">主密钥由 Windows DPAPI 保护</StatusBadge>
+              ) : (
+                <StatusBadge tone="warning">开发态：主密钥明文存储，不可用于真实数据</StatusBadge>
+              )}
+            </>
           ) : (
             "…"
           )}

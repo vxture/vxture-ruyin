@@ -1017,3 +1017,32 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   color: var(--primary-foreground, #fff);
   background: var(--primary, var(--color-primary, #4f7cff));
 }
+
+/* 加密链：三行「保护什么 → 怎么保护」。左列定宽，三行的机制名对齐成一列，
+   扫下来是一条链而不是三句话。 */
+.crypto-chain {
+  list-style: none;
+  margin: 0 0 var(--spacing-xs);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.crypto-chain li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  font-size: var(--body-sm-font-size);
+}
+.crypto-what {
+  flex: 0 0 4.5em;
+  color: var(--foreground);
+  font-weight: 600;
+}
+.crypto-how { color: var(--muted-foreground); min-width: 0; }
+.crypto-note {
+  margin: 0 0 var(--spacing-xs);
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+  opacity: 0.85;
+}
