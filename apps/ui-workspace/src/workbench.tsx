@@ -44,7 +44,7 @@ import {
 import { Api, type ProductInfo, type ProjectMeta, type SessionInfo } from "./api";
 import { TenantMenu } from "./tenant-menu";
 import { PROJECT_TABS, type TabId } from "./workspace-tabs";
-import { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
+import { SETTINGS_SECTIONS, resolveSection, type SectionId } from "./settings-sections";
 import { DEMO_RECENT } from "./catalog";
 import { UserSlot } from "./user";
 import { PendingInbox, usePending } from "./pending";
@@ -194,29 +194,54 @@ export function Workbench({ api }: { api: Api }) {
     return () => window.removeEventListener("focus", onFocus);
   }, [api]);
 
-  const navigate = useCallback((href: string) => {
-    if (href === "#home") setView({ kind: "home" });
-    else if (href.startsWith("#settings")) {
-      const section = href.slice(10);
-      setView({
-        kind: "settings",
-        section: SETTINGS_SECTIONS.some((x) => x.id === section)
-          ? (section as SectionId)
-          : "account",
-      });
+  /**
+   * 按地址取视图。**纯函数**，因为地址要能从三个方向进来：点侧栏、页内跳转
+   * （`window.location.hash = ...`）、以及启动时地址栏里本来就有的那一段。
+   */
+  const viewOf = useCallback((href: string): View | null => {
+    if (href === "#home" || href === "" || href === "#") return { kind: "home" };
+    if (href.startsWith("#settings")) {
+      // resolveSection 认得侧栏之外的地址（添加连接器）与已经搬走的旧地址。
+      return { kind: "settings", section: resolveSection(href.slice(10)) };
     }
-    else if (href.startsWith("#ws/")) {
+    if (href.startsWith("#ws/")) {
       const [id, tab] = href.slice(4).split("/");
-      if (id) setView({ kind: "workspace", id, tab: isTab(tab ?? "") ? (tab as TabId) : "overview" });
+      if (id) return { kind: "workspace", id, tab: isTab(tab ?? "") ? (tab as TabId) : "overview" };
     }
+    return null;
   }, []);
+
+  /**
+   * 换页 = **换地址**（owner 2026-09-04 第 5 条）。
+   *
+   * 之前 navigate 只改 React 状态，地址栏一动不动：于是「独立一页」只是同一页
+   * 换了内容 —— 返回键回不去、地址复制不出来、刷新回到首页。现在写 hash，由下面
+   * 那个 hashchange 统一落到视图上，只有一条路径。
+   */
+  const navigate = useCallback((href: string) => {
+    if (!viewOf(href)) return;
+    if (window.location.hash === href) setView(viewOf(href) as View);
+    else window.location.hash = href.slice(1);
+  }, [viewOf]);
+
+  useEffect(() => {
+    const apply = () => {
+      const next = viewOf(window.location.hash);
+      if (next) setView(next);
+    };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+  }, [viewOf]);
 
   const openProject = useCallback(
     async (id: string) => {
       await refreshSidebar();
-      setView({ kind: "workspace", id, tab: "overview" });
+      // 走地址，不直接改状态：否则地址栏还停在上一页，下一次 hashchange
+      // 会把视图弹回去 —— 地址是权威，就只能有一个人写它。
+      navigate(`#ws/${id}`);
     },
-    [refreshSidebar],
+    [refreshSidebar, navigate],
   );
 
   // Nav link element: state routing behind ordinary anchors, so the DS nav
@@ -483,7 +508,7 @@ export function Workbench({ api }: { api: Api }) {
               用户先找对地方，而那正是这条要修的问题。 */}
           <PendingInbox
             rows={pending}
-            onOpen={(id) => setView({ kind: "workspace", id, tab: "overview" })}
+            onOpen={(id) => navigate(`#ws/${id}`)}
           />
           {/* 「安装桌面应用」（PWA）已移除，理由见 login.tsx 同处注释。 */}
           <ShellIconButton
@@ -630,7 +655,7 @@ export function Workbench({ api }: { api: Api }) {
               products={products}
               workspaces={workspaces}
               health={health}
-              onOpen={(id) => setView({ kind: "workspace", id, tab: "overview" })}
+              onOpen={(id) => navigate(`#ws/${id}`)}
               onCreated={openProject}
               onRefresh={refreshSidebar}
               onError={setError}

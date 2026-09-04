@@ -539,33 +539,49 @@ body {
 /* （.settings / .settings-nav / .settings-content 已随页内那根竖直导航一并
    删除：设置有了自己的框架，分区在侧栏里。留着这些规则，下一个人会以为页面
    里还该有第二根导航。） */
-/* 设置行：纵向布局（owner 2026-09-03 定，全局统一）。名称一行、说明一行（整行宽，
-   不再挤在一个窄列里换行）、控件在下面一行；页面高度够，纵向排反而清楚。
-   控件等宽：所有控件占同一个宽度，扫下来是一列而不是参差的几块。 */
 /* ---------- 单行类的行：一处定义，账户 / 通用设置 / 软件更新 共用 ----------
    行高一个值、虚下划线一种画法（owner 2026-09-04 第 7 条：全局一致）。
    `.setting-row` 与 `.fact-row` 都是它的皮肤 —— 一个放控件，一个放事实，
    但行高、分隔线、名称列的宽度必须一样，否则同一个设置页里三种页面三种节奏。 */
+/* 度量取自参考稿《账号信息页重排方案》第三节：名称列 96px、控件统一 280px
+   定宽（**不全宽**）、行最小高 44px、行间虚线、面头与内容之间一条实线。 */
 :root {
   --set-row-h: 44px;
-  --set-label-w: 7.5em;
-  --set-control-w: 320px;
+  --set-label-w: 96px;
+  --set-control-w: 280px;
 }
 .set-row {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-md);
   min-height: var(--set-row-h);
+  /* 4px 而不是 8px：控件本身 36px，加 8+8 会把这一行顶到 52，于是带控件的行
+     比纯文字行高一截 —— 全局一个行高（owner 第 7 条）就得让 36+4+4 正好落在
+     44 上，纯文字行则由 min-height 撑到同一个值。 */
   padding: var(--spacing-2xs) 0;
-  border-top: 1px dashed var(--border);
+  /* 线画在**下面**，每一行都有 —— 画在上面时最后一行就没有线，那正是
+     owner 2026-09-04 第 1 条说的「不一致」。 */
+  border-bottom: 1px dashed var(--border);
   font-size: var(--body-sm-font-size);
   min-width: 0;
 }
-.set-row:first-child { border-top: none; }
 .set-row-label { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
-/* 控件列定宽：四项**严格对齐**，滑块铺满这一格（owner 第 6 条）。 */
 .set-row-control { flex: 0 0 var(--set-control-w); min-width: 0; }
 .set-row-control > * { width: 100%; }
+/* 分段控件：**选项自己等分容器**。DS 的项是 `flex: 0 1 auto`，于是三个 44px
+   的项挤在 280px 的左边、右边空着（owner 第 4 条，实测 320px 容器里内容
+   132px）。选中态改成实心主色 + 白字：原来是 `--primary` 当文字色压在深色
+   卡上，实测 2.65:1，暗色下读不出来（第 3 条）；白字压主色两种模式都 5.71:1。 */
+.set-row-control [role="radiogroup"] { display: flex; }
+.set-row-control [role="radiogroup"] > [role="radio"] {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+}
+.set-row-control [role="radiogroup"] > [role="radio"][aria-checked="true"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
 .set-row-value { min-width: 0; word-break: break-word; }
 /* 说明单独一行、整行宽 —— 不再挤进名称列里换行（owner 第 10 条）。 */
 .set-row-note {
@@ -576,34 +592,8 @@ body {
   max-width: 62em;
 }
 
-.setting-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-xs);
-  padding: var(--spacing-md) 0;
-  border-top: 1px dashed var(--border);
-}
-.setting-row:first-child { border-top: none; padding-top: var(--spacing-xs); }
-.setting-row:last-child { padding-bottom: var(--spacing-xs); }
-.setting-label { font-weight: 600; }
-.setting-hint {
-  font-weight: 400;
-  color: var(--muted-foreground);
-  font-size: var(--body-sm-font-size);
-  margin-top: 2px;
-  max-width: 60em;
-}
-.setting-control {
-  min-width: 0;
-  width: 100%;
-  max-width: 420px;
-}
-/* 等宽只对表单控件（分段、下拉、输入框），徽章 / 文字 / 链接按内容宽。 */
-.setting-control > :is([role="radiogroup"], .sel-lang, .sel-narrow, input, select, textarea) { width: 100%; }
-.setting-control .sel-lang,
-.setting-control .sel-narrow { width: 100%; }
-.setting-value { font-size: var(--body-md-font-size); }
-.setting-link { color: var(--primary-text, var(--foreground)); text-decoration: underline; word-break: break-all; }
+/* （`.setting-row` 那套纵向行已删：最后一个用它的地方是「更新渠道」，改成
+   共用的 `.set-row` 之后就没人用了。留着它，下一个人会以为设置页有两种行。） */
 
 /* 账户页：头像 + 姓名 / 邮箱 + 右侧「在线修改」。 */
 .account-head {
@@ -1058,26 +1048,27 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 
 /* 加密链：三行「保护什么 → 怎么保护」。左列定宽，三行的机制名对齐成一列，
    扫下来是一条链而不是三句话。 */
+/* 加密链的三行走**和别处一样的行**：此前它自己一套（4.5em 的名称列、没有
+   分隔线），于是「数据加密」这一块的标题与内容对不上其他板块（owner 第 2 条）。 */
 .crypto-chain {
   list-style: none;
-  margin: 0 0 var(--spacing-xs);
+  margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 .crypto-chain li {
   display: flex;
-  align-items: baseline;
-  gap: var(--spacing-sm);
+  align-items: center;
+  gap: var(--spacing-md);
+  min-height: var(--set-row-h);
+  /* 4px 而不是 8px：控件本身 36px，加 8+8 会把这一行顶到 52，于是带控件的行
+     比纯文字行高一截 —— 全局一个行高（owner 第 7 条）就得让 36+4+4 正好落在
+     44 上，纯文字行则由 min-height 撑到同一个值。 */
+  padding: var(--spacing-2xs) 0;
+  border-bottom: 1px dashed var(--border);
   font-size: var(--body-sm-font-size);
 }
-.crypto-what {
-  flex: 0 0 4.5em;
-  color: var(--foreground);
-  font-weight: 600;
-}
-.crypto-how { color: var(--muted-foreground); min-width: 0; }
+.crypto-what { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
+.crypto-how { min-width: 0; }
 .crypto-note {
   margin: 0 0 var(--spacing-xs);
   font-size: var(--body-sm-font-size);
@@ -1119,7 +1110,14 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   max-width: 62em;
 }
 .set-block-aside { flex-shrink: 0; }
-.set-block-body { padding-left: 32px; min-width: 0; }
+/* 面头与内容之间一条**浅色实线**（owner 第 1 条）：说明是解释，下面是事实，
+   两者之间要有一道边界。内容再缩一档（参考稿的 L3）。 */
+.set-block-body {
+  padding-left: 32px;
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
 .set-note {
   margin: var(--spacing-xs) 0 0;
   font-size: var(--body-sm-font-size);
@@ -1133,13 +1131,15 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 .fact-row {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-md);
   min-height: var(--set-row-h);
+  /* 4px 而不是 8px：控件本身 36px，加 8+8 会把这一行顶到 52，于是带控件的行
+     比纯文字行高一截 —— 全局一个行高（owner 第 7 条）就得让 36+4+4 正好落在
+     44 上，纯文字行则由 min-height 撑到同一个值。 */
   padding: var(--spacing-2xs) 0;
-  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
   font-size: var(--body-sm-font-size);
 }
-.fact-row:first-child { border-top: none; }
 .fact-label { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
 .fact-value { min-width: 0; word-break: break-word; }
 /* 同一行里的第二段事实（工作区跟在租户后面，owner 第 4 条）：用一个淡分隔点。 */

@@ -48,6 +48,10 @@ vi.mock("./settings-sections", () => ({
     { id: "updates", label: "软件更新", icon: "arrow-down" },
     { id: "about", label: "关于", icon: "info" },
   ],
+  // 路由要靠它认地址（含侧栏里没有的「添加连接器」），所以桩里必须有它 ——
+  // 少了它这条 mock 会在点击时才炸，而不是在加载时。
+  resolveSection: (id: string) =>
+    id === "privacy" ? "general" : id === "connectors-add" ? "connectors-add" : id || "account",
 }));
 vi.mock("./settings", () => ({
   SettingsView: ({ section }: { section: string }) => (
@@ -143,6 +147,9 @@ function fakeApi(over: Partial<Api> = {}): Api {
 vi.setConfig({ testTimeout: 30_000 });
 
 beforeEach(() => {
+  // 地址是路由的权威，所以它也是**测试之间会串味的状态**：上一个用例停在
+  // `#settings/account`，下一个 render 出来就直接是设置页。每个用例从首页起。
+  window.location.hash = "";
   globalThis.fetch = vi.fn().mockResolvedValue(
     new Response(JSON.stringify({ ok: true, version: "0.2.0" }), {
       status: 200,
