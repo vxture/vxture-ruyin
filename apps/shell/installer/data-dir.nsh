@@ -66,6 +66,14 @@ Function RuyinDataDirPageShow
   ; 指针说，安装器不参与。
   IfFileExists "$RuyinPointerFile" skipDataDirPage 0
 
+  ; **有数据但没有指针**，也不出现。这不是假想：指针文件是这一版才有的东西，
+  ; 所以每一个从旧版升级上来的用户都正好是这个状态（本机 2026-09-05 实测就是
+  ; 如此：`%APPDATA%\Ruyin\data\runtime\master.key.dpapi` 在，指针不在）。
+  ; 那时候让他在这一页改目录，应用会去新的空目录起来，而他的项目库连同解开
+  ; 它们的主密钥一起留在原处、界面上看不见 —— 那就是「升级之后东西没了」。
+  ; 换目录要走设置里那条会真的搬移的路（TD-039），不是装机时改个指针。
+  IfFileExists "$APPDATA\Ruyin\data\runtime\*.*" skipDataDirPage 0
+
   nsDialogs::Create 1018
   Pop $RuyinDataDirPage
   ${If} $RuyinDataDirPage == error
@@ -81,7 +89,12 @@ Function RuyinDataDirPageShow
   ${NSD_CreateLabel} 0 14u 100% 34u "RUYIN 的业务数据（项目库、产品库、密钥）会放在下面这个目录。数据整库加密，密钥按当前 Windows 用户封装 —— 所以请选一个只有你自己使用的位置，不要选可移动磁盘或共享目录。装好之后也可以在设置里改。"
   Pop $0
 
-  ${NSD_CreateDirRequest} 0 54u 75% 12u "$LOCALAPPDATA\Ruyin\data"
+  ; 默认值必须**与应用真正用的位置一字不差**：应用用的是 `join(userData, "data")`，
+  ; 而 Windows 上 Electron 的 userData 是漫游的 `%APPDATA%\Ruyin`（由 main.ts 里
+  ; `app.setName("Ruyin")` 决定）。上一版这里写的是 `$LOCALAPPDATA` —— 页面上说
+  ; 数据会去 Local、实际却去了 Roaming，而且因为「与默认值不同」还会多写一个
+  ; 指针。界面说的地方和东西真去的地方必须是同一个。
+  ${NSD_CreateDirRequest} 0 54u 75% 12u "$APPDATA\Ruyin\data"
   Pop $RuyinDataDirField
 
   ${NSD_CreateButton} 80% 53u 20% 14u "浏览…"
@@ -114,7 +127,7 @@ FunctionEnd
   ${EndIf}
 
   ${If} $RuyinDataDirValue != ""
-  ${AndIf} $RuyinDataDirValue != "$LOCALAPPDATA\Ruyin\data"
+  ${AndIf} $RuyinDataDirValue != "$APPDATA\Ruyin\data"
     ; 用户真的改过默认值才落指针。JSON 里的反斜杠要转义 —— 直接写
     ; "D:\RuyinData" 会变成一个非法的 JSON 字符串，应用读不出来就回落默认，
     ; 于是用户的选择静默失效。
