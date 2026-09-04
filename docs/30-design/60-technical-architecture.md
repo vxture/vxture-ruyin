@@ -234,7 +234,7 @@ Checkpoint 语义     同一 runtime-core                 → 构造保证
 └── workspaces/
     └── ws_<id>/
         ├── workspace.db         SQLite（SQLCipher 加密）
-        ├── files/               文件区（内容寻址，哈希命名）
+        ├── files/               文件区（内容寻址，哈希命名）—— **未实现，TD-041**
         └── exports/             用户导出区
 ```
 
@@ -262,7 +262,8 @@ Checkpoint 语义     同一 runtime-core                 → 构造保证
 ```text
 workspace.db → SQLCipher 静态加密
 密钥 → 每 Workspace 独立 → 主密钥封装 → OS 凭据库（Windows Credential Manager / DPAPI）
-files/ 区 → 同密钥体系加密
+files/ 区 → 同密钥体系加密（**未实现，TD-041**：原件目前不进数据目录，
+              参考资料按目录授权从用户自己的位置读，抽出的内容进 project.db）
 ```
 
 ---
