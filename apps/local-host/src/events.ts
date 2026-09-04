@@ -21,7 +21,13 @@ export type RuntimeEvent =
    * preload。收到之后壳自己去 `GET /ui/theme` 取值，照本总线的规矩：只说
    * 什么变了，不说变成了什么。
    */
-  | { kind: "ui-theme" };
+  | { kind: "ui-theme" }
+  /**
+   * 请壳重启应用。**壳是唯一的消费者**，也是唯一有能力做这件事的人（界面是纯
+   * Web 客户端）。用在数据目录搬家上：搬家必须在开库之前做，所以只能是「下次
+   * 启动时搬」，而用户按下确认之后总得有人真的把应用重开一次。
+   */
+  | { kind: "app-restart" };
 
 type Listener = (event: RuntimeEvent) => void;
 

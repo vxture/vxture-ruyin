@@ -262,6 +262,23 @@ const WRAPPER_CASES: WrapperCase[] = [
     path: "/connectors/crm/activate",
   },
   { name: "removeConnector", call: (api) => api.removeConnector("crm"), method: "DELETE", path: "/connectors/crm" },
+  {
+    // 数据目录搬家（TD-039）：校验、排队、撤销、请壳重启，四个各一条路。
+    name: "checkDataDir",
+    call: (api) => api.checkDataDir("D:\RuyinData"),
+    method: "POST",
+    path: "/system/data-dir/check",
+    body: { target: "D:\RuyinData" },
+  },
+  {
+    name: "requestDataDir",
+    call: (api) => api.requestDataDir("D:\RuyinData"),
+    method: "POST",
+    path: "/system/data-dir",
+    body: { target: "D:\RuyinData" },
+  },
+  { name: "cancelDataDir", call: (api) => api.cancelDataDir(), method: "DELETE", path: "/system/data-dir" },
+  { name: "restartApp", call: (api) => api.restartApp(), method: "POST", path: "/ui/restart" },
   { name: "audit", call: (api) => api.audit("prj_1"), method: "GET", path: "/projects/prj_1/audit" },
   {
     name: "contextItems",

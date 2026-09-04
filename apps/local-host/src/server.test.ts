@@ -929,3 +929,100 @@ test("ui theme relay: GET defaults to dark, POST stores it and publishes once pe
     rig.server.close();
   }
 });
+
+test("data dir move: 校验→排队→撤销三步；排队之前再校验一次，不给必定失败的搬家排队", async () => {
+  const calls: string[] = [];
+  let pending: string | undefined;
+  // 「目标可用不可用」由宿主那一侧真的去摸文件系统（data-location.ts），这里
+  // 钉的是**路由的行为**：谁在什么时候被问、拒绝时给什么状态码。
+  const rig = await startServer({
+    dataMove: {
+      check: (target: string) => {
+        calls.push(`check:${target}`);
+        return target === "D:\ok"
+          ? { ok: true, sameVolume: false, bytes: 1024 }
+          : { ok: false, reason: "目标目录里已经有东西了。" };
+      },
+      request: (target: string) => {
+        calls.push(`request:${target}`);
+        pending = target;
+      },
+      cancel: () => {
+        calls.push("cancel");
+        pending = undefined;
+      },
+    },
+  });
+  try {
+    const post = (path: string, body: unknown) =>
+      fetch(`${rig.base}${path}`, { method: "POST", headers: rig.json, body: JSON.stringify(body) });
+
+    const bad = await post("/system/data-dir/check", { target: "D:\taken" });
+    assert.equal(bad.status, 200);
+    assert.equal(((await bad.json()) as { reason: string }).reason, "目标目录里已经有东西了。");
+    // 校验没有副作用：问一句不该把任何东西排上队。
+    assert.equal(pending, undefined);
+
+    const refused = await post("/system/data-dir", { target: "D:\taken" });
+    assert.equal(refused.status, 400);
+    assert.equal(((await refused.json()) as { code: string }).code, "DATA_DIR_UNUSABLE");
+    assert.equal(pending, undefined);
+
+    const queued = await post("/system/data-dir", { target: "D:\ok" });
+    assert.equal(queued.status, 202);
+    assert.deepEqual(await queued.json(), {
+      pending: "D:\ok",
+      ok: true,
+      sameVolume: false,
+      bytes: 1024,
+    });
+    assert.equal(pending, "D:\ok");
+
+    const cancelled = await fetch(`${rig.base}/system/data-dir`, {
+      method: "DELETE",
+      headers: rig.headers,
+    });
+    assert.equal(cancelled.status, 200);
+    assert.equal(pending, undefined);
+    // 排队之前那一次校验是**独立的一次**：界面那次与这次之间隔着用户的犹豫，
+    // 目录可能已经不是原来的样子了。
+    assert.deepEqual(calls, [
+      "check:D:\taken",
+      "check:D:\taken",
+      "check:D:\ok",
+      "request:D:\ok",
+      "cancel",
+    ]);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+test("data dir move: 宿主没注入搬家能力时，这几个端点根本不存在", async () => {
+  const rig = await startServer({});
+  try {
+    const check = await fetch(`${rig.base}/system/data-dir/check`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ target: "D:\ok" }),
+    });
+    // 404 而不是「假装排上了」：没有指针文件的部署搬不了家，说清楚比含糊好。
+    assert.equal(check.status, 404);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+test("ui restart: 请壳重启就是发一条事件 —— 界面是纯 Web 客户端，做不到这件事", async () => {
+  const events = new EventBus();
+  const seen: string[] = [];
+  events.subscribe((e) => seen.push(e.kind));
+  const rig = await startServer({ events });
+  try {
+    const res = await fetch(`${rig.base}/ui/restart`, { method: "POST", headers: rig.headers });
+    assert.equal(res.status, 202);
+    assert.deepEqual(seen, ["app-restart"]);
+  } finally {
+    closeRig(rig);
+  }
+});

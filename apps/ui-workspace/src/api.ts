@@ -170,7 +170,8 @@ export type RuntimeEvent =
   | { kind: "task"; projectId: string; taskInstance: string }
   | { kind: "pending" }
   /** 界面主题变了；壳据此重画窗口按钮（见 chrome-theme.ts）。 */
-  | { kind: "ui-theme" };
+  | { kind: "ui-theme" }
+  | { kind: "app-restart" };
 
 export interface StateItem {
   name: string;
@@ -420,6 +421,26 @@ export interface SystemInfo {
    */
   capabilitySurface: "configured" | "mock";
   startedAt: string;
+  /** 排着一次搬家（重启时生效）。TD-039。 */
+  dataDirPending?: string;
+  /** 上一次搬家的结果 —— 重启后要能说清楚成没成。 */
+  lastMove?: {
+    status: "moved" | "failed" | "none";
+    from?: string;
+    to?: string;
+    at?: string;
+    reason?: string;
+  };
+}
+
+/** 目标目录能不能用。守护进程算，界面照抄 —— 只有它摸得到文件系统。 */
+export interface DataDirCheck {
+  ok: boolean;
+  reason?: string;
+  /** 同卷（改名，瞬间完成）还是跨卷（复制 + 核对，要等）。 */
+  sameVolume?: boolean;
+  bytes?: number;
+  freeBytes?: number;
 }
 
 export class ApiError extends Error {
@@ -627,6 +648,18 @@ export class Api {
   contextItems = (id: string, type: string) =>
     this.call<ContextItemMeta[]>(`/projects/${id}/context/${type}`);
   system = () => this.call<SystemInfo>("/system");
+  /** 目标目录能不能用。**没有副作用** —— 用户按确认之前先问这一句。 */
+  checkDataDir = (target: string) =>
+    this.call<DataDirCheck>("/system/data-dir/check", "POST", { target });
+  /**
+   * 排一次搬家。真正的搬移发生在**下一次启动、开库之前**（TD-039）——
+   * 这里只写下意图，所以这个调用不会动任何数据。
+   */
+  requestDataDir = (target: string) =>
+    this.call<{ pending: string } & DataDirCheck>("/system/data-dir", "POST", { target });
+  cancelDataDir = () => this.call<{ pending: null }>("/system/data-dir", "DELETE");
+  /** 请壳重启（界面自己做不到）。搬家要靠它才能生效。 */
+  restartApp = () => this.call<{ ok: boolean }>("/ui/restart", "POST");
   /**
    * 上报生效主题，供壳给 Windows 的窗口按钮上色。**中转，不是设置** ——
    * 偏好本身存在本机 localStorage（DS 的 ThemeProvider）。

@@ -19,6 +19,7 @@ import {
   shell,
   utilityProcess,
 } from "electron";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -68,11 +69,46 @@ const daemonEntry = app.isPackaged
 const productsDir = app.isPackaged
   ? join(process.resourcesPath, "products")
   : join(repoRoot, "products");
-const dataDir =
-  process.env["RUYIN_DATA_DIR"] ??
-  (app.isPackaged
-    ? join(app.getPath("userData"), "data")
-    : join(homedir(), ".ruyin", "dev"));
+/**
+ * 数据目录搬家（TD-039）：**指针文件是权威，壳只是把它读出来交给守护进程。**
+ *
+ * 指针放在 userData 根下（装机态）——它必须待在一个不跟着数据搬走的地方，否则
+ * 搬完就找不到「搬到哪儿了」。真正的搬移由守护进程在开库之前做，壳不碰数据。
+ */
+const locationFile = app.isPackaged
+  ? join(app.getPath("userData"), "location.json")
+  : join(homedir(), ".ruyin", "location.json");
+const defaultDataDir = app.isPackaged
+  ? join(app.getPath("userData"), "data")
+  : join(homedir(), ".ruyin", "dev");
+function pointedDataDir(): string {
+  let pointed: string | undefined;
+  try {
+    const raw = JSON.parse(readFileSync(locationFile, "utf8")) as { dataDir?: string };
+    if (typeof raw.dataDir === "string" && raw.dataDir.trim()) pointed = raw.dataDir;
+  } catch {
+    // 没有指针、或者写坏了：按默认目录走。守护进程会重建这个文件。
+  }
+  if (!pointed) return defaultDataDir;
+  // **指针不等于承诺。** 它可能指向一块已经拔掉的移动硬盘、一个被删掉的目录、
+  // 或者安装器写下之后又被改成只读的位置。这里当场验一下能不能建、能不能写：
+  // 验不过就用默认目录起来（应用能用，用户能在设置里改），而不是让守护进程在
+  // 开库那一步崩掉 —— 那看起来就是「装完打不开」。
+  try {
+    mkdirSync(pointed, { recursive: true });
+    const probe = join(pointed, ".ruyin-write-probe");
+    writeFileSync(probe, "probe");
+    rmSync(probe, { force: true });
+    return pointed;
+  } catch (e) {
+    console.error(
+      `[ruyin] data dir ${pointed} is unusable (${(e as Error).message}); falling back to ${defaultDataDir}`,
+    );
+    return defaultDataDir;
+  }
+}
+// 显式的环境变量仍然最高优先（开发与 CI 靠它把目录钉住）。
+const dataDir = process.env["RUYIN_DATA_DIR"] ?? pointedDataDir();
 
 let daemon: Electron.UtilityProcess | undefined;
 let stopping = false;
@@ -103,6 +139,7 @@ function startDaemon(): Electron.UtilityProcess {
       RUYIN_PORT: String(PORT),
       RUYIN_TOKEN: TOKEN,
       RUYIN_DATA_DIR: dataDir,
+      RUYIN_LOCATION_FILE: locationFile,
       RUYIN_PRODUCTS_DIR: productsDir,
       // 冒烟时守护进程会真的排一份 PDF，走完整条 IPC + Chromium 链路。
       ...(SMOKE ? { RUYIN_SMOKE: "1" } : {}),
@@ -383,6 +420,12 @@ function openWindow(): void {
   };
   const stopThemeSync = onDaemonEvent((kind) => {
     if (kind === "ui-theme") void syncCaptionOverlay();
+    // 数据目录搬家只能在开库之前做，所以「生效」= 重启一次。界面按下确认之后
+    // 由守护进程发这条事件，壳来真的重开 —— 界面是纯 Web 客户端，做不到。
+    if (kind === "app-restart") {
+      app.relaunch();
+      app.quit();
+    }
   });
   win.on("closed", stopThemeSync);
   // 启动时问一次：界面渲染第一帧就会上报，但那一次可能发生在壳订阅之前。

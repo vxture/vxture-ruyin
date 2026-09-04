@@ -45,12 +45,39 @@ import { fetchContract } from "./contract-fetch.js";
 import { EventBus } from "./events.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
+import {
+  applyPendingMove,
+  checkTarget,
+  readLocation,
+  writeLocation,
+} from "./data-location.js";
 
 const VERSION = "0.1.0";
 
-const dataDir = resolve(
+/**
+ * 指针文件：**数据目录搬到哪儿了，权威在这里**（TD-039）。它必须待在一个不会
+ * 跟着数据一起搬走的地方 —— 宿主给（装机态是 userData 根，与数据目录同级但不
+ * 在其中）；没给就落到开发态的默认位置。
+ */
+const locationFile = resolve(
+  process.env["RUYIN_LOCATION_FILE"] ?? join(homedir(), ".ruyin", "location.json"),
+);
+const fallbackDataDir = resolve(
   process.env["RUYIN_DATA_DIR"] ?? join(homedir(), ".ruyin", "dev"),
 );
+/**
+ * 搬家在这一行发生 —— **在 KeyManager 与 SqliteStoragePort 之前**，也就是在
+ * 任何库被打开之前。这个顺序是整件事成立的前提，别把它挪到下面去（data-location.ts
+ * 的头注释写了为什么）。
+ */
+const moved = applyPendingMove(locationFile, fallbackDataDir);
+const dataDir = moved.dataDir;
+if (moved.movedNow && moved.outcome.status === "moved") {
+  console.log(`[ruyin] data dir moved: ${moved.outcome.from} -> ${moved.outcome.to}`);
+} else if (moved.movedNow && moved.outcome.status === "failed") {
+  // 如实播报并从原目录启动：一次失败的搬家不该换来一个空应用。
+  console.error(`[ruyin] data dir move FAILED: ${moved.outcome.reason ?? ""}`);
+}
 const productsDir = resolve(process.env["RUYIN_PRODUCTS_DIR"] ?? "products");
 const port = Number(process.env["RUYIN_PORT"] ?? 7420);
 const token = process.env["RUYIN_TOKEN"] ?? randomBytes(24).toString("hex");
@@ -209,6 +236,22 @@ const server = createLocalApi({
       chromeTheme = theme;
     },
   },
+  // 搬家的三个动作都落在宿主这一侧：守护进程知道目录布局，指针文件的位置由
+  // 宿主给（见 locationFile）。校验没有副作用，请求只写意图 —— 真正的搬移永远
+  // 发生在下一次启动的那一行。
+  dataMove: {
+    check: (target: string) => checkTarget(dataDir, target),
+    request: (target: string) => {
+      writeLocation(locationFile, { dataDir, pending: resolve(target) });
+    },
+    cancel: () => {
+      const loc = readLocation(locationFile);
+      writeLocation(locationFile, {
+        dataDir,
+        ...(loc.lastMove ? { lastMove: loc.lastMove } : {}),
+      });
+    },
+  },
   systemInfo: {
     version: VERSION,
     platform: process.platform,
@@ -218,6 +261,15 @@ const server = createLocalApi({
     keyProtection: keys.protection,
     capabilitySurface: capabilityBase ? "configured" : "mock",
     startedAt: new Date().toISOString(),
+    // 这两条是**给界面讲清楚状态**用的：有没有排着一次搬家、上一次搬得怎么样。
+    // 每次问 /system 都重新读指针文件，而不是缓存启动那一刻的值 —— 用户可能刚
+    // 刚在设置页里排了一次。
+    get dataDirPending() {
+      return readLocation(locationFile).pending;
+    },
+    get lastMove() {
+      return readLocation(locationFile).lastMove ?? moved.outcome;
+    },
   },
 });
 

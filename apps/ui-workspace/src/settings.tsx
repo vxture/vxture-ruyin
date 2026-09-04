@@ -24,7 +24,15 @@ import {
   StatusBadge,
   useTheme,
 } from "@vxture/design-system";
-import { Api, ApiError, type ConnectorView, type SessionInfo, type SystemInfo, type UpdateCheck } from "./api";
+import {
+  Api,
+  ApiError,
+  type ConnectorView,
+  type DataDirCheck,
+  type SessionInfo,
+  type SystemInfo,
+  type UpdateCheck,
+} from "./api";
 // SectionId/SETTINGS_SECTIONS live in their own module (settings-sections.ts)
 // so the sidebar can know the section list without pulling in this file's
 // DS-heavy SettingsView - see that file's header comment (TD-011②).
@@ -69,7 +77,7 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
       {/* 「设置」两个字已经在标题栏和侧栏里，这里不再写第三遍。 */}
       {error && <NoticeBar message={error} onClose={() => setError(null)} />}
       {view === "account" && <AccountSection session={session} />}
-      {view === "general" && <SystemSection system={system} />}
+      {view === "general" && <SystemSection system={system} api={api} />}
       {view === "connectors" && <ConnectorsSection api={api} />}
       {view === "connectors-add" && <AddConnectorPage api={api} />}
       {view === "database" && <DatabaseSection />}
@@ -362,7 +370,7 @@ function PreferencesBlock() {
  * 通用设置：数据在哪儿、怎么加密、什么会离开本机。三件事三个板块 ——
  * 原先它们挤在两张卡里，而「目录」和「加密」不是同一个问题。
  */
-function SystemSection({ system }: { system: SystemInfo | null }) {
+function SystemSection({ system, api }: { system: SystemInfo | null; api: Api }) {
   const [policy, setPolicy] = useState(
     localStorage.getItem("ruyin-transmission-policy") ?? "sensitivity",
   );
@@ -379,14 +387,10 @@ function SystemSection({ system }: { system: SystemInfo | null }) {
       >
         <FactRow label="数据目录" value={system?.dataDir} mono />
         <FactRow label="产品目录" value={system?.productsDir} mono />
-        {/* 「能不能改」是 owner 问过的（2026-09-04）。答案照实写在界面上，而不是
-            放一个改不动的输入框：目录在守护进程启动时确定（RUYIN_DATA_DIR），
-            改它要停下运行时、搬走已加密的库、再重新指过去 —— 中途失败会留下
-            两份数据，而两份加密数据比没有更糟。登记在 TD-039。 */}
-        <p className="set-note">
-          目录在运行时启动时确定（<span className="mono">RUYIN_DATA_DIR</span>）。
-          界面内暂不支持修改：改动要停下运行时并搬移已加密的库，半途失败会留下两份数据。
-        </p>
+        {/* 目录**可以改了**（owner 2026-09-04 定；TD-039 由「不给改」改写为
+            「重启期迁移」）。搬移发生在下一次启动、开库之前 —— 那一刻没有任何
+            句柄，也就不存在半开半搬的状态。 */}
+        <DataDirMove system={system} api={api} />
       </SettingsBlock>
 
       <SettingsBlock
@@ -720,6 +724,141 @@ function AddConnectorPage({ api }: { api: Api }) {
         签名信任锚就位前，正式版会拒绝安装并说明原因（TD-036）；测试本身不落盘，起一下就结束。
       </p>
     </SettingsBlock>
+  );
+}
+
+/**
+ * 换数据目录（TD-039）。
+ *
+ * 三步，一步都不能省：**先校验**（守护进程真去写一个探针、算大小、判同卷）→
+ * **排队**（只写意图，不动数据）→ **重启**（搬移在开库之前发生）。
+ *
+ * 为什么是输入框而不是「浏览…」：窗口是纯 Web 客户端（没有 preload，契约边界
+ * 是 HTTP），系统目录选择框只有壳能弹。那条路要走事件总线中转，值得做，但先
+ * 让这件事**能用**：粘一个路径进去，校验会把每一种不行都说清楚。
+ */
+function DataDirMove({ system, api }: { system: SystemInfo | null; api: Api }) {
+  const [target, setTarget] = useState("");
+  const [check, setCheck] = useState<DataDirCheck | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const pending = system?.dataDirPending;
+  const last = system?.lastMove;
+
+  const doCheck = async () => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      setCheck(await api.checkDataDir(target.trim()));
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const doRequest = async () => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      await api.requestDataDir(target.trim());
+      // 重启才真的搬。这里不自己刷新 system —— 应用马上就要重开了。
+      await api.restartApp();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+      setBusy(false);
+    }
+  };
+  const doCancel = async () => {
+    setBusy(true);
+    try {
+      await api.cancelDataDir();
+      setCheck(null);
+      setTarget("");
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (pending) {
+    return (
+      <>
+        <p className="set-callout set-callout--warning">
+          <Icon name="warning" size="sm" />
+          <span>
+            <strong>已排好一次搬移，重启后生效。</strong>
+            目标：<span className="mono">{pending}</span>。搬移在下次启动、打开任何数据库之前
+            进行；万一没搬成，应用会照旧从原目录启动并告诉你原因。
+          </span>
+        </p>
+        <div className="add-actions">
+          <Button size="sm" disabled={busy} onClick={() => void api.restartApp()}>
+            立即重启并搬移
+          </Button>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void doCancel()}>
+            取消这次搬移
+          </Button>
+        </div>
+        {failed && <p className="set-note">{failed}</p>}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {/* 上一次搬家的结果 —— 成功也说一句：用户刚重启过，他要的就是这个确认。 */}
+      {last?.status === "moved" && last.to && (
+        <p className="set-note">
+          上次搬移已完成：数据现在在 <span className="mono">{last.to}</span>。
+        </p>
+      )}
+      {last?.status === "failed" && (
+        <p className="set-callout set-callout--warning">
+          <Icon name="warning" size="sm" />
+          <span>
+            <strong>上次搬移没成功，数据仍在原处。</strong>
+            {last.reason}
+          </span>
+        </p>
+      )}
+      <Row label="搬到">
+        <Input
+          placeholder="D:\RuyinData"
+          value={target}
+          onChange={(e) => {
+            setTarget(e.target.value);
+            setCheck(null);
+          }}
+        />
+      </Row>
+      <div className="add-actions">
+        <Button variant="outline" size="sm" disabled={busy || !target.trim()} onClick={() => void doCheck()}>
+          {busy ? "检查中……" : "检查目标"}
+        </Button>
+        {/* 没校验通过就不给按 —— 排一次注定失败的搬家，失败会等到下次启动才
+            出现，那时用户已经忘了自己做过什么。 */}
+        <Button size="sm" disabled={busy || !check?.ok} onClick={() => void doRequest()}>
+          重启并搬移
+        </Button>
+      </div>
+      {check && !check.ok && <p className="set-note">{check.reason}</p>}
+      {check?.ok && (
+        <p className="set-note">
+          可以搬：约 {(((check.bytes ?? 0) / 1024 / 1024) || 0).toFixed(1)} MB
+          {check.sameVolume
+            ? " · 同一个盘，改名即可，几乎瞬间完成"
+            : " · 跨盘，要复制并逐文件核对，大约需要一会儿"}
+          。缓存不搬（它会自己重建）。
+        </p>
+      )}
+      {failed && <p className="set-note">{failed}</p>}
+      <p className="set-note">
+        搬移在下次启动、打开任何数据库之前进行 —— 那一刻没有任何库是打开的。源目录在核对
+        通过之前一直是权威，中途失败就照旧从原处启动。数据是按用户加密的，所以不要搬到别的
+        Windows 用户或别的机器上去。
+      </p>
+    </>
   );
 }
 
