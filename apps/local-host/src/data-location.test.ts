@@ -312,9 +312,12 @@ void test("resolveDataDir: 钉老位置时不能把已经排好的搬家丢掉",
 
 void test("resolveDataDir: 指针指向不能用的位置（拔掉的盘、被删的目录）→ 回落默认位置", () => {
   const locFile = join(tmp(), "location.json");
-  // Windows 上不存在的盘符；POSIX 上一个不可能建出来的路径。
-  const gone = process.platform === "win32" ? "Q:\ruyin-gone" : "/proc/definitely/not/writable";
-  writeLocation(locFile, { dataDir: gone });
+  // 拿一个**普通文件**当父目录：两个平台都是 ENOTDIR，立刻失败，不必依赖
+  // 「某个盘符不存在」或 /proc 这类平台特有的东西 —— 那种写法在另一个系统上
+  // 可能不是「快速失败」，而是别的行为。
+  const blocker = join(tmp(), "not-a-dir");
+  writeFileSync(blocker, "x");
+  writeLocation(locFile, { dataDir: join(blocker, "child") });
   const preferred = join(tmp(), "fresh");
   const r = resolveDataDir(locFile, preferred, undefined);
   // 应用照旧起来，而不是在开库那一步崩掉 —— 那在用户眼里就是「装完打不开」。
