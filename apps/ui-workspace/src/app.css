@@ -969,6 +969,10 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 /* 域名那一行只留收缩按钮：首页传的是空字符串，本来就没字。（此前按类名隐藏，
    把同样带 text-label-md 的收缩按钮一起藏掉了 —— owner 2026-09-04 指出。） */
 .app-sidebar--home .h-header-sm > :not(:first-child):not(:has(button)) { display: none; }
+/* 标签藏起来之后，那一行只剩两个按钮，末尾那个（分组展开 / 收起）会贴到左边
+   的收缩按钮旁 —— 原来是标签把它顶到右端的。自己顶（owner 2026-09-04 指出）。
+   收起态整行只剩一个按钮，那时不顶，否则窄栏里它会被推到边上。 */
+.app-sidebar--home .h-header-sm > :last-child:not(:first-child) { margin-left: auto; }
 .app-sidebar--home nav > div:first-child > button { display: none; }
 .app-sidebar--home nav > div:first-child { padding-top: var(--spacing-sm); padding-bottom: var(--spacing-sm); }
 .app-sidebar nav a { min-height: 44px; padding-block: 4px; }
@@ -1000,3 +1004,16 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   background: var(--primary, var(--color-primary, #4f7cff));
 }
 .app-sidebar--home nav > div + div { padding-top: var(--spacing-sm); }
+
+/* 「更新」上的 new 标记：小、圆角、品牌色，只在真有可切的新版本时出现。 */
+.dot-new {
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+  color: var(--primary-foreground, #fff);
+  background: var(--primary, var(--color-primary, #4f7cff));
+}

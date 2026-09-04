@@ -162,6 +162,8 @@ void test("HomePage: the metric row is the three framework facts - runtime, encr
 
   expect(screen.getByText("数据加密")).toBeInTheDocument();
   expect(await screen.findByText("已加密")).toBeInTheDocument();
+  // 说加密就说加密算法：DPAPI 保护的是主密钥，不是库（owner 2026-09-04 问及）。
+  expect(screen.getByText("SQLCipher")).toBeInTheDocument();
 
   expect(screen.getByText("平台连接")).toBeInTheDocument();
   expect(await screen.findByText("已连接")).toBeInTheDocument();
@@ -338,9 +340,10 @@ void test("StatusCards: three cards in a row, the explanation lives in the toolt
   // 三件事就是三张卡 —— 合并成一根条，读者得自己去数分隔点在哪。
   expect(cards).toHaveLength(3);
   // 版面上只留结论和一小截事实；「怎么加密的」这种解释在 title 里。
-  expect(cards[1]?.textContent).toContain("DPAPI");
-  expect(cards[1]?.textContent).not.toContain("全库加密");
-  expect(cards[1]?.getAttribute("title")).toContain("整库加密");
+  expect(cards[1]?.textContent).toContain("SQLCipher");
+  expect(cards[1]?.textContent).not.toContain("AES-256-GCM");
+  // 三层（库 / 库钥 / 主密钥）在 tooltip 里，版面上只留结论。
+  expect(cards[1]?.getAttribute("title")).toContain("DPAPI");
 });
 
 void test("ProductCard: only this product's projects are counted, not every project on the machine", () => {
@@ -892,17 +895,17 @@ void test("HomePage/产品库: an empty catalog says so; a failed fetch and a fa
 
 /* ---------------- 我的智能体：标题行动作与卡片动作（2026-09-03 重排）---------------- */
 
-void test("我的智能体 header: 同步产品版本 · 安装本地包 · 在线使用, with 在线使用 as the primary action on the right", async () => {
+void test("我的智能体 header: 更新 · 安装 · 在线使用, with 在线使用 as the primary action on the right", async () => {
   const api = fakeApi();
   render(
     <HomePage api={api} products={[product()]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={noop} />,
   );
   const actions = document.querySelector(".section-actions") as HTMLElement;
   const names = within(actions).getAllByRole("button").map((b) => b.textContent);
-  expect(names).toEqual(["同步产品版本", "安装", "在线使用"]);
+  expect(names).toEqual(["更新", "安装", "在线使用"]);
 });
 
-void test("同步产品版本: fetches every product's contract; refreshes only when something new landed; a refusal reaches onError once", async () => {
+void test("更新: fetches every product's contract; refreshes only when something new landed; a refusal reaches onError once", async () => {
   const fetchProduct = vi
     .fn()
     .mockResolvedValueOnce({ status: "current" })
@@ -922,7 +925,7 @@ void test("同步产品版本: fetches every product's contract; refreshes only 
     />,
   );
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "同步产品版本" }));
+  await user.click(screen.getByRole("button", { name: "更新" }));
   await vi.waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
   expect(fetchProduct).toHaveBeenCalledWith("a");
   expect(fetchProduct).toHaveBeenCalledWith("b");
@@ -934,7 +937,7 @@ void test("同步产品版本: fetches every product's contract; refreshes only 
   render(
     <HomePage api={refusing} products={[product({ id: "c", name: "C" }), product({ id: "d", name: "D" })]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={onError} />,
   );
-  await user.click(screen.getAllByRole("button", { name: "同步产品版本" })[1]!);
+  await user.click(screen.getAllByRole("button", { name: "更新" })[1]!);
   await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
   expect(onError).toHaveBeenCalledWith("契约拉取需要已配置的产品能力面");
 });
@@ -1058,4 +1061,70 @@ void test("我的智能体 header: 从产品库安装 toggles the registry list 
   await user.click(screen.getByRole("button", { name: "安装" }));
   await user.click(await screen.findByRole("menuitem", { name: "收起产品库" }));
   expect(screen.queryByText(/产品库没查到/)).not.toBeInTheDocument();
+});
+
+void test("更新 button: carries a new tag only while some product has a newer version waiting, and checks on click", async () => {
+  const fetchProduct = vi.fn().mockResolvedValue({ status: "current" });
+  const { unmount } = render(
+    <HomePage
+      api={fakeApi({ fetchProduct })}
+      products={[product({ version: "1.0.0", versions: ["1.0.0", "1.1.0"] })]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  // new 标记：库里攒着一版没切过去。卡片上也有一个「更新版本 vX」，所以按标题行取。
+  const header = () => within(document.querySelector(".section-actions") as HTMLElement);
+  const button = header().getByRole("button", { name: /更新/ });
+  expect(button.querySelector(".dot-new")?.textContent).toBe("new");
+  await userEvent.setup().click(button);
+  await vi.waitFor(() => expect(fetchProduct).toHaveBeenCalledWith("vxture.bid"));
+  unmount();
+
+  render(
+    <HomePage
+      api={fakeApi()}
+      products={[product({ version: "1.1.0", versions: ["1.0.0", "1.1.0"] })]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  expect(
+    within(document.querySelector(".section-actions") as HTMLElement)
+      .getByRole("button", { name: /更新/ })
+      .querySelector(".dot-new"),
+  ).toBeNull();
+});
+
+void test("更新: the startup check runs once and stays quiet about failures; a clicked check reports them", async () => {
+  const fetchProduct = vi.fn().mockRejectedValue(new Error("契约拉取需要已配置的产品能力面"));
+  const onError = vi.fn();
+  render(
+    <HomePage
+      api={fakeApi({ fetchProduct })}
+      products={[product()]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={onError}
+    />,
+  );
+  // 启动那一次自己跑，且不弹错误条 —— 没人问过的问题，答不上来不用嚷。
+  await vi.waitFor(() => expect(fetchProduct).toHaveBeenCalledTimes(1));
+  expect(onError).not.toHaveBeenCalled();
+  // 手点的那次要如实说。
+  await userEvent
+    .setup()
+    .click(within(document.querySelector(".section-actions") as HTMLElement).getByRole("button", { name: /更新/ }));
+  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("契约拉取需要已配置的产品能力面"));
 });
