@@ -71,6 +71,8 @@ export interface IdClaims {
   picture?: string;
   active_org?: string;
   active_org_name?: string;
+  /** personal | team —— 平台契约 §8 说这是判个人/团队的唯一可靠信号。 */
+  active_org_type?: string;
   active_workspace?: string;
   active_workspace_name?: string;
   roles?: string[];
@@ -96,7 +98,7 @@ export interface SessionSummary {
     roles?: string[];
     picture?: string;
   };
-  org?: { id?: string; name?: string };
+  org?: { id?: string; name?: string; type?: string };
   workspace?: { id?: string; name?: string };
   issuer: string;
   consoleBase: string;
@@ -432,7 +434,7 @@ export class PlatformService {
               roles: c.roles,
               picture: c.picture,
             },
-            org: { id: c.active_org, name: c.active_org_name },
+            org: { id: c.active_org, name: c.active_org_name, type: c.active_org_type },
             workspace: { id: c.active_workspace, name: c.active_workspace_name },
           }
         : {}),

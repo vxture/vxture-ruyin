@@ -374,7 +374,7 @@ export interface SessionInfo {
     roles?: string[];
     picture?: string;
   };
-  org?: { id?: string; name?: string };
+  org?: { id?: string; name?: string; type?: string };
   workspace?: { id?: string; name?: string };
   issuer: string;
   consoleBase: string;

@@ -107,6 +107,32 @@ function SettingsBlock({
   );
 }
 
+/**
+ * 单行设置：名称 + 控件，一行一个（owner 2026-09-04 第 5 / 6 条）。
+ *
+ * 控件列**定宽**，所以四项左右严格对齐、滑块铺满同一格；要解释的话放
+ * `note`，它单独占一行、整行宽 —— 挤进名称列里换行是上一版的毛病。
+ */
+function Row({
+  label,
+  children,
+  note,
+}: {
+  label: string;
+  children: React.ReactNode;
+  note?: string;
+}) {
+  return (
+    <>
+      <div className="set-row">
+        <span className="set-row-label">{label}</span>
+        <span className="set-row-control">{children}</span>
+      </div>
+      {note && <p className="set-row-note">{note}</p>}
+    </>
+  );
+}
+
 /** 一行事实：名称 + 值（+ 可选徽章）。值缺失写「—」，不留空。 */
 function FactRow({
   label,
@@ -211,7 +237,7 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
         {/* 逐项摆出来。**不显示 sub（uuid）** —— 那是给机器对账的，不是给人看的
             （owner 2026-09-04 定）。缺的字段写「—」而不是藏起来：那一横说明的是
             「平台没在 token 里给」，本身就是信息。 */}
-        <FactRow label="姓名" value={p?.name} />
+        <FactRow label="显示名" value={p?.name} />
         <FactRow label="用户名" value={p?.username} mono />
         <FactRow label="邮箱" value={p?.email} badge={verified(p?.emailVerified)} />
         <FactRow label="电话" value={p?.phone} badge={verified(p?.phoneVerified)} />
@@ -230,8 +256,37 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
           }
         />
         <FactRow label="语言地区" value={p?.locale} mono />
-        <FactRow label="租户" value={session.org?.name} />
-        <FactRow label="工作区" value={session.workspace?.name} />
+        {/* 租户与工作区同一行（owner 第 4 条）：它们回答的是同一个问题 ——
+            「我现在在哪儿干活」。中间一个淡分隔点，不是两行各说一半。
+            **切换只能去平台**（第 3 条）：token 里只有 `active_org` 一个组织，
+            平台 v2 已弃用 `tenants` 声明，所以本机既列不出候选、也换不了 ——
+            换租户等于换一份 token。按钮如实写成去平台切换，切完工作区一起变。 */}
+        <div className="fact-row">
+          <span className="fact-label">当前租户</span>
+          <span className="fact-value">
+            {session.org?.name ?? <span className="fact-empty">—</span>}
+            {session.org?.type && (
+              <StatusBadge tone="neutral">
+                {session.org.type === "personal" ? "个人" : "团队"}
+              </StatusBadge>
+            )}
+            <span className="fact-sep">·</span>
+            {session.workspace?.name ?? <span className="fact-empty">—</span>}
+          </span>
+          <span className="fact-action">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(profileUrl, "_blank", "noopener")}
+            >
+              切换租户
+              <Icon name="external-link" size="xs" />
+            </Button>
+          </span>
+        </div>
+        <p className="set-row-note">
+          切换在平台完成，工作区随租户一起切换；本机会话在下次刷新令牌时跟上。
+        </p>
       </SettingsBlock>
       <PreferencesBlock />
     </>
@@ -260,16 +315,14 @@ function PreferencesBlock() {
       title="偏好设置"
       desc="只作用于这台机器上的这个应用，记录在本机，不随账号同步"
     >
-      <SettingRow label="语言" hint="更多语言随后开放">
-        <NativeSelect
-          wrapperClassName="sel-lang"
-          value={lang}
-          onChange={(e) => pickLang(e.target.value)}
-        >
+      {/* 四项各一行、不带说明（owner 第 5 条）：这四个词自己说得清，一行小字
+          只是把行距撑开。控件列定宽，所以四行左右对齐、滑块等长（第 6 条）。 */}
+      <Row label="语言">
+        <NativeSelect value={lang} onChange={(e) => pickLang(e.target.value)}>
           <option value="zh-CN">简体中文</option>
         </NativeSelect>
-      </SettingRow>
-      <SettingRow label="主题" hint="深色为默认基调；窗口按钮颜色随之同步">
+      </Row>
+      <Row label="主题">
         <SegmentedControl
           ariaLabel="主题"
           items={[
@@ -280,8 +333,8 @@ function PreferencesBlock() {
           value={mode}
           onChange={setMode}
         />
-      </SettingRow>
-      <SettingRow label="密度" hint="同一套语义间距的三组取值，控件高度不变">
+      </Row>
+      <Row label="密度">
         <SegmentedControl
           ariaLabel="密度"
           items={[
@@ -292,8 +345,8 @@ function PreferencesBlock() {
           value={density}
           onChange={setDensity}
         />
-      </SettingRow>
-      <SettingRow label="字号" hint="整套排版角色一起挪档，层级关系不变">
+      </Row>
+      <Row label="字号">
         <SegmentedControl
           ariaLabel="字号"
           items={[
@@ -304,7 +357,7 @@ function PreferencesBlock() {
           value={fontSize}
           onChange={setFontSize}
         />
-      </SettingRow>
+      </Row>
     </SettingsBlock>
   );
 }
@@ -382,14 +435,17 @@ function SystemSection({ system }: { system: SystemInfo | null }) {
         )}
       </SettingsBlock>
 
+{/* 原来是一个「推理与审计」板块 —— 两件事挤在一起（owner 第 9 条）：
+          一个是**我允许什么离开**（可选），一个是**离开之后留下什么**（不可选）。
+          可选与不可选不该同一块。 */}
       <SettingsBlock
         icon="cloud"
-        title="推理与审计"
-        desc="什么会离开这台机器，以及每一次离开留下什么记录"
+        title="推理策略"
+        desc="上下文送云端推理之前，什么情况下要先问我一句"
       >
-        <SettingRow
-          label="推理传输策略"
-          hint="上下文送云端推理前的确认粒度；策略引擎接入后生效（当前高敏感内容始终需确认）"
+        <Row
+          label="确认粒度"
+          note="策略引擎接入后生效；当前无论选哪一档，高敏感内容都始终需要确认。推理传输 ≠ 数据存储：传输临时、不持久化。"
         >
           <SegmentedControl
             ariaLabel="推理传输策略"
@@ -400,12 +456,20 @@ function SystemSection({ system }: { system: SystemInfo | null }) {
             value={policy}
             onChange={pickPolicy}
           />
-        </SettingRow>
-        <FactRow
-          label="审计"
-          value="每次传输与执行都有哈希链审计，可在项目的「审计」板块查看与本地校验"
-        />
-        <p className="set-note">推理传输 ≠ 数据存储：传输临时、不持久化。</p>
+        </Row>
+      </SettingsBlock>
+
+      <SettingsBlock
+        icon="list"
+        title="安全审计"
+        desc="每一次传输与执行都留痕，且留痕本身可以被校验 —— 这一块没有开关"
+      >
+        <FactRow label="记录范围" value="每次上下文传输、每次工具执行、每次人工决定" />
+        <FactRow label="完整性" value="哈希链：每条记录接在上一条的哈希之后，改一条后面全对不上" />
+        <FactRow label="查看" value="在项目的「审计」板块查看，并可在本机重算校验" />
+        <p className="set-note">
+          审计不落原文：记录里是内容的哈希与字节数，不是内容本身。
+        </p>
       </SettingsBlock>
     </>
   );
