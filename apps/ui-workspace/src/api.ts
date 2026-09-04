@@ -274,6 +274,8 @@ export interface ConnectorView {
   args: string[];
   source: "lan" | "private";
   installedAt: string;
+  /** 本机生效态（通则 B-3）。`stashed` = 存下来但没启用（添加时没连上）。 */
+  state: "active" | "stashed";
   health: { ok: boolean; detail?: string; checkedAt: string };
   /** 运行中的服务器暴露的工具名；契约里 provider: connector 的工具靠同名接上。 */
   tools: string[];
@@ -602,7 +604,23 @@ export class Api {
     command: string;
     args: string[];
     source: "lan" | "private";
+    /** `stashed` = 存下来但不启用（测试没通过时用户选择先留着）。 */
+    state?: "stashed";
   }) => this.call<ConnectorView>("/connectors", "POST", input);
+  /** 试连一次（添加页的第一步）。不写任何东西，也不注册。 */
+  testConnector = (input: {
+    id: string;
+    command: string;
+    args?: string[];
+  }) =>
+    this.call<{ ok: boolean; tools: string[]; detail?: string }>(
+      "/connectors/test",
+      "POST",
+      input,
+    );
+  /** 启用一个暂存的连接器：守护进程会重新试一次，通不过仍是暂存。 */
+  activateConnector = (id: string) =>
+    this.call<ConnectorView>(`/connectors/${id}/activate`, "POST");
   removeConnector = (id: string) =>
     this.call<{ removed: string }>(`/connectors/${id}`, "DELETE");
   audit = (id: string) => this.call<StoredAuditEvent[]>(`/projects/${id}/audit`);

@@ -1152,3 +1152,12 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 .fact-empty { color: var(--muted-foreground); opacity: 0.6; }
 .fact-badge { flex-shrink: 0; }
 .fact-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+
+/* 添加连接器那一页的动作行：测试 → 添加 → 暂存，从左到右就是流程的顺序。 */
+.add-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  padding-top: var(--spacing-sm);
+}

@@ -47,7 +47,17 @@ export interface ConnectorRegistryLike {
     args?: string[];
     env?: Record<string, string>;
     source: string;
+    state?: string;
   }): Promise<unknown>;
+  /** 试连一次，不落盘（添加页在写下任何东西之前先问一句）。 */
+  probe(input: {
+    id: string;
+    command: string;
+    args?: string[];
+    env?: Record<string, string>;
+  }): Promise<{ ok: boolean; tools: string[]; detail?: string }>;
+  /** 启用一个暂存的连接器：重新试，通了才转 active。 */
+  activate(id: string): Promise<unknown>;
   remove(id: string): Promise<void>;
   healthOf(id: string): Promise<unknown>;
 }
@@ -568,6 +578,39 @@ async function handle(
       send(res, 200, { items: await deps.connectors.list() });
       return;
     }
+    // POST /connectors/test —— 只问「这条命令通不通」，不写任何东西。
+    if (method === "POST" && segments.length === 2 && segments[1] === "test") {
+      const body = await readJson(req);
+      send(
+        res,
+        200,
+        await deps.connectors.probe({
+          id: String(body["id"] ?? ""),
+          command: String(body["command"] ?? ""),
+          ...(Array.isArray(body["args"]) ? { args: body["args"].map(String) } : {}),
+          ...(body["env"] && typeof body["env"] === "object"
+            ? { env: body["env"] as Record<string, string> }
+            : {}),
+        }),
+      );
+      return;
+    }
+    // POST /connectors/:id/activate —— 把暂存的那个真正启用起来。
+    if (method === "POST" && segments.length === 3 && segments[2] === "activate") {
+      try {
+        send(res, 200, await deps.connectors.activate(segments[1]!));
+      } catch (cause) {
+        send(
+          res,
+          400,
+          apiError(
+            "CONNECTOR_STILL_DOWN",
+            cause instanceof Error ? cause.message : String(cause),
+          ),
+        );
+      }
+      return;
+    }
     if (method === "POST" && segments.length === 1) {
       const body = await readJson(req);
       try {
@@ -579,6 +622,7 @@ async function handle(
             ? { env: body["env"] as Record<string, string> }
             : {}),
           source: String(body["source"] ?? ""),
+          ...(body["state"] === "stashed" ? { state: "stashed" } : {}),
         });
         send(res, 201, view);
       } catch (cause) {
