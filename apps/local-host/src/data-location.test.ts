@@ -323,3 +323,46 @@ void test("resolveDataDir: 指针指向不能用的位置（拔掉的盘、被�
   // 应用照旧起来，而不是在开库那一步崩掉 —— 那在用户眼里就是「装完打不开」。
   assert.equal(r.dataDir, preferred);
 });
+
+void test("performMove: 源目录不存在时报失败 —— 绝不能把「什么都没搬」说成搬完了", () => {
+  const root = tmp();
+  const gone = join(root, "no-such-source");
+  const target = join(root, "target");
+  const out = performMove(gone, target);
+  assert.equal(out.status, "failed");
+  assert.match(out.reason ?? "", /找不到当前数据目录/);
+  // 目标不该被建出来：一个空目录会让下一次启动以为数据在那儿。
+  assert.equal(existsSync(target), false);
+});
+
+void test("applyPendingMove: 源目录不存在时指针一动不动 —— 数据可能只是在没插的盘上", () => {
+  const root = tmp();
+  const gone = join(root, "unplugged-drive");
+  const target = join(root, "target");
+  const locFile = join(root, "location.json");
+  writeLocation(locFile, { dataDir: gone, pending: target });
+
+  const r = applyPendingMove(locFile, join(root, "fallback"));
+  assert.equal(r.outcome.status, "failed");
+  // **关键**：指针仍然指着原来那个位置。改指到空目录，等于把用户的数据弄丢了
+  // ——数据其实还在，只是应用再也不看那儿了。
+  assert.equal(readLocation(locFile).dataDir, gone);
+  assert.equal(readLocation(locFile).pending, undefined);
+});
+
+void test("指针里要带上「要搬多少字节」—— 壳靠它决定等多久，而不是一个常数", () => {
+  const src = tmp();
+  seed(src);
+  const locFile = join(tmp(), "location.json");
+  const target = join(tmp(), "next");
+  // 这一步在守护进程那侧由 dataMove.request 做，这里直接钉住它写下的形状。
+  const bytes = checkTarget(src, target).bytes;
+  assert.ok(bytes !== undefined && bytes > 0);
+  writeLocation(locFile, { dataDir: src, pending: target, pendingBytes: bytes });
+  const loc = readLocation(locFile);
+  assert.equal(loc.pendingBytes, bytes);
+  // 搬完之后这一条要跟着 pending 一起消失（写的是一份新的指针）。
+  applyPendingMove(locFile, src);
+  assert.equal(readLocation(locFile).pendingBytes, undefined);
+  assert.equal(readLocation(locFile).pending, undefined);
+});

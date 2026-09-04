@@ -21,6 +21,7 @@ import {
 } from "electron";
 
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +29,7 @@ import { renderPdf } from "./pdf.js";
 import { isRenderPdfRequest, parsePdfSelfCheck, type RenderPdfReply } from "./pdf-protocol.js";
 import { captionOverlay, themeFromReply } from "./caption-overlay.js";
 import { extractDaemonEvents, type DaemonEventKind } from "./daemon-events.js";
+import { humanBytes, moveWaitMs } from "./migration-wait.js";
 import { diffPending } from "./pending-notify.js";
 
 // userData 路径由它决定，而不是 productName。**这里的 "Ruyin" 是路径键，不是
@@ -75,9 +77,14 @@ const productsDir = app.isPackaged
  * 指针放在 userData 根下（装机态）——它必须待在一个不跟着数据搬走的地方，否则
  * 搬完就找不到「搬到哪儿了」。真正的搬移由守护进程在开库之前做，壳不碰数据。
  */
-const locationFile = app.isPackaged
-  ? join(app.getPath("userData"), "location.json")
-  : join(homedir(), ".ruyin", "location.json");
+const locationFile =
+  // 显式环境变量最高优先，与 RUYIN_DATA_DIR 同一个道理：开发与验证要能把它钉住。
+  // （没有这一条时，壳会用自己算的路径覆盖掉外面设的值 —— 于是「造一个待搬状态
+  // 再启动看看」这件事根本做不到，2026-09-05 验证时就卡在这里。）
+  process.env["RUYIN_LOCATION_FILE"] ??
+  (app.isPackaged
+    ? join(app.getPath("userData"), "location.json")
+    : join(homedir(), ".ruyin", "location.json"));
 /**
  * 数据目录的默认位置：**本地** `%LOCALAPPDATA%\Ruyin\data`（owner 2026-09-05 定）。
  *
@@ -294,6 +301,70 @@ async function waitForPdfSelfCheck(timeoutMs = 60_000): Promise<void> {
   throw new Error("the daemon never reported a pdf self-check result");
 }
 
+/**
+ * 有没有排着一次数据搬家，要搬多少。
+ *
+ * 壳必须在**起守护进程之前**知道这件事：搬家发生在守护进程开库之前，那段时间
+ * 它不回答 /health。原来这里等 15 秒就判失败并 `app.exit(1)` —— 实测 136 MB
+ * 要 11.7 秒，也就是超过约 180 MB 就必然超时，而且下一次启动会把那份半成品丢掉
+ * 重来，于是**数据越多，应用越是再也起不来**。
+ */
+function pendingMove(): { target: string; bytes?: number } | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(locationFile, "utf8")) as {
+      pending?: string;
+      pendingBytes?: number;
+    };
+    if (typeof raw.pending === "string" && raw.pending.trim()) {
+      return {
+        target: raw.pending,
+        ...(typeof raw.pendingBytes === "number" ? { bytes: raw.pendingBytes } : {}),
+      };
+    }
+  } catch {
+    // 没有指针、或者写坏了：当成没有待搬。
+  }
+  return undefined;
+}
+
+/**
+ * 搬家那一屏。守护进程此刻不服务，所以这一屏只能由壳自己画 —— 内联 HTML，不走
+ * 网络、不依赖界面包。**它必须存在**：否则用户点了「重启并搬移」之后，看到的是
+ * 应用消失几分钟，没有任何解释。
+ */
+function openMigrationWindow(target: string, bytes?: number): BrowserWindow {
+  const size = humanBytes(bytes);
+  const win = new BrowserWindow({
+    width: 520,
+    height: 260,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    // 关不掉是有意的：搬家中途关窗会杀掉守护进程，那份副本要被丢弃重来。
+    closable: false,
+    // 标题写明白它是什么：任务栏上那一条是用户唯一能看到的解释。
+    title: "RUYIN — 正在搬移数据",
+    backgroundColor: "#0b0b0c",
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  });
+  win.setMenu?.(null);
+  const html = `<!doctype html><meta charset="utf-8"><style>
+    body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
+      background:#0b0b0c;color:#e8e8ea;font:14px/1.6 "Microsoft YaHei",system-ui,sans-serif}
+    .box{max-width:420px;padding:0 24px;text-align:center}
+    h1{font-size:16px;margin:0 0 10px;font-weight:600}
+    p{margin:0;color:#a1a1a6;font-size:13px}
+    .bar{margin:18px auto 14px;width:220px;height:3px;border-radius:2px;background:#2a2a2e;overflow:hidden}
+    .bar i{display:block;width:70px;height:100%;border-radius:2px;background:#1e51ff;
+      animation:s 1.1s ease-in-out infinite}
+    @keyframes s{0%{transform:translateX(-70px)}100%{transform:translateX(220px)}}
+  </style><div class="box"><h1>正在搬移数据</h1><div class="bar"><i></i></div>
+    <p>请不要关闭应用。${size ? `约 ${size}，` : ""}完成后会自动打开。<br>
+    万一中途失败，数据会留在原来的位置，不会丢。</p></div>`;
+  void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  return win;
+}
+
 async function waitForHealth(timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -480,8 +551,17 @@ function openWindow(): void {
 
 app.whenReady().then(async () => {
   try {
+    // 有待搬时：先把那一屏画出来，再起守护进程，并按要搬的字节数放宽等待。
+    // 顺序要紧 —— 先画屏，用户才不会看到「应用消失了几分钟」。
+    const move = pendingMove();
+    const migrating = move && !SMOKE ? openMigrationWindow(move.target, move.bytes) : undefined;
     daemon = startDaemon();
-    await waitForHealth();
+    await waitForHealth(move ? moveWaitMs(move.bytes) : undefined);
+    if (migrating) {
+      // 关得掉才关得掉：上面把 closable 设成了 false（防止用户中途关窗杀进程）。
+      migrating.closable = true;
+      migrating.close();
+    }
     if (SMOKE) {
       // PDF 那条链（守护进程 -> 壳 -> Chromium -> 字节回去）只有在真的跑一遍
       // 时才算验过（ADR-017）。守护进程在 RUYIN_SMOKE=1 下会排一份，标记打在

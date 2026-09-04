@@ -56,6 +56,13 @@ export interface LocationFile {
   dataDir?: string;
   /** 待搬到的目标目录。有它就意味着「下次启动时搬」。 */
   pending?: string;
+  /**
+   * 要搬多少字节（排队那一刻算的）。**壳读它决定等多久** —— 搬家发生在守护
+   * 进程开库之前，壳只能等；等多久不能是一个常数（见 shell 的
+   * migration-wait.ts：原来那个固定 15 秒会在数据超过约 180 MB 时把启动judge
+   * 成失败）。
+   */
+  pendingBytes?: number;
   /** 上一次搬家的结果 —— 重启后界面要能说清楚成没成。 */
   lastMove?: MoveOutcome;
 }
@@ -317,11 +324,26 @@ export function performMove(
   }
   const check = mode === "copy" ? { ...probe, sameVolume: false } : probe;
 
-  const entries = existsSync(src)
-    ? readdirSync(src, { withFileTypes: true })
-        .filter((e) => !SKIP.has(e.name) && e.name !== MARKER)
-        .map((e) => e.name)
-    : [];
+  /**
+   * **源必须真的在那儿。** 不加这一条时，源目录不存在会一路走成「搬完了」——
+   * 什么都没复制、什么都没删，然后指针被改指到一个空目录上（2026-09-05 实测）。
+   *
+   * 现实里这不是假想：数据在移动硬盘上、开机时没插，同时有一次待搬 —— 应用会
+   * 宣布搬完、指向空目录，而数据还在那块盘上，用户只能手工改指针才能找回。
+   * 「找不到数据」必须报错，绝不能报成功。
+   */
+  if (!existsSync(src)) {
+    return {
+      status: "failed",
+      from: src,
+      to: dst,
+      at,
+      reason: `找不到当前数据目录（${src}）—— 没有搬移任何东西，设置也没有改动。如果数据在移动硬盘上，接好之后重试。`,
+    };
+  }
+  const entries = readdirSync(src, { withFileTypes: true })
+    .filter((e) => !SKIP.has(e.name) && e.name !== MARKER)
+    .map((e) => e.name);
   const done: string[] = [];
   try {
     mkdirSync(dst, { recursive: true });
