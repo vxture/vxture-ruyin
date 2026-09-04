@@ -382,6 +382,73 @@ export function performMove(
 }
 
 /**
+ * 数据目录该用哪一个。**在 applyPendingMove 之前跑**，因为「待搬」的起点就是它
+ * 定下来的。
+ *
+ * 三条，按优先级：
+ *
+ * 1. **指针说了算。** 用户改过目录（或上一次搬家落定过），那就是权威。
+ * 2. **老位置有数据就钉在老位置，并把指针写下来。** 默认位置从漫游
+ *    `%APPDATA%Ruyindata` 挪到了本地 `%LOCALAPPDATA%Ruyindata`（owner
+ *    2026-09-05 定：漫游目录在域环境里会随登录/注销整份同步，而项目库是 GB 级的
+ *    东西）。已经在用的机器**一个字节都不搬** —— 只写一条指针把它钉在原处，行为
+ *    与今天完全一致。想换位置的话，设置里那条会真搬的路一直在。
+ * 3. 都没有：用新默认位置（也就是全新安装的那条路）。
+ *
+ * 「有数据」的判据是 `runtime/` 里有东西 —— 主密钥在那儿。用整个目录是否存在做
+ * 判据会误判：装过一次、还没登录过的机器上，那个目录可能已经建出来但是空的。
+ */
+export function resolveDataDir(
+  locationFile: string,
+  preferred: string,
+  legacy?: string,
+): { dataDir: string; pinnedLegacy: boolean } {
+  const loc = readLocation(locationFile);
+  if (loc.dataDir?.trim()) {
+    const pointed = resolve(loc.dataDir);
+    // **指针不等于承诺。** 它可能指向一块已经拔掉的移动硬盘、一个被删掉的目录、
+    // 或者装机时写下、之后被改成只读的位置。当场验一次能不能建、能不能写：验
+    // 不过就用默认位置起来（应用能用，用户能在设置里改），而不是在开库那一步
+    // 崩掉 —— 那在用户眼里就是「装完打不开」。
+    if (usable(pointed)) return { dataDir: pointed, pinnedLegacy: false };
+    console.error(
+      `[ruyin] data dir ${pointed} is unusable; falling back to ${resolve(preferred)}`,
+    );
+    return { dataDir: resolve(preferred), pinnedLegacy: false };
+  }
+
+  const old = legacy?.trim() ? resolve(legacy) : undefined;
+  if (old && hasData(old)) {
+    writeLocation(locationFile, { dataDir: old, ...(loc.pending ? { pending: loc.pending } : {}) });
+    return { dataDir: old, pinnedLegacy: true };
+  }
+  return { dataDir: resolve(preferred), pinnedLegacy: false };
+}
+
+/** 能不能在这儿建目录、写文件。 */
+function usable(dir: string): boolean {
+  const probe = join(dir, ".ruyin-write-probe");
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(probe, "probe");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    rmSync(probe, { force: true });
+  }
+}
+
+/** 这个目录里有没有真的数据（主密钥在 `runtime/`）。 */
+export function hasData(dir: string): boolean {
+  try {
+    return readdirSync(join(dir, "runtime")).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 启动时跑这一句：有待搬就搬，然后**返回这一轮真正该用的目录**。
  *
  * 无论成败都把结果写回指针文件 —— 界面重启后要能说清楚上次搬没搬成、没搬成是

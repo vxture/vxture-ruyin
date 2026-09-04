@@ -49,6 +49,7 @@ import {
   applyPendingMove,
   checkTarget,
   readLocation,
+  resolveDataDir,
   writeLocation,
 } from "./data-location.js";
 
@@ -62,15 +63,25 @@ const VERSION = "0.1.0";
 const locationFile = resolve(
   process.env["RUYIN_LOCATION_FILE"] ?? join(homedir(), ".ruyin", "location.json"),
 );
-const fallbackDataDir = resolve(
+const preferredDataDir = resolve(
   process.env["RUYIN_DATA_DIR"] ?? join(homedir(), ".ruyin", "dev"),
 );
+/**
+ * 老的默认位置（漫游 `%APPDATA%Ruyindata`）。宿主给，因为只有它知道
+ * userData 在哪儿。**有它、且那儿有数据，就钉在那儿** —— 已经在用的机器一个
+ * 字节都不搬（owner 2026-09-05）。
+ */
+const legacyDataDir = process.env["RUYIN_LEGACY_DATA_DIR"];
+const resolved = resolveDataDir(locationFile, preferredDataDir, legacyDataDir);
+if (resolved.pinnedLegacy) {
+  console.log(`[ruyin] data dir pinned to the existing location: ${resolved.dataDir}`);
+}
 /**
  * 搬家在这一行发生 —— **在 KeyManager 与 SqliteStoragePort 之前**，也就是在
  * 任何库被打开之前。这个顺序是整件事成立的前提，别把它挪到下面去（data-location.ts
  * 的头注释写了为什么）。
  */
-const moved = applyPendingMove(locationFile, fallbackDataDir);
+const moved = applyPendingMove(locationFile, resolved.dataDir);
 const dataDir = moved.dataDir;
 if (moved.movedNow && moved.outcome.status === "moved") {
   console.log(`[ruyin] data dir moved: ${moved.outcome.from} -> ${moved.outcome.to}`);

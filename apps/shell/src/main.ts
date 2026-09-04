@@ -19,7 +19,7 @@ import {
   shell,
   utilityProcess,
 } from "electron";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -78,37 +78,47 @@ const productsDir = app.isPackaged
 const locationFile = app.isPackaged
   ? join(app.getPath("userData"), "location.json")
   : join(homedir(), ".ruyin", "location.json");
+/**
+ * 数据目录的默认位置：**本地** `%LOCALAPPDATA%\Ruyin\data`（owner 2026-09-05 定）。
+ *
+ * 为什么不是别处 —— 四个候选都掂过：
+ *
+ * - `%APPDATA%`（漫游，也就是 Electron 的 userData 默认值，本仓此前的位置）：
+ *   域环境开了漫游配置文件时，登录/注销会把整份数据经网络同步一遍。项目库是
+ *   GB 级的东西，那意味着登录要等、撞配置文件限额、两台机器之间还可能冲突。
+ * - `Documents\RUYIN`：看得见、好找，但 Documents 正是 OneDrive / 坚果云 /
+ *   百度网盘要同步的目录（OneDrive 的「已知文件夹移动」在很多企业租户里默认就
+ *   开着）。把一个正在被打开的 SQLite 库交给云盘同步，是这几个选项里最坏的一个。
+ * - `%USERPROFILE%\RUYIN`：不被已知文件夹移动覆盖，但企业备份工具常常整份备份
+ *   用户配置文件 —— 同一个「GB 走网络」的问题，只是频率低些；还会在用户主目录
+ *   里多出一个文件夹。
+ * - `D:\RUYIN`：很多人确实希望数据在 D:，但不能当默认 —— D: 可能不存在、可能
+ *   是光驱或移动盘。这恰恰是「设置里能改目录」要服务的那种人。
+ *
+ * 所以选本地 AppData：不同步、不漫游、按用户隔离、不需要管理员。它不显眼，但
+ * 设置页把完整路径摆出来了，旁边还有「打开目录」。
+ */
+// `app.getPath` 没有 localAppData 这一项（它是 Windows 专有的），所以走环境变量；
+// 拿不到时按 Windows 的固定布局兜底。装机形态只出 win32-x64。
+const localAppData = process.env["LOCALAPPDATA"] ?? join(homedir(), "AppData", "Local");
 const defaultDataDir = app.isPackaged
-  ? join(app.getPath("userData"), "data")
+  ? join(localAppData, "Ruyin", "data")
   : join(homedir(), ".ruyin", "dev");
-function pointedDataDir(): string {
-  let pointed: string | undefined;
-  try {
-    const raw = JSON.parse(readFileSync(locationFile, "utf8")) as { dataDir?: string };
-    if (typeof raw.dataDir === "string" && raw.dataDir.trim()) pointed = raw.dataDir;
-  } catch {
-    // 没有指针、或者写坏了：按默认目录走。守护进程会重建这个文件。
-  }
-  if (!pointed) return defaultDataDir;
-  // **指针不等于承诺。** 它可能指向一块已经拔掉的移动硬盘、一个被删掉的目录、
-  // 或者安装器写下之后又被改成只读的位置。这里当场验一下能不能建、能不能写：
-  // 验不过就用默认目录起来（应用能用，用户能在设置里改），而不是让守护进程在
-  // 开库那一步崩掉 —— 那看起来就是「装完打不开」。
-  try {
-    mkdirSync(pointed, { recursive: true });
-    const probe = join(pointed, ".ruyin-write-probe");
-    writeFileSync(probe, "probe");
-    rmSync(probe, { force: true });
-    return pointed;
-  } catch (e) {
-    console.error(
-      `[ruyin] data dir ${pointed} is unusable (${(e as Error).message}); falling back to ${defaultDataDir}`,
-    );
-    return defaultDataDir;
-  }
-}
-// 显式的环境变量仍然最高优先（开发与 CI 靠它把目录钉住）。
-const dataDir = process.env["RUYIN_DATA_DIR"] ?? pointedDataDir();
+/**
+ * 老的默认位置（漫游 userData 下的 data）。传给守护进程：那儿有数据就钉在那儿，
+ * **不搬**。这条兼容线不能删 —— 删掉它，所有老用户升级之后会对着一个空应用，
+ * 而他们的项目库还在原处。
+ */
+const legacyDataDir = app.isPackaged ? join(app.getPath("userData"), "data") : undefined;
+/**
+ * **壳不解析目录。** 它只报出两个候选（默认位置、老位置）和指针文件在哪儿；
+ * 「这一轮到底用哪个」由守护进程的 `resolveDataDir` 定 —— 那件事必须在开库之前
+ * 发生，而且它有测试。此前两边各读一遍指针、各做一次可写探测，是同一个决定有
+ * 两个主人：两处的规则一旦有一天不一致，谁对都说不清。
+ *
+ * 显式的环境变量仍然最高优先（开发与 CI 靠它把目录钉住）。
+ */
+const dataDir = process.env["RUYIN_DATA_DIR"] ?? defaultDataDir;
 
 let daemon: Electron.UtilityProcess | undefined;
 let stopping = false;
@@ -139,6 +149,7 @@ function startDaemon(): Electron.UtilityProcess {
       RUYIN_PORT: String(PORT),
       RUYIN_TOKEN: TOKEN,
       RUYIN_DATA_DIR: dataDir,
+      ...(legacyDataDir ? { RUYIN_LEGACY_DATA_DIR: legacyDataDir } : {}),
       RUYIN_LOCATION_FILE: locationFile,
       RUYIN_PRODUCTS_DIR: productsDir,
       // 冒烟时守护进程会真的排一份 PDF，走完整条 IPC + Chromium 链路。

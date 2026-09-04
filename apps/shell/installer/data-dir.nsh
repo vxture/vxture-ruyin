@@ -6,7 +6,9 @@
 ;
 ; 我们写的是**一个指针文件**，不是数据本身：
 ;   %APPDATA%\Ruyin\location.json  ->  { "dataDir": "<用户选的目录>" }
-; 应用启动时读它（apps/shell/src/main.ts 的 pointedDataDir），守护进程按它开库。
+; 守护进程启动时读它决定用哪个目录（data-location.ts 的 resolveDataDir），然后
+; 才开库。没有指针时的默认位置是**本地** %LOCALAPPDATA%\Ruyin\data；老机器上
+; 数据还在漫游那边的，守护进程会写一条指针把它钉在原处，一个字节都不搬。
 ; 路径而已，没有秘密 —— 客户端零秘密这条规矩在这儿也成立。
 ;
 ; 三条自我约束：
@@ -73,6 +75,9 @@ Function RuyinDataDirPageShow
   ; 它们的主密钥一起留在原处、界面上看不见 —— 那就是「升级之后东西没了」。
   ; 换目录要走设置里那条会真的搬移的路（TD-039），不是装机时改个指针。
   IfFileExists "$APPDATA\Ruyin\data\runtime\*.*" skipDataDirPage 0
+  ; 新的默认位置（本地 AppData）那儿有数据也一样跳过 —— 重装到同一台机器时，
+  ; 这一页问的是一个已经有答案的问题。
+  IfFileExists "$LOCALAPPDATA\Ruyin\data\runtime\*.*" skipDataDirPage 0
 
   nsDialogs::Create 1018
   Pop $RuyinDataDirPage
@@ -89,12 +94,14 @@ Function RuyinDataDirPageShow
   ${NSD_CreateLabel} 0 14u 100% 34u "RUYIN 的业务数据（项目库、产品库、密钥）会放在下面这个目录。数据整库加密，密钥按当前 Windows 用户封装 —— 所以请选一个只有你自己使用的位置，不要选可移动磁盘或共享目录。装好之后也可以在设置里改。"
   Pop $0
 
-  ; 默认值必须**与应用真正用的位置一字不差**：应用用的是 `join(userData, "data")`，
-  ; 而 Windows 上 Electron 的 userData 是漫游的 `%APPDATA%\Ruyin`（由 main.ts 里
-  ; `app.setName("Ruyin")` 决定）。上一版这里写的是 `$LOCALAPPDATA` —— 页面上说
-  ; 数据会去 Local、实际却去了 Roaming，而且因为「与默认值不同」还会多写一个
-  ; 指针。界面说的地方和东西真去的地方必须是同一个。
-  ${NSD_CreateDirRequest} 0 54u 75% 12u "$APPDATA\Ruyin\data"
+  ; 默认值必须**与应用真正用的位置一字不差**（apps/shell/src/main.ts 的
+  ; `defaultDataDir`）：本地 AppData，不是漫游 —— 漫游目录在域环境里会随登录/
+  ; 注销整份同步，而项目库是 GB 级的东西（owner 2026-09-05 定）。
+  ;
+  ; 两边写得不一致的后果 2026-09-04 已经撞过一次：页面上说数据去 Local、应用
+  ; 实际去了 Roaming，而且用户**什么都不改**也会因为「与默认值不同」被写进一个
+  ; 多余的指针。改这一行时，请连同 main.ts 那一处一起改。
+  ${NSD_CreateDirRequest} 0 54u 75% 12u "$LOCALAPPDATA\Ruyin\data"
   Pop $RuyinDataDirField
 
   ${NSD_CreateButton} 80% 53u 20% 14u "浏览…"
@@ -127,7 +134,7 @@ FunctionEnd
   ${EndIf}
 
   ${If} $RuyinDataDirValue != ""
-  ${AndIf} $RuyinDataDirValue != "$APPDATA\Ruyin\data"
+  ${AndIf} $RuyinDataDirValue != "$LOCALAPPDATA\Ruyin\data"
     ; 用户真的改过默认值才落指针。JSON 里的反斜杠要转义 —— 直接写
     ; "D:\RuyinData" 会变成一个非法的 JSON 字符串，应用读不出来就回落默认，
     ; 于是用户的选择静默失效。
