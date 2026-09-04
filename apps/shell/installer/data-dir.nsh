@@ -36,7 +36,20 @@ Var RuyinPointerFile
   StrCpy $RuyinPointerFile "$APPDATA\Ruyin\location.json"
 !macroend
 
+; 这个钩子的位置在**页面声明区**（app-builder-lib 的 assistedInstaller.nsh 把它
+; 插在 MUI 的目录页与安装页之间），所以这里只能声明一页，不能直接写指令 ——
+; 对话框的创建要放进页面回调里。本地用 makensis 试过：直接写指令会得到
+; `command IfFileExists not valid outside Section or Function`。
+;
+; 顺带一个有用的性质：`Page custom` 是下面两个 Function 唯一的引用来源。万一这个
+; 钩子将来没有被插入（换了 electron-builder、改了 oneClick），makensis 会报
+; `warning 6010: function not referenced`，而 electron-builder 是 -WX 编译的 ——
+; 于是「这一页悄悄没出现」会变成一次构建失败，而不是装机时才被发现。
 !macro customPageAfterChangeDir
+  Page custom RuyinDataDirPageShow
+!macroend
+
+Function RuyinDataDirPageShow
   ; 已经有指针（升级、或重装到同一个用户）：这一页不出现。数据在哪儿由那份
   ; 指针说，安装器不参与。
   IfFileExists "$RuyinPointerFile" skipDataDirPage 0
@@ -60,8 +73,12 @@ Var RuyinPointerFile
   ${NSD_OnClick} $0 RuyinBrowseDataDir
 
   nsDialogs::Show
+  Return
   skipDataDirPage:
-!macroend
+  ; 用 Abort 而不是直接返回：页面回调里 Abort 的含义正是「跳过这一页」，直接
+  ; 返回会停在一张空白页上。
+  Abort
+FunctionEnd
 
 Function RuyinBrowseDataDir
   ${NSD_GetText} $RuyinDataDirField $0
