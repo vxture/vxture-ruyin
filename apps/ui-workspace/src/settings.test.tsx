@@ -95,10 +95,13 @@ void test("SettingsView: renders exactly the requested section, not a mix", asyn
   expect(screen.queryByText("数据目录")).not.toBeInTheDocument();
 });
 
-void test("SettingsView: a system() fetch failure shows an error box without crashing the section", async () => {
+void test("SettingsView: a system() fetch failure shows an error box without crashing the section; 那条提醒可以关掉", async () => {
   const api = fakeApi({ system: vi.fn().mockRejectedValue(new Error("daemon unreachable")) });
   renderSection("about", api);
   expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
+  // 页面顶部那条讲的是刚才那个动作的结果，读完就没用了 —— 给关（owner 第 2 条）。
+  await userEvent.setup().click(screen.getByRole("button", { name: "关闭提醒" }));
+  expect(screen.queryByText("daemon unreachable")).not.toBeInTheDocument();
   // 这一节仍然照常渲染 —— system 只是还没有值，不是整节崩掉。
   expect(screen.getByText("RUYIN")).toBeInTheDocument();
   expect(screen.getByText("Intelligent Workbench")).toBeInTheDocument();

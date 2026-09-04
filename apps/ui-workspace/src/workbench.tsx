@@ -45,6 +45,7 @@ import { Api, type ProductInfo, type ProjectMeta, type SessionInfo } from "./api
 import { TenantMenu } from "./tenant-menu";
 import { PROJECT_TABS, type TabId } from "./workspace-tabs";
 import { SETTINGS_SECTIONS, resolveSection, type SectionId } from "./settings-sections";
+import { NoticeBar } from "./notice-bar";
 import { DEMO_RECENT } from "./catalog";
 import { UserSlot } from "./user";
 import { PendingInbox, usePending } from "./pending";
@@ -444,10 +445,17 @@ export function Workbench({ api }: { api: Api }) {
                 ) : (
                   <>
                     <span className="app-ident-product">{openProductName}</span>
-                    <span className="app-ident-sep">·</span>
-                    <span className="app-ident-doc">
-                      {openProjectMeta?.name ?? "项目"}
-                    </span>
+                    {/* 项目名与产品名一字不差时只写一遍（owner 2026-09-04：
+                        「一大一小两个标书编写」）。用户拿产品名给项目命名很自然，
+                        但「标书编写 · 标书编写」读起来像是界面出了错。 */}
+                    {openProjectMeta?.name !== openProductName && (
+                      <>
+                        <span className="app-ident-sep">·</span>
+                        <span className="app-ident-doc">
+                          {openProjectMeta?.name ?? "项目"}
+                        </span>
+                      </>
+                    )}
                   </>
                 )}
               </span>
@@ -532,7 +540,10 @@ export function Workbench({ api }: { api: Api }) {
     );
     const list: ShellNavSection[] = [
       {
-        title: openProjectMeta?.name ?? "项目",
+        /* 这一组不写标题（owner 2026-09-04：左上角三个名字扎堆）。原来写的是
+           项目名 —— 而标题栏那一行已经把项目名摆在那儿了，同屏两遍。下面
+           「同产品的其他项目」那一组的标题留着：它说的是另一件事。 */
+        title: "",
         items: PROJECT_TABS.map((t) => ({
           href: `#ws/${view.id}/${t.id}`,
           // 未决数挂在「任务」上：徽章跟着它要指向的东西走，才省得下那条
@@ -564,7 +575,8 @@ export function Workbench({ api }: { api: Api }) {
   const settingsSections: ShellNavSection[] = useMemo(
     () => [
       {
-        title: "设置",
+        // 同上：标题栏那一行已经写着「设置」，侧栏不再写第二遍。
+        title: "",
         items: SETTINGS_SECTIONS.map((x) => ({
           href: `#settings/${x.id}`,
           label: x.label,
@@ -576,15 +588,22 @@ export function Workbench({ api }: { api: Api }) {
   );
 
   const sidebar = (
-    <div className={`app-sidebar h-full${view.kind === "home" ? " app-sidebar--home" : ""}`}>
+    <div
+      className={`app-sidebar h-full${
+        view.kind === "home"
+          ? " app-sidebar--home"
+          : view.kind === "workspace"
+            ? " app-sidebar--ws"
+            : " app-sidebar--set"
+      }`}
+    >
     <ShellSidebarNav
-      domainName={
-        view.kind === "workspace"
-          ? (openProductName ?? "产品")
-          : view.kind === "settings"
-            ? "设置"
-            : ""
-      }
+      /* 侧栏不写标题（owner 2026-09-04：首页去掉之后，产品态和设置态也照同一
+         条来）。进了产品，左上角原本挤着三个名字：标题栏的产品名、标题栏的项目
+         名、侧栏这一行的产品名 —— 同一个身份在两条带子上各写一遍。身份归标题栏，
+         侧栏只回答「我能去哪儿」。收缩按钮的位置由 CSS 顶到右端，与首页同一条
+         规则，所以标题去掉后它不动。 */
+      domainName=""
       sections={
         view.kind === "workspace"
           ? productSections
@@ -633,7 +652,7 @@ export function Workbench({ api }: { api: Api }) {
       sidebarMode={collapsed ? "collapsed" : "expanded"}
     >
       <ShellPageContainer width="wide-2xl" className="workbench-page">
-        {error && <div className="error-box">{error}</div>}
+        {error && <NoticeBar message={error} onClose={() => setError(null)} />}
         <Suspense
           fallback={
             <p className="text-body-md text-muted-foreground">加载中……</p>

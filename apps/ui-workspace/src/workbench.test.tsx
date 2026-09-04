@@ -690,3 +690,13 @@ void test("Workbench: 认不出来的地址什么也不做 —— 不清空视�
   window.dispatchEvent(new HashChangeEvent("hashchange"));
   expect(screen.getByTestId("settings-stub")).toBeInTheDocument();
 });
+
+void test("Workbench: 侧栏拉不到时顶部报一条，且那条提醒可以关掉", async () => {
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({ projects: vi.fn().mockRejectedValue(new Error("daemon unreachable")) });
+  render(<Workbench api={api} />);
+  expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
+  // 关掉之后不再占着内容区顶部；它讲的是刚才那次拉取，不是这一页的状态。
+  await userEvent.setup().click(screen.getByRole("button", { name: "关闭提醒" }));
+  expect(screen.queryByText("daemon unreachable")).not.toBeInTheDocument();
+});
