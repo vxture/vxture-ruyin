@@ -17,11 +17,14 @@
  *    已经在目标这边了，这一次要做的是**接着把尾巴收完**，绝不是把目标删掉。
  * 3. **不搬缓存。** `chromium/` 是 Electron 的缓存，删了会自己长回来 —— 它通常
  *    是整棵树里最大的一块，搬它只是拿风险换等待。
- * 4. **不跨用户、不跨机器。** 主密钥由 DPAPI 按用户作用域封装，换个 Windows
+ * 4. **搬移是异步的。** 同步复制会把事件循环整段占住 —— 搬家期间那个只答
+ *    `/health` 与 `/migration` 的小服务（migration-server.ts）就永远轮不到，
+ *    于是「有进度接口却报不出进度」（2026-09-05 实测：3 GB 的搬移期间端点一次
+ *    都没答上话）。每个文件之间让出一次，服务才活着。
+ * 5. **不跨用户、不跨机器。** 主密钥由 DPAPI 按用户作用域封装，换个 Windows
  *    用户就解不开。这里搬的是「同一个用户换个盘」；别的场景要导出，不是搬移。
  */
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -32,6 +35,9 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { copyFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
@@ -41,6 +47,19 @@ const SKIP = new Set(["chromium"]);
 const MARKER = ".ruyin-move";
 /** 留出的余量：复制期间盘上还有别的进程在写。 */
 const HEADROOM = 1.1;
+
+/**
+ * 搬家进度。**逐文件报**，因为用户看着的是一个进度条 —— 而
+ * `cpSync(dir, {recursive:true})` 是一整棵树一次调用，中间没有任何汇报点。
+ *
+ * `phase`：`copy` 复制、`verify` 逐文件核对（跨卷才有这一步，它和复制一样费
+ * 时间，藏起来会让进度条在 100% 处停很久）。
+ */
+export interface MoveProgress {
+  phase: "copy" | "verify";
+  copiedBytes: number;
+  totalBytes: number;
+}
 
 export interface MoveOutcome {
   status: "moved" | "failed" | "none";
@@ -226,25 +245,73 @@ function mb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function sha256(file: string): string {
-  return createHash("sha256").update(readFileSync(file)).digest("hex");
+/**
+ * 文件摘要。**流式 + 异步**：核对要读遍两边全部字节，一次 readFileSync 既把整个
+ * 文件读进内存（项目库可以是 GB 级），又把事件循环占死。
+ */
+async function sha256(file: string): Promise<string> {
+  const hash = createHash("sha256");
+  await pipeline(createReadStream(file), hash);
+  return hash.digest("hex");
+}
+
+/**
+ * 复制一棵树，**每个文件报一次进度**。返回累计已复制字节数。
+ *
+ * 自己走树而不是 `cpSync(recursive)`：后者是一次调用，中间没有汇报点。空目录
+ * 也要建出来 —— 它可能是产品或项目布局的一部分。
+ */
+async function copyTree(
+  a: string,
+  b: string,
+  copiedSoFar: number,
+  totalBytes: number,
+  onProgress?: (p: MoveProgress) => void | Promise<void>,
+): Promise<number> {
+  let copied = copiedSoFar;
+  const st = statSync(a);
+  if (st.isDirectory()) {
+    mkdirSync(b, { recursive: true });
+    for (const e of readdirSync(a, { withFileTypes: true })) {
+      copied = await copyTree(join(a, e.name), join(b, e.name), copied, totalBytes, onProgress);
+    }
+    return copied;
+  }
+  if (!st.isFile()) return copied; // 符号链接等：不跟着走（treeSize 也没算它）
+  mkdirSync(resolve(b, ".."), { recursive: true });
+  // 异步 copyFile：搬家期间那个报进度的小服务要在文件之间拿到执行机会。
+  await copyFile(a, b);
+  copied += st.size;
+  await onProgress?.({ phase: "copy", copiedBytes: copied, totalBytes });
+  return copied;
 }
 
 /** 逐文件核对：大小 + 摘要。没核对过的副本不算数。 */
-function verifyTree(srcDir: string, dstDir: string): string | undefined {
-  const walk = (rel: string): string | undefined => {
+async function verifyTree(
+  srcDir: string,
+  dstDir: string,
+  verified: { bytes: number },
+  totalBytes: number,
+  onProgress?: (p: MoveProgress) => void | Promise<void>,
+): Promise<string | undefined> {
+  const walk = async (rel: string): Promise<string | undefined> => {
     for (const e of readdirSync(join(srcDir, rel), { withFileTypes: true })) {
       const r = rel ? join(rel, e.name) : e.name;
       const a = join(srcDir, r);
       const b = join(dstDir, r);
       if (e.isDirectory()) {
         if (!existsSync(b)) return `复制后少了目录 ${r}`;
-        const deeper = walk(r);
+        const deeper = await walk(r);
         if (deeper) return deeper;
       } else if (e.isFile()) {
         if (!existsSync(b)) return `复制后少了文件 ${r}`;
-        if (statSync(a).size !== statSync(b).size) return `复制后大小对不上：${r}`;
-        if (sha256(a) !== sha256(b)) return `复制后内容对不上：${r}`;
+        const size = statSync(a).size;
+        if (size !== statSync(b).size) return `复制后大小对不上：${r}`;
+        if ((await sha256(a)) !== (await sha256(b))) return `复制后内容对不上：${r}`;
+        verified.bytes += size;
+        // 核对和复制一样费时间（两边都要读一遍全部字节）。不报的话进度条会在
+        // 100% 处停住不动，而那正是最容易让人以为卡死的时刻。
+        await onProgress?.({ phase: "verify", copiedBytes: verified.bytes, totalBytes });
       }
     }
     return undefined;
@@ -257,19 +324,28 @@ function verifyTree(srcDir: string, dstDir: string): string | undefined {
  * （同一个盘上 rename 永远成功），而「核对能抓出坏副本」正是那条路唯一的护栏 ——
  * 不能只靠一条走不到的分支来保证。
  */
-export function verifyMoved(src: string, dst: string, names: string[]): string | undefined {
+export async function verifyMoved(
+  src: string,
+  dst: string,
+  names: string[],
+  totalBytes = 0,
+  onProgress?: (p: MoveProgress) => void | Promise<void>,
+): Promise<string | undefined> {
+  const verified = { bytes: 0 };
   for (const name of names) {
     const a = join(src, name);
     if (!existsSync(a)) continue;
     if (statSync(a).isDirectory()) {
-      const bad = verifyTree(a, join(dst, name));
+      const bad = await verifyTree(a, join(dst, name), verified, totalBytes, onProgress);
       if (bad) return bad;
       continue;
     }
     const b = join(dst, name);
     if (!existsSync(b)) return `复制后少了文件 ${name}`;
     if (statSync(a).size !== statSync(b).size) return `复制后大小对不上：${name}`;
-    if (sha256(a) !== sha256(b)) return `复制后内容对不上：${name}`;
+    if ((await sha256(a)) !== (await sha256(b))) return `复制后内容对不上：${name}`;
+    verified.bytes += statSync(a).size;
+    await onProgress?.({ phase: "verify", copiedBytes: verified.bytes, totalBytes });
   }
   return undefined;
 }
@@ -302,13 +378,15 @@ function settleUnfinished(dst: string): { resolved?: "target"; note?: string } {
  * 同卷：逐项改名（每一项都是原子的），中途失败把已改名的原路搬回。
  * 跨卷：复制 → 逐文件核对 → 写 `done` → 删源 → 清标记。
  */
-export function performMove(
+export async function performMove(
   from: string,
   to: string,
   /** `copy` 强制走「复制 + 核对 + 删源」那条路。跨卷时自动如此；测试用它把那条
       路走一遍，遇到古怪文件系统时也可以用它换取更保险的过程。 */
   mode: "auto" | "copy" = "auto",
-): MoveOutcome {
+  /** 每复制 / 核对完一个文件报一次。同卷改名没有进度可报（它是瞬间的）。 */
+  onProgress?: (p: MoveProgress) => void | Promise<void>,
+): Promise<MoveOutcome> {
   const at = new Date().toISOString();
   const src = resolve(from);
   const dst = resolve(to);
@@ -351,11 +429,17 @@ export function performMove(
       join(dst, MARKER),
       JSON.stringify({ from: src, at, state: "copying", names: [] } satisfies Marker),
     );
+    const totalBytes = check.bytes ?? 0;
+    let copied = 0;
     for (const name of entries) {
       const a = join(src, name);
       const b = join(dst, name);
       if (check.sameVolume) renameSync(a, b);
-      else cpSync(a, b, { recursive: true, force: true });
+      else {
+        // **逐文件复制**，而不是 cpSync 整棵树：一次调用中间没有汇报点，而用户
+        // 看着的是一个进度条。代价是我们自己建目录、自己走树。
+        copied = await copyTree(a, b, copied, totalBytes, onProgress);
+      }
       done.push(name);
       // 每搬完一项就把清单落盘：断电之后要知道哪些已经在那边了。
       writeFileSync(
@@ -364,7 +448,7 @@ export function performMove(
       );
     }
     if (!check.sameVolume) {
-      const bad = verifyMoved(src, dst, entries);
+      const bad = await verifyMoved(src, dst, entries, totalBytes, onProgress);
       if (bad) {
         // 副本不可信：丢掉副本，源一动没动，如实说是哪一处对不上。
         rmSync(dst, { recursive: true, force: true });
@@ -493,10 +577,12 @@ export function hasData(dir: string): boolean {
  * 因为什么。失败时返回源目录：数据在哪儿就从哪儿启动，不因为一次失败的搬家让
  * 用户面对一个空应用。
  */
-export function applyPendingMove(
+export async function applyPendingMove(
   locationFile: string,
   fallbackDir: string,
-): { dataDir: string; outcome: MoveOutcome; movedNow: boolean } {
+  /** 搬家进度往外报（搬家期间那个小服务要它）。同卷改名没有进度。 */
+  onProgress?: (p: MoveProgress) => void | Promise<void>,
+): Promise<{ dataDir: string; outcome: MoveOutcome; movedNow: boolean }> {
   const loc = readLocation(locationFile);
   const current = resolve(loc.dataDir ?? fallbackDir);
   // `movedNow` 与 `outcome` 是两件事：outcome 也可能是**上一次**的结果（界面要
@@ -507,7 +593,7 @@ export function applyPendingMove(
     return { dataDir: current, outcome: loc.lastMove ?? { status: "none" }, movedNow: false };
   }
 
-  const outcome = performMove(current, resolve(loc.pending));
+  const outcome = await performMove(current, resolve(loc.pending), "auto", onProgress);
   const dataDir = outcome.status === "moved" ? resolve(loc.pending) : current;
   writeLocation(locationFile, { dataDir, lastMove: outcome });
   return { dataDir, outcome, movedNow: true };

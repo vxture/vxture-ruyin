@@ -38,3 +38,30 @@ export function humanBytes(bytes?: number): string {
   if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
+
+/**
+ * 搬家那一屏上的一行字。**纯函数**，所以能被测 —— 那一屏本身是主进程注进去的
+ * 一段 DOM 操作，测不到。
+ *
+ * 两段分开说（复制 / 核对）：核对与复制一样费时间（两边全部字节都要读一遍），
+ * 混成一个 0–100% 会让进度条走到一半突然回头，而分开说只是「第二步」。
+ */
+export function progressLine(p?: {
+  phase?: "copy" | "verify";
+  copiedBytes?: number;
+  totalBytes?: number;
+}): string {
+  if (!p || !p.totalBytes || p.copiedBytes === undefined) return "正在准备……";
+  const pct = Math.min(100, Math.floor((p.copiedBytes / p.totalBytes) * 100));
+  const step = p.phase === "verify" ? "正在核对" : "正在复制";
+  return `${step} ${humanBytes(p.copiedBytes)} / ${humanBytes(p.totalBytes)}（${pct}%）`;
+}
+
+/** 进度条要画多长（0–100）。拿不到进度时返回 undefined —— 那时该用不确定条。 */
+export function progressPercent(p?: {
+  copiedBytes?: number;
+  totalBytes?: number;
+}): number | undefined {
+  if (!p || !p.totalBytes || p.copiedBytes === undefined) return undefined;
+  return Math.min(100, Math.floor((p.copiedBytes / p.totalBytes) * 100));
+}

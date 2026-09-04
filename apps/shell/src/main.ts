@@ -29,7 +29,7 @@ import { renderPdf } from "./pdf.js";
 import { isRenderPdfRequest, parsePdfSelfCheck, type RenderPdfReply } from "./pdf-protocol.js";
 import { captionOverlay, themeFromReply } from "./caption-overlay.js";
 import { extractDaemonEvents, type DaemonEventKind } from "./daemon-events.js";
-import { humanBytes, moveWaitMs } from "./migration-wait.js";
+import { humanBytes, moveWaitMs, progressLine, progressPercent } from "./migration-wait.js";
 import { diffPending } from "./pending-notify.js";
 
 // userData 路径由它决定，而不是 productName。**这里的 "Ruyin" 是路径键，不是
@@ -393,15 +393,61 @@ function openMigrationWindow(target: string, bytes?: number): BrowserWindow {
     .box{max-width:420px;padding:0 24px;text-align:center}
     h1{font-size:16px;margin:0 0 10px;font-weight:600}
     p{margin:0;color:#a1a1a6;font-size:13px}
-    .bar{margin:18px auto 14px;width:220px;height:3px;border-radius:2px;background:#2a2a2e;overflow:hidden}
+    .bar{margin:18px auto 12px;width:260px;height:4px;border-radius:2px;background:#2a2a2e;overflow:hidden}
+    /* 两种状态：拿到进度就是一条按比例的实条（width 由主进程注入），拿不到才
+       退回那条来回跑的 —— 不确定进度条和卡死长得一模一样，能不用就不用。 */
     .bar i{display:block;width:70px;height:100%;border-radius:2px;background:#1e51ff;
       animation:s 1.1s ease-in-out infinite}
-    @keyframes s{0%{transform:translateX(-70px)}100%{transform:translateX(220px)}}
+    .bar.known i{animation:none;transition:width .3s ease}
+    #pct{margin-top:2px;color:#e8e8ea;font-size:12px;font-variant-numeric:tabular-nums}
+    @keyframes s{0%{transform:translateX(-70px)}100%{transform:translateX(260px)}}
   </style><div class="box"><h1>正在搬移数据</h1><div class="bar"><i></i></div>
-    <p>请不要关闭应用。${size ? `约 ${size}，` : ""}完成后会自动打开。<br>
+    <div id="pct">${size ? `约 ${size}` : "正在准备……"}</div>
+    <p>请不要关闭应用。完成后会自动打开。<br>
     万一中途失败，数据会留在原来的位置，不会丢。</p></div>`;
   void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  // 真实进度：守护进程在搬家期间支了一个只答 /health 与 /migration 的小服务
+  // （local-host/migration-server.ts）。这里每 500ms 问一次，把那一行字与条宽
+  // 注进页面 —— 页面是 data: URL，没有 preload，注入是唯一的通路。
+  const tick = setInterval(() => void paintProgress(win), 500);
+  win.on("closed", () => clearInterval(tick));
   return win;
+}
+
+/** 问一次进度，画到那一屏上。问不到就什么都不改（保持上一次的字）。 */
+async function paintProgress(win: BrowserWindow): Promise<void> {
+  if (win.isDestroyed()) return;
+  try {
+    const res = await fetch(`http://127.0.0.1:${PORT}/migration`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    if (!res.ok) return;
+    const p = (await res.json()) as {
+      phase?: "copy" | "verify";
+      copiedBytes?: number;
+      totalBytes?: number;
+    };
+    const line = progressLine(p);
+    const pct = progressPercent(p);
+    await win.webContents.executeJavaScript(
+      `(() => {
+        const t = document.getElementById("pct");
+        if (t) t.textContent = ${JSON.stringify(line)};
+        const bar = document.querySelector(".bar");
+        const fill = document.querySelector(".bar i");
+        if (bar && fill) {
+          ${
+            pct === undefined
+              ? `bar.classList.remove("known"); fill.style.width = "70px";`
+              : `bar.classList.add("known"); fill.style.width = "${pct}%";`
+          }
+        }
+      })()`,
+      true,
+    );
+  } catch {
+    // 小服务还没起来、或者已经关掉（搬完了）：不改屏，等下一次。
+  }
 }
 
 async function waitForHealth(timeoutMs = 15_000): Promise<void> {

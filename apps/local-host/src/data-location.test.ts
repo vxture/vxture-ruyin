@@ -44,7 +44,7 @@ function seed(dir: string): void {
   writeFileSync(join(dir, "chromium", "Cache", "blob"), "x".repeat(4096));
 }
 
-void test("checkTarget: 拦住那些不该搬的目标，并且说得清为什么", () => {
+void test("checkTarget: 拦住那些不该搬的目标，并且说得清为什么", async () => {
   const src = tmp();
   seed(src);
   assert.match(checkTarget(src, "").reason ?? "", /还没填/);
@@ -75,11 +75,11 @@ void test("checkTarget: 拦住那些不该搬的目标，并且说得清为什�
   assert.ok((r.bytes ?? 0) < 4096, `不该把 chromium 的 4096 字节算进来，实际 ${r.bytes}`);
 });
 
-void test("performMove: 搬完之后源那边只剩缓存，目标那边逐字节一致", () => {
+void test("performMove: 搬完之后源那边只剩缓存，目标那边逐字节一致", async () => {
   const src = tmp();
   seed(src);
   const dst = join(tmp(), "moved");
-  const out = performMove(src, dst);
+  const out = await performMove(src, dst);
   assert.equal(out.status, "moved", out.reason);
 
   assert.deepEqual(readdirSync(src), ["chromium"]);
@@ -92,19 +92,19 @@ void test("performMove: 搬完之后源那边只剩缓存，目标那边逐字�
   assert.equal(existsSync(join(dst, ".ruyin-move")), false);
 });
 
-void test("performMove: 目标不可用时源一动没动，且如实说原因", () => {
+void test("performMove: 目标不可用时源一动没动，且如实说原因", async () => {
   const src = tmp();
   seed(src);
   const busy = tmp();
   writeFileSync(join(busy, "occupied"), "x");
   const before = readdirSync(src).sort();
-  const out = performMove(src, busy);
+  const out = await performMove(src, busy);
   assert.equal(out.status, "failed");
   assert.match(out.reason ?? "", /已经有东西/);
   assert.deepEqual(readdirSync(src).sort(), before);
 });
 
-void test("断电在复制中途（copying 标记）：丢掉那份不完整的副本，源仍是权威", () => {
+void test("断电在复制中途（copying 标记）：丢掉那份不完整的副本，源仍是权威", async () => {
   const src = tmp();
   seed(src);
   const dst = join(tmp(), "halfway");
@@ -116,14 +116,14 @@ void test("断电在复制中途（copying 标记）：丢掉那份不完整的�
     JSON.stringify({ from: src, at: "t", state: "copying", names: ["projects"] }),
   );
 
-  const out = performMove(src, dst);
+  const out = await performMove(src, dst);
   assert.equal(out.status, "moved", out.reason);
   // 那份截断的副本没有被当成数据接着用 —— 它被丢掉，然后从源重新搬了一遍。
   assert.equal(readFileSync(join(dst, "projects", "prj_1", "project.db"), "utf8"), "DB");
   assert.equal(readFileSync(join(dst, "runtime", "master.key.dpapi"), "utf8"), "KEY");
 });
 
-void test("断电在删源之前（done 标记）：认目标、收尾，绝不把目标删掉", () => {
+void test("断电在删源之前（done 标记）：认目标、收尾，绝不把目标删掉", async () => {
   const src = tmp();
   seed(src);
   const dst = join(tmp(), "already-there");
@@ -145,7 +145,7 @@ void test("断电在删源之前（done 标记）：认目标、收尾，绝不�
     }),
   );
 
-  const out = performMove(src, dst);
+  const out = await performMove(src, dst);
   assert.equal(out.status, "moved", out.reason);
   // 关键断言：**目标那份还在**。把 done 当成「上次没走完、丢掉重来」处理，
   // 会删掉唯一一份好数据 —— 这条用例就是为了钉死这个方向。
@@ -155,20 +155,20 @@ void test("断电在删源之前（done 标记）：认目标、收尾，绝不�
   assert.deepEqual(readdirSync(src), ["chromium"]);
 });
 
-void test("applyPendingMove: 没有待搬就什么也不做；搬成了把指针指向新目录", () => {
+void test("applyPendingMove: 没有待搬就什么也不做；搬成了把指针指向新目录", async () => {
   const src = tmp();
   seed(src);
   const locFile = join(tmp(), "location.json");
 
   // 没有指针文件：按调用方给的默认目录走，不动任何东西。
-  const idle = applyPendingMove(locFile, src);
+  const idle = await applyPendingMove(locFile, src);
   assert.equal(idle.dataDir, src);
   assert.equal(idle.outcome.status, "none");
   assert.equal(existsSync(locFile), false);
 
   const dst = join(tmp(), "next");
   writeLocation(locFile, { dataDir: src, pending: dst });
-  const moved = applyPendingMove(locFile, src);
+  const moved = await applyPendingMove(locFile, src);
   assert.equal(moved.outcome.status, "moved", moved.outcome.reason);
   assert.equal(moved.dataDir, dst);
   const loc = readLocation(locFile);
@@ -178,7 +178,7 @@ void test("applyPendingMove: 没有待搬就什么也不做；搬成了把指针
   assert.equal(loc.lastMove?.status, "moved");
 });
 
-void test("applyPendingMove: 搬不成时从原目录启动 —— 一次失败的搬家不该换来一个空应用", () => {
+void test("applyPendingMove: 搬不成时从原目录启动 —— 一次失败的搬家不该换来一个空应用", async () => {
   const src = tmp();
   seed(src);
   const locFile = join(tmp(), "location.json");
@@ -186,7 +186,7 @@ void test("applyPendingMove: 搬不成时从原目录启动 —— 一次失败�
   writeFileSync(join(busy, "occupied"), "x");
   writeLocation(locFile, { dataDir: src, pending: busy });
 
-  const r = applyPendingMove(locFile, src);
+  const r = await applyPendingMove(locFile, src);
   assert.equal(r.outcome.status, "failed");
   assert.equal(r.dataDir, src);
   // 失败的原因要留在指针文件里：界面重启后要能说清楚为什么没搬成。
@@ -195,7 +195,7 @@ void test("applyPendingMove: 搬不成时从原目录启动 —— 一次失败�
   assert.equal(readFileSync(join(src, "runtime", "master.key.dpapi"), "utf8"), "KEY");
 });
 
-void test("readLocation: 文件被写坏了按「还没搬过家」处理，不因为一个路径把应用卡住", () => {
+void test("readLocation: 文件被写坏了按「还没搬过家」处理，不因为一个路径把应用卡住", async () => {
   const f = join(tmp(), "location.json");
   writeFileSync(f, "{ not json");
   assert.deepEqual(readLocation(f), {});
@@ -203,20 +203,20 @@ void test("readLocation: 文件被写坏了按「还没搬过家」处理，不�
   assert.deepEqual(readLocation(f), {});
 });
 
-void test("跨卷那条路：复制 + 核对 + 删源，一步都不少", () => {
+void test("跨卷那条路：复制 + 核对 + 删源，一步都不少", async () => {
   const src = tmp();
   seed(src);
   const dst = join(tmp(), "cross-volume");
   // 临时目录都在同一个盘上，rename 永远成功，跨卷那条路在真实条件下走不到 ——
   // 所以显式强制它，否则这条分支只能靠「相信它写对了」。
-  const out = performMove(src, dst, "copy");
+  const out = await await performMove(src, dst, "copy");
   assert.equal(out.status, "moved", out.reason);
   assert.equal(readFileSync(join(dst, "projects", "prj_1", "project.db-wal"), "utf8"), "WAL");
   assert.deepEqual(readdirSync(src), ["chromium"]);
   assert.equal(existsSync(join(dst, ".ruyin-move")), false);
 });
 
-void test("核对能抓出坏副本：少一个文件、大小不对、内容不对，各说各的", () => {
+void test("核对能抓出坏副本：少一个文件、大小不对、内容不对，各说各的", async () => {
   const src = tmp();
   seed(src);
   const dst = tmp();
@@ -224,37 +224,37 @@ void test("核对能抓出坏副本：少一个文件、大小不对、内容不
   // 完整复制一份，先证明核对在正常情况下是安静的。
   cpSync(join(src, "runtime"), join(dst, "runtime"), { recursive: true });
   cpSync(join(src, "projects"), join(dst, "projects"), { recursive: true });
-  assert.equal(verifyMoved(src, dst, names), undefined);
+  assert.equal(await verifyMoved(src, dst, names), undefined);
 
   rmSync(join(dst, "projects", "prj_1", "key.enc"));
-  assert.match(verifyMoved(src, dst, names) ?? "", /少了文件/);
+  assert.match(await verifyMoved(src, dst, names) ?? "", /少了文件/);
 
   writeFileSync(join(dst, "projects", "prj_1", "key.enc"), "K-but-longer");
-  assert.match(verifyMoved(src, dst, names) ?? "", /大小对不上/);
+  assert.match(await verifyMoved(src, dst, names) ?? "", /大小对不上/);
 
   // 同样长度、不同内容 —— 只比大小的实现会在这里放过一份坏数据。
   writeFileSync(join(dst, "projects", "prj_1", "key.enc"), "X");
-  assert.match(verifyMoved(src, dst, names) ?? "", /内容对不上/);
+  assert.match(await verifyMoved(src, dst, names) ?? "", /内容对不上/);
 });
 
-void test("applyPendingMove: 搬完之后再启动，不会再报一次「搬了」", () => {
+void test("applyPendingMove: 搬完之后再启动，不会再报一次「搬了」", async () => {
   const src = tmp();
   seed(src);
   const locFile = join(tmp(), "location.json");
   const dst = join(tmp(), "there");
   writeLocation(locFile, { dataDir: src, pending: dst });
-  const first = applyPendingMove(locFile, src);
+  const first = await applyPendingMove(locFile, src);
   assert.equal(first.movedNow, true);
 
   // 第二次启动：指针里已经没有待搬，什么也不该发生。outcome 仍然是「上次搬成了」
   // （界面要用它讲那句确认），但 movedNow 是 false —— 日志据此闭嘴。
-  const second = applyPendingMove(locFile, src);
+  const second = await applyPendingMove(locFile, src);
   assert.equal(second.movedNow, false);
   assert.equal(second.dataDir, dst);
   assert.equal(second.outcome.status, "moved");
 });
 
-void test("resolveDataDir: 指针说了算", () => {
+void test("resolveDataDir: 指针说了算", async () => {
   const locFile = join(tmp(), "location.json");
   const chosen = tmp();
   writeLocation(locFile, { dataDir: chosen });
@@ -263,7 +263,7 @@ void test("resolveDataDir: 指针说了算", () => {
   assert.equal(r.pinnedLegacy, false);
 });
 
-void test("resolveDataDir: 老位置有数据 → 钉在老位置并写下指针，**一个字节都不搬**", () => {
+void test("resolveDataDir: 老位置有数据 → 钉在老位置并写下指针，**一个字节都不搬**", async () => {
   const legacy = tmp();
   seed(legacy);
   const locFile = join(tmp(), "location.json");
@@ -279,7 +279,7 @@ void test("resolveDataDir: 老位置有数据 → 钉在老位置并写下指针
   assert.equal(existsSync(preferred), false);
 });
 
-void test("resolveDataDir: 全新机器 → 用新默认位置，不写指针（少一处要保持一致的状态）", () => {
+void test("resolveDataDir: 全新机器 → 用新默认位置，不写指针（少一处要保持一致的状态）", async () => {
   const locFile = join(tmp(), "location.json");
   const preferred = join(tmp(), "fresh");
   const emptyLegacy = tmp();
@@ -289,7 +289,7 @@ void test("resolveDataDir: 全新机器 → 用新默认位置，不写指针（
   assert.equal(existsSync(locFile), false);
 });
 
-void test("resolveDataDir: 老目录建出来了但是空的，不算「有数据」—— 那是装过没登录过的机器", () => {
+void test("resolveDataDir: 老目录建出来了但是空的，不算「有数据」—— 那是装过没登录过的机器", async () => {
   const legacy = tmp();
   mkdirSync(join(legacy, "runtime"), { recursive: true });
   const locFile = join(tmp(), "location.json");
@@ -298,7 +298,7 @@ void test("resolveDataDir: 老目录建出来了但是空的，不算「有数�
   assert.equal(resolveDataDir(locFile, preferred, legacy).dataDir, preferred);
 });
 
-void test("resolveDataDir: 钉老位置时不能把已经排好的搬家丢掉", () => {
+void test("resolveDataDir: 钉老位置时不能把已经排好的搬家丢掉", async () => {
   const legacy = tmp();
   seed(legacy);
   const locFile = join(tmp(), "location.json");
@@ -310,7 +310,7 @@ void test("resolveDataDir: 钉老位置时不能把已经排好的搬家丢掉",
   assert.equal(readLocation(locFile).pending, target);
 });
 
-void test("resolveDataDir: 指针指向不能用的位置（拔掉的盘、被删的目录）→ 回落默认位置", () => {
+void test("resolveDataDir: 指针指向不能用的位置（拔掉的盘、被删的目录）→ 回落默认位置", async () => {
   const locFile = join(tmp(), "location.json");
   // 拿一个**普通文件**当父目录：两个平台都是 ENOTDIR，立刻失败，不必依赖
   // 「某个盘符不存在」或 /proc 这类平台特有的东西 —— 那种写法在另一个系统上
@@ -324,25 +324,25 @@ void test("resolveDataDir: 指针指向不能用的位置（拔掉的盘、被�
   assert.equal(r.dataDir, preferred);
 });
 
-void test("performMove: 源目录不存在时报失败 —— 绝不能把「什么都没搬」说成搬完了", () => {
+void test("performMove: 源目录不存在时报失败 —— 绝不能把「什么都没搬」说成搬完了", async () => {
   const root = tmp();
   const gone = join(root, "no-such-source");
   const target = join(root, "target");
-  const out = performMove(gone, target);
+  const out = await performMove(gone, target);
   assert.equal(out.status, "failed");
   assert.match(out.reason ?? "", /找不到当前数据目录/);
   // 目标不该被建出来：一个空目录会让下一次启动以为数据在那儿。
   assert.equal(existsSync(target), false);
 });
 
-void test("applyPendingMove: 源目录不存在时指针一动不动 —— 数据可能只是在没插的盘上", () => {
+void test("applyPendingMove: 源目录不存在时指针一动不动 —— 数据可能只是在没插的盘上", async () => {
   const root = tmp();
   const gone = join(root, "unplugged-drive");
   const target = join(root, "target");
   const locFile = join(root, "location.json");
   writeLocation(locFile, { dataDir: gone, pending: target });
 
-  const r = applyPendingMove(locFile, join(root, "fallback"));
+  const r = await applyPendingMove(locFile, join(root, "fallback"));
   assert.equal(r.outcome.status, "failed");
   // **关键**：指针仍然指着原来那个位置。改指到空目录，等于把用户的数据弄丢了
   // ——数据其实还在，只是应用再也不看那儿了。
@@ -350,7 +350,7 @@ void test("applyPendingMove: 源目录不存在时指针一动不动 —— 数�
   assert.equal(readLocation(locFile).pending, undefined);
 });
 
-void test("指针里要带上「要搬多少字节」—— 壳靠它决定等多久，而不是一个常数", () => {
+void test("指针里要带上「要搬多少字节」—— 壳靠它决定等多久，而不是一个常数", async () => {
   const src = tmp();
   seed(src);
   const locFile = join(tmp(), "location.json");
@@ -362,7 +362,55 @@ void test("指针里要带上「要搬多少字节」—— 壳靠它决定等�
   const loc = readLocation(locFile);
   assert.equal(loc.pendingBytes, bytes);
   // 搬完之后这一条要跟着 pending 一起消失（写的是一份新的指针）。
-  applyPendingMove(locFile, src);
+  await applyPendingMove(locFile, src);
   assert.equal(readLocation(locFile).pendingBytes, undefined);
   assert.equal(readLocation(locFile).pending, undefined);
+});
+
+void test("performMove: 跨卷时逐文件报进度，复制与核对两段各自走到 100%", async () => {
+  const src = tmp();
+  seed(src);
+  const dst = join(tmp(), "with-progress");
+  const seen: Array<{ phase: string; copiedBytes: number; totalBytes: number }> = [];
+  const out = await performMove(src, dst, "copy", (p) => void seen.push({ ...p }));
+  assert.equal(out.status, "moved", out.reason);
+
+  const copy = seen.filter((p) => p.phase === "copy");
+  const verify = seen.filter((p) => p.phase === "verify");
+  // 两段都要有汇报点：核对和复制一样费时间（两边全部字节都要读一遍），
+  // 不报的话进度条会停在 100% 不动 —— 那是最容易被当成卡死的时刻。
+  assert.ok(copy.length >= 4, `复制该逐文件报，实际 ${copy.length} 次`);
+  assert.ok(verify.length >= 4, `核对该逐文件报，实际 ${verify.length} 次`);
+
+  // 单调不减，且不超过总量。
+  for (const list of [copy, verify]) {
+    let prev = 0;
+    for (const p of list) {
+      assert.ok(p.copiedBytes >= prev, "进度不能倒退");
+      assert.ok(p.copiedBytes <= p.totalBytes, `${p.copiedBytes} > ${p.totalBytes}`);
+      prev = p.copiedBytes;
+    }
+  }
+  // 两段最后都应当走到总量（缓存不算在总量里，也不参与搬移）。
+  assert.equal(copy[copy.length - 1]?.copiedBytes, treeSize(dst));
+  assert.equal(verify[verify.length - 1]?.copiedBytes, treeSize(dst));
+});
+
+void test("performMove: 逐文件复制要把空目录也建出来 —— 它可能是布局的一部分", async () => {
+  const src = tmp();
+  seed(src);
+  mkdirSync(join(src, "projects", "prj_1", "empty-on-purpose"), { recursive: true });
+  const dst = join(tmp(), "with-empty");
+  assert.equal((await performMove(src, dst, "copy")).status, "moved");
+  assert.equal(existsSync(join(dst, "projects", "prj_1", "empty-on-purpose")), true);
+});
+
+void test("performMove: 同卷改名没有进度可报（它是瞬间的），但也不能因此崩", async () => {
+  const src = tmp();
+  seed(src);
+  const dst = join(tmp(), "same-volume");
+  const seen: string[] = [];
+  const out = await performMove(src, dst, "auto", (p) => void seen.push(p.phase));
+  assert.equal(out.status, "moved", out.reason);
+  assert.deepEqual(seen, []);
 });

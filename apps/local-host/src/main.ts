@@ -47,6 +47,11 @@ import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
 import { FolderPick } from "./folder-pick.js";
 import {
+  startMigrationServer,
+  stopMigrationServer,
+  type MigrationStatus,
+} from "./migration-server.js";
+import {
   applyPendingMove,
   checkTarget,
   readLocation,
@@ -77,12 +82,63 @@ const resolved = resolveDataDir(locationFile, preferredDataDir, legacyDataDir);
 if (resolved.pinnedLegacy) {
   console.log(`[ruyin] data dir pinned to the existing location: ${resolved.dataDir}`);
 }
+// 端口与令牌要在搬家之前定下来：搬家期间那个小服务用的是同一对。
+const port = Number(process.env["RUYIN_PORT"] ?? 7420);
+const token = process.env["RUYIN_TOKEN"] ?? randomBytes(24).toString("hex");
+
 /**
- * 搬家在这一行发生 —— **在 KeyManager 与 SqliteStoragePort 之前**，也就是在
- * 任何库被打开之前。这个顺序是整件事成立的前提，别把它挪到下面去（data-location.ts
+ * 搬家在这一段发生 —— **在 KeyManager 与 SqliteStoragePort 之前**，也就是在任何
+ * 库被打开之前。这个顺序是整件事成立的前提，别把它挪到下面去（data-location.ts
  * 的头注释写了为什么）。
+ *
+ * 搬之前先把那个只答两条的小服务支起来（migration-server.ts）：搬 GB 级数据要
+ * 几分钟，这段时间里壳唯一能做的就是问「搬到哪儿了」。没有它，那一屏只能显示一
+ * 个不确定的进度条 —— 而不确定的进度条和卡死长得一模一样。
  */
-const moved = applyPendingMove(locationFile, resolved.dataDir);
+const moved = await (async () => {
+  const pendingTo = readLocation(locationFile).pending;
+  if (!pendingTo) return applyPendingMove(locationFile, resolved.dataDir);
+
+  let progress: MigrationStatus = {
+    phase: "copy",
+    copiedBytes: 0,
+    totalBytes: readLocation(locationFile).pendingBytes ?? 0,
+    from: resolved.dataDir,
+    to: pendingTo,
+  };
+  let mini;
+  try {
+    mini = await startMigrationServer(port, token, () => progress);
+    // 这一行是给「搬家期间到底有没有人应答」这个问题用的：没有它，进度报不
+    // 出来时分不清是服务没起来、还是壳没问。
+    console.log(`[ruyin] migration progress endpoint listening on ${port}`);
+  } catch (cause) {
+    // 端口被占（比如有人手工起了一个守护进程）：搬家照做，只是没有进度可报 ——
+    // 不能因为「报不了进度」就不搬，那会把用户卡在一个待搬状态里。
+    console.error(`[ruyin] migration progress endpoint unavailable: ${String(cause)}`);
+  }
+  try {
+    // 顺手把进度写进日志（每秒最多一条）：搬 GB 级数据要几分钟，那段时间里
+    // 日志如果一行不动，看日志的人无法判断它是在干活还是卡住了。
+    let lastLog = 0;
+    // **`return await`，不是 `return`。** 在 try/finally 里 `return 一个 Promise`
+    // 不会等它 —— finally 立刻执行，于是那个报进度的小服务在起来几毫秒后就被关
+    // 掉了，而搬家还在后台跑。2026-09-05 实测到的现象正是这个：日志里「已在
+    // 监听」是真的，探针一次也探不到也是真的。
+    return await applyPendingMove(locationFile, resolved.dataDir, (p) => {
+      progress = { ...progress, ...p };
+      const now = Date.now();
+      if (now - lastLog < 1000) return;
+      lastLog = now;
+      const mb = (n: number) => Math.round(n / 1024 / 1024);
+      console.log(
+        `[ruyin] migrating (${p.phase}): ${mb(p.copiedBytes)} / ${mb(p.totalBytes)} MB`,
+      );
+    });
+  } finally {
+    if (mini) await stopMigrationServer(mini);
+  }
+})();
 const dataDir = moved.dataDir;
 if (moved.movedNow && moved.outcome.status === "moved") {
   console.log(`[ruyin] data dir moved: ${moved.outcome.from} -> ${moved.outcome.to}`);
@@ -91,8 +147,6 @@ if (moved.movedNow && moved.outcome.status === "moved") {
   console.error(`[ruyin] data dir move FAILED: ${moved.outcome.reason ?? ""}`);
 }
 const productsDir = resolve(process.env["RUYIN_PRODUCTS_DIR"] ?? "products");
-const port = Number(process.env["RUYIN_PORT"] ?? 7420);
-const token = process.env["RUYIN_TOKEN"] ?? randomBytes(24).toString("hex");
 
 // Capability provider base (ADR-009: the business product''s own cloud service
 // holds the credentials for Atlas). Unset = mock, and the daemon says so -
