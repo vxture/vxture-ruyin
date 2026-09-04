@@ -17,7 +17,9 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@vxture/design-system";
+import { useEffect, useState } from "react";
 import { SettingsView, type SectionId } from "./settings";
+import { resolveSection } from "./settings-sections";
 import { Api, type SystemInfo, type UpdateCheck, ApiError } from "./api";
 
 function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
@@ -52,8 +54,34 @@ function renderSection(section: SectionId, api: Api = fakeApi()) {
   );
 }
 
+/**
+ * 跟着**地址**挂载。「添加连接器」是它自己的一页（owner 2026-09-04 第 5 条），
+ * 换页靠改 hash —— 工作台那边有个 hashchange 把它落到视图上。这里放一个同样
+ * 的小宿主，用例才测得到「去了那一页」，而不是只测到「按钮点得动」。
+ */
+function renderRouted(section: SectionId, api: Api = fakeApi()) {
+  window.location.hash = `#settings/${section}`;
+  function Host() {
+    const [id, setId] = useState<string>(section);
+    useEffect(() => {
+      // `#settings/connectors-add` → `connectors-add`
+      const apply = () => setId(window.location.hash.split("/").slice(1).join("/"));
+      window.addEventListener("hashchange", apply);
+      return () => window.removeEventListener("hashchange", apply);
+    }, []);
+    return <SettingsView api={api} section={resolveSection(id)} />;
+  }
+  return render(
+    <ThemeProvider defaultMode="dark" defaultDensity="default">
+      <Host />
+    </ThemeProvider>,
+  );
+}
+
 beforeEach(() => {
   localStorage.clear();
+  // 地址是路由的权威，所以也是会在用例之间串味的状态。
+  window.location.hash = "";
 });
 
 afterEach(() => {
@@ -103,7 +131,7 @@ void test("偏好设置（在账户之下）: language + the three axes, in that
   const user = userEvent.setup();
   await user.click(screen.getByRole("radio", { name: "宽松" }));
   await user.click(screen.getByRole("radio", { name: "浅色" }));
-  await user.click(screen.getByRole("radio", { name: "大" }));
+  await user.click(screen.getByRole("radio", { name: "加大" }));
   await vi.waitFor(() => expect(localStorage.getItem("vx-density")).toBe("comfortable"));
   // 三条轴的键名归 DS（vx-*），这里断言的是「都落到了本机」，不是某个具体键名 ——
   // 键名是 DS 的实现细节，写死它会在 DS 改名那天变成一条假红。
@@ -139,10 +167,15 @@ void test("通用设置: data dir / product dir / key protection reflect system 
   renderSection("general", api);
   expect(await screen.findByText("C:/data")).toBeInTheDocument();
   expect(screen.getByText("D:/products")).toBeInTheDocument();
-  expect(screen.getByText("主密钥由 Windows DPAPI 保护")).toBeInTheDocument();
+  // DPAPI 只在「主密钥」那一行说一次：底下那个说同一件事的徽章已经删了
+  // （owner 2026-09-04 第 2 条）。
+  expect(
+    screen.getByText("Windows DPAPI 保护（当前用户作用域），不落明文"),
+  ).toBeInTheDocument();
+  expect(document.body.textContent).not.toContain("主密钥由 Windows DPAPI 保护");
 });
 
-void test("通用设置: plaintext key protection shows the dev-mode warning, not the DPAPI badge", async () => {
+void test("通用设置: 明文保护时那条「不可用于真实数据」的警告要在 —— 它不是重复", async () => {
   const api = fakeApi({
     system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "plaintext" })),
   });
@@ -291,7 +324,7 @@ void test("Settings/连接器: lists installed connectors with live health, and 
     }),
     removeConnector: vi.fn().mockResolvedValue({ removed: "crm" }),
   });
-  renderSection("connectors", api);
+  renderRouted("connectors", api);
   const list = await screen.findByLabelText("已安装的连接器");
   expect(within(list).getByText("crm")).toBeInTheDocument();
   expect(within(list).getByText("运行中")).toBeInTheDocument();
@@ -313,7 +346,7 @@ void test("Settings/连接器: 添加是独立一页；必须先测通才能启�
     testConnector,
     installConnector,
   });
-  renderSection("connectors", api);
+  renderRouted("connectors", api);
   expect(await screen.findByText("尚未安装任何连接器。")).toBeInTheDocument();
   const user = userEvent.setup();
 
@@ -369,7 +402,7 @@ void test("Settings/连接器: 测通了但对方没报工具，说清楚 ——
     connectors: vi.fn().mockResolvedValue({ items: [] }),
     testConnector: vi.fn().mockResolvedValue({ ok: true, tools: [] }),
   });
-  renderSection("connectors", api);
+  renderRouted("connectors", api);
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "添加连接器" }));
   await user.type(screen.getByPlaceholderText("如 crm"), "x");
@@ -383,7 +416,7 @@ void test("Settings/连接器: 测试本身失败（守护进程没答话）也�
     connectors: vi.fn().mockResolvedValue({ items: [] }),
     testConnector: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
   });
-  renderSection("connectors", api);
+  renderRouted("connectors", api);
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "添加连接器" }));
   await user.type(screen.getByPlaceholderText("如 crm"), "x");
@@ -406,7 +439,7 @@ void test("Settings/连接器: 暂存的那个标「已暂存」，启用会重�
     .fn()
     .mockResolvedValue({ items: [stashed] });
   const api = fakeApi({ connectors, activateConnector });
-  renderSection("connectors", api);
+  renderRouted("connectors", api);
   expect(await screen.findByText("已暂存")).toBeInTheDocument();
   // 暂存 ≠ 装了没跑起来：不该显示成「未运行」。
   expect(screen.queryByText(/^未运行/)).not.toBeInTheDocument();
@@ -424,7 +457,7 @@ void test("Settings/连接器: an assembly without a registry (503) says so and 
       new ApiError(503, { error: "CONNECTORS_NOT_AVAILABLE", message: "这套装配没有进程外连接器注册表" }),
     ),
   });
-  renderSection("connectors", api);
+  renderRouted("connectors", api);
   expect(await screen.findByText("这套装配没有进程外连接器注册表")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "安装并启动" })).not.toBeInTheDocument();
 });
@@ -439,7 +472,7 @@ void test("Settings/连接器: a generic failure to list is shown as a failure (
     testConnector: vi.fn().mockResolvedValue({ ok: true, tools: ["crm_search"] }),
     installConnector: vi.fn().mockResolvedValue(crmView),
   });
-  renderSection("connectors", api);
+  renderRouted("connectors", api);
   expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
   expect(screen.queryByText("尚未安装任何连接器。")).not.toBeInTheDocument();
 
@@ -464,7 +497,7 @@ void test("Settings/连接器: a failed uninstall is reported, the list stays", 
     connectors: vi.fn().mockResolvedValue({ items: [crmView] }),
     removeConnector: vi.fn().mockRejectedValue(new Error("connector \"crm\" is not installed")),
   });
-  renderSection("connectors", api);
+  renderRouted("connectors", api);
   const list = await screen.findByLabelText("已安装的连接器");
   const user = userEvent.setup();
   await user.click(within(list).getByRole("button", { name: "卸载" }));
@@ -549,10 +582,11 @@ void test("Settings/通用设置: the encryption chain spells out all three laye
   // 一次加密 + 两层密钥保护。把层数说成加密次数是在核实的那一刻会崩掉的话。
   expect(container.textContent).not.toContain("三次加密");
   expect(container.textContent).toContain("产品契约与本机配置不加密");
-  expect(screen.getByText("主密钥由 Windows DPAPI 保护")).toBeInTheDocument();
+  // 保护到位时不再多挂一个徽章重复「主密钥」那一行（owner 第 2 条）。
+  expect(container.textContent).not.toContain("主密钥由 Windows DPAPI 保护");
 });
 
-void test("Settings/通用设置: without OS key protection the master-key row and the badge both say so", async () => {
+void test("Settings/通用设置: 没有 OS 级密钥保护时，行里与警告里都说清楚", async () => {
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "plaintext" })) });
   renderSection("general", api);
   expect(await screen.findByText("明文存放 —— 本平台没有 OS 级密钥保护")).toBeInTheDocument();
@@ -603,7 +637,9 @@ void test("Settings/通用设置: four blocks - storage, encryption, inference p
   renderSection("general", api);
   const titles = Array.from(document.querySelectorAll(".set-block-title")).map((e) => e.textContent);
   // 推理与审计拆成两块（owner 第 9 条）：可选的与不可选的不该同一块。
-  expect(titles).toEqual(["存储位置", "静态加密", "推理策略", "安全审计"]);
+  // 「静态加密」改叫「数据加密」（owner 2026-09-04 第 2 条）：用户找的是自己的
+  // 数据安不安全，不是一个密码学状态词。
+  expect(titles).toEqual(["存储位置", "数据加密", "推理策略", "安全审计"]);
   expect(await screen.findByText("C:/data")).toBeInTheDocument();
   // 目录只读，并写明为什么（owner 问过能不能改）。
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
@@ -623,6 +659,32 @@ void test("Settings/软件更新: four blocks; the channel is a select with only
   expect(document.body.textContent).toContain("不会自动下载或自动安装");
 });
 
+void test("Settings/连接器: 添加页有自己的地址 —— 点进去地址就变，直接开那个地址也能进", async () => {
+  const api = fakeApi({ connectors: vi.fn().mockResolvedValue({ items: [] }) });
+  const { unmount } = renderRouted("connectors", api);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "添加连接器" }));
+  // 「独立一页」的判据是**地址**，不是屏幕上换了内容（owner 2026-09-04 第 5 条）。
+  expect(window.location.hash).toBe("#settings/connectors-add");
+  await user.click(screen.getByRole("button", { name: "返回列表" }));
+  expect(window.location.hash).toBe("#settings/connectors");
+  unmount();
+
+  // 直接落在那个地址上（复制链接、刷新）也要进得去，而不是回到列表。
+  renderRouted("connectors-add", api);
+  expect(await screen.findByPlaceholderText("如 crm")).toBeInTheDocument();
+});
+
+void test("Settings/数据库: 只说功能未开通，不摆一个连不上任何东西的表单", async () => {
+  renderRouted("database");
+  expect(await screen.findByText("功能暂未开通")).toBeInTheDocument();
+  // 假控件比空页更糟：填完连不上，人会以为是自己配错了。
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  // 把真正能走的那条路指出来，而不是让人卡在这里。
+  expect(document.body.textContent).toContain("连接器");
+});
+
 void test("Settings/连接器: 生产拒装（403）在添加页照原样转达，人不会以为是自己填错了", async () => {
   const api = fakeApi({
     connectors: vi.fn().mockResolvedValue({ items: [] }),
@@ -633,7 +695,7 @@ void test("Settings/连接器: 生产拒装（403）在添加页照原样转达�
         new Error("connector installation is refused until connectors arrive signed (TD-012)"),
       ),
   });
-  renderSection("connectors", api);
+  renderRouted("connectors", api);
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "添加连接器" }));
   await user.type(screen.getByPlaceholderText("如 crm"), "crm");

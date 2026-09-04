@@ -124,9 +124,20 @@ export function UserSlot({
   // 未登录进不来工作台（登录页是唯一入口），所以走到这里只有一种情况：
   // 会话在使用中失效了。那不是一种「模式」，是掉线 —— 说清楚它是什么，
   // 用户才知道该重新登录，而不是以为自己在某个受支持的离线状态里。
+  /**
+   * 侧栏那一格只放**显示名**，不放邮箱（owner 2026-09-04）。
+   *
+   * 邮箱是账号的**标识**，不是称呼：它长、会换行、而且是个人信息 —— 侧栏一直
+   * 摊在屏幕上，截图、投屏、旁边坐个人都能看见。要认账号，菜单里有（点开才看
+   * 得到），配置 › 账号里也有。没有显示名时落到用户名，仍然不落到邮箱。
+   */
   const displayName = signedIn
-    ? session?.profile?.name ?? session?.profile?.email ?? "Vxture 用户"
+    ? session?.profile?.name ?? session?.profile?.username ?? "Vxture 用户"
     : "会话已失效";
+  /**
+   * 菜单里那一行（**不是**侧栏那一格）。这里放邮箱是对的：菜单要回答「我登的
+   * 是哪个账号」，而它只在点开时出现，不是一直摊在屏幕上。
+   */
   const subLine = signedIn
     ? session?.profile?.email ?? session?.org?.name ?? "已登录"
     : online
@@ -174,13 +185,6 @@ export function UserSlot({
             {!collapsed && (
               <>
                 <span className="user-chip-name">{displayName}</span>
-                <span className="user-chip-sub">
-                  {signedIn
-                    ? session?.profile?.email ??
-                      session?.org?.name ??
-                      "已登录"
-                    : "未登录"}
-                </span>
                 <Icon
                   name="caret-up-down"
                   size="sm"

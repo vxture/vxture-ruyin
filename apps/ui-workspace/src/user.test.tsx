@@ -74,29 +74,38 @@ void test("UserSlot: not signed in reads 'session expired', not a generic 'not l
   expect(await screen.findByText("会话已失效")).toBeInTheDocument();
 });
 
-void test("UserSlot: display name falls back name -> email -> a generic label, only once signed in", async () => {
+void test("UserSlot: 侧栏那一格只放显示名，退到用户名，**从不退到邮箱**", async () => {
   const withName = fakeApi({
     session: vi.fn().mockResolvedValue(
-      session({ signedIn: true, profile: { sub: "u1", name: "郭彦豪" } }),
+      session({ signedIn: true, profile: { sub: "u1", name: "郭彦豪", email: "u1@example.com" } }),
     ),
   });
-  const { unmount } = render(<UserSlot api={withName} productIds={[]} onOpenSettings={() => {}} />);
+  const { unmount, container } = render(
+    <UserSlot api={withName} productIds={[]} onOpenSettings={() => {}} />,
+  );
   expect(
     await screen.findByText("郭彦豪", { selector: ".user-chip-name" }),
   ).toBeInTheDocument();
+  // 邮箱一直摊在侧栏上（截图、投屏、旁边坐个人都看得见），所以整格里都不该有
+  // 它 —— owner 2026-09-04。要认账号，点开菜单里有。
+  expect(container.querySelector(".user-slot-wrap")).not.toHaveTextContent("u1@example.com");
   unmount();
 
-  const emailOnly = fakeApi({
+  const noName = fakeApi({
     session: vi.fn().mockResolvedValue(
-      session({ signedIn: true, profile: { sub: "u1", email: "u1@example.com" } }),
+      session({
+        signedIn: true,
+        profile: { sub: "u1", username: "yanhao", email: "u1@example.com" },
+      }),
     ),
   });
-  render(<UserSlot api={emailOnly} productIds={[]} onOpenSettings={() => {}} />);
-  // 没有 name 时，昵称与副标题都退到 email —— 两处同时出现是预期行为，
-  // 这条用例钉的是昵称那一处确实退到了 email，不是唯一性。
+  const { container: c2 } = render(
+    <UserSlot api={noName} productIds={[]} onOpenSettings={() => {}} />,
+  );
   expect(
-    await screen.findByText("u1@example.com", { selector: ".user-chip-name" }),
+    await screen.findByText("yanhao", { selector: ".user-chip-name" }),
   ).toBeInTheDocument();
+  expect(c2.querySelector(".user-slot-wrap")).not.toHaveTextContent("u1@example.com");
 });
 
 void test("UserSlot: online health reflects the /health poll result", async () => {

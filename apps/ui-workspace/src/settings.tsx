@@ -32,6 +32,14 @@ export { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
 import { resolveSection, type SectionId } from "./settings-sections";
 
 const UI_VERSION = "0.2.0";
+
+/**
+ * 换地址。设置页在工作台的 hash 路由里（workbench.tsx 的 navigate 监听
+ * hashchange），所以「去另一页」就是改 hash —— 设置页不需要自己拿到路由函数。
+ */
+function go(href: string): void {
+  window.location.hash = href.replace(/^#/, "");
+}
 /** 界面语言偏好（本机）。DS 管排版三轴，语言这一项归本文件。 */
 const LANG_KEY = "ruyin-language";
 
@@ -62,6 +70,8 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
       {view === "account" && <AccountSection session={session} />}
       {view === "general" && <SystemSection system={system} />}
       {view === "connectors" && <ConnectorsSection api={api} />}
+      {view === "connectors-add" && <AddConnectorPage api={api} />}
+      {view === "database" && <DatabaseSection />}
       {view === "updates" && <UpdatesSection system={system} api={api} />}
       {view === "about" && <AboutSection system={system} />}
     </div>
@@ -156,26 +166,6 @@ function FactRow({
         )}
       </span>
       {badge && <span className="fact-badge">{badge}</span>}
-    </div>
-  );
-}
-
-function SettingRow({
-  label,
-  children,
-  hint,
-}: {
-  label: string;
-  children: React.ReactNode;
-  hint?: string;
-}) {
-  return (
-    <div className="setting-row">
-      <div className="setting-label">
-        {label}
-        {hint && <div className="setting-hint">{hint}</div>}
-      </div>
-      <div className="setting-control">{children}</div>
     </div>
   );
 }
@@ -350,9 +340,12 @@ function PreferencesBlock() {
         <SegmentedControl
           ariaLabel="字号"
           items={[
-            { value: "small", label: "小" },
-            { value: "default", label: "标准" },
-            { value: "large", label: "大" },
+            // 「减小 / 默认 / 加大」而不是「小 / 标准 / 大」（owner 2026-09-04
+            // 第 3 条）：这三个是**动作**，是把当前字号往哪边调，不是在描述
+            // 一个尺码。
+            { value: "small", label: "减小" },
+            { value: "default", label: "默认" },
+            { value: "large", label: "加大" },
           ]}
           value={fontSize}
           onChange={setFontSize}
@@ -397,7 +390,7 @@ function SystemSection({ system }: { system: SystemInfo | null }) {
 
       <SettingsBlock
         icon="lock"
-        title="静态加密"
+        title="数据加密"
         desc="业务数据落盘即加密。一次加密，密钥再套两层保护 —— 每层各自保护什么，逐条写在下面"
       >
         {system ? (
@@ -424,9 +417,11 @@ function SystemSection({ system }: { system: SystemInfo | null }) {
             <p className="crypto-note">
               会话凭证由主密钥单独密封；产品契约与本机配置不加密 —— 它们按设计就是公开信息。
             </p>
-            {system.keyProtection === "dpapi" ? (
-              <StatusBadge tone="success">主密钥由 Windows DPAPI 保护</StatusBadge>
-            ) : (
+            {/* 成功那一侧原来还有个徽章「主密钥由 Windows DPAPI 保护」——**与上面
+                「主密钥」那一行说了同一件事**（owner 2026-09-04 第 2 条），删掉。
+                明文这一侧留着：它多说了一句「不可用于真实数据」，那是行里没有的
+                结论，而且这一条必须显眼 —— 它是「别把真数据放进来」。 */}
+            {system.keyProtection === "plaintext" && (
               <StatusBadge tone="warning">开发态：主密钥明文存储，不可用于真实数据</StatusBadge>
             )}
           </>
@@ -485,7 +480,6 @@ function SystemSection({ system }: { system: SystemInfo | null }) {
  * 界面照实转达，不把「拒绝」包装成「暂不可用」。
  */
 function ConnectorsSection({ api }: { api: Api }) {
-  const [page, setPage] = useState<"list" | "add">("list");
   const [items, setItems] = useState<ConnectorView[] | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -532,19 +526,6 @@ function ConnectorsSection({ api }: { api: Api }) {
     }
   };
 
-  if (page === "add") {
-    return (
-      <AddConnectorPage
-        api={api}
-        onBack={() => setPage("list")}
-        onAdded={async () => {
-          setPage("list");
-          await reload();
-        }}
-      />
-    );
-  }
-
   return (
     <SettingsBlock
       icon="plugs-connected"
@@ -552,7 +533,8 @@ function ConnectorsSection({ api }: { api: Api }) {
       desc="局域网 / 私有服务经本机 MCP 连接器进入项目上下文；每个项目还要单独授权才能用"
       aside={
         unavailable ? undefined : (
-          <Button variant="outline" size="sm" onClick={() => setPage("add")}>
+          // 走地址，不是换状态：添加页有自己的地址，返回是真的返回（第 5 条）。
+          <Button variant="outline" size="sm" onClick={() => go("#settings/connectors-add")}>
             添加连接器
           </Button>
         )
@@ -617,15 +599,7 @@ function ConnectorsSection({ api }: { api: Api }) {
  * 通不过也能**暂存** —— 现场连不上是常事（服务没开、端口没通），把配置留下来
  * 比让用户重新敲一遍强；但暂存的不启动、不进任务能拿到的清单，它是待办不是能力。
  */
-function AddConnectorPage({
-  api,
-  onBack,
-  onAdded,
-}: {
-  api: Api;
-  onBack: () => void;
-  onAdded: () => void | Promise<void>;
-}) {
+function AddConnectorPage({ api }: { api: Api }) {
   const [id, setId] = useState("");
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
@@ -662,7 +636,8 @@ function AddConnectorPage({
         source,
         ...(stashed ? { state: "stashed" as const } : {}),
       });
-      await onAdded();
+      // 回列表页 —— 它自己会重新拉一次，不需要谁替它记住。
+      go("#settings/connectors");
     } catch (e) {
       setFailed(String((e as Error).message));
     } finally {
@@ -676,7 +651,7 @@ function AddConnectorPage({
       title="添加连接器（stdio）"
       desc="一个 MCP 服务器的启动命令。先测一次，再决定启用还是暂存"
       aside={
-        <Button variant="ghost" size="sm" onClick={onBack}>
+        <Button variant="ghost" size="sm" onClick={() => go("#settings/connectors")}>
           返回列表
         </Button>
       }
@@ -744,6 +719,28 @@ function AddConnectorPage({
         签名信任锚就位前，正式版会拒绝安装并说明原因（TD-036）；测试本身不落盘，起一下就结束。
       </p>
     </SettingsBlock>
+  );
+}
+
+/* ---------------- 数据库 ---------------- */
+
+/**
+ * 数据库 —— **占位，功能未开通**（owner 2026-09-04 第 6 条）。
+ *
+ * 放一个空页而不是隐藏这一项，是有意的：菜单里出现它，说明这件事在路线上；
+ * 但页面**不摆假控件** —— 一个连不上任何东西的连接表单，会让人以为是自己配错了。
+ * 现在业务数据都在本机 SQLite（通用设置 › 存储位置），外部数据库进上下文要走
+ * 连接器那条路（ADR-005 通路二）。
+ */
+function DatabaseSection() {
+  return (
+    <div className="card">
+      <EmptyState
+        icon="table"
+        title="功能暂未开通"
+        description="外部数据库接入还没有开放。业务数据当前全部在本机的加密库里（通用设置 › 存储位置）；要把局域网或私有服务的数据带进上下文，先用「连接器」那条路。"
+      />
+    </div>
   );
 }
 
@@ -878,11 +875,13 @@ function UpdatesSection({
         title="更新渠道"
         desc="从哪个渠道问新版本。当前只发布 stable —— 别的渠道那边还没有包，切过去检查会查不到"
       >
-        <SettingRow label="渠道">
-          <NativeSelect wrapperClassName="sel-narrow" value="stable" disabled>
+        {/* 名称与控件同一行、列宽与别处同一套（owner 2026-09-04 追加）：
+            这里原先用的是纵向那套旧行，于是整个设置页只有这一处是两行。 */}
+        <Row label="渠道">
+          <NativeSelect value="stable" disabled>
             <option value="stable">stable（正式）</option>
           </NativeSelect>
-        </SettingRow>
+        </Row>
       </SettingsBlock>
 
       <SettingsBlock
