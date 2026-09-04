@@ -72,7 +72,7 @@ body {
   margin-bottom: var(--spacing-xs);
 }
 .login-title {
-  font-size: var(--text-heading-2-font-size, 24px);
+  font-size: var(--heading-2-font-size);
   font-weight: 700;
 }
 .login-sub {
@@ -210,7 +210,7 @@ body {
 }
 .status-card--ok .status-card-icon { color: var(--color-success, #22c55e); }
 .status-card--warn .status-card-icon { color: var(--color-warning, #f59e0b); }
-.status-card--danger .status-card-icon { color: var(--color-danger, #ef4444); }
+.status-card--danger .status-card-icon { color: var(--destructive); }
 .status-card-text {
   display: flex;
   flex-direction: column;
@@ -232,19 +232,19 @@ body {
 }
 .status-dot--ok { background: var(--color-success, #22c55e); }
 .status-dot--warn { background: var(--color-warning, #f59e0b); }
-.status-dot--danger { background: var(--color-danger, #ef4444); }
+.status-dot--danger { background: var(--destructive); }
 .status-dot--muted { background: var(--color-muted-foreground); }
 .status-label {
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   color: var(--color-muted-foreground);
 }
 .status-value {
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   font-weight: 600;
 }
 /* 细节比结论再弱一档：它是解释，不是结论本身。 */
 .status-detail {
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   color: var(--color-muted-foreground);
   opacity: 0.75;
   overflow: hidden;
@@ -301,7 +301,7 @@ body {
 }
 .pcard-title {
   margin: 0;
-  font-size: var(--font-size-body-md);
+  font-size: var(--body-md-font-size);
   font-weight: 600;
   color: var(--color-foreground);
   line-height: 1.25;
@@ -330,7 +330,7 @@ body {
 .pcard-desc {
   color: var(--color-foreground);
   opacity: 0.85;
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   line-height: 1.45;
 }
 .pcard--selected {
@@ -340,7 +340,7 @@ body {
 .pcard { cursor: default; }
 .pcard-desc {
   margin: 0;
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   color: var(--color-muted-foreground);
 }
 /* 副标题：产品标识 + 版本连成一句。它们回答同一个问题（哪个产品的哪一版），
@@ -363,13 +363,17 @@ body {
   margin: 0;
   padding: var(--spacing-2xs, 4px) var(--spacing-xs);
   border-radius: var(--radius-sm, 6px);
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   line-height: 1.4;
 }
+/* 走 DS 的 warning 语气三件套（底 / 字 / 边），与 .error-box 用 destructive
+   那一组同一个写法。此前拿 `--color-warning` 当**文字色** —— 那是语气的原色
+   （亮琥珀），深色底上勉强能读，浅色卡上就是一行发黄发绿的字（owner 2026-09-04
+   指出）。muted 那一组才是给「淡底 + 深字」的贴片准备的，两个模式各自定义过。 */
 .pcard-alert--warning {
-  color: var(--color-warning, #b45309);
-  background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 35%, transparent);
+  color: var(--warning-muted-foreground);
+  background: var(--warning-muted);
+  border: 1px solid var(--warning-border);
 }
 .pcard-alert > svg { flex-shrink: 0; margin-top: 2px; }
 
@@ -402,12 +406,12 @@ body {
 }
 .pcard:hover .pcard-version { opacity: 1; }
 .pcard-count {
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   color: var(--color-foreground);
   opacity: 0.85;
   white-space: nowrap;
 }
-.pcard-count b { font-weight: 600; font-size: var(--font-size-body-md); }
+.pcard-count b { font-weight: 600; font-size: var(--body-md-font-size); }
 .pcard-unit {
   font-size: 11px;
   color: var(--color-muted-foreground);
@@ -585,7 +589,7 @@ body {
 /* 品牌字标与标语：RUYIN 大写、字距拉开；Intelligent Workbench 弱化一档跟在后面。 */
 .brand-name { font-weight: 700; letter-spacing: 0.18em; font-size: var(--title-xl-font-size, 20px); }
 .brand-tag { color: var(--muted-foreground); letter-spacing: 0.04em; font-weight: 400; }
-.login-title .brand-name { font-size: var(--text-heading-2-font-size, 24px); }
+.login-title .brand-name { font-size: var(--heading-2-font-size); }
 .login-title .brand-tag { display: block; font-size: var(--body-md-font-size); margin-top: 4px; }
 
 /* ---------- sidebar footer identity strip ---------- */
@@ -757,7 +761,7 @@ body {
 }
 .proj-summary-cell { display: flex; align-items: baseline; gap: var(--spacing-xs); }
 .proj-summary-k {
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   color: var(--color-muted-foreground);
   white-space: nowrap;
 }
@@ -773,7 +777,7 @@ body {
 /* 标识挤到最后，宽度不够时第一个换行 —— 它是最不需要一眼看到的那个。 */
 .proj-summary-id { margin-inline-start: auto; }
 .proj-summary-id code {
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   color: var(--color-muted-foreground);
 }
 
@@ -806,7 +810,7 @@ body {
 /* 直接点名 DS 的字标类：`.vx-brand-name` 自己设了 18px，挂在外层的
    font-size 继承不过去 —— 父元素上的字号对一个自己声明了字号的子元素无效。 */
 .app-brand .vx-brand-name {
-  font-size: var(--font-size-body-md);
+  font-size: var(--body-md-font-size);
   letter-spacing: 0.04em;
 }
 /* 标语「Intelligent Workbench」：设计系统默认把子名做成贴片（浅底 + 描边），那是给
@@ -817,7 +821,7 @@ body {
   border: 0;
   border-radius: 0;
   background: none;
-  font-size: var(--font-size-body-xs, 11px);
+  font-size: 11px /* DS 最小是 body-sm(12px)，这里有意再降一档 */;
   font-weight: 400;
   letter-spacing: 0.02em;
   color: var(--muted-foreground);
@@ -833,7 +837,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-2xs, 4px);
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   color: var(--color-muted-foreground);
   padding: 2px var(--spacing-xs);
   border: 0;
@@ -863,7 +867,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: var(--spacing-xs) var(--spacing-md);
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   color: var(--color-muted-foreground);
 }
 .proj-summary-meta code { font-size: inherit; }
@@ -893,11 +897,11 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
 }
 .row-tag {
   flex: 0 0 auto;
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   color: var(--color-muted-foreground);
 }
 
@@ -908,7 +912,7 @@ body {
 .audit-time {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   color: var(--color-muted-foreground);
 }
 .audit-action { white-space: nowrap; }
@@ -918,7 +922,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-size-body-sm);
+  font-size: var(--body-sm-font-size);
   color: var(--color-muted-foreground);
 }
 
@@ -959,7 +963,7 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 }
 /* Runtime 徽章：字号与标语「Intelligent Workbench」一致（11px），样式（圆点 + 描边）不变。 */
 .app-runtime > * {
-  font-size: var(--font-size-body-xs, 11px);
+  font-size: 11px /* DS 最小是 body-sm(12px)，这里有意再降一档 */;
   line-height: 1.2;
   padding-block: 1px;
 }
@@ -977,7 +981,7 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 .app-sidebar--home nav > div:first-child { padding-top: var(--spacing-sm); padding-bottom: var(--spacing-sm); }
 .app-sidebar nav a { min-height: 44px; padding-block: 4px; }
 .app-sidebar nav a > span:last-child > span { flex-direction: column-reverse; gap: 3px; padding-block: 2px; }
-.app-sidebar nav a > span:last-child > span > span:first-child { font-size: var(--font-size-body-md); }
+.app-sidebar nav a > span:last-child > span > span:first-child { font-size: var(--body-md-font-size); }
 /* 「最近工作」第一行的智能体名：照标题栏 Runtime 徽章的样子做成 chip ——
    前面一颗鲜亮的圆点，底色与文字都淡（owner 2026-09-04 定）。 */
 .app-sidebar nav a > span:last-child > span > span:last-child {
