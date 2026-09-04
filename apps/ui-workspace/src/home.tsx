@@ -41,6 +41,17 @@ import {
 } from "./api";
 import { CATALOG_SOURCE, RECOMMENDED } from "./catalog";
 
+/** 库里比生效版本更新的那一版（没有就是 undefined）。卡片与标题行读同一份判断。 */
+export function newerVersionOf(product: {
+  version: string;
+  versions: string[];
+}): string | undefined {
+  return [...product.versions]
+    .filter((v) => compareVersions(v, product.version) > 0)
+    .sort(compareVersions)
+    .pop();
+}
+
 /** x.y.z 比较（与 installer.ts 同一口径）；用于「有没有比生效版本更新的已装版本」。 */
 function compareVersions(a: string, b: string): number {
   const pa = a.split(".");
@@ -321,12 +332,17 @@ export function HomePage({
   const [syncing, setSyncing] = useState(false);
   const [registryOpen, setRegistryOpen] = useState(false);
   /**
-   * 同步产品版本：对每个产品拉一次契约（一级供给，ADR-012）。拉到新版本的落进
-   * 产品库，卡上随即出现「更新版本」；这里**不自动切换**生效版本 —— 切版本是
-   * 用户看着卡片按一下的事，不是同步顺手做掉的事。
+   * 检查更新：对每个产品拉一次契约（一级供给，ADR-012）。拉到新版本的落进产品
+   * 库，卡上随即出现「更新版本」；这里**不自动切换**生效版本 —— 切版本是用户
+   * 看着卡片按一下的事，不是检查顺手做掉的事。
+   *
+   * `silent` 给启动时那一次用：**没人按过的检查，失败了不该弹错误条**。用户点
+   * 「更新」是他问了一句，答不上来要如实说；启动自检答不上来只是没答上来。
    */
-  const syncVersions = async (ids: string[]) => {
-    setSyncing(true);
+  const checkUpdates = async (ids: string[], silent = false) => {
+    // 静默那次连忙碌态都不显示：启动自检把按钮翻成「正在检查……」，是让每次
+    // 开应用都闪一下，而那一下不对应任何人的动作。
+    if (!silent) setSyncing(true);
     try {
       let fetched = 0;
       let firstError: string | null = null;
@@ -338,12 +354,25 @@ export function HomePage({
           firstError ??= String((e as Error).message);
         }
       }
-      if (firstError) onError(firstError);
+      if (firstError && !silent) onError(firstError);
       if (fetched > 0) await onRefresh();
     } finally {
-      setSyncing(false);
+      if (!silent) setSyncing(false);
     }
   };
+  /**
+   * 启动检查一次（owner 2026-09-04 定）。ref 守着：产品列表每刷新一次都重跑，
+   * 就变成了每次刷新都打一轮网络 —— 那不是「启动时检查一次」。
+   */
+  const checkedOnce = useRef(false);
+  useEffect(() => {
+    if (checkedOnce.current || products.length === 0) return;
+    checkedOnce.current = true;
+    void checkUpdates(products.map((p) => p.id), true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products.length]);
+  /** 有没有产品攒着一版没切过去 —— 「更新」按钮的 new 标记就看它。 */
+  const hasUpdates = products.some((p) => newerVersionOf(p) !== undefined);
   const [system, setSystem] = useState<{
     keyProtection: string;
     capabilitySurface?: string;
@@ -412,10 +441,13 @@ export function HomePage({
             icon: "shield-check",
             label: "数据加密",
             value: encrypted ? "已加密" : "开发态",
-            detail: encrypted ? "DPAPI" : "明文",
+            // 说加密就说加密算法。DPAPI 是最外层保护主密钥的，不是加密本身 ——
+            // 写在这里读起来像「用 DPAPI 加密的」，而实际是 SQLCipher（owner
+            // 2026-09-04 问及）。完整三层放 tooltip。
+            detail: encrypted ? "SQLCipher" : "主密钥明文",
             hint: encrypted
-              ? "主密钥由 Windows DPAPI 保护，业务库整库加密"
-              : "主密钥以明文存放，仅供开发，不可用于真实数据",
+              ? "业务库整库 SQLCipher 加密，一库一钥；库钥以 AES-256-GCM 封装在主密钥下；主密钥由 Windows DPAPI 保护"
+              : "业务库仍整库加密，但主密钥以明文存放（本平台无 OS 级密钥保护）——仅供开发，不可用于真实数据",
             tone: encrypted ? "ok" : "warn",
           },
           {
@@ -446,16 +478,18 @@ export function HomePage({
         }
         action={
           /* 三个动作排在标题行右侧，主按钮在最右（owner 2026-09-04 定）：
-             同步产品版本 · 安装 ▾（本地包 / 产品库）· 在线使用。 */
+             更新{new} · 安装 ▾（本地包 / 产品库）· 在线使用。 */
           <span className="section-actions">
             {products.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
                 disabled={syncing}
-                onClick={() => void syncVersions(products.map((p) => p.id))}
+                onClick={() => void checkUpdates(products.map((p) => p.id))}
               >
-                {syncing ? "正在同步……" : "同步产品版本"}
+                {syncing ? "正在检查……" : "更新"}
+                {/* 有可切的新版本才挂 new：一个常年亮着的标记等于没有标记。 */}
+                {!syncing && hasUpdates && <span className="dot-new">new</span>}
               </Button>
             )}
             <InstallMenu
@@ -655,13 +689,10 @@ function ProductCard({
   const usable = product.availability === "available";
 
   /**
-   * 库里有没有比生效版本更新的版本 —— 「同步产品版本」拉下来的，或装包装进来的。
+   * 库里有没有比生效版本更新的版本 —— 「更新」拉下来的，或装包装进来的。
    * 有才显示「更新版本」（owner 2026-09-03 定），按一下就把生效版本钉过去。
    */
-  const newer = [...product.versions]
-    .filter((v) => compareVersions(v, product.version) > 0)
-    .sort(compareVersions)
-    .pop();
+  const newer = newerVersionOf(product);
   const updateTo = async (version: string) => {
     setOpening(true);
     try {

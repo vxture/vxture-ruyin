@@ -141,10 +141,11 @@ export function UserSlot({
    *   平台连接  已连接 · 工作区 / 未登录
    */
   const runtimeLine = online ? `已就绪${system?.version ? ` · Runtime ${system.version}` : ""}` : "未连接";
+  // 与首页逐字一致；DPAPI 是主密钥的保护，不是加密算法（见 home.tsx 同处注释）。
   const encryptionLine = system
     ? system.keyProtection === "dpapi"
-      ? "已加密 · DPAPI"
-      : "开发态 · 明文"
+      ? "已加密 · SQLCipher"
+      : "开发态 · 主密钥明文"
     : "…";
   const platformLine = signedIn
     ? `已连接${session?.workspace?.name ? ` · ${session.workspace.name}` : ""}`

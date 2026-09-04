@@ -145,7 +145,7 @@ void test("UserSlot: non-DPAPI key protection reads 开发态, not left blank", 
   });
   render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
   await openPopover();
-  expect(await screen.findByText("开发态 · 明文")).toBeInTheDocument();
+  expect(await screen.findByText("开发态 · 主密钥明文")).toBeInTheDocument();
 });
 
 // --- login / logout / settings ---------------------------------------------
@@ -293,7 +293,7 @@ void test("UserSlot panel: the three environment rows mirror the home page word 
   expect(await screen.findByText("运行环境")).toBeInTheDocument();
   expect(screen.getByText("已就绪 · Runtime 0.1.0")).toBeInTheDocument();
   expect(screen.getByText("数据加密")).toBeInTheDocument();
-  expect(screen.getByText("已加密 · DPAPI")).toBeInTheDocument();
+  expect(screen.getByText("已加密 · SQLCipher")).toBeInTheDocument();
   expect(screen.getByText("平台连接")).toBeInTheDocument();
   expect(screen.getByText("已连接 · 某工作区")).toBeInTheDocument();
   expect(screen.queryByText("订阅")).not.toBeInTheDocument();
