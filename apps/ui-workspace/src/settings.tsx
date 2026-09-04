@@ -15,6 +15,12 @@ import {
   AvatarFallback,
   AvatarImage,
   Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   EmptyState,
   Icon,
   Input,
@@ -415,7 +421,11 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
         {/* 目录**可以改了**（owner 2026-09-04 定；TD-039 由「不给改」改写为
             「重启期迁移」）。搬移发生在下一次启动、开库之前 —— 那一刻没有任何
             句柄，也就不存在半开半搬的状态。 */}
-        <DataDirMove system={system} api={api} />
+        {/* 一次性操作不占常驻位置（owner 2026-09-05）：这一块回答「数据在哪」，
+            换位置是从这里发起的一个**动作** —— 按钮开弹层，弹层里走完选目录、
+            确认、重启。原来把输入框、「检查目标」、「重启并搬移」三样连同一段
+            长说明一直摆在页面上，等于把我们的状态机摊给用户看。 */}
+        <DataDirMoveEntry system={system} api={api} />
       </SettingsBlock>
 
       <SettingsBlock
@@ -753,62 +763,25 @@ function AddConnectorPage({ api }: { api: Api }) {
 }
 
 /**
- * 换数据目录（TD-039）。
+ * 换数据目录（TD-039）。**一次性操作，所以只在页面上留一个按钮。**
  *
- * 三步，一步都不能省：**先校验**（守护进程真去写一个探针、算大小、判同卷）→
- * **排队**（只写意图，不动数据）→ **重启**（搬移在开库之前发生）。
+ * 三步走完在弹层里：**选目录**（系统目录框，壳弹 —— 见 folder-pick）→ **确认**
+ * （从哪到哪、多少、同盘还是跨盘、要重启、失败会留在原处）→ **重启并搬移**。
  *
- * 为什么是输入框而不是「浏览…」：窗口是纯 Web 客户端（没有 preload，契约边界
- * 是 HTTP），系统目录选择框只有壳能弹。那条路要走事件总线中转，值得做，但先
- * 让这件事**能用**：粘一个路径进去，校验会把每一种不行都说清楚。
+ * 页面上不再有输入框与「检查目标」：校验是我们的事，不是用户要记得先按的一步。
+ * 它现在发生在用户选完目录之后，结果直接写在确认那一屏里。
  */
-function DataDirMove({ system, api }: { system: SystemInfo | null; api: Api }) {
-  const [target, setTarget] = useState("");
-  const [check, setCheck] = useState<DataDirCheck | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState<string | null>(null);
+function DataDirMoveEntry({ system, api }: { system: SystemInfo | null; api: Api }) {
+  const hostChrome = useHostChrome();
+  const [open, setOpen] = useState(false);
   const pending = system?.dataDirPending;
   const last = system?.lastMove;
 
-  const doCheck = async () => {
-    setBusy(true);
-    setFailed(null);
-    try {
-      setCheck(await api.checkDataDir(target.trim()));
-    } catch (e) {
-      setFailed(String((e as Error).message));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const doRequest = async () => {
-    setBusy(true);
-    setFailed(null);
-    try {
-      await api.requestDataDir(target.trim());
-      // 重启才真的搬。这里不自己刷新 system —— 应用马上就要重开了。
-      await api.restartApp();
-    } catch (e) {
-      setFailed(String((e as Error).message));
-      setBusy(false);
-    }
-  };
-  const doCancel = async () => {
-    setBusy(true);
-    try {
-      await api.cancelDataDir();
-      setCheck(null);
-      setTarget("");
-    } catch (e) {
-      setFailed(String((e as Error).message));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (pending) {
-    return (
-      <>
+  return (
+    <>
+      {/* 排着一次搬移时，这一块要说清楚现在是什么状态 —— 它比「换位置」这个
+          动作更重要，所以放在最前面。 */}
+      {pending && (
         <p className="set-callout set-callout--warning">
           <Icon name="warning" size="sm" />
           <span>
@@ -817,28 +790,8 @@ function DataDirMove({ system, api }: { system: SystemInfo | null; api: Api }) {
             进行；万一没搬成，应用会照旧从原目录启动并告诉你原因。
           </span>
         </p>
-        <div className="add-actions">
-          <Button size="sm" disabled={busy} onClick={() => void api.restartApp()}>
-            立即重启并搬移
-          </Button>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void doCancel()}>
-            取消这次搬移
-          </Button>
-        </div>
-        {failed && <p className="set-note">{failed}</p>}
-      </>
-    );
-  }
-
-  return (
-    <>
-      {/* 上一次搬家的结果 —— 成功也说一句：用户刚重启过，他要的就是这个确认。 */}
-      {last?.status === "moved" && last.to && (
-        <p className="set-note">
-          上次搬移已完成：数据现在在 <span className="mono">{last.to}</span>。
-        </p>
       )}
-      {last?.status === "failed" && (
+      {!pending && last?.status === "failed" && (
         <p className="set-callout set-callout--warning">
           <Icon name="warning" size="sm" />
           <span>
@@ -847,43 +800,153 @@ function DataDirMove({ system, api }: { system: SystemInfo | null; api: Api }) {
           </span>
         </p>
       )}
-      <Row label="搬到">
-        <Input
-          placeholder="D:\RuyinData"
-          value={target}
-          onChange={(e) => {
-            setTarget(e.target.value);
-            setCheck(null);
-          }}
-        />
-      </Row>
-      <div className="add-actions">
-        <Button variant="outline" size="sm" disabled={busy || !target.trim()} onClick={() => void doCheck()}>
-          {busy ? "检查中……" : "检查目标"}
-        </Button>
-        {/* 没校验通过就不给按 —— 排一次注定失败的搬家，失败会等到下次启动才
-            出现，那时用户已经忘了自己做过什么。 */}
-        <Button size="sm" disabled={busy || !check?.ok} onClick={() => void doRequest()}>
-          重启并搬移
-        </Button>
-      </div>
-      {check && !check.ok && <p className="set-note">{check.reason}</p>}
-      {check?.ok && (
+      {!pending && last?.status === "moved" && last.to && (
         <p className="set-note">
-          可以搬：约 {(((check.bytes ?? 0) / 1024 / 1024) || 0).toFixed(1)} MB
-          {check.sameVolume
-            ? " · 同一个盘，改名即可，几乎瞬间完成"
-            : " · 跨盘，要复制并逐文件核对，大约需要一会儿"}
-          。缓存不搬（它会自己重建）。
+          上次搬移已完成：数据现在在 <span className="mono">{last.to}</span>。
         </p>
       )}
-      {failed && <p className="set-note">{failed}</p>}
-      <p className="set-note">
-        搬移在下次启动、打开任何数据库之前进行 —— 那一刻没有任何库是打开的。源目录在核对
-        通过之前一直是权威，中途失败就照旧从原处启动。数据是按用户加密的，所以不要搬到别的
-        Windows 用户或别的机器上去。
-      </p>
+
+      <div className="add-actions">
+        {pending ? (
+          <>
+            <Button size="sm" onClick={() => void api.restartApp()}>
+              立即重启并搬移
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void api.cancelDataDir().then(() => window.location.reload())}
+            >
+              取消这次搬移
+            </Button>
+          </>
+        ) : (
+          /* 浏览器里不给：系统目录框只有壳弹得出来，给了按钮就是给一条走不通的路。 */
+          hostChrome === "electron" && (
+            <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+              <Icon name="folder-open" size="xs" />
+              更改数据目录…
+            </Button>
+          )
+        )}
+      </div>
+      {open && (
+        <DataDirMoveDialog
+          api={api}
+          current={system?.dataDir ?? ""}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * 换目录那一层弹窗：选 → 校验 → 确认 → 重启。
+ *
+ * 每一步的措辞都只说用户需要知道的那件事。**要重启这件事必须在按下之前说**，
+ * 而不是按下之后才发生 —— 一个会关掉应用的按钮，不能长得像一个普通按钮。
+ */
+function DataDirMoveDialog({
+  api,
+  current,
+  onClose,
+}: {
+  api: Api;
+  current: string;
+  onClose: () => void;
+}) {
+  const [target, setTarget] = useState<string | null>(null);
+  const [check, setCheck] = useState<DataDirCheck | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const pick = async () => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      const picked = await api.pickFolder(current || undefined);
+      if (!picked.path) return; // 取消：什么都不变，也不报错
+      setTarget(picked.path);
+      // 选完立刻校验 —— 用户不该记得「还要按一下检查」。
+      setCheck(await api.checkDataDir(picked.path));
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const go = async () => {
+    if (!target) return;
+    setBusy(true);
+    setFailed(null);
+    try {
+      await api.requestDataDir(target);
+      await api.restartApp();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+      setBusy(false);
+    }
+  };
+
+  const mb = ((check?.bytes ?? 0) / 1024 / 1024).toFixed(0);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>更改数据目录</DialogTitle>
+          <DialogDescription>
+            业务数据与密钥会搬到新位置。搬移在下次启动、打开任何数据库之前进行。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="move-dlg">
+          <FactRow label="当前" value={current} mono />
+          <FactRow
+            label="搬到"
+            value={target ?? undefined}
+            mono
+            action={
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => void pick()}>
+                {target ? "重新选择…" : "选择目录…"}
+              </Button>
+            }
+          />
+          {check && !check.ok && (
+            <p className="set-callout set-callout--warning">
+              <Icon name="warning" size="sm" />
+              <span>{check.reason}</span>
+            </p>
+          )}
+          {check?.ok && (
+            <p className="set-note">
+              要搬 约 {mb} MB
+              {check.sameVolume
+                ? " · 同一个盘，改名即可，几乎瞬间完成。"
+                : " · 跨盘，要逐文件复制并核对，可能要等几分钟。"}
+              {" 缓存不搬（它会自己重建）。"}
+            </p>
+          )}
+          <p className="set-note">
+            按下之后应用会**关闭并重新打开**，期间会显示搬移进度。源目录在核对通过之前
+            一直是权威 —— 中途失败就照旧从原处启动，数据不会丢。数据按当前 Windows
+            用户加密，所以不要选别的用户的目录或移动磁盘。
+          </p>
+          {failed && <p className="set-note">{failed}</p>}
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
+            取消
+          </Button>
+          <Button size="sm" disabled={busy || !check?.ok} onClick={() => void go()}>
+            重启并搬移
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

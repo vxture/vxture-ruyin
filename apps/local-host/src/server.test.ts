@@ -30,6 +30,7 @@ import { KeyManager } from "./keys.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { ConnectorRegistry } from "./connector-registry.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
+import { FolderPick } from "./folder-pick.js";
 import { EventBus } from "./events.js";
 import { LocalToolExecutor } from "./tool-executor.js";
 import { loadProducts } from "./products.js";
@@ -930,6 +931,20 @@ test("ui theme relay: GET defaults to dark, POST stores it and publishes once pe
   }
 });
 
+/** 轮到条件成立为止。这个文件跑在 node:test 上，没有 vitest 的 waitFor。 */
+async function vi_waitFor(fn: () => Promise<void>, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    try {
+      await fn();
+      return;
+    } catch (e) {
+      if (Date.now() > deadline) throw e;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  }
+}
+
 test("data dir move: 校验→排队→撤销三步；排队之前再校验一次，不给必定失败的搬家排队", async () => {
   const calls: string[] = [];
   let pending: string | undefined;
@@ -1045,5 +1060,52 @@ test("ui open-data-dir: 只发一条不带路径的事件 —— 打开哪个目
     assert.deepEqual(seen, [{ kind: "app-open-data-dir" }]);
   } finally {
     closeRig(rig);
+  }
+});
+
+test("pick-folder: 请求挂着等壳送结果；壳先问起始目录；没接这个能力时端点不存在", async () => {
+  const events = new EventBus();
+  const seen: string[] = [];
+  events.subscribe((e) => seen.push(e.kind));
+  const pick = new FolderPick(2000, () => events.publish({ kind: "app-pick-folder" }));
+  const rig = await startServer({ events, folderPick: pick });
+  try {
+    // 界面发起：这条请求会挂着，所以**先不 await**。
+    const asking = fetch(`${rig.base}/ui/pick-folder`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ start: "C:/data" }),
+    });
+    // 壳收到事件后来问「弹在哪儿」——事件本身不带数据。
+    await vi_waitFor(async () => {
+      const r = await fetch(`${rig.base}/ui/pick-folder`, { headers: rig.headers });
+      const body = (await r.json()) as { start?: string };
+      assert.equal(body.start, "C:/data");
+    });
+    assert.deepEqual(seen, ["app-pick-folder"]);
+
+    // 壳把用户选的送回来 -> 界面那条请求这才回。
+    const back = await fetch(`${rig.base}/ui/pick-folder/result`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ path: "D:/RuyinData" }),
+    });
+    assert.equal(back.status, 200);
+    assert.deepEqual(await (await asking).json(), { path: "D:/RuyinData" });
+  } finally {
+    closeRig(rig);
+  }
+
+  const bare = await startServer({});
+  try {
+    const r = await fetch(`${bare.base}/ui/pick-folder`, {
+      method: "POST",
+      headers: bare.json,
+      body: "{}",
+    });
+    // 没有壳的部署弹不出系统框 —— 404 而不是挂在那儿等一个永远不来的答复。
+    assert.equal(r.status, 404);
+  } finally {
+    closeRig(bare);
   }
 });

@@ -10,7 +10,8 @@ export type DaemonEventKind =
   | "pending"
   | "ui-theme"
   | "app-restart"
-  | "app-open-data-dir";
+  | "app-open-data-dir"
+  | "app-pick-folder";
 
 export interface DaemonEventFrame {
   kind: DaemonEventKind;

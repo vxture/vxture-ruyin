@@ -1163,6 +1163,9 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 /* 事实行尾的动作（「打开目录」）：顶到右端，不去挤值那一列 —— 值是这一行的
    主角，路径本来就长。 */
 .fact-action { margin-left: auto; flex-shrink: 0; }
+/* 换目录那层弹窗：沿用页面里那套行度量，别在弹层里另起一套节奏。 */
+.move-dlg { display: flex; flex-direction: column; gap: var(--spacing-xs); min-width: 0; }
+.move-dlg .fact-row:first-child { border-top: none; }
 
 /* ---------- 设置：二级板块（owner 2026-09-04 的统一标题模式）---------- */
 /* 小图标 + 标题 + 说明，内容缩进到标题文字的左缘（图标 24 + gap 8 = 32px）。 */

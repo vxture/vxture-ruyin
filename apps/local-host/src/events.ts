@@ -35,7 +35,15 @@ export type RuntimeEvent =
    * 这不只是为了守规矩：路径要是跟着事件走，界面就成了「让壳打开任意目录」的
    * 一条通路。而界面是纯 Web 客户端 —— 同一个页面在浏览器里也开着。
    */
-  | { kind: "app-open-data-dir" };
+  | { kind: "app-open-data-dir" }
+  /**
+   * 请壳弹一个系统目录选择框。**壳是唯一能弹它的人** —— 窗口是纯 Web 客户端，
+   * 浏览器里的 file input 只给得到文件名，给不到目录的绝对路径。
+   *
+   * 同样不带数据：壳收到之后弹框，把用户选的路径 POST 回
+   * `/ui/pick-folder/result`；那条请求会唤醒正在等的那个界面调用。
+   */
+  | { kind: "app-pick-folder" };
 
 type Listener = (event: RuntimeEvent) => void;
 

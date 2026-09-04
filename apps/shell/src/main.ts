@@ -142,6 +142,45 @@ let daemonOutput = "";
  */
 let userWindowOpened = false;
 
+/**
+ * 弹系统目录选择框，把用户选的路径送回守护进程。
+ *
+ * 起始目录也从守护进程取 —— 事件按总线规矩不带数据，而「从哪儿开始浏览」是
+ * 界面那边知道的事（当前数据目录）。用户取消时送回空：**取消是正常结果**，
+ * 界面该回到原状，而不是显示一个错误。
+ */
+async function pickFolder(parent: BrowserWindow): Promise<void> {
+  const post = async (picked?: string) => {
+    try {
+      await fetch(`http://127.0.0.1:${PORT}/ui/pick-folder/result`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(picked ? { path: picked } : {}),
+      });
+    } catch (cause) {
+      // 送不回去，界面那次请求会自己超时（守护进程按取消处理）。
+      console.error("[shell] could not hand the picked folder back:", cause);
+    }
+  };
+  try {
+    const res = await fetch(`http://127.0.0.1:${PORT}/ui/pick-folder`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    const start = res.ok ? ((await res.json()) as { start?: string }).start : undefined;
+    const picked = await dialog.showOpenDialog(parent, {
+      title: "选择新的数据目录",
+      // createDirectory 让用户能当场新建一个空目录 —— 校验要求目标是空的，
+      // 没有这一项他得先去资源管理器建好再回来。
+      properties: ["openDirectory", "createDirectory"],
+      ...(start ? { defaultPath: start } : {}),
+    });
+    await post(picked.canceled ? undefined : picked.filePaths[0]);
+  } catch (cause) {
+    console.error("[shell] folder dialog failed:", cause);
+    await post(undefined);
+  }
+}
+
 /** 在资源管理器里打开当前数据目录。目录由守护进程说，壳不自己算。 */
 async function openDataDir(): Promise<void> {
   try {
@@ -529,6 +568,9 @@ function openWindow(): void {
     // 数据）。这条边界是有意的 —— 界面同一个页面在浏览器里也开着，路径要是
     // 跟着请求走，就等于给了它「让壳打开任意目录」的能力。
     if (kind === "app-open-data-dir") void openDataDir();
+    // 系统目录选择框：界面弹不出来（纯 Web 客户端，file input 只给文件名），
+    // 只有壳能弹。选完把路径送回守护进程，那边正挂着界面那次请求。
+    if (kind === "app-pick-folder") void pickFolder(win);
   });
   win.on("closed", stopThemeSync);
   // 启动时问一次：界面渲染第一帧就会上报，但那一次可能发生在壳订阅之前。
