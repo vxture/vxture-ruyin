@@ -340,9 +340,12 @@ function PreferencesBlock() {
         <SegmentedControl
           ariaLabel="字号"
           items={[
-            { value: "small", label: "小" },
-            { value: "default", label: "标准" },
-            { value: "large", label: "大" },
+            // 「减小 / 默认 / 加大」而不是「小 / 标准 / 大」（owner 2026-09-04
+            // 第 3 条）：这三个是**动作**，是把当前字号往哪边调，不是在描述
+            // 一个尺码。
+            { value: "small", label: "减小" },
+            { value: "default", label: "默认" },
+            { value: "large", label: "加大" },
           ]}
           value={fontSize}
           onChange={setFontSize}

@@ -134,9 +134,12 @@ export function UserSlot({
   const displayName = signedIn
     ? session?.profile?.name ?? session?.profile?.username ?? "Vxture 用户"
     : "会话已失效";
-  // 第二行给「在哪个租户」—— 同样是这一格该回答的问题，且不是个人信息。
+  /**
+   * 菜单里那一行（**不是**侧栏那一格）。这里放邮箱是对的：菜单要回答「我登的
+   * 是哪个账号」，而它只在点开时出现，不是一直摊在屏幕上。
+   */
   const subLine = signedIn
-    ? session?.org?.name ?? "已登录"
+    ? session?.profile?.email ?? session?.org?.name ?? "已登录"
     : online
       ? "请重新登录以继续"
       : "未连接";
@@ -182,7 +185,6 @@ export function UserSlot({
             {!collapsed && (
               <>
                 <span className="user-chip-name">{displayName}</span>
-                <span className="user-chip-sub">{subLine}</span>
                 <Icon
                   name="caret-up-down"
                   size="sm"

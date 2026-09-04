@@ -131,7 +131,7 @@ void test("偏好设置（在账户之下）: language + the three axes, in that
   const user = userEvent.setup();
   await user.click(screen.getByRole("radio", { name: "宽松" }));
   await user.click(screen.getByRole("radio", { name: "浅色" }));
-  await user.click(screen.getByRole("radio", { name: "大" }));
+  await user.click(screen.getByRole("radio", { name: "加大" }));
   await vi.waitFor(() => expect(localStorage.getItem("vx-density")).toBe("comfortable"));
   // 三条轴的键名归 DS（vx-*），这里断言的是「都落到了本机」，不是某个具体键名 ——
   // 键名是 DS 的实现细节，写死它会在 DS 改名那天变成一条假红。

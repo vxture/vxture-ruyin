@@ -568,6 +568,9 @@ body {
 .set-row-label { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
 .set-row-control { flex: 0 0 var(--set-control-w); min-width: 0; }
 .set-row-control > * { width: 100%; }
+/* 下拉框跟着行走小一号：它原来是 14px，同一行右边的分段选项是 12px，两个
+   控件并排却不同号（owner 2026-09-04 第 2 条）。 */
+.set-row-control :is(select, input, textarea) { font-size: var(--body-sm-font-size); }
 /* 分段控件：**选项自己等分容器**。DS 的项是 `flex: 0 1 auto`，于是三个 44px
    的项挤在 280px 的左边、右边空着（owner 第 4 条，实测 320px 容器里内容
    132px）。选中态改成实心主色 + 白字：原来是 `--primary` 当文字色压在深色
@@ -584,12 +587,19 @@ body {
 }
 .set-row-value { min-width: 0; word-break: break-word; }
 /* 说明单独一行、整行宽 —— 不再挤进名称列里换行（owner 第 10 条）。 */
+/* 板块底部/行下的说明文字：**一套间距、一套宽度**（owner 2026-09-04 第 1、4 条）。
+   此前三种说明各自一套 —— `.set-note` 上边距 8px、`.crypto-note` 与
+   `.set-row-note` 都是 0，于是「数据加密」「账号信息」「推理策略」的说明贴在
+   上一行的虚线上，只有「存储位置」是留白的。
+   62em 的宽度上限也去掉了：内容区已经比 62em 宽得多，这个上限只会让一句话在
+   半空中折行（第 4 条），而这几处都是一两句解释，不是需要控制行长的长正文。 */
+.set-note,
+.crypto-note,
 .set-row-note {
-  margin: 0 0 var(--spacing-xs);
+  margin: var(--spacing-sm) 0 0;
   padding-left: 0;
   font-size: var(--body-sm-font-size);
   color: var(--muted-foreground);
-  max-width: 62em;
 }
 
 /* （`.setting-row` 那套纵向行已删：最后一个用它的地方是「更新渠道」，改成
@@ -648,14 +658,8 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.user-chip-sub {
-  color: var(--muted-foreground);
-  font-size: var(--body-sm-font-size);
-  font-weight: 400;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.user-chip-sub::before { content: "· "; }
+/* （`.user-chip-sub` 已删：那一格只放显示名 —— owner 2026-09-04 第 5 条。
+   头像上的首字 + 显示名 + 再加一个租户名，扫过去像是同一个名字写了两遍。） */
 /* (agent dock retired 2026-08-30: ruyin is the workspace RUNTIME - agents live
    inside business products' task flows, never as shell-level chrome.) */
 
@@ -1069,12 +1073,7 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 }
 .crypto-what { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
 .crypto-how { min-width: 0; }
-.crypto-note {
-  margin: 0 0 var(--spacing-xs);
-  font-size: var(--body-sm-font-size);
-  color: var(--muted-foreground);
-  opacity: 0.85;
-}
+.crypto-note { opacity: 0.85; }
 
 /* ---------- 设置：二级板块（owner 2026-09-04 的统一标题模式）---------- */
 /* 小图标 + 标题 + 说明，内容缩进到标题文字的左缘（图标 24 + gap 8 = 32px）。 */
@@ -1118,12 +1117,7 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   border-top: 1px solid var(--border);
   min-width: 0;
 }
-.set-note {
-  margin: var(--spacing-xs) 0 0;
-  font-size: var(--body-sm-font-size);
-  color: var(--muted-foreground);
-  max-width: 62em;
-}
+
 
 /* 事实行：名称定宽一列，值一列，徽章跟在值后面。 */
 /* 个人信息那几行原来挤在 5px 的上下内边距里（owner 第 1 条：太密集）。
