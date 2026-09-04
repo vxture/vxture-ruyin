@@ -63,6 +63,11 @@ export interface IdClaims {
   name?: string;
   preferred_username?: string;
   email?: string;
+  email_verified?: boolean;
+  /** OIDC `phone` scope（授权请求里一直在要，此前没投射出来）。 */
+  phone_number?: string;
+  phone_number_verified?: boolean;
+  locale?: string;
   picture?: string;
   active_org?: string;
   active_org_name?: string;
@@ -74,10 +79,21 @@ export interface IdClaims {
 
 export interface SessionSummary {
   signedIn: boolean;
+  /**
+   * 会话身份的**投射**，不是原始 claims：只挑界面要展示的那几项。
+   * 2026-09-04 补齐 —— 授权请求要的是 `openid profile email phone`，而此前只
+   * 投射了四个字段，用户名 / 电话 / 角色 / 地区拿到了却没人看得见。
+   */
   profile?: {
     sub: string;
     name?: string;
+    username?: string;
     email?: string;
+    emailVerified?: boolean;
+    phone?: string;
+    phoneVerified?: boolean;
+    locale?: string;
+    roles?: string[];
     picture?: string;
   };
   org?: { id?: string; name?: string };
@@ -407,7 +423,13 @@ export class PlatformService {
             profile: {
               sub: c.sub,
               name: c.name ?? c.preferred_username,
+              username: c.preferred_username,
               email: c.email,
+              emailVerified: c.email_verified,
+              phone: c.phone_number,
+              phoneVerified: c.phone_number_verified,
+              locale: c.locale,
+              roles: c.roles,
               picture: c.picture,
             },
             org: { id: c.active_org, name: c.active_org_name },

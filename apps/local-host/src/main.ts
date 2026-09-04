@@ -60,6 +60,9 @@ const token = process.env["RUYIN_TOKEN"] ?? randomBytes(24).toString("hex");
 // "not wired up" must never look like "working".
 const capabilityBase = process.env["RUYIN_CAPABILITY_BASE"] ?? "";
 
+/** 界面生效主题的中转值（见下面 chromeTheme 与 events.ts 的 ui-theme）。 */
+let chromeTheme: "dark" | "light" = "dark";
+
 const keys = await KeyManager.open(dataDir);
 const storage = new SqliteStoragePort(dataDir, keys);
 console.log(`[ruyin] master key protection: ${keys.protection}`);
@@ -198,6 +201,14 @@ const server = createLocalApi({
           }),
       }
     : {}),
+  // 界面主题的中转值。内存里的一个词，重启即回到默认深色 —— 界面渲染第一帧
+  // 就会再告诉一次（apps/ui-workspace/src/chrome-theme.ts）。
+  chromeTheme: {
+    get: () => chromeTheme,
+    set: (theme) => {
+      chromeTheme = theme;
+    },
+  },
   systemInfo: {
     version: VERSION,
     platform: process.platform,

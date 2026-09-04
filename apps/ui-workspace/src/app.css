@@ -1050,3 +1050,61 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   color: var(--muted-foreground);
   opacity: 0.85;
 }
+
+/* ---------- 设置：二级板块（owner 2026-09-04 的统一标题模式）---------- */
+/* 小图标 + 标题 + 说明，内容缩进到标题文字的左缘（图标 24 + gap 8 = 32px）。 */
+.set-block { display: flex; flex-direction: column; gap: var(--spacing-sm); }
+.set-block-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+.set-block-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+.set-block-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-right: auto; }
+.set-block-title {
+  margin: 0;
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.set-block-desc {
+  margin: 0;
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+  max-width: 62em;
+}
+.set-block-aside { flex-shrink: 0; }
+.set-block-body { padding-left: 32px; min-width: 0; }
+.set-note {
+  margin: var(--spacing-xs) 0 0;
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+  max-width: 62em;
+}
+
+/* 事实行：名称定宽一列，值一列，徽章跟在值后面。 */
+.fact-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  padding: 5px 0;
+  border-top: 1px dashed var(--border);
+  font-size: var(--body-sm-font-size);
+}
+.fact-row:first-child { border-top: none; }
+.fact-label { flex: 0 0 6em; color: var(--muted-foreground); }
+.fact-value { min-width: 0; word-break: break-all; }
+.fact-empty { color: var(--muted-foreground); opacity: 0.6; }
+.fact-badge { flex-shrink: 0; }
+.fact-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }

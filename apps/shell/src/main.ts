@@ -25,6 +25,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderPdf } from "./pdf.js";
 import { isRenderPdfRequest, parsePdfSelfCheck, type RenderPdfReply } from "./pdf-protocol.js";
+import { captionOverlay, themeFromReply } from "./caption-overlay.js";
 import { extractDaemonEvents, type DaemonEventKind } from "./daemon-events.js";
 import { diffPending } from "./pending-notify.js";
 
@@ -352,14 +353,11 @@ function openWindow(): void {
     // buttons over the app's own top bar (which declares a drag region).
     // Dark-first tech-console identity: colors match the DS dark background
     // (neutral-950); overlay height matches the ShellHeader "md" band (48).
-    // The overlay is fixed at creation - after a light-theme switch the
-    // caption buttons keep the dark tint until a shell-side sync lands.
+    // The overlay opens dark and is re-tinted whenever the page reports a
+    // theme change (syncCaptionOverlay below) - the sync the previous version
+    // of this comment said had not landed yet.
     titleBarStyle: "hidden",
-    titleBarOverlay: {
-      color: "#0a0a0a",
-      symbolColor: "#a3a3a3",
-      height: 40,
-    },
+    titleBarOverlay: captionOverlay("dark"),
     backgroundColor: "#0a0a0a",
     webPreferences: {
       // The window is a pure web client of the Local API - no Node access,
@@ -369,6 +367,27 @@ function openWindow(): void {
       sandbox: true,
     },
   });
+  // 窗口按钮的颜色跟着页面主题走（owner 2026-09-04）。壳看不见页面，通路是
+  // 界面 → 守护进程 → 事件流 → 这里；收到事件后自己去取值（events.ts 的规矩：
+  // 事件只说什么变了）。取不到就不动 —— 一个读不出来的答复不是重画的理由。
+  const syncCaptionOverlay = async (): Promise<void> => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/ui/theme`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      if (!res.ok || win.isDestroyed()) return;
+      win.setTitleBarOverlay(captionOverlay(themeFromReply(await res.json())));
+    } catch {
+      // 守护进程还没起来，或这一版没有这个端点。窗口按钮保持深色。
+    }
+  };
+  const stopThemeSync = onDaemonEvent((kind) => {
+    if (kind === "ui-theme") void syncCaptionOverlay();
+  });
+  win.on("closed", stopThemeSync);
+  // 启动时问一次：界面渲染第一帧就会上报，但那一次可能发生在壳订阅之前。
+  win.webContents.on("did-finish-load", () => void syncCaptionOverlay());
+
   // External targets (OIDC login, console deep links) go to the SYSTEM
   // browser - the shell never hosts third-party origins (60 section 4.2),
   // and the PKCE loopback flow requires a real browser session anyway.

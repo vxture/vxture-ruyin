@@ -14,7 +14,14 @@ export type RuntimeEvent =
   /** 某个任务实例动了（起来了、落定了、停在等人那一刻）。 */
   | { kind: "task"; projectId: string; taskInstance: string }
   /** 「在等我」的清单变了。 */
-  | { kind: "pending" };
+  | { kind: "pending" }
+  /**
+   * 界面的生效主题变了（深 / 浅）。**壳是唯一的消费者**：Windows 的三个窗口
+   * 按钮由系统画、颜色由壳定，而壳看不见页面 —— 窗口是纯 Web 客户端，没有
+   * preload。收到之后壳自己去 `GET /ui/theme` 取值，照本总线的规矩：只说
+   * 什么变了，不说变成了什么。
+   */
+  | { kind: "ui-theme" };
 
 type Listener = (event: RuntimeEvent) => void;
 

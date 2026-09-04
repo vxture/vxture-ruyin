@@ -101,6 +101,7 @@ const platform = {
 };
 
 const events = new EventBus();
+let chromeTheme = "dark";
 const registry = new ProductRegistry(`${repo}/products`, dataDir);
 const server = createLocalApi({
   runtime,
@@ -120,6 +121,14 @@ const server = createLocalApi({
   platform,
   reindex: (pid, b) => reindexBinding(storage, pid, b, connectorLookup.get(b.connector)),
   connectors: connectorRegistry,
+  // 主题中转：界面上报，壳取值给窗口按钮上色（观察台里没有壳，但端点要在，
+  // 否则那条通路在这儿看不见）。
+  chromeTheme: {
+    get: () => chromeTheme,
+    set: (t) => {
+      chromeTheme = t;
+    },
+  },
   systemInfo: {
     version: "0.1.0-uiharness",
     platform: process.platform,
