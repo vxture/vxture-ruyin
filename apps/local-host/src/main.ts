@@ -253,7 +253,15 @@ const server = createLocalApi({
   dataMove: {
     check: (target: string) => checkTarget(dataDir, target),
     request: (target: string) => {
-      writeLocation(locationFile, { dataDir, pending: resolve(target) });
+      // 顺手把「要搬多少」记下来：壳靠它算等多久（shell/migration-wait.ts）。
+      // 这里算一次很便宜（checkTarget 本来就要走一遍目录树），而启动那一刻壳
+      // 没有别的办法知道 —— 那时守护进程还没开始服务。
+      const size = checkTarget(dataDir, target).bytes;
+      writeLocation(locationFile, {
+        dataDir,
+        pending: resolve(target),
+        ...(size === undefined ? {} : { pendingBytes: size }),
+      });
     },
     cancel: () => {
       const loc = readLocation(locationFile);
