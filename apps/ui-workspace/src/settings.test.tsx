@@ -715,17 +715,25 @@ async function renderStorage(api: Api) {
   return { ...r, restore };
 }
 
-void test("Settings/存储位置: 页面上只有一个按钮 —— 输入框与「检查目标」都在弹层里", async () => {
+void test("Settings/存储位置: 两个动作都在数据目录那一行上，页面上没有常驻表单", async () => {
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })) });
   const { restore } = await renderStorage(api);
-  const entry = await screen.findByRole("button", { name: /更改数据目录/ });
+  // 先等按钮出来（它等的是 /system 回来），再看它落在哪一行 —— 直接去抓
+  // 第一个 .fact-row 会抓到还没有值的那一帧。
+  const entry = await screen.findByRole("button", { name: "更改…" });
+  const row = entry.closest(".fact-row") as HTMLElement;
+  // 「打开目录」与「更改…」针对的是同一个东西，所以在**同一行**上（owner
+  // 2026-09-05 指出：一个在行上、一个在下面另一块，那是两处）。
+  expect(row.textContent).toContain("数据目录");
+  expect(row.textContent).toContain("C:/data");
+  expect(within(row).getByRole("button", { name: /打开目录/ })).toBeInTheDocument();
+
   // 常驻页面上不该有这些：它们是一次性操作的零件。
   expect(screen.queryByRole("button", { name: "检查目标" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "重启并搬移" })).not.toBeInTheDocument();
   expect(screen.queryByPlaceholderText(/RuyinData/)).not.toBeInTheDocument();
 
   await userEvent.setup().click(entry);
-  // 弹层里先摆事实：当前在哪、要搬到哪（还没选）。
   expect(await screen.findByText("更改数据目录")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /选择目录/ })).toBeInTheDocument();
   // 没选目录之前，会关掉应用的那个按钮是关着的。
@@ -745,7 +753,7 @@ void test("Settings/存储位置: 选完目录自动校验 —— 用户不必�
   });
   const { restore } = await renderStorage(api);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(await screen.findByRole("button", { name: "更改…" }));
   await user.click(screen.getByRole("button", { name: /选择目录/ }));
 
   // 目录框从当前位置开始浏览 —— 用户多半是在它旁边找一个位置。
@@ -768,7 +776,7 @@ void test("Settings/存储位置: 用户在系统框里取消 —— 什么都�
   });
   const { restore } = await renderStorage(api);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(await screen.findByRole("button", { name: "更改…" }));
   await user.click(screen.getByRole("button", { name: /选择目录/ }));
   // 取消是正常结果：不校验、不报错、按钮仍然关着。
   expect(api.checkDataDir).not.toHaveBeenCalled();
@@ -786,7 +794,7 @@ void test("Settings/存储位置: 目标不可用时把原因写在弹层里，�
   });
   const { restore } = await renderStorage(api);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(await screen.findByRole("button", { name: "更改…" }));
   await user.click(screen.getByRole("button", { name: /选择目录/ }));
   expect(await screen.findByText("目标目录里已经有东西了。")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "重启并搬移" })).toBeDisabled();
@@ -804,7 +812,7 @@ void test("Settings/存储位置: 排队那一步失败就停在原地 —— �
   });
   const { restore } = await renderStorage(api);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(await screen.findByRole("button", { name: "更改…" }));
   await user.click(screen.getByRole("button", { name: /选择目录/ }));
   await screen.findByText(/同一个盘，改名即可/);
   await user.click(screen.getByRole("button", { name: "重启并搬移" }));
@@ -824,7 +832,7 @@ void test("Settings/存储位置: 已排队时给「立即重启」与「取消�
   });
   const { restore } = await renderStorage(api);
   expect(await screen.findByText(/已排好一次搬移，重启后生效/)).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /更改数据目录/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "更改…" })).not.toBeInTheDocument();
   await userEvent.setup().click(screen.getByRole("button", { name: "立即重启并搬移" }));
   expect(api.restartApp).toHaveBeenCalled();
   restore();
@@ -860,7 +868,7 @@ void test("Settings/存储位置: 弹层能关掉，什么也不发生", async (
   });
   const { restore } = await renderStorage(api);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(await screen.findByRole("button", { name: "更改…" }));
   await user.click(screen.getByRole("button", { name: "取消" }));
   await vi.waitFor(() => expect(screen.queryByText("更改数据目录")).not.toBeInTheDocument());
   expect(api.requestDataDir).not.toHaveBeenCalled();
@@ -868,7 +876,7 @@ void test("Settings/存储位置: 弹层能关掉，什么也不发生", async (
 
   // Esc 也要能关：弹层的关闭有两条路（按钮、Esc/点遮罩），两条都得通 ——
   // 只接一条的话，用户按 Esc 会以为应用卡住了。
-  await user.click(screen.getByRole("button", { name: /更改数据目录/ }));
+  await user.click(screen.getByRole("button", { name: "更改…" }));
   await screen.findByText("更改数据目录");
   await user.keyboard("{Escape}");
   await vi.waitFor(() => expect(screen.queryByText("更改数据目录")).not.toBeInTheDocument());
@@ -882,7 +890,7 @@ void test("Settings/存储位置: 选目录这一步本身失败也照原样转�
   });
   const { restore } = await renderStorage(api);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: /更改数据目录/ }));
+  await user.click(await screen.findByRole("button", { name: "更改…" }));
   await user.click(screen.getByRole("button", { name: /选择目录/ }));
   expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
   restore();
@@ -892,7 +900,7 @@ void test("Settings/存储位置: 浏览器里不给更改入口 —— 系统�
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })) });
   renderSection("general", api);
   expect(await screen.findByText("C:/data")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /更改数据目录/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "更改…" })).not.toBeInTheDocument();
 });
 
 void test("Settings/存储位置: 上次搬移失败要如实说，并且说清数据还在原处", async () => {
