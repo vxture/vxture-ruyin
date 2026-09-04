@@ -401,7 +401,17 @@ export class SqliteStoragePort implements StoragePort {
     if (existsSync(dir)) {
       throw new Error(`workspace directory already exists: ${dir}`);
     }
-    mkdirSync(join(dir, "files"), { recursive: true });
+    // 建的是项目目录本身。**原来这一行建的是 `<dir>/files`**，项目目录只是它
+    // 顺带带出来的。
+    //
+    // 那个 `files/` 是设计里规划过的「文件区（内容寻址，哈希命名）」，并且
+    // 30-design/60 §7.3 明确写了它要「同密钥体系加密」—— 但**实现里没有任何
+    // 写入方**，加密也还没做（TD-041）。所以先不建它：一个空目录会让下一个人
+    // 以为附件原件已经在那儿了，而那正是最不能猜错的一件事。
+    //
+    // 现在原件不进数据目录：参考资料由工具按目录授权**从用户自己的位置读**，
+    // 抽出的内容写进这个加密库；产出物写到用户授权的导出目录。
+    mkdirSync(dir, { recursive: true });
     return this.openDb(projectId);
   }
 
