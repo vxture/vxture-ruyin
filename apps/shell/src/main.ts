@@ -135,6 +135,23 @@ let daemonOutput = "";
  */
 let userWindowOpened = false;
 
+/** 在资源管理器里打开当前数据目录。目录由守护进程说，壳不自己算。 */
+async function openDataDir(): Promise<void> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${PORT}/system`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    if (!res.ok) return;
+    const { dataDir: dir } = (await res.json()) as { dataDir?: string };
+    if (!dir) return;
+    // openPath 失败时返回一个非空的说明字符串，而不是抛 —— 别把它当成 void。
+    const failed = await shell.openPath(dir);
+    if (failed) console.error(`[shell] could not open ${dir}: ${failed}`);
+  } catch (cause) {
+    console.error("[shell] could not open the data dir:", cause);
+  }
+}
+
 function stopDaemon(): void {
   stopping = true;
   daemon?.kill();
@@ -437,6 +454,10 @@ function openWindow(): void {
       app.relaunch();
       app.quit();
     }
+    // 打开数据目录：**路径从守护进程拿**，不从事件里拿（事件按总线规矩不带
+    // 数据）。这条边界是有意的 —— 界面同一个页面在浏览器里也开着，路径要是
+    // 跟着请求走，就等于给了它「让壳打开任意目录」的能力。
+    if (kind === "app-open-data-dir") void openDataDir();
   });
   win.on("closed", stopThemeSync);
   // 启动时问一次：界面渲染第一帧就会上报，但那一次可能发生在壳订阅之前。

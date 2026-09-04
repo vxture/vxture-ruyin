@@ -279,6 +279,7 @@ const WRAPPER_CASES: WrapperCase[] = [
   },
   { name: "cancelDataDir", call: (api) => api.cancelDataDir(), method: "DELETE", path: "/system/data-dir" },
   { name: "restartApp", call: (api) => api.restartApp(), method: "POST", path: "/ui/restart" },
+  { name: "openDataDir", call: (api) => api.openDataDir(), method: "POST", path: "/ui/open-data-dir" },
   { name: "audit", call: (api) => api.audit("prj_1"), method: "GET", path: "/projects/prj_1/audit" },
   {
     name: "contextItems",

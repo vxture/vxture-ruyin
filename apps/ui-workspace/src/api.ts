@@ -171,7 +171,8 @@ export type RuntimeEvent =
   | { kind: "pending" }
   /** 界面主题变了；壳据此重画窗口按钮（见 chrome-theme.ts）。 */
   | { kind: "ui-theme" }
-  | { kind: "app-restart" };
+  | { kind: "app-restart" }
+  | { kind: "app-open-data-dir" };
 
 export interface StateItem {
   name: string;
@@ -660,6 +661,11 @@ export class Api {
   cancelDataDir = () => this.call<{ pending: null }>("/system/data-dir", "DELETE");
   /** 请壳重启（界面自己做不到）。搬家要靠它才能生效。 */
   restartApp = () => this.call<{ ok: boolean }>("/ui/restart", "POST");
+  /**
+   * 请壳在资源管理器里打开数据目录。**不传路径** —— 打开哪个目录由守护进程说
+   * （它才是知道 dataDir 的那个），界面只是提出这个请求。
+   */
+  openDataDir = () => this.call<{ ok: boolean }>("/ui/open-data-dir", "POST");
   /**
    * 上报生效主题，供壳给 Windows 的窗口按钮上色。**中转，不是设置** ——
    * 偏好本身存在本机 localStorage（DS 的 ThemeProvider）。
