@@ -311,7 +311,13 @@ jobs:
       # app with --smoke. The smoke step renders a real PDF through the shell
       # (ADR-017), so a broken IPC path fails here rather than at a user's
       # first export.
+      #
+      # **不带 --dir，也就是真的编译安装器。** 2026-09-04 被这件事咬过一次：
+      # 那次的 `--dir` 只出解包目录，NSIS 脚本压根不参与编译，于是十一项检查
+      # 全绿、合并、打 tag，release 才在 makensis 那一步炸掉（自定义安装页少了
+      # 两个 !include）。这个检查存在的理由就是「构建全绿而装出来的东西不对」，
+      # 那么安装器本身也得在这里被编译一次 —— 代价是多下一次 nsis 工具链。
       - name: Pack and launch the packaged app
-        run: node scripts/release/pack.mjs --dir
+        run: node scripts/release/pack.mjs
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}

@@ -1,4 +1,4 @@
-; 安装时选数据目录（owner 2026-09-04 定）。
+﻿; 安装时选数据目录（owner 2026-09-04 定）。
 ;
 ; 为什么放在安装期：这一刻**还没有任何加密数据**，所以「选在哪儿」是免费的 ——
 ; 不需要搬移、不需要校验一致性、失败也没有半份数据留下。装完之后再改也可以
@@ -16,6 +16,14 @@
 ;      （userData\data），少一处需要两边保持一致的状态。
 ;   3. **写不进去就当没选。** 指针写失败不阻断安装：应用会用默认目录起来，
 ;      用户仍然可以在设置里改。安装器不该因为一个可选项而失败。
+
+; nsDialogs 与 LogicLib **必须自己 include**：electron-builder 的模板不保证
+; 引过它们，而 `${NSD_*}` / `${If}` 只是宏 —— 没引进来时它们不是「运行时报错」，
+; 而是 makensis 在编译期就停下（第一次踩到的是下面那个 Function 里的用法，因为
+; `!macro` 体要等到被插入时才展开，于是报的行号离真正缺失的那一行很远）。
+; 两个头文件都有自己的重复保护，再引一次是安全的。
+!include nsDialogs.nsh
+!include LogicLib.nsh
 
 Var RuyinDataDirPage
 Var RuyinDataDirField
@@ -47,7 +55,7 @@ Var RuyinPointerFile
   ${NSD_CreateDirRequest} 0 40u 75% 12u "$LOCALAPPDATA\Ruyin\data"
   Pop $RuyinDataDirField
 
-  ${NSD_CreateBrowseButton} 80% 39u 20% 14u "浏览…"
+  ${NSD_CreateButton} 80% 39u 20% 14u "浏览…"
   Pop $0
   ${NSD_OnClick} $0 RuyinBrowseDataDir
 
