@@ -1,4 +1,4 @@
-; 安装时选数据目录（owner 2026-09-04 定）。
+﻿; 安装时选数据目录（owner 2026-09-04 定）。
 ;
 ; 为什么放在安装期：这一刻**还没有任何加密数据**，所以「选在哪儿」是免费的 ——
 ; 不需要搬移、不需要校验一致性、失败也没有半份数据留下。装完之后再改也可以
@@ -17,9 +17,18 @@
 ;   3. **写不进去就当没选。** 指针写失败不阻断安装：应用会用默认目录起来，
 ;      用户仍然可以在设置里改。安装器不该因为一个可选项而失败。
 
-Var RuyinDataDirPage
-Var RuyinDataDirField
-Var RuyinDataDirValue
+; nsDialogs 与 LogicLib **必须自己 include**：electron-builder 的模板不保证
+; 引过它们，而 `${NSD_*}` / `${If}` 只是宏 —— 没引进来时它们不是「运行时报错」，
+; 而是 makensis 在编译期就停下（第一次踩到的是下面那个 Function 里的用法，因为
+; `!macro` 体要等到被插入时才展开，于是报的行号离真正缺失的那一行很远）。
+; 两个头文件都有自己的重复保护，再引一次是安全的。
+!include nsDialogs.nsh
+!include LogicLib.nsh
+
+; `preInit` 在两遍里都会被插进 `.onInit`（installer.nsi），所以指针路径这个
+; 变量必须留在守卫外面。另外三个只在安装器那一遍用得到 —— 留在外面会换来
+; `warning 6001: Variable not referenced or never set, wasting memory`，同样
+; 是 -WX 下的构建失败。
 Var RuyinPointerFile
 
 !macro preInit
@@ -28,7 +37,31 @@ Var RuyinPointerFile
   StrCpy $RuyinPointerFile "$APPDATA\Ruyin\location.json"
 !macroend
 
+; 这个钩子的位置在**页面声明区**（app-builder-lib 的 assistedInstaller.nsh 把它
+; 插在 MUI 的目录页与安装页之间），所以这里只能声明一页，不能直接写指令 ——
+; 对话框的创建要放进页面回调里。本地用 makensis 试过：直接写指令会得到
+; `command IfFileExists not valid outside Section or Function`。
+;
+; 顺带一个有用的性质：`Page custom` 是下面两个 Function 唯一的引用来源。万一这个
+; 钩子将来没有被插入（换了 electron-builder、改了 oneClick），makensis 会报
+; `warning 6010: function not referenced`，而 electron-builder 是 -WX 编译的 ——
+; 于是「这一页悄悄没出现」会变成一次构建失败，而不是装机时才被发现。
 !macro customPageAfterChangeDir
+  Page custom RuyinDataDirPageShow
+!macroend
+
+; **卸载器那一遍不要这些函数。** electron-builder 编两次：安装器一遍、卸载器一
+; 遍，两遍共用同一份头部（也就是本文件）。卸载器那一遍里 app-builder-lib 用
+; `!ifndef BUILD_UNINSTALLER` 把所有页面与 `customInstall` 全部排除，于是这里的
+; 函数没人引用 —— 而 electron-builder 是 -WX 编译，`warning 6010: function not
+; referenced` 直接成为构建失败。CI 上连着两次红都是这一条。
+!ifndef BUILD_UNINSTALLER
+
+Var RuyinDataDirPage
+Var RuyinDataDirField
+Var RuyinDataDirValue
+
+Function RuyinDataDirPageShow
   ; 已经有指针（升级、或重装到同一个用户）：这一页不出现。数据在哪儿由那份
   ; 指针说，安装器不参与。
   IfFileExists "$RuyinPointerFile" skipDataDirPage 0
@@ -39,21 +72,29 @@ Var RuyinPointerFile
     Abort
   ${EndIf}
 
-  !insertmacro MUI_HEADER_TEXT "选择数据目录" "业务数据与密钥放在哪里。装好之后也可以在设置里改。"
-
-  ${NSD_CreateLabel} 0 0 100% 34u "RUYIN 的业务数据（项目库、产品库、密钥）会放在下面这个目录。数据整库加密，密钥按当前 Windows 用户封装 —— 所以请选一个只有你自己使用的位置，不要选可移动磁盘或共享目录。"
+  ; 标题写在对话框里，**不用 `MUI_HEADER_TEXT`**：electron-builder 把自定义
+  ; include 放在公共头部，那时 MUI2 还没被引进来，于是那个宏在这里根本不存在 ——
+  ; CI 上报的就是这一行（`!include: error ... on line 63`）。本地探针脚本先引
+  ; MUI2 再引本文件，所以没复现出来；探针现在按真实顺序来了。
+  ${NSD_CreateLabel} 0 0 100% 12u "选择数据目录"
+  Pop $0
+  ${NSD_CreateLabel} 0 14u 100% 34u "RUYIN 的业务数据（项目库、产品库、密钥）会放在下面这个目录。数据整库加密，密钥按当前 Windows 用户封装 —— 所以请选一个只有你自己使用的位置，不要选可移动磁盘或共享目录。装好之后也可以在设置里改。"
   Pop $0
 
-  ${NSD_CreateDirRequest} 0 40u 75% 12u "$LOCALAPPDATA\Ruyin\data"
+  ${NSD_CreateDirRequest} 0 54u 75% 12u "$LOCALAPPDATA\Ruyin\data"
   Pop $RuyinDataDirField
 
-  ${NSD_CreateBrowseButton} 80% 39u 20% 14u "浏览…"
+  ${NSD_CreateButton} 80% 53u 20% 14u "浏览…"
   Pop $0
   ${NSD_OnClick} $0 RuyinBrowseDataDir
 
   nsDialogs::Show
+  Return
   skipDataDirPage:
-!macroend
+  ; 用 Abort 而不是直接返回：页面回调里 Abort 的含义正是「跳过这一页」，直接
+  ; 返回会停在一张空白页上。
+  Abort
+FunctionEnd
 
 Function RuyinBrowseDataDir
   ${NSD_GetText} $RuyinDataDirField $0
@@ -118,3 +159,5 @@ Function RuyinEscapeBackslashes
   Pop $R1
   Exch $R0
 FunctionEnd
+
+!endif ; BUILD_UNINSTALLER
