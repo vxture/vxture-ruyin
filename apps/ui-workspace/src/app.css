@@ -550,6 +550,39 @@ body {
   --set-label-w: 96px;
   --set-control-w: 280px;
 }
+
+/* ---------- 密度三档：把「宽松」真正撑开（owner 2026-09-04）----------
+   实测 @vxture/design-tokens@3.0.0：`.density-comfortable` 的**内缩尺度与默认
+   逐字相同** —— `--space-2xs..lg` 与 `--space-row-*` 一个值都没变，只有
+   `--space-control-*` 抬了一档（分段控件 32 → 36px）。于是卡片内边距 16/16、
+   卡片间距 10/10、板块间距 26/26 在两档之间纹丝不动，用户看到的就是「宽松基本
+   等于默认」。**这不是本仓库的样式问题，是上游尺度的缺口**（TD-040）。
+
+   另一半是我们自己的：`--set-row-h` 写死 44px，于是连「紧凑」都推不动设置页
+   的行 —— 三档下行高都是 44。
+
+   这里的做法：只定义 **ruyin 自己的量**与只改**ruyin 自己的容器**（外加 DS 的
+   `.card` 内边距，那是我们在自己的壳里用它）。**不改写 `--space-*` /
+   `--spacing-*` 的尺度** —— 那等于在产品仓里把组织级尺度分叉，上游哪天补上
+   宽松档，两套值会打架。上游补齐后这一段整体删除。 */
+html.density-compact { --set-row-h: 36px; }
+html.density-comfortable { --set-row-h: 52px; }
+html.density-comfortable .card { padding: var(--spacing-lg); }
+html.density-comfortable .set-block { gap: var(--spacing-md); }
+html.density-comfortable .set-block-body { padding-top: var(--spacing-md); }
+html.density-comfortable .settings-page { gap: var(--spacing-lg); }
+/* 首页那几张卡也要跟着松：它们用的是 `--spacing-sm/md`，而这两个值在默认与
+   宽松之间是同一个数（见上面那段），所以不逐个抬一下，首页在两档之间一模一样。
+   这份名单**是有意逐个列出的**：它标出了「哪些是 ruyin 自己的容器」，上游补齐
+   宽松档之后照着删就行。 */
+html.density-comfortable .status-cards { gap: var(--spacing-md); }
+html.density-comfortable .status-card { padding: var(--spacing-md) var(--spacing-lg); }
+html.density-comfortable .pcard { padding: var(--spacing-lg); gap: var(--spacing-md); }
+html.density-comfortable .set-row,
+html.density-comfortable .fact-row,
+html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
+/* 设置页那一摞卡片：原来是 Tailwind 的 `gap-md`，写死在类名里就跟不了密度。 */
+.settings-page { display: flex; flex-direction: column; gap: var(--spacing-md); }
 .set-row {
   display: flex;
   align-items: center;
