@@ -25,9 +25,10 @@
 !include nsDialogs.nsh
 !include LogicLib.nsh
 
-Var RuyinDataDirPage
-Var RuyinDataDirField
-Var RuyinDataDirValue
+; `preInit` 在两遍里都会被插进 `.onInit`（installer.nsi），所以指针路径这个
+; 变量必须留在守卫外面。另外三个只在安装器那一遍用得到 —— 留在外面会换来
+; `warning 6001: Variable not referenced or never set, wasting memory`，同样
+; 是 -WX 下的构建失败。
 Var RuyinPointerFile
 
 !macro preInit
@@ -48,6 +49,17 @@ Var RuyinPointerFile
 !macro customPageAfterChangeDir
   Page custom RuyinDataDirPageShow
 !macroend
+
+; **卸载器那一遍不要这些函数。** electron-builder 编两次：安装器一遍、卸载器一
+; 遍，两遍共用同一份头部（也就是本文件）。卸载器那一遍里 app-builder-lib 用
+; `!ifndef BUILD_UNINSTALLER` 把所有页面与 `customInstall` 全部排除，于是这里的
+; 函数没人引用 —— 而 electron-builder 是 -WX 编译，`warning 6010: function not
+; referenced` 直接成为构建失败。CI 上连着两次红都是这一条。
+!ifndef BUILD_UNINSTALLER
+
+Var RuyinDataDirPage
+Var RuyinDataDirField
+Var RuyinDataDirValue
 
 Function RuyinDataDirPageShow
   ; 已经有指针（升级、或重装到同一个用户）：这一页不出现。数据在哪儿由那份
@@ -147,3 +159,5 @@ Function RuyinEscapeBackslashes
   Pop $R1
   Exch $R0
 FunctionEnd
+
+!endif ; BUILD_UNINSTALLER
