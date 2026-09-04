@@ -644,10 +644,135 @@ void test("Settings/通用设置: four blocks - storage, encryption, inference p
   // 数据安不安全，不是一个密码学状态词。
   expect(titles).toEqual(["存储位置", "数据加密", "推理策略", "安全审计"]);
   expect(await screen.findByText("C:/data")).toBeInTheDocument();
-  // 目录只读，并写明为什么（owner 问过能不能改）。
-  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-  expect(document.body.textContent).toContain("RUYIN_DATA_DIR");
-  expect(document.body.textContent).toContain("界面内暂不支持修改");
+  // 目录可以改了（owner 2026-09-04；TD-039 改写为「重启期迁移」），并且要说清楚
+  // 它是在什么时候搬的 —— 「重启时、开库之前」是这件事安全的全部理由。
+  expect(screen.getByPlaceholderText(/RuyinData/)).toBeInTheDocument();
+  expect(document.body.textContent).toContain("打开任何数据库之前");
+});
+
+void test("Settings/存储位置: 换目录要先校验；校验不通过就不给排队", async () => {
+  const checkDataDir = vi.fn().mockResolvedValue({ ok: false, reason: "目标目录里已经有东西了。" });
+  const requestDataDir = vi.fn();
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
+    checkDataDir,
+    requestDataDir,
+  });
+  renderSection("general", api);
+  const user = userEvent.setup();
+  await user.type(await screen.findByPlaceholderText(/RuyinData/), "D:\Taken");
+  // 没校验之前主按钮就是关着的：排一次注定失败的搬家，失败要等到下次启动才
+  // 出现，那时用户已经忘了自己做过什么。
+  expect(screen.getByRole("button", { name: "重启并搬移" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "检查目标" }));
+  expect(checkDataDir).toHaveBeenCalledWith("D:\Taken");
+  expect(await screen.findByText("目标目录里已经有东西了。")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "重启并搬移" })).toBeDisabled();
+  expect(requestDataDir).not.toHaveBeenCalled();
+});
+
+void test("Settings/存储位置: 校验通过后说清同盘还是跨盘，排队之后请壳重启", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
+    checkDataDir: vi.fn().mockResolvedValue({ ok: true, sameVolume: false, bytes: 5 * 1024 * 1024 }),
+    requestDataDir: vi.fn().mockResolvedValue({ pending: "D:\RuyinData", ok: true }),
+    restartApp: vi.fn().mockResolvedValue({ ok: true }),
+  });
+  renderSection("general", api);
+  const user = userEvent.setup();
+  await user.type(await screen.findByPlaceholderText(/RuyinData/), "D:\RuyinData");
+  await user.click(screen.getByRole("button", { name: "检查目标" }));
+  // 跨盘要复制并核对，那要等；同盘是改名。这句差别必须说，否则用户不知道该不该
+  // 现在按下去。
+  expect(await screen.findByText(/跨盘，要复制并逐文件核对/)).toBeInTheDocument();
+  expect(screen.getByText(/5.0 MB/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "重启并搬移" }));
+  expect(api.requestDataDir).toHaveBeenCalledWith("D:\RuyinData");
+  // 排队之后必须真的重启 —— 搬移只在开库之前发生，不重启这件事永远不会生效。
+  await vi.waitFor(() => expect(api.restartApp).toHaveBeenCalled());
+});
+
+void test("Settings/存储位置: 排着一次搬移时只给「立即重启」与「取消」，不再给填新目标", async () => {
+  const api = fakeApi({
+    system: vi
+      .fn()
+      .mockResolvedValue(systemInfo({ dataDir: "C:/data", dataDirPending: "D:\RuyinData" })),
+    cancelDataDir: vi.fn().mockResolvedValue({ pending: null }),
+  });
+  renderSection("general", api);
+  expect(await screen.findByText(/已排好一次搬移，重启后生效/)).toBeInTheDocument();
+  expect(screen.queryByPlaceholderText(/RuyinData/)).not.toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "取消这次搬移" }));
+  expect(api.cancelDataDir).toHaveBeenCalled();
+});
+
+void test("Settings/存储位置: 守护进程答不上来时照原样转达，且不排队", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
+    checkDataDir: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
+    requestDataDir: vi.fn(),
+  });
+  renderSection("general", api);
+  const user = userEvent.setup();
+  await user.type(await screen.findByPlaceholderText(/RuyinData/), "D:\X");
+  await user.click(screen.getByRole("button", { name: "检查目标" }));
+  expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
+  expect(api.requestDataDir).not.toHaveBeenCalled();
+});
+
+void test("Settings/存储位置: 排队那一步失败就停在原地 —— 不重启，也不假装排上了", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
+    checkDataDir: vi.fn().mockResolvedValue({ ok: true, sameVolume: true, bytes: 1024 }),
+    requestDataDir: vi.fn().mockRejectedValue(new Error("目标目录里已经有东西了。")),
+    restartApp: vi.fn(),
+  });
+  renderSection("general", api);
+  const user = userEvent.setup();
+  await user.type(await screen.findByPlaceholderText(/RuyinData/), "D:\X");
+  await user.click(screen.getByRole("button", { name: "检查目标" }));
+  expect(await screen.findByText(/同一个盘，改名即可/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "重启并搬移" }));
+  expect(await screen.findByText("目标目录里已经有东西了。")).toBeInTheDocument();
+  // 排不上就别重启：重启之后什么也不会发生，用户只会更糊涂。
+  expect(api.restartApp).not.toHaveBeenCalled();
+});
+
+void test("Settings/存储位置: 已排队时「立即重启」就是请壳重启；撤销失败也如实说", async () => {
+  const api = fakeApi({
+    system: vi
+      .fn()
+      .mockResolvedValue(systemInfo({ dataDir: "C:/data", dataDirPending: "D:\RuyinData" })),
+    restartApp: vi.fn().mockResolvedValue({ ok: true }),
+    cancelDataDir: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
+  });
+  renderSection("general", api);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "立即重启并搬移" }));
+  expect(api.restartApp).toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "取消这次搬移" }));
+  expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
+});
+
+void test("Settings/存储位置: 上次搬移失败要如实说，并且说清数据还在原处", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(
+      systemInfo({
+        dataDir: "C:/data",
+        lastMove: {
+          status: "failed",
+          from: "C:/data",
+          to: "D:/RuyinData",
+          at: "2026-09-04T12:00:00Z",
+          reason: "目标那边空间不够：要搬 120.0 MB，可用 30.0 MB。",
+        },
+      }),
+    ),
+  });
+  renderSection("general", api);
+  expect(await screen.findByText(/上次搬移没成功，数据仍在原处/)).toBeInTheDocument();
+  expect(screen.getByText(/空间不够/)).toBeInTheDocument();
 });
 
 void test("Settings/软件更新: four blocks; the channel is a select with only stable; nothing is auto-installed", async () => {

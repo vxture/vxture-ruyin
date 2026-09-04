@@ -12,8 +12,7 @@ productName: Ruyin
 # install/rebuild steps are disabled - they fight pnpm workspaces.
 npmRebuild: false
 nodeGypRebuild: false
-directories:
-  output: release
+
 files:
   - dist/**
   - package.json
@@ -53,9 +52,16 @@ win:
   #
   # 签名仍然没有（TD-001 的证书未到），electron-builder 在没有证书时只编辑、不签。
   signAndEditExecutable: true
+directories:
+  output: release
+  buildResources: installer
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  # 安装期多一页：让用户选数据目录（owner 2026-09-04）。这一刻还没有任何加密
+  # 数据，所以选择是免费的 —— 装完再改要重启并逐文件核对（TD-039）。脚本只写
+  # 一个指针文件（userData 下的 location.json），不碰数据。
+  include: data-dir.nsh
   artifactName: Ruyin-Setup-${version}.${ext}
 # Generic provider => electron-updater feed (latest.yml) is emitted alongside
 # the installer. Channel URL is finalized when L2 (dl host) lands; release.yml

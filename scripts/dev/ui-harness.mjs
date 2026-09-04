@@ -14,7 +14,7 @@
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const ROOT = pathToFileURL(repoRoot).toString().replace(/\/$/, "");
@@ -27,6 +27,9 @@ const { MockAIGateway, nodeClock, nodeCrypto, nodeId } = await import(
 );
 const { ProductRegistry } = await import(`${ROOT}/apps/local-host/dist/product-registry.js`);
 const { createLocalApi } = await import(`${ROOT}/apps/local-host/dist/server.js`);
+const { checkTarget, readLocation, writeLocation } = await import(
+  `${ROOT}/apps/local-host/dist/data-location.js`
+);
 const { TaskRunner } = await import(`${ROOT}/apps/local-host/dist/task-runner.js`);
 const { LocalFsConnector } = await import(`${ROOT}/apps/local-host/dist/connector-fs.js`);
 const { FtsRanker, reindexBinding, searchContext } = await import(
@@ -41,6 +44,9 @@ const PORT = Number(process.env.PORT ?? 17470);
 const TOKEN = "uiharness";
 const repo = repoRoot.replaceAll("\\", "/").replace(/\/$/, "");
 const dataDir = mkdtempSync(join(tmpdir(), "ruyin-uiharness-"));
+// 指针文件放在数据目录**之外**（与装机态同一条道理：它不能跟着数据搬走）。
+const locationFile = join(tmpdir(), `ruyin-uiharness-location-${process.pid}.json`);
+let harnessLocation = readLocation(locationFile);
 const work = mkdtempSync(join(tmpdir(), "ruyin-uiwork-"));
 mkdirSync(join(work, "招标"), { recursive: true });
 writeFileSync(
@@ -129,6 +135,20 @@ const server = createLocalApi({
       chromeTheme = t;
     },
   },
+  // 数据目录搬家（TD-039）：观察台里也接上，否则「换目录」那条路在这儿是
+  // 404，而它恰恰是最需要在真实文件系统上看一眼的一条 —— 校验的每一句拒绝
+  // 都来自真的去摸了一下磁盘。观察台的指针文件跟着临时数据目录一起丢弃。
+  dataMove: {
+    check: (target) => checkTarget(harnessLocation.dataDir ?? dataDir, target),
+    request: (target) => {
+      harnessLocation = { dataDir: harnessLocation.dataDir ?? dataDir, pending: resolve(target) };
+      writeLocation(locationFile, harnessLocation);
+    },
+    cancel: () => {
+      harnessLocation = { dataDir: harnessLocation.dataDir ?? dataDir };
+      writeLocation(locationFile, harnessLocation);
+    },
+  },
   systemInfo: {
     version: "0.1.0-uiharness",
     platform: process.platform,
@@ -140,6 +160,12 @@ const server = createLocalApi({
     // （TD-033）在这里就能看见，而不是只在装机后才第一次出现。
     capabilitySurface: "mock",
     startedAt: new Date().toISOString(),
+    get dataDirPending() {
+      return harnessLocation.pending;
+    },
+    get lastMove() {
+      return harnessLocation.lastMove;
+    },
   },
 });
 server.listen(PORT, "127.0.0.1", () => {

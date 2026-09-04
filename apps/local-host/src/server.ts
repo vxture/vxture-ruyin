@@ -115,6 +115,24 @@ export interface LocalApiDeps {
    */
   chromeTheme?: { get(): "dark" | "light"; set(theme: "dark" | "light"): void };
   /**
+   * 数据目录搬家（TD-039）。**没有它时这几个端点不存在** —— 指针文件的位置是
+   * 宿主给的，没有宿主注入的部署（测试里直接起 server）不该假装能搬家。
+   */
+  dataMove?: {
+    /** 能不能搬到那儿去，没有副作用。 */
+    check(target: string): {
+      ok: boolean;
+      reason?: string;
+      sameVolume?: boolean;
+      bytes?: number;
+      freeBytes?: number;
+    };
+    /** 记下「下次启动时搬」。 */
+    request(target: string): void;
+    /** 撤销待搬。 */
+    cancel(): void;
+  };
+  /**
    * 把字节写进授权目录。导出用它 —— **导出不是特权动作**，它写的仍然是用户
    * 授权过的目录，凭什么绕过同一套护栏。
    */
@@ -143,6 +161,16 @@ export interface LocalApiDeps {
      * 「没接上」绝不能看起来像「在工作」，而守护进程日志到不了用户眼前。
      */
     capabilitySurface: "configured" | "mock";
+    /** 待搬到的目录（重启时生效）。没有待搬时不出现。 */
+    dataDirPending?: string;
+    /** 上一次搬家的结果 —— 重启后界面要能说清楚成没成、没成是因为什么。 */
+    lastMove?: {
+      status: "moved" | "failed" | "none";
+      from?: string;
+      to?: string;
+      at?: string;
+      reason?: string;
+    };
     startedAt: string;
   };
 }
@@ -528,6 +556,41 @@ async function handle(
         apiError(/not countersigned/.test(message) ? "PACKAGE_UNSIGNED" : "PACKAGE_INVALID", message),
       );
     }
+    return;
+  }
+
+  // --- 数据目录搬家（TD-039：改目录 = 记下意图 + 重启时搬）---
+  if (method === "POST" && path === "/system/data-dir/check" && deps.dataMove) {
+    const body = await readJson(req);
+    send(res, 200, deps.dataMove.check(String(body["target"] ?? "")));
+    return;
+  }
+  if (method === "POST" && path === "/system/data-dir" && deps.dataMove) {
+    const body = await readJson(req);
+    const target = String(body["target"] ?? "");
+    // **写意图之前再校验一次**：界面那次校验与这一次之间，用户可能已经把目录
+    // 删了、或者往里放了东西。让一个必定失败的搬家排上队比当场拒绝更糟 ——
+    // 它会在下一次启动时才失败，而那时用户已经忘了自己做过什么。
+    const check = deps.dataMove.check(target);
+    if (!check.ok) {
+      send(res, 400, apiError("DATA_DIR_UNUSABLE", check.reason ?? "目标目录不可用"));
+      return;
+    }
+    deps.dataMove.request(target);
+    send(res, 202, { pending: target, ...check });
+    return;
+  }
+  if (method === "DELETE" && path === "/system/data-dir" && deps.dataMove) {
+    deps.dataMove.cancel();
+    send(res, 200, { pending: null });
+    return;
+  }
+
+  // POST /ui/restart - 请壳重启。界面是纯 Web 客户端，重启只有壳做得到；走
+  // 事件总线那条既有的路（与 ui-theme 同一个机制）。
+  if (method === "POST" && path === "/ui/restart") {
+    deps.events?.publish({ kind: "app-restart" });
+    send(res, 202, { ok: true });
     return;
   }
 
