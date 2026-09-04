@@ -1104,12 +1104,15 @@ void test("更新 button: carries a new tag only while some product has a newer 
   ).toBeNull();
 });
 
-void test("更新: the startup check runs once and stays quiet about failures; a clicked check reports them", async () => {
-  const fetchProduct = vi.fn().mockRejectedValue(new Error("契约拉取需要已配置的产品能力面"));
+void test("更新: 接了能力面时，启动自检跑一次且失败不出声；手点的那次如实说", async () => {
+  const fetchProduct = vi.fn().mockRejectedValue(new Error("产品能力面无响应"));
   const onError = vi.fn();
   render(
     <HomePage
-      api={fakeApi({ fetchProduct })}
+      api={fakeApi({
+        fetchProduct,
+        system: vi.fn().mockResolvedValue({ keyProtection: "dpapi", capabilitySurface: "configured" }),
+      })}
       products={[product()]}
       workspaces={[]}
       health={{ ok: true }}
@@ -1126,5 +1129,39 @@ void test("更新: the startup check runs once and stays quiet about failures; a
   await userEvent
     .setup()
     .click(within(document.querySelector(".section-actions") as HTMLElement).getByRole("button", { name: /更新/ }));
-  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("契约拉取需要已配置的产品能力面"));
+  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("产品能力面无响应"));
+});
+
+void test("更新: 能力面没接时，按钮是关着的，启动也不去问 —— 不把守护进程那句配置话摆给用户", async () => {
+  const fetchProduct = vi.fn().mockRejectedValue(
+    new Error("契约拉取需要已配置的产品能力面（RUYIN_CAPABILITY_BASE）；当前未配置"),
+  );
+  const onError = vi.fn();
+  render(
+    <HomePage
+      api={fakeApi({
+        fetchProduct,
+        system: vi.fn().mockResolvedValue({ keyProtection: "dpapi", capabilitySurface: "mock" }),
+      })}
+      products={[product()]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={onError}
+    />,
+  );
+  const btn = await vi.waitFor(() => {
+    const b = within(document.querySelector(".section-actions") as HTMLElement).getByRole("button", { name: /更新/ });
+    expect(b).toBeDisabled();
+    return b;
+  });
+  // 关着的按钮要说明白为什么，而且用用户的话 —— 环境变量名是给部署的人看的。
+  expect(btn.getAttribute("title")).toBe("还没接产品能力面，暂时问不到新版本");
+  expect(btn.getAttribute("title")).not.toContain("RUYIN_CAPABILITY_BASE");
+  // 启动自检也不去打这一轮注定 503 的请求。
+  await new Promise((r) => setTimeout(r, 30));
+  expect(fetchProduct).not.toHaveBeenCalled();
+  expect(onError).not.toHaveBeenCalled();
 });

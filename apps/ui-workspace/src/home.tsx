@@ -360,6 +360,13 @@ export function HomePage({
       if (!silent) setSyncing(false);
     }
   };
+  /** 有没有产品攒着一版没切过去 —— 「更新」按钮的 new 标记就看它。 */
+  const hasUpdates = products.some((p) => newerVersionOf(p) !== undefined);
+  const [system, setSystem] = useState<{
+    keyProtection: string;
+    capabilitySurface?: string;
+  } | null>(null);
+
   /**
    * 启动检查一次（owner 2026-09-04 定）。ref 守着：产品列表每刷新一次都重跑，
    * 就变成了每次刷新都打一轮网络 —— 那不是「启动时检查一次」。
@@ -367,16 +374,13 @@ export function HomePage({
   const checkedOnce = useRef(false);
   useEffect(() => {
     if (checkedOnce.current || products.length === 0) return;
+    // 能力面没接时这一轮**必定全军覆没**（守护进程直接 503）—— 每次开应用打
+    // 一轮注定失败的请求，只是把日志写脏。等 /system 回来再决定要不要问。
+    if (system === null || system.capabilitySurface !== "configured") return;
     checkedOnce.current = true;
     void checkUpdates(products.map((p) => p.id), true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products.length]);
-  /** 有没有产品攒着一版没切过去 —— 「更新」按钮的 new 标记就看它。 */
-  const hasUpdates = products.some((p) => newerVersionOf(p) !== undefined);
-  const [system, setSystem] = useState<{
-    keyProtection: string;
-    capabilitySurface?: string;
-  } | null>(null);
+  }, [products.length, system?.capabilitySurface]);
 
   useEffect(() => {
     let alive = true;
@@ -484,11 +488,21 @@ export function HomePage({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={syncing}
+                /* 能力面没接就关掉它（owner 2026-09-04 第 4 条）。此前按下去会
+                   把守护进程那句「契约拉取需要已配置的产品能力面
+                   （RUYIN_CAPABILITY_BASE）；当前未配置」原样摆到用户面前 ——
+                   那是给部署的人看的话，用户读完只知道「有个我没听过的东西没配」。
+                   入口不该承诺它兑现不了的事（与「连接器」那边同一条道理）。 */
+                disabled={syncing || capabilityMock}
+                {...(capabilityMock
+                  ? { title: "还没接产品能力面，暂时问不到新版本" }
+                  : {})}
                 onClick={() => void checkUpdates(products.map((p) => p.id))}
               >
                 {syncing ? "正在检查……" : "更新"}
-                {/* 有可切的新版本才挂 new：一个常年亮着的标记等于没有标记。 */}
+                {/* 有可切的新版本才挂 new：一个常年亮着的标记等于没有标记。
+                    这一条与能力面无关 —— 它看的是本机已装的版本，本地装了新版
+                    照样该亮。 */}
                 {!syncing && hasUpdates && <span className="dot-new">new</span>}
               </Button>
             )}

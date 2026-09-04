@@ -30,6 +30,7 @@ import { Api, ApiError, type ConnectorView, type SessionInfo, type SystemInfo, t
 // DS-heavy SettingsView - see that file's header comment (TD-011②).
 export { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
 import { resolveSection, type SectionId } from "./settings-sections";
+import { NoticeBar } from "./notice-bar";
 
 const UI_VERSION = "0.2.0";
 
@@ -66,7 +67,7 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
   return (
     <div className="settings-page">
       {/* 「设置」两个字已经在标题栏和侧栏里，这里不再写第三遍。 */}
-      {error && <div className="error-box">{error}</div>}
+      {error && <NoticeBar message={error} onClose={() => setError(null)} />}
       {view === "account" && <AccountSection session={session} />}
       {view === "general" && <SystemSection system={system} />}
       {view === "connectors" && <ConnectorsSection api={api} />}
@@ -892,9 +893,17 @@ function UpdatesSection({
         <FactRow label="检查" value="手动，或每次打开设置时你点一下" />
         <FactRow label="下载" value="浏览器下载，安装包落在你的下载目录" />
         <FactRow label="安装" value="双击安装包，覆盖安装，业务数据不动" />
-        <p className="set-note">
-          安装包未做代码签名，Windows SmartScreen 首次会警告一次（「更多信息 → 仍要运行」）。
-          这是警告不是封锁 —— 照实说，而不是让你在装到一半时才遇到它。
+        {/* 语气块，不是灰色小字（owner 2026-09-04 第 1 条）：这一条是**装之前
+            要先知道**的事，混在事实行下面的说明里会被划过去。原来那句还带着
+            「照实说，而不是让你装到一半才遇到」—— 那是写给我们自己看的编辑说明，
+            不是给用户的话，删掉。 */}
+        <p className="set-callout set-callout--warning">
+          <Icon name="warning" size="sm" />
+          <span>
+            <strong>首次安装时 Windows 会拦一下。</strong>
+            安装包还没做代码签名，SmartScreen 第一次会弹一个蓝色提示框：点「更多信息」，
+            再点「仍要运行」即可继续。这是提醒，不是阻止；同一台机器以后不再提示。
+          </span>
         </p>
       </SettingsBlock>
     </>

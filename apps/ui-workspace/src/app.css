@@ -133,6 +133,49 @@ body {
   font-size: var(--body-sm-font-size);
   word-break: break-all;
 }
+/* 页面顶部那条提醒**要能关掉**（owner 2026-09-04 第 2 条）：它讲的是刚才那个
+   动作的结果，读完就没用了；不给关，它会一直占着内容区顶部，直到用户换一页。
+   只有页面级的这一条能关 —— 贴在某个失败操作旁边的错误框不给关闭按钮，那不是
+   通知，是那块内容当前的状态。 */
+.notice-bar { display: flex; align-items: flex-start; gap: var(--spacing-sm); }
+.notice-bar > span { min-width: 0; flex: 1; }
+.notice-bar-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -2px -4px -2px 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.notice-bar-close:hover { opacity: 1; background: var(--surface-3, rgba(127, 127, 127, 0.14)); }
+
+/* 语气块：淡底 + 深字 + 左边一条边，与 .pcard-alert--warning 同一组语气 token。
+   用在「装之前要先知道」这类叮嘱上 —— 它比灰色小字重，比错误条轻。 */
+.set-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  margin: var(--spacing-sm) 0 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--body-sm-font-size);
+  line-height: 1.5;
+}
+.set-callout > svg { flex-shrink: 0; margin-top: 1px; }
+.set-callout--warning {
+  color: var(--warning-muted-foreground);
+  background: var(--warning-muted);
+  border: 1px solid var(--warning-border);
+  border-left-width: 3px;
+}
 
 .ws-name { font-weight: 600; }
 .ws-meta-line {
@@ -1033,13 +1076,23 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
    两行文字拉开；「最近工作」第一行小字是智能体，第二行是任务。 */
 /* 域名那一行只留收缩按钮：首页传的是空字符串，本来就没字。（此前按类名隐藏，
    把同样带 text-label-md 的收缩按钮一起藏掉了 —— owner 2026-09-04 指出。） */
-.app-sidebar--home .h-header-sm > :not(:first-child):not(:has(button)) { display: none; }
+/* 这两条从「只在首页」改成「所有页」：侧栏那一行不写标题（owner 2026-09-04），
+   所以标签要藏、收缩按钮要自己顶到右端 —— 三种页面同一个位置，切页时按钮不会
+   跳。下面带 --home 的几条仍然只对首页：那是「总览」分组与它的留白，产品态的
+   分组是产品自己的页签，不该一起摘掉。 */
+.app-sidebar .h-header-sm > :not(:first-child):not(:has(button)) { display: none; }
 /* 标签藏起来之后，那一行只剩两个按钮，末尾那个（分组展开 / 收起）会贴到左边
    的收缩按钮旁 —— 原来是标签把它顶到右端的。自己顶（owner 2026-09-04 指出）。
    收起态整行只剩一个按钮，那时不顶，否则窄栏里它会被推到边上。 */
-.app-sidebar--home .h-header-sm > :last-child:not(:first-child) { margin-left: auto; }
-.app-sidebar--home nav > div:first-child > button { display: none; }
-.app-sidebar--home nav > div:first-child { padding-top: var(--spacing-sm); padding-bottom: var(--spacing-sm); }
+.app-sidebar .h-header-sm > :last-child:not(:first-child) { margin-left: auto; }
+/* 第一组没有标题时，那颗折叠箭头也没有意义 —— 它折叠的是一个空标题。产品态
+   与首页同一条（owner 2026-09-04）。 */
+.app-sidebar--home nav > div:first-child > button,
+.app-sidebar--ws nav > div:first-child > button,
+.app-sidebar--set nav > div:first-child > button { display: none; }
+.app-sidebar--home nav > div:first-child,
+.app-sidebar--ws nav > div:first-child,
+.app-sidebar--set nav > div:first-child { padding-top: var(--spacing-sm); padding-bottom: var(--spacing-sm); }
 .app-sidebar nav a { min-height: 44px; padding-block: 4px; }
 .app-sidebar nav a > span:last-child > span { flex-direction: column-reverse; gap: 3px; padding-block: 2px; }
 .app-sidebar nav a > span:last-child > span > span:first-child { font-size: var(--body-md-font-size); }
