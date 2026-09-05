@@ -44,6 +44,14 @@ import {
 import { TransientError } from "./ports.js";
 import { LOCAL_FS, bindingRevoked, folderGrants, isFolderGrant, isPathGranted } from "./project.js";
 import { decideTool, validateToolCall } from "./tool-gate.js";
+import {
+  SKILL_TOOLS,
+  USE_SKILL,
+  checkResourcePath,
+  isSkillTool,
+  renderSkillDocument,
+  skillTool,
+} from "./skills.js";
 import type {
   AIGatewayPort,
   Binding,
@@ -63,6 +71,8 @@ import type {
   ToolExecutionResult,
   ToolExecutorPort,
   ToolOffer,
+  SkillOffer,
+  SkillsPort,
   TurnMessage,
   ProjectStore,
 } from "./ports.js";
@@ -278,6 +288,12 @@ export interface HarnessDeps {
   /** Executes tools the gate lets through; absent = no tool is on offer. */
   tools?: ToolExecutorPort | undefined;
   /**
+   * The layered skill registry (ADR-018). Absent = a task that declares
+   * skills cannot start here, and says so - the same shape as a tool no host
+   * implements.
+   */
+  skills?: SkillsPort | undefined;
+  /**
    * True once the user has asked this task to stop. Lives outside the record
    * on purpose: the running loop holds its own copy and would overwrite a
    * persisted flag on its next write.
@@ -365,6 +381,16 @@ export class Harness {
       throw new HarnessError(
         `task "${taskId}" needs tools this host does not implement: ` +
           `${unrunnable.join(", ")}`,
+      );
+    }
+    // Same judgement for skills (ADR-018 §2.5): a declared skill this machine
+    // does not have - not bundled, not distributed, not added, or switched off
+    // - is named here, before a turn is paid for. Offering the task and quietly
+    // dropping the skill would hand the model a catalogue with a hole in it.
+    const missingSkills = await this.missingSkills(definition.skills ?? []);
+    if (missingSkills.length) {
+      throw new HarnessError(
+        `task "${taskId}" needs skills this machine does not have: ${missingSkills.join(", ")}`,
       );
     }
     const instance: TaskInstanceRecord = {
@@ -1025,6 +1051,7 @@ export class Harness {
     await this.journal(instance, "capability", { capability });
     await this.audit(instance, "capability.invoked", { capability });
     const offers = this.toolOffers(instance);
+    const skills = await this.skillOffers(instance);
 
     for (let step = 1; step <= MAX_TURNS; step++) {
       // Safe point: between turns, with nothing in flight.
@@ -1040,6 +1067,7 @@ export class Harness {
           context,
           messages,
           tools: offers,
+          ...(skills.length ? { skills } : {}),
           ...(instance.pendingRevision
             ? { revision: instance.pendingRevision }
             : {}),
@@ -1149,12 +1177,78 @@ export class Harness {
   /** Tools this task may use, as declared by the contract for this task. */
   private toolOffers(instance: TaskInstanceRecord): ToolOffer[] {
     const declared = new Set(instance.definition.tools);
-    return this.deps.contract.tools
+    const contractTools = this.deps.contract.tools
       .filter((t) => declared.has(t.id))
       // A tool no host can run is not on offer: promising it and failing later
       // costs a turn and teaches the provider nothing.
-      .filter((t) => this.deps.tools?.supports(t.id, t.provider ?? "runtime") ?? false)
-      .map((t) => ({ id: t.id, description: `${t.category} (risk: ${t.risk})` }));
+      .filter((t) => this.deps.tools?.supports(t.id, t.provider ?? "runtime") ?? false);
+    // The two skill tools come with `tasks[].skills`, not with `tools[]`
+    // (ADR-018 §2.4): a task that declares skills can read them, one that
+    // does not has nothing to read.
+    const withSkills = this.hasSkills(instance) ? [...contractTools, ...SKILL_TOOLS] : contractTools;
+    return withSkills.map((t) => ({ id: t.id, description: `${t.category} (risk: ${t.risk})` }));
+  }
+
+  private hasSkills(instance: TaskInstanceRecord): boolean {
+    return (instance.definition.skills?.length ?? 0) > 0 && this.deps.skills !== undefined;
+  }
+
+  /** Which of a task's declared skills this machine cannot supply for this project. */
+  private async missingSkills(declared: readonly string[]): Promise<string[]> {
+    const missing: string[] = [];
+    for (const name of declared) {
+      const found = await this.deps.skills?.resolve(name, this.deps.projectId);
+      if (!found) missing.push(name);
+    }
+    return missing;
+  }
+
+  /**
+   * The catalogue for this turn: name + description of each declared skill the
+   * registry currently has (ADR-018 §2.4). A skill switched off after the task
+   * started simply drops out - the same as a tool that stopped being supported.
+   */
+  private async skillOffers(instance: TaskInstanceRecord): Promise<SkillOffer[]> {
+    if (!this.hasSkills(instance)) return [];
+    const offers: SkillOffer[] = [];
+    for (const name of instance.definition.skills ?? []) {
+      const found = await this.deps.skills?.resolve(name, this.deps.projectId);
+      if (found) offers.push({ name: found.name, description: found.description });
+    }
+    return offers;
+  }
+
+  /**
+   * The two skill tools, executed in the kernel: they read from the registry
+   * port and nothing else, so there is no host executor to route through. The
+   * gate has already passed the call; this re-checks the two facts only the
+   * task knows - that the skill is declared, and that the path stays inside
+   * references/ or assets/.
+   */
+  private async runSkillTool(
+    instance: TaskInstanceRecord,
+    call: ToolCall,
+  ): Promise<ToolExecutionResult> {
+    const port = this.deps.skills;
+    if (!port) return { content: "no skill registry is configured on this host", isError: true };
+    const name = String(call.arguments["name"] ?? "");
+    if (!(instance.definition.skills ?? []).includes(name)) {
+      return {
+        content: `skill "${name}" is not declared by task "${instance.taskId}"`,
+        isError: true,
+      };
+    }
+    if (call.tool === USE_SKILL) {
+      const doc = await port.read(name, this.deps.projectId);
+      if (!doc) return { content: `skill "${name}" is not available on this machine`, isError: true };
+      return { content: renderSkillDocument(doc) };
+    }
+    const checked = checkResourcePath(String(call.arguments["path"] ?? ""));
+    if (!checked.ok) return { content: checked.reason, isError: true };
+    const resource = await port.readResource(name, checked.path, this.deps.projectId);
+    return resource.kind === "text"
+      ? { content: resource.text }
+      : { content: resource.reason, isError: true };
   }
 
   /** The contract's word on who implements a tool; runtime unless it says connector. */
@@ -1185,7 +1279,12 @@ export class Harness {
     const askCache = new Set(instance.askCache ?? []);
 
     for (const call of calls) {
-      const tool = this.deps.contract.tools.find((t) => t.id === call.tool);
+      // The skill tools are not in the contract's tools[]; they exist for a
+      // task that declares skills, and the gate sees them as the local_read
+      // tools they are.
+      const tool =
+        this.deps.contract.tools.find((t) => t.id === call.tool) ??
+        (this.hasSkills(instance) ? skillTool(call.tool) : undefined);
       const refuse = async (reason: string, kind: string) => {
         refusals.push({ tool: call.tool, reason });
         refusalMessages.push({
@@ -1211,7 +1310,7 @@ export class Harness {
         await refuse(`tool "${call.tool}" is not declared in the contract`, "contract");
         continue;
       }
-      if (!instance.definition.tools.includes(tool.id)) {
+      if (!instance.definition.tools.includes(tool.id) && !isSkillTool(tool.id)) {
         await refuse(
           `tool "${tool.id}" is not available to task "${instance.taskId}"`,
           "contract",
@@ -1275,6 +1374,9 @@ export class Harness {
       await this.journal(instance, "tool", { tool: call.tool, callId: call.id });
       let result: ToolExecutionResult;
       try {
+        if (isSkillTool(call.tool)) {
+          result = await this.runSkillTool(instance, call);
+        } else {
         if (!this.deps.tools) throw new Error("no tool executor is configured");
         result = await this.deps.tools.execute({
           tool: call.tool,
@@ -1286,6 +1388,7 @@ export class Harness {
           connectors,
           contextSet: instance.contextSet ?? [],
         });
+        }
       } catch (cause) {
         result = {
           content: cause instanceof Error ? cause.message : String(cause),
@@ -1299,8 +1402,13 @@ export class Harness {
       await this.audit(
         instance,
         "tool.executed",
-        // 经连接器跑的说清经的是谁（ADR-005：每次连接器调用落审计）。
-        { tool: call.tool, ...(result.connector ? { connector: result.connector } : {}) },
+        // 经连接器跑的说清经的是谁（ADR-005：每次连接器调用落审计）；读的是哪个
+        // 技能也说清（ADR-018 §2.8：任务详情要能把「用了哪个技能」和普通工具调用分开）。
+        {
+          tool: call.tool,
+          ...(result.connector ? { connector: result.connector } : {}),
+          ...(isSkillTool(call.tool) ? { skill: String(call.arguments["name"] ?? "") } : {}),
+        },
         // 工具报错是 failed，不是 rejected —— 没有谁拒绝它，是它自己没做成。
         result.isError ? "failed" : "success",
       );

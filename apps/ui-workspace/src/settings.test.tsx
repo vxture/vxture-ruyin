@@ -1019,3 +1019,144 @@ void test("Settings/连接器: 生产拒装（403）在添加页照原样转达�
   // 还停在添加页，输入没被清掉：他可能只是想换台机器再来。
   expect((screen.getByPlaceholderText("如 crm") as HTMLInputElement).value).toBe("crm");
 });
+
+// ───────────────────────── 能力平台（ADR-018 §2.7） ─────────────────────────
+
+function skillsApi(over: Partial<Api> = {}): Api {
+  return fakeApi({
+    skills: vi.fn().mockResolvedValue({
+      scannedAt: "2026-09-05T00:00:00Z",
+      layers: [
+        { layer: "bundled", present: true, count: 2, dir: "C:/app/resources/skills" },
+        { layer: "distributed", present: false, count: 0 },
+        { layer: "user", present: true, count: 1, dir: "C:/data/skills/user" },
+      ],
+      items: [
+        { name: "officecli-docx", description: "Word 文档", layer: "bundled", source: "iofficeai.officecli", license: "Apache-2.0", tier: "default", enabled: true, hasScripts: false, dir: "C:/app/resources/skills/iofficeai.officecli/officecli-docx", shadowedBy: "user" },
+        { name: "sn-deep-research", description: "深度研究", layer: "bundled", source: "opensensenova.sensenova-skills", license: "MIT", tier: "installed-disabled", enabled: false, hasScripts: true, dir: "C:/app/resources/skills/opensensenova.sensenova-skills/sn-deep-research" },
+        { name: "officecli-docx", description: "我的 docx 规矩", layer: "user", source: "user", version: "1.2.0", enabled: true, hasScripts: false, dir: "C:/data/skills/user/officecli-docx" },
+      ],
+    }),
+    tools: vi.fn().mockResolvedValue({
+      items: [
+        { id: "read_file", kind: "builtin", source: "runtime", status: "available" },
+        { id: "use_skill", kind: "builtin", source: "skills", status: "available" },
+        { id: "microsoft.playwright-mcp", kind: "mcp-server", source: "microsoft.playwright-mcp", status: "registered", detail: "已登记；本机启动规格未定，尚不能启动（TD-042）", license: "Apache-2.0", tier: "default" },
+        { id: "tavily-ai.tavily-mcp", kind: "mcp-server", source: "tavily-ai.tavily-mcp", status: "runos", license: "MIT", tier: "runos-registered" },
+        { id: "crm", kind: "connector", source: "crm", status: "available", tools: ["crm_lookup", "crm_write"] },
+        { id: "x.custom", kind: "mcp-server", source: "x.custom", status: "registered", tier: "custom-tier" },
+      ],
+    }),
+    setSkillEnabled: vi.fn().mockResolvedValue({}),
+    refreshSkills: vi.fn().mockResolvedValue({}),
+    ...over,
+  });
+}
+
+test("能力平台：技能按层列出，被覆盖 / 停用 / 含脚本各说各的，工具的状态如实", async () => {
+  renderSection("skills", skillsApi());
+  const skills = await screen.findByRole("list", { name: "技能" });
+  const rows = within(skills).getAllByRole("listitem");
+  expect(rows).toHaveLength(3);
+  // 预置层那条 officecli-docx 被用户层盖住：标「被覆盖」，不标「启用」。
+  expect(within(rows[0]!).getByText("被用户层覆盖")).toBeTruthy();
+  expect(within(rows[0]!).getByText("预置")).toBeTruthy();
+  // 装而不启用：停用，且标出含脚本。
+  expect(within(rows[1]!).getByText("停用")).toBeTruthy();
+  expect(within(rows[1]!).getByText("含脚本（本地不跑）")).toBeTruthy();
+  expect(within(rows[1]!).getByText(/装而不启用/)).toBeTruthy();
+  // 用户层那条生效。
+  expect(within(rows[2]!).getByText("启用")).toBeTruthy();
+  expect(screen.getByText("预置 2 · 产品分发 0 · 用户 1")).toBeTruthy();
+
+  const tools = screen.getByRole("list", { name: "工具" });
+  const toolRows = within(tools).getAllByRole("listitem");
+  expect(toolRows).toHaveLength(6);
+  expect(within(toolRows[4]!).getByText("工具：crm_lookup、crm_write")).toBeTruthy();
+  expect(within(toolRows[5]!).getByText("custom-tier")).toBeTruthy();
+  expect(within(rows[2]!).getByText(/v1\.2\.0/)).toBeTruthy();
+  expect(within(toolRows[2]!).getByText("已登记")).toBeTruthy();
+  expect(within(toolRows[2]!).getByText("MCP 服务器")).toBeTruthy();
+  expect(within(toolRows[3]!).getByText("经 Runos")).toBeTruthy();
+});
+
+test("能力平台：停用走 disable、启用走 enable（B-3 动词），键带 layer/source；刷新调 refresh 再重拉", async () => {
+  const api = skillsApi();
+  renderSection("skills", api);
+  const skills = await screen.findByRole("list", { name: "技能" });
+  const rows = within(skills).getAllByRole("listitem");
+  await userEvent.click(within(rows[1]!).getByRole("button", { name: "启用" }));
+  expect(api.setSkillEnabled).toHaveBeenCalledWith(
+    { name: "sn-deep-research", layer: "bundled", source: "opensensenova.sensenova-skills" },
+    true,
+  );
+  await userEvent.click(within(rows[2]!).getByRole("button", { name: "停用" }));
+  expect(api.setSkillEnabled).toHaveBeenCalledWith({ name: "officecli-docx", layer: "user", source: "user" }, false);
+
+  await userEvent.click(screen.getByRole("button", { name: "刷新" }));
+  expect(api.refreshSkills).toHaveBeenCalledTimes(1);
+  expect(api.skills).toHaveBeenCalledTimes(4); // 首次 + 两次开关后的重拉 + 刷新后的重拉
+});
+
+test("能力平台：按层筛选只看用户层；没有登记册时说清，不是空清单", async () => {
+  renderSection("skills", skillsApi());
+  await screen.findByRole("list", { name: "技能" });
+  fireEvent.change(screen.getByLabelText("按来源层筛选"), { target: { value: "user" } });
+  expect(within(screen.getByRole("list", { name: "技能" })).getAllByRole("listitem")).toHaveLength(1);
+  fireEvent.change(screen.getByLabelText("按来源层筛选"), { target: { value: "distributed" } });
+  expect(screen.getByText("这一层没有技能。")).toBeTruthy();
+
+  renderSection(
+    "skills",
+    skillsApi({ skills: vi.fn().mockRejectedValue(new ApiError(503, { message: "这套装配没有技能登记册" })) }),
+  );
+  expect(await screen.findByText("这套装配没有技能登记册")).toBeTruthy();
+});
+
+test("能力平台：拉不到（非 503）就说拉不到；开关与刷新失败的原因照原样转达；没有工具登记册也说清", async () => {
+  const api = skillsApi({
+    setSkillEnabled: vi.fn().mockRejectedValue(new Error("state.json 写不进去")),
+    refreshSkills: vi.fn().mockRejectedValue(new Error("能力面 503")),
+    tools: vi.fn().mockRejectedValue(new Error("no tools")),
+  });
+  renderSection("skills", api);
+  const skills = await screen.findByRole("list", { name: "技能" });
+  expect(await screen.findByText("没有工具登记册。")).toBeTruthy();
+  await userEvent.click(within(within(skills).getAllByRole("listitem")[1]!).getByRole("button", { name: "启用" }));
+  expect(await screen.findByText("state.json 写不进去")).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "刷新" }));
+  expect(await screen.findByText("能力面 503")).toBeTruthy();
+
+  renderSection("skills", skillsApi({ skills: vi.fn().mockRejectedValue(new Error("守护进程没响应")) }));
+  expect(await screen.findByText("守护进程没响应")).toBeTruthy();
+});
+
+test("能力平台：还没拉到时两张清单都是省略号，不是「没有」", () => {
+  const pending = new Promise<never>(() => {});
+  renderSection("skills", skillsApi({ skills: vi.fn().mockReturnValue(pending), tools: vi.fn().mockReturnValue(pending) }));
+  expect(screen.getAllByText("…")).toHaveLength(2);
+});
+
+test("能力平台：一条技能都没有时告诉用户预置层从哪来", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      skills: vi.fn().mockResolvedValue({ scannedAt: "", layers: [{ layer: "bundled", present: false, count: 0 }], items: [] }),
+      tools: vi.fn().mockResolvedValue({ items: [] }),
+    }),
+  );
+  expect(await screen.findByText(/本机还没有任何技能/)).toBeTruthy();
+  expect(screen.getByText("预置 0")).toBeTruthy();
+});
+
+test("能力平台：刷新进行中按钮变「刷新中…」并禁用，直到能力面回话", async () => {
+  let settle!: () => void;
+  const api = skillsApi({ refreshSkills: vi.fn().mockReturnValue(new Promise<void>((ok) => (settle = ok))) });
+  renderSection("skills", api);
+  await screen.findByRole("list", { name: "技能" });
+  await userEvent.click(screen.getByRole("button", { name: "刷新" }));
+  const busy = screen.getByRole("button", { name: "刷新中…" });
+  expect((busy as HTMLButtonElement).disabled).toBe(true);
+  settle();
+  expect(await screen.findByRole("button", { name: "刷新" })).toBeTruthy();
+});

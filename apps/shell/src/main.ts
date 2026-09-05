@@ -215,6 +215,8 @@ function startDaemon(): Electron.UtilityProcess {
       ...(legacyDataDir ? { RUYIN_LEGACY_DATA_DIR: legacyDataDir } : {}),
       RUYIN_LOCATION_FILE: locationFile,
       RUYIN_PRODUCTS_DIR: productsDir,
+      // 预置技能层（ADR-018）随安装包在 resources/skills；开发态守护进程自己找仓内目录。
+      ...(app.isPackaged ? { RUYIN_SKILLS_DIR: join(process.resourcesPath, "skills") } : {}),
       // 冒烟时守护进程会真的排一份 PDF，走完整条 IPC + Chromium 链路。
       ...(SMOKE ? { RUYIN_SMOKE: "1" } : {}),
       // Packaged: built Workspace UI travels in resources/ui. Dev: unset -

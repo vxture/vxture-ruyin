@@ -51,6 +51,15 @@ export type {
   RuyinExportPredicate,
 } from "./export.js";
 export { decideTool, validateToolCall } from "./tool-gate.js";
+export {
+  READ_SKILL_RESOURCE,
+  SKILL_TOOLS,
+  USE_SKILL,
+  checkResourcePath,
+  isSkillTool,
+  renderSkillDocument,
+} from "./skills.js";
+export type { ResourcePathCheck } from "./skills.js";
 export type {
   CallValidation,
   GateDecision,
