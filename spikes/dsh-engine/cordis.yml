@@ -22,13 +22,14 @@
   name: '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
 - id: agent
   name: '@deepseek-ai/dsh-agent'
-- id: agent-default-model
-  name: '@deepseek-ai/dsh-agent-default-model'
-  config:
-    provider: ruyin
-    model: capability
+# agent-default-model 已删：树里没有任何消费者读 ctx.agentDefaultModel；provider/model 常量在 agentOptions 里。
 - id: system-prompt
   name: '@deepseek-ai/dsh-system-prompt'
+  config:
+    # 出路 (a)：dsh 的提示通道整个关掉。identity 段不注册、运行时上下文快照被抑制，
+    # renderPrompt 返回 ''，canonicalHeader 就不带 system，GenerateOptions 里根本没有这个键。
+    includeHarnessIdentity: false
+    includeRuntimeContext: false
 - id: tools
   name: '@deepseek-ai/dsh-tools'
 - id: agent-loop
