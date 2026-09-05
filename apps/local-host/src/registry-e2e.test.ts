@@ -18,7 +18,7 @@ import { readPackage, verifyIntegrity } from "./pkg.js";
 import { downloadPackage, fetchRegistryIndex } from "./registry-client.js";
 
 const CLI = fileURLToPath(new URL("../../../packages/cli/dist/main.js", import.meta.url));
-const BID = fileURLToPath(new URL("../../../products/bid/ruyin.product.yaml", import.meta.url));
+const BID = fileURLToPath(new URL("../../../products/bidproposal/ruyin.product.yaml", import.meta.url));
 const BASE = "https://dl.example.test/ruyin/products";
 
 /** Serve files under `dir` for urls under BASE; anything else is 404. */

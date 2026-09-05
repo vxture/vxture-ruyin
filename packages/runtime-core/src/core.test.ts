@@ -17,6 +17,7 @@ import {
   type SkillsPort,
   type ToolCall,
   MemoryConnector,
+  MemorySkills,
   MemoryStoragePort,
   ProjectRuntime,
   verifyAuditChain,
@@ -42,7 +43,7 @@ import {
 
 // Compiled test runs from dist/, so ../../../ is the repo root.
 const bidUrl = new URL(
-  "../../../products/bid/ruyin.product.yaml",
+  "../../../products/bidproposal/ruyin.product.yaml",
   import.meta.url,
 );
 const bidContract = parseContract(readFileSync(bidUrl, "utf8"));
@@ -75,6 +76,8 @@ function makePorts(): RuntimePorts {
       supports: () => true,
       execute: async () => ({ content: "[mock tool]" }),
     },
+    // 样例契约声明了技能（ADR-018 §2.5）；没人应答的话任务在启动前就被按名拒绝。
+    skills: MemorySkills.forContract(bidContract as RuyinContract),
   };
 }
 
@@ -2063,7 +2066,8 @@ test("skills: a task that declares none never offers the skill tools, and a use_
   ports.skills = fakeSkillsPort();
   const seen: CapabilityTurnRequest[] = [];
   ports.gateway = askOnce([{ id: "c1", tool: "use_skill", arguments: { name: "docx-basics" } }], seen);
-  const meta = await runtime.createProject(structuredClone(bidContract) as RuyinContract, "ws", "wsp_test");
+  // 样例契约现在本身就声明了技能；这条要的是「没声明」的任务，所以把它清掉。
+  const meta = await runtime.createProject(withSkills([]), "ws", "wsp_test");
   await bindTender(runtime, connector, meta.id);
   const harness = await runtime.createHarness(meta.id);
   const final = await approveThrough(harness, "analyze_tender");

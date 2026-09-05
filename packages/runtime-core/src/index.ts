@@ -71,3 +71,5 @@ export { runConformance } from "./conformance.js";
 export type { ConformanceCheck, ConformanceInput } from "./conformance.js";
 export { MemoryStoragePort } from "./memory-storage.js";
 export { MemoryConnector } from "./memory-connector.js";
+export { MemorySkills } from "./memory-skills.js";
+export type { MemorySkill } from "./memory-skills.js";

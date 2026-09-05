@@ -1,5 +1,5 @@
 ﻿/**
- * Rule-by-rule validator tests. The canonical Bid contract (products/bid,
+ * Rule-by-rule validator tests. The canonical Bid contract (products/bidproposal,
  * from design doc 30-contract-schema.md section 16) is the passing fixture;
  * failure cases are targeted mutations of it, one per rule.
  */
@@ -16,7 +16,7 @@ import type { RuyinContract, ValidationResult } from "./index.js";
 
 // Compiled test runs from dist/, so ../../../ is the repo root.
 const bidUrl = new URL(
-  "../../../products/bid/ruyin.product.yaml",
+  "../../../products/bidproposal/ruyin.product.yaml",
   import.meta.url,
 );
 const base = parseContract(readFileSync(bidUrl, "utf8")) as RuyinContract;

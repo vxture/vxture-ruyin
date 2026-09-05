@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import {
+  MemorySkills,
   ProjectRuntime,
   pendingCheckpoint,
   toAuditView,
@@ -95,6 +96,7 @@ async function makePorts(dataDir: string): Promise<{
       connectors: new Map([["local-fs", new LocalFsConnector()]]),
       ranker: new FtsRanker(storage),
       tools: executor,
+      skills: MemorySkills.forContract(loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal")!.contract),
     },
     storage,
     executor,

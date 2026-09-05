@@ -129,7 +129,7 @@ ADR-008 留下「能力目录放 Runos 更干净，前提是先解决 Ruyin 怎�
 | 1 | 技能来源加「**产品分发**」层（Runos 经产品能力面转交，按 `content_digest` 缓存；层序：预置 → 产品分发 → 用户 → 项目，近者优先） | ADR-018 v2.2 §2.2 / §2.3；产品接入指南 §5.4 |
 | 2 | 第三方 API 密钥归 **Runos 凭证保险库**（账户级注入），本机不做这类连接器；本地连接器只管内网 / 私有系统 | ADR-018 v2.2 §2.6；预置清单 §4「需密钥」档改为「经 Runos 注册」 |
 | 3 | `scripts/` 的 Runos Executor 出路**只登记不启用**（仅适用于不带业务数据的脚本） | TD-005 选项表 |
-| 4 | **bid 产品的云端能力面是 Runos 的第一个消费者**（Runos ADR-014 的「baseline-only」条件随之失效） | 产品接入指南 §5.4；对 Runos 的告知走 GitHub Issue（`liaison` 标签，开在 vxture-runos 上）—— 待 owner 点头再开；平台侧前提（OBO subject_token 受众 + bid 登记）：vxture-platform/vxture-platform#198；bid 能力面仓 https://github.com/vxture/vx-agent-bid |
+| 4 | **bid 产品的云端能力面是 Runos 的第一个消费者**（Runos ADR-014 的「baseline-only」条件随之失效） | 产品接入指南 §5.4；对 Runos 的告知走 GitHub Issue（`liaison` 标签，开在 vxture-runos 上）—— 待 owner 点头再开；平台侧前提（OBO subject_token 受众 + bid 登记）：vxture-platform/vxture-platform#198；bid 能力面仓 https://github.com/vxture/vx-agent-bidproposal（原 vx-agent-bid，2026-09-05 随产品码改名）|
 
 ## 7. 备选方案
 

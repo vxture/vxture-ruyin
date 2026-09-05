@@ -23,7 +23,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
+import { MemorySkills, ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { KeyManager } from "./keys.js";
@@ -92,6 +92,8 @@ async function startServer(
     connectors: lookup,
     ranker: new FtsRanker(storage),
     tools: executor,
+    // 样例契约声明了技能：测试装配用内存登记册应答，不要求先拉预置层。
+    skills: MemorySkills.forContract(loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal")!.contract),
   });
   const token = "srv-test-token";
   const server = createLocalApi({
@@ -295,7 +297,7 @@ test("HTTP /registry: unreachable is a 200 with status unreachable (not an empty
     const bid = body.items.find((i) => i.id === "bidproposal");
     assert.ok(bid);
     assert.equal(bid.signed, false);
-    // products/bid is the dev-mode builtin in this rig, so 1.0.0 shows as installed.
+    // products/bidproposal is the dev-mode builtin in this rig, so 1.0.0 shows as installed.
     assert.equal(bid.installed, true);
     assert.deepEqual(bid.installedVersions, ["1.0.0"]);
   } finally {
