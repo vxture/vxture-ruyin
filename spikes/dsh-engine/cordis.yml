@@ -1,0 +1,37 @@
+# ADR-019 探针：dsh 的最小进程内组合 —— 没有 DeepSeek 适配器、没有凭据、没有 web、没有沙箱。
+# 模型提供方是 probe.mjs 里用 prepare() 挂进去的 llm-ruyin 适配器（指向产品能力面的位置）。
+- id: timer
+  name: '@deepseek-ai/cordis-plugin-timer'
+- id: llm
+  name: '@deepseek-ai/dsh-llm'
+- id: llm-retry
+  name: '@deepseek-ai/dsh-llm-retry'
+- id: deepseek-llm-api-extensions
+  name: '@deepseek-ai/dsh-deepseek-llm-api-extensions'
+- id: session
+  name: '@deepseek-ai/dsh-session'
+- id: session-log-deepseek
+  name: '@deepseek-ai/dsh-session-log-deepseek'
+- id: session-projection
+  name: '@deepseek-ai/dsh-session-projection'
+- id: typert
+  name: '@deepseek-ai/dsh-typert-registry'
+- id: typert-loader
+  name: '@deepseek-ai/dsh-typert-loader'
+- id: plugin-package-inventory-deepseek
+  name: '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
+- id: agent
+  name: '@deepseek-ai/dsh-agent'
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: ruyin
+    model: capability
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+- id: tools
+  name: '@deepseek-ai/dsh-tools'
+- id: agent-loop
+  name: '@deepseek-ai/dsh-agent-loop'
+  config:
+    maxParallelToolCalls: 1
