@@ -186,3 +186,43 @@ day-1 读的 `eventsSnapshot` 是私有缓存字段）。
   全局 session/event 12 个会话 254 个事件。
 - 遗留更新：Tool Gate 的 guard 半边已在探针里真跑（registerSpikeGuard）；`tools/pre-execute` 半边仍是第三天；
   post-execute block 的归属规则有单元测试但组合里没有这种策略插件，探针不构造。
+
+## 2026-09-06 · 修正（第二轮）——ADR-011 四条反驳 + 两处协议加固（`node probe.mjs` 全绿 114 条断言，`node --test llm-ruyin.test.mjs` 44/44）
+
+- **反驳 1 · 取消路径漏 dsh 英文进 messages[]**（`tool call aborted` dsh-tools 3551-3568、`tool call aborted before dispatch` 3570-3580 / agent-loop 276-292）。
+  原先账本分类成 authored:'runtime' 后仍以裸 reason 转发，句子还是 dsh 的。现在 mapMessages 对 authored:'runtime' 且 code ∈
+  {ABORTED, ABORTED_BEFORE_DISPATCH} 的结果：**结果整条抹掉，发出它的 assistant 那条 toolCalls 条目一并抹掉**，发出方只剩空壳
+  （content '' 且无 toolCalls）就整条抹掉——镜像内核"被取消的步骤从不记录"。计数 `dropped.droppedCancelledCalls`，适配器累计在
+  `adapter.counters`。探针 D4：R6 = 六条（D3 那步整个消失），`/tool call aborted/` 在请求 JSON 里为 false、在 dsh 自己的 tool/result
+  事件里仍在（丢是适配器做的）。单元：整批取消 / 混合批 / 发出方带文本 / 发出方不在表面（compaction）四种。
+- **反驳 2 · 无账本模式照转 dsh 渲染文本**。账本改成**必需的构造依赖**（缺席、或缺 provenanceOf / reconcileEmitted /
+  noteEmittedCalls → TypeError）；删掉"账本没记录就照转"的分支和 `unattributedToolResults` 计数；账本没记录的工具结果 →
+  `INVALID_HISTORY`（成功结果也一样；authored:'tool' 但没有工具名也是）。适配器级测试：网关一次都没被调用。
+  代价：换进程 / 重启后恢复的会话，历史里的工具结果没有账本记录 → 该会话不能续（见遗留）。
+- **反驳 3 · resolveModel 声明 inputModalities ['text']** 让 `LlmRuntime.adapterStream` 在适配器之前把 image 块改写成
+  `[image omitted because this model accepts text only; …]`（dsh-llm 521-523, 600-625；条件在 1684：`inputModalities !== void 0 && !includes('image')`）。
+  现在不声明 inputModalities，image 块原样到达适配器，mapMessages 自己丢（user / tool-result 内层 / assistant 三处），计数
+  `droppedImageBlocks`——一个数字，不是一句话。探针 E1 宿主消息真带了一个 image 块：R1 = 只有文本，`/image omitted/` 全程 false。
+- **反驳 4 · 工具附加的上下文可以冒充用户**（additionalContexts: UserMessage[]，source 任意，dsh-tools index.d.ts:397/408/436-445；
+  循环拼进下一步 agent-loop 185 → 692，claim 后记成 user/message 559）。原先只丢 kind:'plugin'。现在**宿主是 user 角色的唯一作者**：
+  `MemoryTaskFacts.noteHostMessage(sessionId, id)` / `isHostMessage()`（createUserMessage 入 inbox 之前就有 id，dsh-llm 40-52，跨表示层不变）；
+  探针的 `hostFollowup` 先登记再 followup；适配器只把名单上的 kind:'user' 转成 role 'user'，其余丢并计 `droppedForeignUserMessages`。
+  探针 E1：read_file "poser.pdf" 用 `exec.deferContext` 附一条 kind:'user' 的伪造消息——dsh 日志里真有两条 user/message（宿主的 + 伪造的），
+  R2 只有宿主那条。名单按会话：同一 id 在别的会话不算。
+- **加固 5 · JSON.stringify(call.arguments) 无防护**。`serializeArguments` 在校验循环里、第一个 chunk 之前：抛（BigInt `{n:1n}`、循环引用）/
+  返回 undefined（`{toJSON(){return undefined}}`）/ 非对象 JSON（toJSON 返回数组或字符串，`!startsWith('{')`）→ 都是 `INVALID_TURN`；
+  第二个 call 才坏也是整批零 chunk；账本什么都不登记。
+- **加固 6 · 发出过的 id 永久禁用会卡死无状态能力面**（中途取消：agent-loop 626-627 在 append 之前 throwIfAborted；interruptedBlocks 从不留
+  tool-call 块，dsh-llm 935-942——块到不了日志）。账本分两格：`pending`（yield 之前 noteEmittedCalls）和 `logged`（进过日志）。
+  下一次请求 `reconcileEmitted(sessionId, historyCallIds(options))`：pending 里出现在历史表面的 → logged，没出现的 → 忘掉；另外 session/event
+  的 `assistant/message` 里的 tool-call 块直接确认为 logged（agent-loop 680-688，session.append 同步触发 dsh-session 1428-1435）。
+  复用检查 = 历史表面 ∪ logged：进过日志的 id 在 compaction 之后仍拒绝（保住第一轮的 compaction 覆盖），没进日志的可以重发。
+  探针 E2/E3/E4 真跑：E2 在 noteEmittedCalls 之后 queueMicrotask(cancel)，事件序列 `step/start → user/message → step/end → turn/end{aborted}`、
+  零 chunk、call_e2 pending 不 logged；E3 能力面重发 call_e2 → 接受、工具真跑、call_e2 转 logged；E4 再发 → INVALID_TURN、零 tool/call。
+- 其它：`mapMessages(messages, dropped, host)` 第三参改成 `{ provenanceOf, isHostMessage }`，缺哪一半按"什么都不知道"（fail closed）；
+  `usedCallIds` 改成导出的纯函数 `historyCallIds(options)`；`ledger.emittedCalls` 改名 `loggedCalls` + 新增 `pendingCalls`（只给测试 / 探针）。
+- 度量（本次）：boot 208–248 ms；RSS 结束 91 MB；E1 3–6 ms、E2 1 ms、E3 2–3 ms、E4 1 ms、D3 13–16 ms；全局 session/event 13 个会话 316 个事件。
+- 遗留新增：(a) 账本是进程内存——重启后恢复的会话历史里的工具结果无记录 → INVALID_HISTORY，续跑要持久化账本（或宿主重放 tool/result 事件
+  喂回 attach 的 session/event 分支）；(b) 工具还能伪造 **tool 结果**：deferContext 一条 source.kind 'tool' + 真实 callId 的消息，账本按 callId
+  查会命中真记录——要堵得让账本记下真结果的 message.id（session/event tool/result 的 message.id）并按 id 核对，本轮未做；
+  (c) `droppedForeignUserMessages` / `droppedImageBlocks` 是每请求重映射的累计数，不是"发生过几次"。

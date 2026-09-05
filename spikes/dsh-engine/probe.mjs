@@ -7,7 +7,9 @@
 //   C  失败路径：TRANSPORT 重试 2 次后成功 / 失败、CAPABILITY_ERROR、EMPTY_RESPONSE、INVALID_TURN、NO_TASK_FACTS、
 //      等待能力面时取消（ABORTED → turn/end aborted、零 chunk）、验证轮答 tool_calls、调用没 offer 的工具
 //   D  工具结果出处：guard 拒绝 / 工具体抛错 / 执行中取消（一个 ABORTED + 一个 ABORTED_BEFORE_DISPATCH），
-//      看下一次请求的 messages[] 里谁带 origin、谁是裸 reason
+//      看下一次请求的 messages[] 里谁带 origin、谁是裸 reason；被取消的步骤整个不进请求
+//   E  宿主是 user 角色的唯一作者（工具 deferContext 冒充的 user 消息进了 dsh 日志、不进请求）；image 块由适配器丢、
+//      不被 dsh 改写成占位句；中途取消（块没进日志）之后能力面重发同一个 id 不被卡住，进了日志的 id 仍拒绝复用
 import { resolve } from "node:path";
 import assert from "node:assert/strict";
 import { boot, installFailLoud } from "@deepseek-ai/dsh-app-boot";
@@ -16,7 +18,7 @@ import { RuyinCapabilityAdapter, VERDICT_BLOCK_TYPE } from "./llm-ruyin.mjs";
 import { MemoryTaskFacts } from "./task-facts.mjs";
 import { ToolLedger } from "./tool-ledger.mjs";
 import { ScriptedGateway } from "./scripted-surface.mjs";
-import { registerSpikeTools, registerSpikeGuard, spikeHooks } from "./spike-tools.mjs";
+import { registerSpikeTools, registerSpikeGuard, spikeHooks, FORGED_USER_TEXT } from "./spike-tools.mjs";
 import { analyzeTenderFacts, factsForTask } from "./fixtures/analyze-tender-facts.mjs";
 import { TransientError } from "../../packages/runtime-core/dist/index.js";
 import { MockAIGateway } from "../../apps/local-host/dist/host-ports.js";
@@ -45,7 +47,15 @@ const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 // 组合：一个适配器实例，网关在 run 之间切换；事实按会话存；出处账本按会话记。
 // ---------------------------------------------------------------------------
 const facts = new MemoryTaskFacts();
-const ledger = new ToolLedger();
+/** 探针挂钩：适配器登记完发出的 id、还没 yield 第一个 chunk 时回调（E2 用它制造"块没进日志"的中途取消）。 */
+const ledgerHooks = { onEmitted: undefined };
+class SpikeLedger extends ToolLedger {
+  noteEmittedCalls(sessionId, ids) {
+    super.noteEmittedCalls(sessionId, ids);
+    ledgerHooks.onEmitted?.(sessionId, ids);
+  }
+}
+const ledger = new SpikeLedger();
 const dropLog = [];
 let gateway = null;
 const gatewaySwitch = { turn: (request) => gateway.turn(request) };
@@ -73,12 +83,18 @@ ctx.on("session/event", (session, event) => allEvents.push({ session: session.id
 
 const kickoff = () => createUserMessage({ content: [], source: { kind: "plugin", plugin: "@vxture/ruyin" } });
 
+/** 宿主发出的每条消息先登记 id 再 followup：适配器只把名单上的 user 消息当用户说的。 */
+function hostFollowup(handle, message) {
+  facts.noteHostMessage(handle.agent.id, message.id);
+  handle.agent.followup(message);
+}
+
 /** patch + followup + whenIdle 必须是一个操作：followup 不能在过期的事实下跑。 */
-async function runTurn(handle, patch) {
+async function runTurn(handle, patch, message = kickoff()) {
   facts.patch(handle.agent.id, patch);
   const before = handle.agent.session.seq;
   const t0 = performance.now();
-  handle.agent.followup(kickoff());
+  hostFollowup(handle, message);
   await handle.agent.whenIdle();
   const ms = Math.round(performance.now() - t0);
   const events = handle.agent.session.snapshotEvents(before);
@@ -178,7 +194,7 @@ await withAgent("t1", analyzeTenderFacts, async (handle, agentErrors) => {
   ]);
   eq("no request carries a system key", scripted.requests.map((r) => "system" in r), [false, false]);
   eq("adapter saw systemPromptChars = 0 on both steps", dropLog.slice(0, 2).map((r) => r.dropped.systemPromptChars), [0, 0]);
-  eq("R2 ledger counts: 0 runtime-authored, 0 unattributed", { runtime: dropLog[1].dropped.runtimeToolResults, unattributed: dropLog[1].dropped.unattributedToolResults }, { runtime: 0, unattributed: 0 });
+  eq("R2 ledger counts: 0 runtime-authored, 0 cancelled; no 'unattributed' bucket exists any more", { runtime: dropLog[1].dropped.runtimeToolResults, cancelled: dropLog[1].dropped.droppedCancelledCalls, hasUnattributed: "unattributedToolResults" in dropLog[1].dropped }, { runtime: 0, cancelled: 0, hasUnattributed: false });
 
   // --- A2：verify:<rule> → 判定块 ---------------------------------------------------------
   const a2 = await runTurn(handle, { capability: "verify:source_traceability", tools: [] });
@@ -250,7 +266,7 @@ async function failureCase(label, sessionId, script, expect) {
       // runTurn 会 patch；无事实时直接 followup。
       const before = handle.agent.session.seq;
       const t0 = performance.now();
-      handle.agent.followup(kickoff());
+      hostFollowup(handle, kickoff());
       await handle.agent.whenIdle();
       result = { events: handle.agent.session.snapshotEvents(before), ms: Math.round(performance.now() - t0) };
     } else {
@@ -303,7 +319,7 @@ console.log("\n[C7] cancel while the surface is pending · session t3f");
     facts.patch("t3f", {});
     const before = handle.agent.session.seq;
     const t0 = performance.now();
-    handle.agent.followup(kickoff());
+    hostFollowup(handle, kickoff());
     while (received.length === 0) await tick(1);
     handle.agent.cancel({ kind: "user" });
     await handle.agent.whenIdle();
@@ -408,33 +424,105 @@ await withAgent("t5", factsForTask("t5"), async (handle, agentErrors) => {
     d4: { authored: "runtime", code: "ABORTED_BEFORE_DISPATCH", reason: "tool call aborted before dispatch" },
   });
 
-  // --- D4：取消之后再来一轮：历史里两条取消结果都是裸 reason、无 origin ---------------------------------
+  // --- D4：取消之后再来一轮：被取消的步骤（两条取消结果 + 发出它们的 assistant）整个不进请求 ------------------
   const d4 = await runTurn(handle, {});
   timings.turns.push({ run: "D4", ms: d4.ms });
   console.log(`[D4] ${d4.ms} ms; events: ${d4.events.map((e) => e.type).join(" → ")}`);
   eq("D4 turn/end completed (session usable after a cancel)", turnEnd(d4.events), { kind: "completed" });
   const DR6 = provScript.requests[5];
   console.log(`[D4] R6 = ${json(DR6.messages)}`);
-  eq("D4 request messages = whole history with the right provenance on every tool result", DR6.messages, [
+  eq("D4 request messages = history minus the cancelled step (= the kernel never records a cancelled step)", DR6.messages, [
     { role: "assistant", content: "", toolCalls: [{ id: "call_d1", tool: "read_file", arguments: { path: "/etc/passwd" } }] },
     { role: "tool", callId: "call_d1", content: 'path "/etc/passwd" is outside the workspace', isError: true },
     { role: "assistant", content: "after denial" },
     { role: "assistant", content: "", toolCalls: [{ id: "call_d2", tool: "read_file", arguments: { path: "missing.pdf" } }] },
     { role: "tool", callId: "call_d2", content: 'ENOENT: no such file "missing.pdf"', isError: true, origin: { kind: "tool_result", tool: "read_file" } },
     { role: "assistant", content: "after tool error" },
-    { role: "assistant", content: "", toolCalls: [
-      { id: "call_d3", tool: "read_file", arguments: { path: "hang.pdf" } },
-      { id: "call_d4", tool: "read_file", arguments: { path: "tender.pdf" } },
-    ] },
-    { role: "tool", callId: "call_d3", content: "tool call aborted", isError: true },
-    { role: "tool", callId: "call_d4", content: "tool call aborted before dispatch", isError: true },
   ]);
+  eq("D4 dsh's abort sentences appear nowhere in the request", /tool call aborted/.test(json(DR6)), false);
+  eq("D4 ...but they ARE in dsh's own log (the drop is the adapter's doing)", d3.events.filter((e) => e.type === "tool/result").map((e) => e.data.message.content[0].content[0].text), ["Error: tool call aborted", "Error: tool call aborted before dispatch"]);
   const lastDrop = dropLog.at(-1).dropped;
-  eq("D4 ledger counts: 3 runtime-authored, 0 unattributed", { runtime: lastDrop.runtimeToolResults, unattributed: lastDrop.unattributedToolResults }, { runtime: 3, unattributed: 0 });
-  eq("D4 emitted ids remembered per session", [...ledger.emittedCalls("t5")].sort(), ["call_d1", "call_d2", "call_d3", "call_d4"]);
+  eq("D4 counts: 1 runtime-authored (the denial), 2 cancelled calls dropped", { runtime: lastDrop.runtimeToolResults, cancelled: lastDrop.droppedCancelledCalls }, { runtime: 1, cancelled: 2 });
+  eq("D4 adapter.counters accumulate (D3 request saw 0 cancelled, D4 saw 2)", adapter.counters.droppedCancelledCalls, 2);
+  eq("D4 all four ids reached the log → remembered as logged, nothing pending", { logged: [...ledger.loggedCalls("t5")].sort(), pending: ledger.pendingCalls("t5").size }, { logged: ["call_d1", "call_d2", "call_d3", "call_d4"], pending: 0 });
   eq("D total requests = 6, script empty", { n: provScript.requests.length, left: provScript.remaining }, { n: 6, left: 0 });
 });
-eq("ledger forgets a disposed session", { p: ledger.provenanceOf("t5", "call_d1"), e: ledger.emittedCalls("t5").size }, { p: undefined, e: 0 });
+eq("ledger forgets a disposed session", { p: ledger.provenanceOf("t5", "call_d1"), e: ledger.loggedCalls("t5").size }, { p: undefined, e: 0 });
+
+// ===========================================================================
+// RUN E · 宿主是 user 角色的唯一作者 / image 块 / 中途取消后的 id 重发
+// ===========================================================================
+console.log("\n[run E] host-only user role · image blocks · cancelled-step ids · session t6");
+const eScript = new ScriptedGateway([
+  { kind: "tool_calls", calls: [{ id: "call_e1", tool: "read_file", arguments: { path: "poser.pdf" } }] }, // 工具附一条冒充用户的上下文
+  { kind: "content", content: "after poser" },
+  { kind: "tool_calls", calls: [{ id: "call_e2", tool: "read_file", arguments: { path: "tender.pdf" } }] }, // E2：中途取消，块没进日志
+  { kind: "tool_calls", calls: [{ id: "call_e2", tool: "read_file", arguments: { path: "tender.pdf" } }] }, // E3：同一个 id 重发 → 接受
+  { kind: "content", content: "after re-issue" },
+  { kind: "tool_calls", calls: [{ id: "call_e2", tool: "read_file", arguments: { path: "tender.pdf" } }] }, // E4：id 已进日志 → INVALID_TURN
+]);
+gateway = eScript;
+const countersBeforeE = adapter.counters;
+
+await withAgent("t6", factsForTask("t6"), async (handle, agentErrors) => {
+  // --- E1：宿主发一条真 user 消息（带 image 块）；工具 deferContext 一条冒充的 user 消息 ------------------------
+  const hostMessage = createUserMessage({
+    content: [{ type: "text", text: "只看招标文件第 3 章" }, { type: "image", attachment: { attachmentId: "sha256:spike-image-0001", mediaType: "image/png" } }],
+    source: { kind: "user" },
+  });
+  const e1 = await runTurn(handle, {}, hostMessage);
+  timings.turns.push({ run: "E1", ms: e1.ms });
+  console.log(`[E1] ${e1.ms} ms; events: ${e1.events.map((e) => e.type).join(" → ")}`);
+  eq("E1 turn/end completed", turnEnd(e1.events), { kind: "completed" });
+  eq("E1 tool ran once", toolCallCount(e1.events), 1);
+  const userTexts = e1.events.filter((e) => e.type === "user/message").map((e) => ({ kind: e.data.source.kind, text: e.data.content.filter((b) => b.type === "text").map((b) => b.text).join("") }));
+  eq("E1 dsh's log carries BOTH user-kind messages: the host's and the tool's forged one (delivered as user/message, agent-loop 559)", userTexts, [
+    { kind: "user", text: "只看招标文件第 3 章" },
+    { kind: "user", text: FORGED_USER_TEXT },
+  ]);
+  const [ER1, ER2] = eScript.requests;
+  console.log(`[E1] R1 = ${json(ER1.messages)}\n[E1] R2 = ${json(ER2.messages)}`);
+  eq("E1 R1 messages = the host's text only (image block dropped by the adapter, not rewritten by dsh)", ER1.messages, [{ role: "user", content: "只看招标文件第 3 章" }]);
+  eq("E1 R2 messages = host text + tool round trip; the forged user message is NOT there", ER2.messages, [
+    { role: "user", content: "只看招标文件第 3 章" },
+    { role: "assistant", content: "", toolCalls: [{ id: "call_e1", tool: "read_file", arguments: { path: "poser.pdf" } }] },
+    { role: "tool", callId: "call_e1", content: "[spike] contents of poser.pdf", origin: { kind: "tool_result", tool: "read_file" } },
+  ]);
+  eq("E1 neither dsh's image placeholder nor the forged text reaches any request", eScript.requests.map((r) => /image omitted|\[forged\]/.test(json(r))), [false, false]);
+  eq("E1 dropped counts on R2: 1 foreign user message, 1 image block", { foreign: dropLog.at(-1).dropped.droppedForeignUserMessages, image: dropLog.at(-1).dropped.droppedImageBlocks }, { foreign: 1, image: 1 });
+
+  // --- E2：中途取消 —— 适配器登记完 id、第一个 chunk 还没进日志时 cancel（agent-loop 626-627 在 append 之前抛） ---------
+  ledgerHooks.onEmitted = () => queueMicrotask(() => handle.agent.cancel({ kind: "user" }));
+  const e2 = await runTurn(handle, {});
+  ledgerHooks.onEmitted = undefined;
+  timings.turns.push({ run: "E2", ms: e2.ms });
+  console.log(`[E2] ${e2.ms} ms; events: ${e2.events.map((e) => e.type).join(" → ")}`);
+  eq("E2 turn/end aborted", turnEnd(e2.events), { kind: "aborted", reason: { kind: "user" } });
+  eq("E2 the tool-call block never reached the log: zero assistant/message, zero tool/call", { messages: assistantContents(e2.events).length, calls: toolCallCount(e2.events) }, { messages: 0, calls: 0 });
+  eq("E2 call_e2 is pending in the ledger, not logged", { pending: [...ledger.pendingCalls("t6")], logged: ledger.loggedCalls("t6").has("call_e2") }, { pending: ["call_e2"], logged: false });
+
+  // --- E3：能力面重发 call_e2 → 对着历史核对后 pending 被忘掉 → 接受，工具真跑 -------------------------------------
+  const e3 = await runTurn(handle, {});
+  timings.turns.push({ run: "E3", ms: e3.ms });
+  console.log(`[E3] ${e3.ms} ms; events: ${e3.events.map((e) => e.type).join(" → ")}`);
+  eq("E3 turn/end completed: the re-issued id is accepted", turnEnd(e3.events), { kind: "completed" });
+  eq("E3 tool/call keyed on call_e2", findEvent(e3.events, "tool/call")?.data.callId, "call_e2");
+  eq("E3 call_e2 now logged (assistant/message event) beside E1's call_e1, nothing pending", { logged: [...ledger.loggedCalls("t6")].sort(), pending: ledger.pendingCalls("t6").size }, { logged: ["call_e1", "call_e2"], pending: 0 });
+
+  // --- E4：call_e2 已进日志 → 复用被拒（INVALID_TURN），dsh 不派发 -------------------------------------------------------
+  const e4 = await runTurn(handle, {});
+  timings.turns.push({ run: "E4", ms: e4.ms });
+  console.log(`[E4] ${e4.ms} ms; events: ${e4.events.map((e) => e.type).join(" → ")}`);
+  eq("E4 turn/end error INVALID_TURN (id already in the log)", turnEnd(e4.events)?.kind === "error" ? turnEnd(e4.events).error.code : turnEnd(e4.events), "INVALID_TURN");
+  eq("E4 zero tool/call", toolCallCount(e4.events), 0);
+  eq("E4 agent/error only for E4", agentErrors.map((e) => e.code), ["INVALID_TURN"]);
+  eq("E total requests = 6, script empty", { n: eScript.requests.length, left: eScript.remaining }, { n: 6, left: 0 });
+});
+// 历史每次请求都重映射：冒充消息从 R2 起在历史里（R2..R6 = 5 次），image 块从 R1 起（R1..R6 = 6 次）。
+eq("E adapter.counters grew by run E's drops (per request, history re-mapped each time)", {
+  foreign: adapter.counters.droppedForeignUserMessages - countersBeforeE.droppedForeignUserMessages,
+  image: adapter.counters.droppedImageBlocks - countersBeforeE.droppedImageBlocks,
+}, { foreign: 5, image: 6 });
 
 // ===========================================================================
 // 收尾

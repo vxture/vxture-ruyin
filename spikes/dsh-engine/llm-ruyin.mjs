@@ -15,7 +15,10 @@
 //   只有 HarnessError/LlmError 保得住 code               NM/dsh-llm/lib/types/adapter-failure.js:13-26
 //   循环按内容（tool-call 块）而不是 finish 种类派发工具  NM/dsh-agent-loop/lib/index.js:689-693
 //   派发只看注册表可见性，不看请求的 offer               NM/dsh-tools/lib/index.js:2907-2912（resolveExecution → view(scope).visible）
-//   text-only 路由会在适配器之前把 image 块投影成文本    NM/dsh-llm/lib/index.js:1686-1700
+//   声明了不含 image 的 inputModalities 才会投影 image 块  NM/dsh-llm/lib/index.js:1684-1690（→ 521-523, 600-625 的英文占位句）
+//   取消路径的两种结果文本是 dsh 写的                    NM/dsh-tools/lib/index.js:3550-3585；NM/dsh-agent-loop/lib/index.js:276-292
+//   工具附加的上下文可以带任何 MessageSource             NM/dsh-tools/lib/types/index.d.ts:397, 408, 436-445；循环拼进下一步 agent-loop 185, 692 → 559
+//   中途取消：块到不了日志                               NM/dsh-agent-loop/lib/index.js:626-627；interruptedBlocks 丢 tool-call 块 dsh-llm index.js:935-942
 import { LlmAdapter, LlmError, ToolCallId, resolveRetryPolicy } from "@deepseek-ai/dsh-llm";
 import { TransientError } from "../../packages/runtime-core/dist/index.js";
 
@@ -31,6 +34,10 @@ export const PROVIDER_DISPLAY_NAME = "Ruyin capability surface";
 export const VERDICT_BLOCK_TYPE = "ruyin-verdict";
 const VERIFY_PREFIX = "verify:";
 const EMPTY_SET = Object.freeze(new Set());
+/** dsh 取消路径写的两种结果（dsh-tools 3550-3585；循环补记的跳过 agent-loop 276-292）。内核从不记录被取消的步骤。 */
+const CANCELLED_CODES = Object.freeze(new Set(["ABORTED", "ABORTED_BEFORE_DISPATCH"]));
+/** 什么都不知道的宿主：任何工具结果都是 INVALID_HISTORY，任何 user 消息都是外来的。 */
+const NO_HOST = Object.freeze({ provenanceOf: () => undefined, isHostMessage: () => false });
 
 // ---------------------------------------------------------------------------
 // 纯函数
@@ -47,9 +54,11 @@ export function newDropped() {
     emptyAssistantMessages: 0,// 既无文本块也无工具调用的 assistant 消息（例如只有 reasoning）
     reasoningBlocks: 0,
     verdictBlocks: 0,
-    nonTextBlocks: 0,         // 其它未知块（image 已被 text-only 路由投影掉，到不了这里）
+    nonTextBlocks: 0,         // 其它未知块（image 单独记在 droppedImageBlocks）
     runtimeToolResults: 0,    // dsh 运行时（不是工具）写的工具结果：转成裸 reason、无 origin（harness.ts:1290-1295 的形状）
-    unattributedToolResults: 0, // 账本里没有记录的工具结果：内容照转、不附 origin（不知道是谁写的就不声称）
+    droppedCancelledCalls: 0, // 被取消的工具调用（ABORTED / ABORTED_BEFORE_DISPATCH）：结果和发出它的 toolCalls 条目一起抹掉，dsh 的取消文本不进请求
+    droppedImageBlocks: 0,    // image 块：适配器自己丢（不声明 inputModalities，dsh 就不会先改写成英文占位句）
+    droppedForeignUserMessages: 0, // source.kind 'user' 但不是宿主发的消息（工具附加的 additionalContexts 可以冒充用户）
     toolsNotVisible: 0,       // 契约 offer 里有、dsh 注册表里没有的工具
     toolsNotInContract: 0,    // dsh 注册表里有、契约没列的工具
     systemPromptChars: 0,     // options.system 的长度——只记长度，内容不读
@@ -92,15 +101,30 @@ function isPlainObject(value) {
 }
 
 /**
+ * @typedef {object} HostKnowledge  宿主知道、dsh 的消息表面上看不出来的两件事
+ * @property {(callId: string) => ({ authored: 'tool'|'runtime', tool?: string, reason?: string, code?: string } | undefined)} provenanceOf
+ *   账本（tool-ledger.mjs）：这条工具结果是谁写的。没有记录 = INVALID_HISTORY，永不照转。
+ * @property {(messageId: string) => boolean} isHostMessage
+ *   这条 user 消息是不是宿主自己发的（followup 时登记的 id）。只有宿主能以用户的身份说话。
+ */
+
+/**
  * dsh Message[] → TurnMessage[]（ports.ts:64-76）。顺序保持，不合并。
  * @param {object[]} messages   options.messages（session.deriveMessages() 的表面）
  * @param {ReturnType<typeof newDropped>} [dropped]
- * @param {(callId: string) => ({ authored: 'tool'|'runtime', tool?: string, reason?: string } | undefined)} [provenanceOf]
- *   宿主账本（tool-ledger.mjs）：这条工具结果是谁写的。没有回调 = 什么都不知道 = 永不附 origin。
+ * @param {Partial<HostKnowledge>} [host]  缺哪一半就按"什么都不知道"处理（fail closed）。
  * @returns {{ messages: object[], dropped: ReturnType<typeof newDropped> }}
  */
-export function mapMessages(messages, dropped = newDropped(), provenanceOf = undefined) {
+export function mapMessages(messages, dropped = newDropped(), host = NO_HOST) {
+  const provenanceOf = typeof host?.provenanceOf === "function" ? host.provenanceOf : NO_HOST.provenanceOf;
+  const isHostMessage = typeof host?.isHostMessage === "function" ? host.isHostMessage : NO_HOST.isHostMessage;
   const out = [];
+  /** callId → out 里发出这个调用的 assistant 消息的下标（取消时那条 toolCalls 也要抹掉） */
+  const issuedAt = new Map();
+  const countNonText = (block) => {
+    if (block?.type === "image") dropped.droppedImageBlocks += 1; // 适配器自己丢：一个数字，不是 dsh 的占位句
+    else dropped.nonTextBlocks += 1;
+  };
 
   for (const message of messages ?? []) {
     const role = message?.role;
@@ -126,7 +150,7 @@ export function mapMessages(messages, dropped = newDropped(), provenanceOf = und
             sawVerdict = true;
             break;
           default:
-            dropped.nonTextBlocks += 1;
+            countNonText(block);
         }
       }
       if (texts.length === 0 && toolCalls.length === 0) {
@@ -136,6 +160,7 @@ export function mapMessages(messages, dropped = newDropped(), provenanceOf = und
       }
       // tool_calls 应答读回来是 { role:'assistant', content:'', toolCalls }（= harness.ts:1094）
       out.push({ role: "assistant", content: texts.join("\n"), ...(toolCalls.length ? { toolCalls } : {}) });
+      for (const c of toolCalls) issuedAt.set(c.id, out.length - 1);
       continue;
     }
 
@@ -144,19 +169,40 @@ export function mapMessages(messages, dropped = newDropped(), provenanceOf = und
       if (block === undefined) {
         throw new LlmError(`tool-result message for call "${message.source.callId}" has no tool-result block`, "INVALID_HISTORY");
       }
-      for (const inner of block.content ?? []) if (inner?.type !== "text") dropped.nonTextBlocks += 1;
+      for (const inner of block.content ?? []) if (inner?.type !== "text") countNonText(inner);
       const callId = block.toolCallId;
       const text = textOf(block.content);
-      const provenance = provenanceOf?.(callId);
+      const provenance = provenanceOf(callId);
 
-      if (provenance?.authored === "runtime") {
-        // dsh 运行时写的（拒绝 / 未知工具 / 取消 / post-execute block）：= 内核 gate 拒绝的形状（harness.ts:1290-1295）——
+      if (provenance === undefined) {
+        // 账本没有记录（不是这个进程产生的、或账本没接上）：不知道是谁写的就不转发——照转的反面是把 dsh 的渲染文本
+        // （`Error: ` 前缀那一套）原样送进请求。
+        throw new LlmError(`tool result for call "${callId}" has no ledger record`, "INVALID_HISTORY");
+      }
+      if (provenance.authored === "runtime" && CANCELLED_CODES.has(provenance.code)) {
+        // 取消（dsh-tools 3550-3585 / agent-loop 276-292 写的 'tool call aborted[ before dispatch]'）：镜像内核——被取消的步骤
+        // 从不进 messages。这条结果和发出它的那条 toolCalls 一起抹掉；发出方只剩空壳时整条抹掉。
+        dropped.droppedCancelledCalls += 1;
+        const at = issuedAt.get(callId);
+        if (at !== undefined) {
+          const issuer = out[at];
+          const rest = issuer.toolCalls.filter((c) => c.id !== callId);
+          if (rest.length > 0) issuer.toolCalls = rest;
+          else {
+            delete issuer.toolCalls;
+            if (issuer.content === "") out[at] = undefined;
+          }
+        }
+        continue;
+      }
+      if (provenance.authored === "runtime") {
+        // dsh 运行时写的（拒绝 / 未知工具 / post-execute block）：= 内核 gate 拒绝的形状（harness.ts:1290-1295）——
         // 裸 reason（dsh 记在 error.message 里的那句）、isError、**没有 origin**：没有工具产出过这段文字。
         dropped.runtimeToolResults += 1;
         out.push({ role: "tool", callId, content: provenance.reason ?? stripErrorPrefix(text), isError: true });
         continue;
       }
-      if (provenance?.authored === "tool" && typeof provenance.tool === "string") {
+      if (provenance.authored === "tool" && typeof provenance.tool === "string") {
         // 工具真正返回的（成功的 render 输出，或工具体自己抛的错的 message）：= harness.ts:1415-1423 推的形状，origin 是账本里
         // 实际执行的工具名（exec.name），不是从历史 tool-call 块猜的。
         out.push({
@@ -168,16 +214,17 @@ export function mapMessages(messages, dropped = newDropped(), provenanceOf = und
         });
         continue;
       }
-      // 账本没记录（宿主没接账本、或结果不是这个进程产生的）：内容照转，不声称出处。
-      dropped.unattributedToolResults += 1;
-      out.push({ role: "tool", callId, content: text, ...(block.isError === true ? { isError: true } : {}) });
-      continue;
+      throw new LlmError(`tool result for call "${callId}" has an unreadable ledger record`, "INVALID_HISTORY");
     }
 
     if (role === "user" && kind === "user") {
-      let nonText = 0;
-      for (const block of message.content ?? []) if (block?.type !== "text") nonText += 1;
-      dropped.nonTextBlocks += nonText;
+      if (!isHostMessage(message?.id)) {
+        // 只有宿主能以用户的身份说话。工具附加的 additionalContexts 可以带任何 MessageSource（dsh-tools index.d.ts:397/408/436-445），
+        // 循环把它们拼进下一步（agent-loop 185, 692 → 559）——不在宿主名单上的 user 消息一律丢，只记数。
+        dropped.droppedForeignUserMessages += 1;
+        continue;
+      }
+      for (const block of message.content ?? []) if (block?.type !== "text") countNonText(block);
       const hasText = (message.content ?? []).some((b) => b?.type === "text");
       if (!hasText) {
         dropped.emptyUserMessages += 1;
@@ -198,7 +245,7 @@ export function mapMessages(messages, dropped = newDropped(), provenanceOf = und
     dropped.otherMessages += 1;
   }
 
-  return { messages: out, dropped };
+  return { messages: out.filter((m) => m !== undefined), dropped };
 }
 
 /**
@@ -206,10 +253,10 @@ export function mapMessages(messages, dropped = newDropped(), provenanceOf = und
  * options 是深冻结的（agent-loop 767），只读不改；每个映射值都是新对象。
  * @param {object} options
  * @param {import('./task-facts.mjs').TaskFacts | undefined} facts
- * @param {Parameters<typeof mapMessages>[2]} [provenanceOf]
+ * @param {Parameters<typeof mapMessages>[2]} [host]
  * @returns {{ request: object, dropped: ReturnType<typeof newDropped> }}
  */
-export function toTurnRequest(options, facts, provenanceOf = undefined) {
+export function toTurnRequest(options, facts, host = NO_HOST) {
   if (facts === undefined || facts === null) {
     throw new LlmError(`no Ruyin task facts for session "${options?.sessionId ?? "?"}"`, "NO_TASK_FACTS");
   }
@@ -221,7 +268,7 @@ export function toTurnRequest(options, facts, provenanceOf = undefined) {
   // options.system：整个丢弃（出路 a；ADR-011:23-27, 38）。只记长度作为代价账目。
   dropped.systemPromptChars = typeof options.system === "string" ? options.system.length : 0;
 
-  const { messages } = mapMessages(options.messages, dropped, provenanceOf);
+  const { messages } = mapMessages(options.messages, dropped, host);
 
   // options.tools 只当"dsh 此刻能执行什么"的可见性事实（= harness.toolOffers 里的 deps.tools.supports()）。
   // ToolSchema 的 description / parameters 永远不转发：offer 的 description 是契约事实字符串（facts.tools）。
@@ -248,17 +295,36 @@ export function toTurnRequest(options, facts, provenanceOf = undefined) {
 }
 
 /**
- * 历史里已经用过的 tool-call id（能力面不得复用）。
+ * 历史表面上的 tool-call id（能力面不得复用）。
  * options.messages 是 session.deriveMessages() 的**表面**（agent-loop 619）——compaction replace 之后（dsh-session 1489-1490）
- * 早先的 id 会从表面消失，所以还要并上账本里"本适配器发出过"的 id。
+ * 早先的 id 会从表面消失，所以适配器还要并上账本里"进过日志"的 id（ToolLedger.reconcileEmitted）。
+ * @returns {Set<string>}
  */
-function usedCallIds(options, emitted = EMPTY_SET) {
-  const ids = new Set(emitted);
+export function historyCallIds(options) {
+  const ids = new Set();
   for (const message of options?.messages ?? []) {
     if (message?.role !== "assistant") continue;
     for (const block of message.content ?? []) if (block?.type === "tool-call") ids.add(block.id);
   }
   return ids;
+}
+
+/**
+ * call.arguments → ToolCallBlock.arguments（原始 JSON 字符串，types.d.ts:65-66）。
+ * JSON.stringify 会抛（BigInt、循环引用）或返回 undefined（toJSON 返回 undefined）、或返回非对象 JSON（toJSON 返回别的）——
+ * 三种都是能力面违反协议，在发出任何 chunk 之前拒绝。
+ */
+function serializeArguments(call) {
+  let args;
+  try {
+    args = JSON.stringify(call.arguments);
+  } catch (error) {
+    throw new LlmError(`capability surface answered tool_calls with unserializable arguments (call "${call.id}")`, "INVALID_TURN", { cause: error });
+  }
+  if (typeof args !== "string" || !args.startsWith("{")) {
+    throw new LlmError(`capability surface answered tool_calls with arguments that do not serialize to a JSON object (call "${call.id}")`, "INVALID_TURN");
+  }
+  return args;
 }
 
 /**
@@ -272,9 +338,9 @@ function usedCallIds(options, emitted = EMPTY_SET) {
  *   dsh 派发工具只看注册表可见性、不看 offer（dsh-tools 2907-2912；agent-loop 690-692 对每个 tool-call 块都派发），
  *   所以"没 offer 的工具"必须在这里拦下，否则 dsh 会真的执行——ports.ts:244-247 的反面。
  * @param {object} options   GenerateOptions（只读 messages，查 id 复用）
- * @param {ReadonlySet<string>} [emittedIds]  账本里本会话已经发出过的 tool-call id
+ * @param {ReadonlySet<string>} [loggedIds]  账本里本会话进过日志的 tool-call id（表面上可能已被 compaction 抹掉）
  */
-export function turnToChunks(turn, request, options, emittedIds = EMPTY_SET) {
+export function turnToChunks(turn, request, options, loggedIds = EMPTY_SET) {
   if (turn === null || typeof turn !== "object") {
     throw new LlmError("capability surface returned an unreadable turn", "CAPABILITY_ERROR");
   }
@@ -306,7 +372,8 @@ export function turnToChunks(turn, request, options, emittedIds = EMPTY_SET) {
     }
     const offered = new Set((request?.tools ?? []).map((o) => o.id));
     const seen = new Set();
-    const used = usedCallIds(options, emittedIds);
+    const used = new Set([...historyCallIds(options), ...loggedIds]);
+    const serialized = [];
     for (const call of calls) {
       if (!isPlainObject(call)) throw new LlmError("capability surface answered tool_calls with a non-object call", "INVALID_TURN");
       if (typeof call.id !== "string" || call.id === "") throw new LlmError("capability surface answered tool_calls with an empty call id", "INVALID_TURN");
@@ -317,12 +384,13 @@ export function turnToChunks(turn, request, options, emittedIds = EMPTY_SET) {
       // 镜像 gate 的 tool-not-in-contract 拒绝（harness.ts:1280-1295），但在派发之前、以整回合失败的形式：
       // offer 是"Runtime 真会执行的工具"（ports.ts:244-247），执行没 offer 的工具是它的反面。
       if (!offered.has(call.tool)) throw new LlmError(`capability surface called tool "${call.tool}", which was not offered this turn (call "${call.id}")`, "TOOL_NOT_OFFERED");
+      serialized.push(serializeArguments(call)); // 序列化也在第一个 chunk 之前：抛 / undefined / 非对象都是 INVALID_TURN
       seen.add(call.id);
     }
     const chunks = [];
     calls.forEach((call, index) => {
       const id = ToolCallId(call.id); // 运行时是恒等（brand.js:26-28）：能力面的 id 原样往下走
-      const args = JSON.stringify(call.arguments); // ToolCallBlock.arguments 是原始 JSON 字符串（types.d.ts:65-66）
+      const args = serialized[index]; // ToolCallBlock.arguments 是原始 JSON 字符串（types.d.ts:65-66）
       chunks.push({ type: "block-start", index, blockType: "tool-call" });
       chunks.push({ type: "tool-call-delta", index, id, name: call.tool, argumentsDelta: args });
       // block-end 带完整块：装配器原样返回它（assembler.js:64-71, 94-96），id/name/arguments 就是我们给的。
@@ -405,32 +473,47 @@ export class RuyinCapabilityAdapter extends LlmAdapter {
   #facts;
   #ledger;
   #log;
+  /** 三项"dsh 想塞进请求、被适配器挡下"的累计数（每请求的明细在 log 回调的 dropped 里；历史每次请求都重映射，所以同一条会累计多次）。 */
+  #counters = { droppedCancelledCalls: 0, droppedImageBlocks: 0, droppedForeignUserMessages: 0 };
 
   /**
    * @param {{ gateway: { turn(request: object): Promise<object> },
    *           facts: import('./task-facts.mjs').TaskFactsProvider,
-   *           ledger?: import('./tool-ledger.mjs').ToolLedger,
+   *           ledger: import('./tool-ledger.mjs').ToolLedger,
    *           log?: (record: { sessionId: string, capability: string, dropped: object }) => void }} deps
-   *   ledger 缺席 = 适配器对工具结果的出处一无所知：内容照转、永不附 origin（unattributedToolResults 计数）。
+   *   三者都是必需的：没有账本就分不出工具结果是谁写的（会把 dsh 的渲染文本照转），没有宿主名单就分不出 user 消息是谁发的。
    */
   constructor({ gateway, facts, ledger, log }) {
     super();
     if (!gateway || typeof gateway.turn !== "function") throw new TypeError("llm-ruyin needs a gateway with turn()");
-    if (!facts || typeof facts.factsFor !== "function") throw new TypeError("llm-ruyin needs a facts provider with factsFor()");
-    if (ledger !== undefined && typeof ledger.provenanceOf !== "function") throw new TypeError("llm-ruyin ledger needs provenanceOf()");
+    if (!facts || typeof facts.factsFor !== "function" || typeof facts.isHostMessage !== "function") {
+      throw new TypeError("llm-ruyin needs a facts provider with factsFor() and isHostMessage()");
+    }
+    if (!ledger || typeof ledger.provenanceOf !== "function" || typeof ledger.reconcileEmitted !== "function" || typeof ledger.noteEmittedCalls !== "function") {
+      throw new TypeError("llm-ruyin needs a tool ledger with provenanceOf() / reconcileEmitted() / noteEmittedCalls()");
+    }
     this.#gateway = gateway;
     this.#facts = facts;
     this.#ledger = ledger;
     this.#log = log;
   }
 
+  /** @returns {{ droppedCancelledCalls: number, droppedImageBlocks: number, droppedForeignUserMessages: number }} 快照 */
+  get counters() {
+    return { ...this.#counters };
+  }
+
   providerInfo(provider) {
     return { id: provider, name: PROVIDER_DISPLAY_NAME };
   }
 
-  /** 无 reasoning（AgentOptions 不得带 reasoningEffort）；text-only：image 块在适配器之前就被投影掉。 */
+  /**
+   * 无 reasoning（AgentOptions 不得带 reasoningEffort）。**不声明 inputModalities**：声明成 ['text'] 会让 LlmRuntime.adapterStream
+   * 在适配器跑之前把 image 块改写成 dsh 的英文占位句（dsh-llm index.js:1684-1690 → 521-523, 600-625）；不声明就原样到达，
+   * 由 mapMessages 自己丢、只记 droppedImageBlocks。
+   */
   resolveModel(provider, model) {
-    return Promise.resolve({ provider, id: model, name: PROVIDER_DISPLAY_NAME, inputModalities: ["text"] });
+    return Promise.resolve({ provider, id: model, name: PROVIDER_DISPLAY_NAME });
   }
 
   /** 镜像内核 MAX_TRANSIENT_ATTEMPTS=3 / BASE_BACKOFF_MS=500（harness.ts:316-317）：首发 + 2 次重试，500 → 1000 ms。 */
@@ -457,8 +540,12 @@ export class RuyinCapabilityAdapter extends LlmAdapter {
       throw new LlmError(`no Ruyin task facts for session "${sessionId ?? "?"}"`, "NO_TASK_FACTS");
     }
     const ledger = this.#ledger;
-    const provenanceOf = ledger === undefined ? undefined : (callId) => ledger.provenanceOf(sessionId, callId);
-    const { request, dropped } = toTurnRequest(options, facts, provenanceOf);
+    const host = {
+      provenanceOf: (callId) => ledger.provenanceOf(sessionId, callId),
+      isHostMessage: (messageId) => this.#facts.isHostMessage(sessionId, messageId),
+    };
+    const { request, dropped } = toTurnRequest(options, facts, host);
+    for (const key of Object.keys(this.#counters)) this.#counters[key] += dropped[key];
     this.#log?.({ sessionId, capability: facts.capability, dropped });
 
     let turn;
@@ -469,10 +556,13 @@ export class RuyinCapabilityAdapter extends LlmAdapter {
     }
     if (options.signal?.aborted) throw new LlmError("cancelled after the capability surface answered", "ABORTED");
 
+    // 上一次发出的 id 对着这次的历史表面核对：出现了的 = 进过日志（永远记住，compaction 之后也算用过）；
+    // 没出现的 = 块没进日志（中途取消，agent-loop 626-627 在 append 之前抛），忘掉——无状态的能力面重发同一个 id 不会被卡死。
+    const logged = ledger.reconcileEmitted(sessionId, historyCallIds(options));
     // 所有校验在第一个 chunk 之前；应答对着**发出去的请求**校验（offer / 生成轮 vs 验证轮）。
-    const chunks = turnToChunks(turn, request, options, ledger?.emittedCalls(sessionId));
-    if (ledger !== undefined && turn.kind === "tool_calls") {
-      // 先登记再 yield：即便这一步中途被取消、块没进日志，这些 id 也算发出过了（保守：能力面不得再用）。
+    const chunks = turnToChunks(turn, request, options, logged);
+    if (turn.kind === "tool_calls") {
+      // 先登记再 yield；是否真进了日志，下一次 reconcileEmitted 再定。
       ledger.noteEmittedCalls(sessionId, turn.calls.map((call) => call.id));
     }
     yield* chunks;

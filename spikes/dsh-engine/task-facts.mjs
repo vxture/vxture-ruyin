@@ -24,16 +24,36 @@
 /**
  * @typedef {object} TaskFactsProvider
  * @property {(sessionId: string) => TaskFacts | undefined} factsFor
+ * @property {(sessionId: string, messageId: string) => boolean} isHostMessage
+ *   这条 user 消息是不是宿主自己发的。dsh 里工具附加的 additionalContexts 可以带任何 MessageSource
+ *   （dsh-tools index.d.ts:397/408/436-445）并被拼进下一步，所以"role user"不等于"用户说的"；宿主每次 followup /
+ *   steer / inject 之前把消息 id 登记进来，适配器只把名单上的转成 role 'user'。
  */
 
-/** 内存实现：一个 dsh 会话对应一份事实；宿主在每次 followup 之前 patch。 */
+/** 内存实现：一个 dsh 会话对应一份事实；宿主在每次 followup 之前 patch，并登记自己发出的消息 id。 */
 export class MemoryTaskFacts {
   #facts = new Map();
+  /** sessionId → Set<messageId> */
+  #hostMessages = new Map();
 
   /** @param {string} sessionId @param {TaskFacts} facts */
   set(sessionId, facts) {
     this.#facts.set(sessionId, { ...facts });
     return this;
+  }
+
+  /** 宿主发消息之前登记它的 id（createUserMessage 在入 inbox 之前就给了 id：dsh-llm index.js:40-52，且跨表示层不变）。 */
+  noteHostMessage(sessionId, messageId) {
+    if (typeof messageId !== "string" || messageId === "") throw new TypeError("a host message needs a string id");
+    let set = this.#hostMessages.get(sessionId);
+    if (set === undefined) this.#hostMessages.set(sessionId, (set = new Set()));
+    set.add(messageId);
+    return this;
+  }
+
+  /** @param {string} sessionId @param {string} messageId */
+  isHostMessage(sessionId, messageId) {
+    return this.#hostMessages.get(sessionId)?.has(messageId) === true;
   }
 
   /** 浅合并：宿主在两次 followup 之间推进 capability / tools / revision 用的。 */
@@ -45,6 +65,7 @@ export class MemoryTaskFacts {
   }
 
   delete(sessionId) {
+    this.#hostMessages.delete(sessionId);
     return this.#facts.delete(sessionId);
   }
 
