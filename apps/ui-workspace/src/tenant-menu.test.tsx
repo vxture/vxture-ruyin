@@ -61,9 +61,9 @@ test("summarizeQuota: identical shared pools count once; different pools of one 
 test("TenantMenu: trigger shows the workspace name only; opening shows tenant, workspace, quota meters and the tenant-admin link", async () => {
   const entitlements = vi.fn().mockResolvedValue({
     workspace_id: "w1",
-    entitlements: { "vxture.bid": envelope([{ metric: "ai.credit", limit: 1000, remaining: 250, priority: 1 }]) },
+    entitlements: { "bidproposal": envelope([{ metric: "ai.credit", limit: 1000, remaining: 250, priority: 1 }]) },
   });
-  render(<TenantMenu api={fakeApi({ entitlements })} session={session()} productIds={["vxture.bid"]} />);
+  render(<TenantMenu api={fakeApi({ entitlements })} session={session()} productIds={["bidproposal"]} />);
   const trigger = screen.getByRole("button", { name: /某工作区/ });
   expect(trigger.textContent).toBe("某工作区");
   const user = userEvent.setup();
@@ -72,7 +72,7 @@ test("TenantMenu: trigger shows the workspace name only; opening shows tenant, w
   expect(screen.getByText("工作区：某工作区")).toBeInTheDocument();
   expect(await screen.findByText("AI 额度")).toBeInTheDocument();
   expect(screen.getByText("已用 750 / 1,000 · 剩余 250")).toBeInTheDocument();
-  expect(entitlements).toHaveBeenCalledWith(["vxture.bid"]);
+  expect(entitlements).toHaveBeenCalledWith(["bidproposal"]);
   const admin = screen.getByRole("link", { name: /租户管理/ }) as HTMLAnchorElement;
   expect(admin.href).toBe("https://vxture.com/zh-CN/tenant-settings");
   expect(admin.target).toBe("_blank");

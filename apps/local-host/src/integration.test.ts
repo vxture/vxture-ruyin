@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import {
+  MemorySkills,
   ProjectRuntime,
   pendingCheckpoint,
   toAuditView,
@@ -95,6 +96,7 @@ async function makePorts(dataDir: string): Promise<{
       connectors: new Map([["local-fs", new LocalFsConnector()]]),
       ranker: new FtsRanker(storage),
       tools: executor,
+      skills: MemorySkills.forContract(loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal")!.contract),
     },
     storage,
     executor,
@@ -228,12 +230,12 @@ test("milestone: bid contract loads, workspace created, task runs over SQLite", 
   try {
     const scan = loadProducts(productsDir);
     assert.deepEqual(scan.failed, []);
-    const bid = scan.loaded.find((p) => p.id === "vxture.bid");
+    const bid = scan.loaded.find((p) => p.id === "bidproposal");
     assert.ok(bid, "bid product must load");
 
     const runtime = new ProjectRuntime(first.ports);
     const meta = await runtime.createProject(bid.contract, "投标项目 A", "wsp_test");
-    assert.equal(meta.productId, "vxture.bid");
+    assert.equal(meta.productId, "bidproposal");
     assert.equal((await runtime.openProject(meta.id)).businessState, "draft");
 
     // Run a task to the human checkpoint.
@@ -307,7 +309,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     const products = (await (
       await fetch(`${base}/products`, { headers: authed })
     ).json()) as Array<{ id: string }>;
-    assert.ok(products.some((p) => p.id === "vxture.bid"));
+    assert.ok(products.some((p) => p.id === "bidproposal"));
 
     // System transparency surface for the settings panel.
     const system = await fetch(`${base}/system`, { headers: authed });
@@ -322,7 +324,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
 
     // 契约拉取未配置能力面时必须如实回答 503（ADR-012）。「没接通」看起来像
     // 「拉过了、无事发生」是最坏的一种沉默。
-    const noBase = await fetch(`${base}/products/vxture.bid/fetch`, {
+    const noBase = await fetch(`${base}/products/bidproposal/fetch`, {
       method: "POST",
       headers: json,
     });
@@ -346,7 +348,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     const created = await fetch(`${base}/projects`, {
       method: "POST",
       headers: json,
-      body: JSON.stringify({ product: "vxture.bid", name: "api-ws" }),
+      body: JSON.stringify({ product: "bidproposal", name: "api-ws" }),
     });
     assert.equal(created.status, 201);
     const meta = (await created.json()) as { id: string; workspaceId?: string };
@@ -449,7 +451,7 @@ test("selection over real files: grant -> bind (indexes) -> gate -> complete", a
     writeFileSync(join(filesDir, "sub", "old-notes.txt"), "misc notes", "utf8");
 
     const scan = loadProducts(productsDir);
-    const bid = scan.loaded.find((p) => p.id === "vxture.bid");
+    const bid = scan.loaded.find((p) => p.id === "bidproposal");
     assert.ok(bid);
     const meta = await runtime.createProject(bid.contract, "sel-ws", "wsp_test");
 
@@ -566,7 +568,7 @@ test("project database is encrypted at rest (TD-009)", async () => {
   const runtime = new ProjectRuntime(ports);
   try {
     const scan = loadProducts(productsDir);
-    const bid = scan.loaded.find((p) => p.id === "vxture.bid");
+    const bid = scan.loaded.find((p) => p.id === "bidproposal");
     assert.ok(bid);
     const meta = await runtime.createProject(bid.contract, "enc-ws", "wsp_test");
     storage.closeAll();
@@ -660,7 +662,7 @@ test("归属：未登录不能新建项目；老项目可导入当前工作区",
   const legacy = await storage.createProjectStore("ws_legacy0002");
   await legacy.putMeta({
     id: "ws_legacy0002",
-    productId: "vxture.bid",
+    productId: "bidproposal",
     productVersion: "1.0.0",
     contractVersion: "0.1",
     name: "老项目",
@@ -668,7 +670,7 @@ test("归属：未登录不能新建项目；老项目可导入当前工作区",
     createdAt: "2026-01-01T00:00:00Z",
   });
   const bidProduct = loadProducts(productsDir).loaded.find(
-    (p) => p.id === "vxture.bid",
+    (p) => p.id === "bidproposal",
   );
   assert.ok(bidProduct);
   await legacy.putContract(JSON.stringify(bidProduct.contract));
@@ -700,7 +702,7 @@ test("归属：未登录不能新建项目；老项目可导入当前工作区",
     const refused = await fetch(`${outBase}/projects`, {
       method: "POST",
       headers: json,
-      body: JSON.stringify({ product: "vxture.bid", name: "无主项目" }),
+      body: JSON.stringify({ product: "bidproposal", name: "无主项目" }),
     });
     assert.equal(refused.status, 409);
     assert.equal(
@@ -762,7 +764,7 @@ test("导出：落进授权目录、留下审计、未授权目录一律拒绝",
   const denied = mkdtempSync(join(tmpdir(), "ruyin-nope-"));
   const { ports, storage } = await makePorts(dataDir);
   const runtime = new ProjectRuntime(ports);
-  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal");
   assert.ok(bid);
   const meta = await runtime.createProject(bid.contract, "导出", "wsp_test");
   await runtime.addGrant(meta.id, outDir, "readwrite");
@@ -856,7 +858,7 @@ test("任务列表：跑不了的标出来，标了的确实启动不了，没�
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-unrun-"));
   const { ports, storage, executor } = await makePorts(dataDir);
   const runtime = new ProjectRuntime(ports);
-  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal");
   assert.ok(bid);
   const meta = await runtime.createProject(bid.contract, "任务面", "wsp_test");
 
@@ -929,7 +931,7 @@ test("事件流：任务一动，订阅者就收到，而且只说什么变了",
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-sse-"));
   const { ports, storage, executor } = await makePorts(dataDir);
   const runtime = new ProjectRuntime(ports);
-  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal");
   assert.ok(bid);
   const meta = await runtime.createProject(bid.contract, "事件", "wsp_test");
 
@@ -1098,7 +1100,7 @@ test("工作区边界：别的工作区的项目，凭 id 也打不开", async (
   const outDir = mkdtempSync(join(tmpdir(), "ruyin-bound-out-"));
   const { ports, storage, executor } = await makePorts(dataDir);
   const runtime = new ProjectRuntime(ports);
-  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal");
   assert.ok(bid);
 
   const mine = await runtime.createProject(bid.contract, "我的", "wsp_test");
@@ -1107,7 +1109,7 @@ test("工作区边界：别的工作区的项目，凭 id 也打不开", async (
   const legacyStore = await ports.storage.createProjectStore("prj_legacy");
   await legacyStore.putMeta({
     id: "prj_legacy",
-    productId: "vxture.bid",
+    productId: "bidproposal",
     productVersion: "1.0.0",
     contractVersion: "0.1",
     name: "老项目",
@@ -1207,12 +1209,12 @@ test("导出：待导入的项目未登录时也导不走", async () => {
   const outDir = mkdtempSync(join(tmpdir(), "ruyin-anon-out-"));
   const { ports, storage, executor } = await makePorts(dataDir);
   const runtime = new ProjectRuntime(ports);
-  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal");
   assert.ok(bid);
   const store = await ports.storage.createProjectStore("prj_orphan");
   await store.putMeta({
     id: "prj_orphan",
-    productId: "vxture.bid",
+    productId: "bidproposal",
     productVersion: "1.0.0",
     contractVersion: "0.1",
     name: "无主",
@@ -1274,7 +1276,7 @@ test("导出：待导入的项目未登录时也导不走", async () => {
 test("一致性：C1–C7 在 SQLite ports 上全过", async () => {
   const dirs: string[] = [];
   const opened: SqliteStoragePort[] = [];
-  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal");
   assert.ok(bid);
   try {
     const results = await runConformance({

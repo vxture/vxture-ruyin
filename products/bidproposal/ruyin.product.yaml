@@ -1,11 +1,11 @@
-﻿# Bid product runtime contract - the canonical example from
+﻿# bidproposal product runtime contract - the canonical example from
 # docs/30-design/30-contract-schema.md section 16. Passes the R-series rules;
 # the contract-schema test suite uses this file as its primary fixture.
 contract: "0.1"
 
 product:
-  id: vxture.bid
-  name: 标书编写
+  id: bidproposal
+  name: 标书方案智能体          # = 平台产品目录 product_name（2026-09-05 owner：名字对齐平台）
   version: 1.0.0
   publisher: vxture
   runtime:
@@ -191,6 +191,7 @@ tasks:
       - 需求条目必须可回溯到招标原文
     capabilities: [requirement_analysis]
     tools: [read_file, write_document]
+    skills: [xberg]                              # 101+ 格式抽文本 / 表格（预置层，xberg-io.xberg）
     verification:
       - { id: source_traceability, kind: automated }
       - { id: matrix_review,       kind: human }
@@ -204,6 +205,7 @@ tasks:
       - 必须基于已授权资料
     capabilities: [knowledge_retrieval, proposal_generation]
     tools: [search_knowledge, read_file, write_document]
+    skills: [officecli-docx, officecli-word-form]  # Word 文档与表单（预置层，iofficeai.officecli）
     verification:
       - { id: requirement_coverage, kind: ai_assisted }
       - { id: consistency_check,    kind: ai_assisted }
@@ -228,6 +230,7 @@ tasks:
       - 导出前必须通过覆盖校验
     capabilities: [deliverable_assembly]
     tools: [read_file, export_result]
+    skills: [officecli-docx]
     verification:
       - { id: final_confirmation, kind: human }
 

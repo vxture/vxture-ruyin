@@ -17,7 +17,7 @@ import { CapabilityClient } from "./capability-client.js";
 function request(): CapabilityTurnRequest {
   return {
     capability: "requirement_analysis",
-    product: "vxture.bid",
+    product: "bidproposal",
     taskId: "ti_0001",
     workspace: "prj_0001",
     objective: "解析招标文件，生成需求矩阵",
@@ -74,7 +74,7 @@ test("resolver: routes by product + capability and carries the aggregation key",
       assert.deepEqual(turn, { kind: "content", content: "drafted" });
       assert.equal(
         seen.path,
-        "/products/vxture.bid/capabilities/requirement_analysis/turn",
+        "/products/bidproposal/capabilities/requirement_analysis/turn",
       );
       assert.equal(seen.auth, "Bearer user-token");
 

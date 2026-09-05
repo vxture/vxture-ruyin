@@ -1,6 +1,6 @@
 {
   "name": "@vxture/ruyin-document",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ruyin structured document representation (mdast + ry: directives) and the preset renderers that turn it into deliverables (design authority: docs/30-design/decisions/ADR-013, ADR-016).",
   "repository": {
     "type": "git",

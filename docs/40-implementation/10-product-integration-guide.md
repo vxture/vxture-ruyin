@@ -139,6 +139,36 @@ objects → states → context.types → capabilities → tools → tasks
 
 ---
 
+## 5.4 云端能力面与 Runos（ADR-009 / ADR-020，2026-09-05）
+
+契约之外，产品还要出**一个云端服务**：能力面。Ruyin 不直连 Atlas、不直连 Runos
+（ADR-001 / ADR-009）—— 桌面客户端是零秘密的 public client，换不到 S2S 令牌；持
+confidential 凭据、替用户换票、调 Atlas 与 Runos 的，是产品自己的云端。
+
+| 义务 | 内容 | 出处 |
+|---|---|---|
+| 回合端点 | `POST /capabilities/:id/turn`：收 `{objective, constraints, context[], messages[], tools[], skills[], revision?}`（`skills[]` = 该任务在契约 `tasks[].skills` 里声明、且本机有的那几条 `{name, description}`，2026-09-05 起 Ruyin 真的会送；模型要全文就调 `use_skill`），回 `tool_calls | content | verdict`。运行时只给事实，措辞归产品 | 30-design/20；ADR-011 |
+| 模型 | 用服务端会话里的用户 access token 做 OBO 换票（`act.sub` = 产品码），调 Atlas `POST /v1/chat`，每次必带 `taskId` | ADR-001；《产品接入范本》 |
+| Runos 能力 | 同一张 OBO 票调 Runos `POST /v1/mcp`（`aud=runos`、`scope=tool:runos`），四工具流 discover → resolve → invoke → report_outcome；`_meta.vxture.task_id` 与本地任务的 `taskId` 用**同一个值** —— 两边审计靠它对账 | ADR-020 §2 / §3 |
+| **技能目录转发** | 能力面把 Runos 分发给本产品的 Skill（`runos_invoke` 的 `fetch`，返回 `SKILL.md` 全文 + 资源块 + `content_digest`）**转交给 Ruyin**：暴露 `GET /skills`（目录：`name`、`description`、`capability_id@version`、`content_digest`）与 `GET /skills/:name`（全文与资源）。Ruyin 把它们进本机技能登记册的**产品分发层**，按 digest 缓存、离线可用 | ADR-020 §3 c / §6-1 |
+| 第三方密钥 | **不经过 Ruyin，也不经过能力面的代码**：注册进 Runos 的凭证保险库，由 Runos 在出站调用时注入。产品侧只声明 `credential_requirements` | ADR-020 §6-2 |
+| 脚本 | 带 `scripts/` 的技能：本地不跑（TD-005）；不带业务数据的脚本可声明依赖 Runos Executor 在云端沙箱里跑 —— **登记未启用** | TD-005；ADR-020 §6-3 |
+
+**预置的 MCP 服务器怎么被产品用（2026-09-05，ADR-018 §7.1）**：它们在本机是来源为 `bundled`
+的连接器，用户在「能力平台」启动后，契约里 `provider: connector` 的工具按**同名**接上
+（例如 `browser_navigate`、`search`），项目还要授权那个连接器（ADR-005）。工具名以服务器
+`tools/list` 报的为准；对照表待补（TD-042 / TD-034）。
+
+**平台侧前提（2026-09-05 读平台代码核实）**：平台 token-exchange 的 `resolveOboContext` 只接受
+`aud` 等于 caller 自己 client id 的 subject_token；Ruyin 登录得到的用户 token `aud='ruyin'`，
+产品云端拿它去换票会被 `400 invalid_request` 拒掉。这是「桌面客户端 + 产品云端」形态第一次
+撞上单受众纪律，解法（Ruyin 按产品申请受众 RFC 8707 `resource`，或平台侧受托登记）与 bid
+的登记一起提在 vxture-platform/vxture-platform#198。**不定，任何产品的云端能力面在生产上都通不了。**
+
+**第一个消费者。** Runos 至今按「baseline-only until first consumer」运行（Runos
+ADR-014）。owner 2026-09-05 定：**bid 产品的云端能力面是 Runos 的第一个消费者**。
+也就是说 bid 的云端要先于任何别的产品把上表跑通 —— 它同时是本指南这一节的活体样本。
+
 # 6. Step 3 · 产品 UI 开发
 
 ## 6.1 运行环境

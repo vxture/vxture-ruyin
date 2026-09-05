@@ -46,6 +46,19 @@ function run(cmd, args, cwd) {
 run("pnpm", ["install", "--prefer-offline"], repoRoot);
 run("pnpm", ["--recursive", "build"], repoRoot);
 
+// 预置技能层（ADR-018 §2.3）：按 resources/skill-manifest.json 拉到 resources/skills，
+// electron-builder 再把它连同 index.json 与许可证一起装进 resources/skills。
+// 拉不到就失败 —— 装不进包的预置层不该静默变成「零条」。开发机上想跳过
+// （没网、只验壳）：RUYIN_SKIP_SKILL_PULL=1，下面的冒烟断言随之放松。
+const skillPull = process.env["RUYIN_SKIP_SKILL_PULL"] !== "1";
+if (skillPull) {
+  run("node", [join(repoRoot, "scripts", "release", "pull-skills.mjs")], repoRoot);
+  // 预置的 MCP 服务器（node 形态 vendored 进 resources/tools；TD-042）。
+  run("node", [join(repoRoot, "scripts", "release", "pull-tools.mjs")], repoRoot);
+} else {
+  console.log("[pack] skill/tool pull SKIPPED (RUYIN_SKIP_SKILL_PULL=1) - the bundled layers are whatever resources/skills and resources/tools hold");
+}
+
 rmSync(daemonOut, { recursive: true, force: true });
 run(
   "pnpm",
@@ -145,6 +158,44 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
       " see the output above.",
   );
   process.exit(1);
+}
+
+// 预置技能层真的在包里。
+//
+// extraResources 配了不等于装进去了：目录不存在时 electron-builder 一声不吭地跳过；
+// 壳没把 RUYIN_SKILLS_DIR 传过去时守护进程会退回仓内路径 —— 装出来的机器上那条路
+// 径不存在，于是「预置 270 条」在用户那里是 0 条，而启动日志一直都在打这一行。
+{
+  const skills = /\[ruyin\] skills: bundled (\d+)/.exec(smokeOut);
+  const bundled = skills ? Number(skills[1]) : -1;
+  if (bundled < 0) {
+    console.error("[pack] FAILED: 守护进程没有报预置技能层（缺 \"[ruyin] skills: bundled N\" 这一行）");
+    process.exit(1);
+  }
+  if (skillPull && bundled === 0) {
+    console.error(
+      "[pack] FAILED: 打包后的预置技能层是 0 条。拉取跑过了（resources/skills 有东西），\n" +
+        "       所以是没装进包（electron-builder.yml 的 extraResources）或壳没传\n" +
+        "       RUYIN_SKILLS_DIR（apps/shell/src/main.ts）。",
+    );
+    process.exit(1);
+  }
+  console.log(`[pack] bundled skills in the packaged app: ${bundled}`);
+}
+
+// 预置的 MCP 服务器真的起得来：守护进程在冒烟时真起一个 vendored 的 node 服务器
+// （Electron 当 Node 用）、握手、列工具。拉过就必须起得来；没拉过如实说。
+{
+  const line = /\[ruyin\] tools self-check: (ok \(([^,]+), (\d+) tool\(s\)\)|no vendored node server to try)/.exec(smokeOut);
+  if (!line) {
+    console.error("[pack] FAILED: 守护进程没有报预置工具自检（缺 \"[ruyin] tools self-check\" 这一行）");
+    process.exit(1);
+  }
+  if (skillPull && !line[1].startsWith("ok")) {
+    console.error("[pack] FAILED: 拉取跑过了，包里却没有一个能试的 vendored 服务器 —— 看 electron-builder.yml 的 resources/tools 与壳的 RUYIN_TOOLS_DIR");
+    process.exit(1);
+  }
+  console.log(`[pack] bundled tool server self-check: ${line[1]}`);
 }
 
 // 打包形态下主密钥必须由 DPAPI 保护。

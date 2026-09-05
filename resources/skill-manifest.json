@@ -1,0 +1,889 @@
+{
+  "version": 1,
+  "generatedAt": "2026-09-05",
+  "$comment": "技能与工具预置清单（ADR-018 §2.3，owner 2026-09-05 定三档）。每条来源仓钉死 commit；许可证是硬门槛（none 不允许）。ruyin 构建时按它拉取预置进安装包；Runos 按它注册台账（vxture-foundation/vxture-runos#14）。launch 为本机启动规格（node = 构建时 vendored 随包；uvx = 需本机 uv），2026-09-05 逐条核过包名 / 版本 / bin。人读版：docs/40-implementation/20-tools-skills-catalog-v1.md。",
+  "tiers": {
+    "default": "默认启用",
+    "installed-disabled": "装而不启用",
+    "runos-registered": "经 Runos 注册，不进本机（密钥在 Runos 保险库）"
+  },
+  "skills": [
+    {
+      "id": "opensensenova.sensenova-skills",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/OpenSenseNova/SenseNova-Skills",
+      "ref": "main",
+      "commit": "98a8bde28092fb8f33664154a0edeb4d9cdb352f",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 5377,
+      "tier": "default",
+      "include": [
+        "skills/**"
+      ],
+      "note": "中文办公主力：Excel 工作流 44、PPT 5、搜索 9、研究报告 6"
+    },
+    {
+      "id": "iofficeai.officecli",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/iOfficeAI/OfficeCLI",
+      "ref": "main",
+      "commit": "b94f3906fd52d450c64f8e40370e376b9e15079e",
+      "license": "Apache-2.0",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 29890,
+      "tier": "default",
+      "include": [
+        "skills/**"
+      ],
+      "note": "docx/xlsx/pptx/word-form 等 12 条；驱动 OfficeCLI 可执行程序（其作为工具进第二批）"
+    },
+    {
+      "id": "openai.skills",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/openai/skills",
+      "ref": "main",
+      "commit": "49f948faa9258a0c61caceaf225e179651397431",
+      "license": "Apache-2.0",
+      "licenseSource": "逐技能 LICENSE.txt（2026-09-05 核：pdf/playwright/playwright-interactive/screenshot/jupyter-notebook/transcribe/speech/define-goal 均 Apache-2.0）",
+      "stars": 25424,
+      "tier": "default",
+      "include": [
+        "skills/.curated/pdf",
+        "skills/.curated/playwright",
+        "skills/.curated/playwright-interactive",
+        "skills/.curated/screenshot",
+        "skills/.curated/jupyter-notebook",
+        "skills/.curated/transcribe",
+        "skills/.curated/speech",
+        "skills/.curated/define-goal"
+      ],
+      "note": "逐技能 Apache-2.0（LICENSE.txt 已核）；doc/slides 在仓里不存在"
+    },
+    {
+      "id": "anthropics.skills",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/anthropics/skills",
+      "ref": "main",
+      "commit": "41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f",
+      "license": "Apache-2.0",
+      "licenseSource": "逐技能 LICENSE.txt（2026-09-05 核：纳入的 13 条哈希一致均 Apache-2.0；docx/pdf/pptx/xlsx 为专有许可，已排除）",
+      "stars": 174333,
+      "tier": "default",
+      "include": [
+        "skills/webapp-testing",
+        "skills/mcp-builder",
+        "skills/skill-creator",
+        "skills/academy-guide",
+        "skills/brand-guidelines",
+        "skills/canvas-design",
+        "skills/claude-api",
+        "skills/discernment-nudge",
+        "skills/internal-comms",
+        "skills/slack-gif-creator",
+        "skills/theme-factory",
+        "skills/web-artifacts-builder",
+        "skills/algorithmic-art"
+      ],
+      "note": "只收 Apache-2.0 的 13 条；docx/pdf/pptx/xlsx 专有许可禁止分发，明确排除；doc-coauthoring/frontend-design 许可证未核，排除"
+    },
+    {
+      "id": "panniantong.agent-reach",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/Panniantong/Agent-Reach",
+      "ref": "main",
+      "commit": "da5044d26fc6adddb6554d5679c94ac22e76e428",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 78121,
+      "tier": "default",
+      "include": [
+        "**"
+      ],
+      "note": "17 站多平台搜索，含中文平台"
+    },
+    {
+      "id": "mvanhorn.last30days-skill",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/mvanhorn/last30days-skill",
+      "ref": "main",
+      "commit": "56ba5ace27e4697aedc60aa0b1e1bfdcd592ff20",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 61281,
+      "tier": "default",
+      "include": [
+        "**"
+      ],
+      "note": "跨 Reddit/X/YouTube/HN 的话题研究"
+    },
+    {
+      "id": "johell1ns.browser-search",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/Johell1NS/browser-search",
+      "ref": "master",
+      "commit": "398768aea1242506efdb8a3123b3a092602a6af0",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 513,
+      "tier": "default",
+      "include": [
+        "**"
+      ],
+      "note": "SearXNG 搜索 + 浏览，无需密钥"
+    },
+    {
+      "id": "xberg-io.xberg",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/xberg-io/xberg",
+      "ref": "main",
+      "commit": "d98f848f51e26c26814ae0d38954acb8a4626be9",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 9267,
+      "tier": "default",
+      "include": [
+        "plugin/skills/xberg"
+      ],
+      "note": "101+ 格式抽文本/表格/元数据"
+    },
+    {
+      "id": "deusyu.translate-book",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/deusyu/translate-book",
+      "ref": "main",
+      "commit": "5d07e733fa9318ff9c718085191c0c2243f51383",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 1543,
+      "tier": "default",
+      "include": [
+        "**"
+      ],
+      "note": "翻译整本 PDF/DOCX/EPUB"
+    },
+    {
+      "id": "lackeyjb.playwright-skill",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/lackeyjb/playwright-skill",
+      "ref": "main",
+      "commit": "dd47a6a023e249eb1b36e9e943eab89d0900865d",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 3102,
+      "tier": "default",
+      "include": [
+        "**"
+      ],
+      "note": "通用 Playwright 自动化"
+    },
+    {
+      "id": "sandbaseai.sandbase-skills",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/sandbaseai/sandbase-skills",
+      "ref": "main",
+      "commit": "84660c4a41de55dced84047a89d27913f0da7314",
+      "license": "Apache-2.0",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 126,
+      "tier": "installed-disabled",
+      "include": [
+        "research/**",
+        "marketing/**",
+        "agent-plugin/skills/**"
+      ],
+      "note": "99 条研究/营销技能，多数需外部 API 密钥 —— 密钥归 Runos"
+    },
+    {
+      "id": "sanjay3290.ai-skills",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/sanjay3290/ai-skills",
+      "ref": "main",
+      "commit": "361969210b1002034be70de60a041a25732b098a",
+      "license": "Apache-2.0",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 417,
+      "tier": "installed-disabled",
+      "include": [
+        "**"
+      ],
+      "note": "24 条 Google/Notion/邮件类，多需授权"
+    },
+    {
+      "id": "serpapi.skills",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/serpapi/skills",
+      "ref": "master",
+      "commit": "046af39d11d6b3fa91662e80e28fd6d6e4095448",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 7,
+      "tier": "installed-disabled",
+      "include": [
+        "**"
+      ],
+      "note": "serpapi-web-search 需密钥"
+    },
+    {
+      "id": "microsoft.skills",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/microsoft/skills",
+      "ref": "main",
+      "commit": "02e0b2f852b39ea00c43283f999b83fc12079273",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 2992,
+      "tier": "installed-disabled",
+      "include": [
+        ".github/skills/microsoft-docs",
+        ".github/plugins/deep-wiki/skills/wiki-researcher"
+      ],
+      "note": "绑 Azure 的部分不收"
+    },
+    {
+      "id": "lambdatest.agent-skills",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/LambdaTest/agent-skills",
+      "ref": "main",
+      "commit": "0491a3a29aa18558d2c3c64ff09367adb976c56f",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 366,
+      "tier": "installed-disabled",
+      "include": [
+        "playwright-skill",
+        "puppeteer-skill"
+      ],
+      "note": "测试向的浏览器自动化模式"
+    },
+    {
+      "id": "testdino-hq.playwright-skill",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/testdino-hq/playwright-skill",
+      "ref": "main",
+      "commit": "d3be9ca4d7303e2aee3eba4842963abf573117b0",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 359,
+      "tier": "installed-disabled",
+      "include": [
+        "**"
+      ],
+      "note": "70+ Playwright 模式"
+    },
+    {
+      "id": "browser-act.skills",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/browser-act/skills",
+      "ref": "main",
+      "commit": "11c057b03f92101642cadc9f840564574120d184",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 5614,
+      "tier": "installed-disabled",
+      "include": [
+        "browser-act"
+      ],
+      "note": "带反爬与人工接管的浏览器自动化 CLI"
+    },
+    {
+      "id": "yusufkaraaslan.skill_seekers",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/yusufkaraaslan/Skill_Seekers",
+      "ref": "development",
+      "commit": "f3972efa33fa79634b96936acf1fac321cdcf7c1",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 14916,
+      "tier": "installed-disabled",
+      "include": [
+        "**"
+      ],
+      "note": "把文档站/仓库/PDF 转成技能（造技能的技能）"
+    },
+    {
+      "id": "joeseesun.qiaomu-anything-to-notebooklm",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/joeseesun/qiaomu-anything-to-notebooklm",
+      "ref": "main",
+      "commit": "cea6ceee8cdcd01a573af5ae75c2d3cffc20650b",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 5911,
+      "tier": "installed-disabled",
+      "include": [
+        "**"
+      ],
+      "note": "多源内容整理"
+    },
+    {
+      "id": "fokkyp.softwarecopyright-skill",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/Fokkyp/SoftwareCopyright-Skill",
+      "ref": "main",
+      "commit": "dfc15dca6555b74c8e0da28963c125d6a1e8e001",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 5226,
+      "tier": "installed-disabled",
+      "include": [
+        "**"
+      ],
+      "note": "生成全套 .docx 申请材料 —— docx 模板生成范例"
+    },
+    {
+      "id": "the-shy123456.thesis-docx",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/the-shy123456/thesis-docx",
+      "ref": "main",
+      "commit": "df5ad2e8c5e786ecf4fcfd8023b6ed4f789a38dc",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 455,
+      "tier": "installed-disabled",
+      "include": [
+        "**"
+      ],
+      "note": "论文 docx"
+    },
+    {
+      "id": "nexu-io.codex-slides",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/nexu-io/codex-slides",
+      "ref": "master",
+      "commit": "dbc2a5992e937760e9ce8e587e11729f970881cb",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 869,
+      "tier": "installed-disabled",
+      "include": [
+        "**"
+      ],
+      "note": "幻灯片工作室"
+    },
+    {
+      "id": "obra.superpowers",
+      "kind": "skill-source",
+      "format": "agent-skills",
+      "repo": "https://github.com/obra/superpowers",
+      "ref": "main",
+      "commit": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 281931,
+      "tier": "installed-disabled",
+      "include": [
+        "skills/writing-skills",
+        "skills/writing-plans"
+      ],
+      "note": "写技能用"
+    }
+  ],
+  "servers": [
+    {
+      "id": "microsoft.playwright-mcp",
+      "kind": "mcp-server",
+      "repo": "https://github.com/microsoft/playwright-mcp",
+      "ref": "main",
+      "commit": "8a13ef8e9f7385a0f89477922127f31cbfde9761",
+      "license": "Apache-2.0",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 36814,
+      "tier": "default",
+      "subpath": null,
+      "needsKey": false,
+      "launch": {
+        "runtime": "node",
+        "package": "@playwright/mcp",
+        "version": "0.0.80",
+        "bin": "cli.js",
+        "args": [
+          "--headless"
+        ],
+        "note": "需要 Chromium：首次用前 npx playwright install chromium（不随包，~150 MB）"
+      },
+      "note": "~70 个 browser_* 工具"
+    },
+    {
+      "id": "microsoft.markitdown",
+      "kind": "mcp-server",
+      "repo": "https://github.com/microsoft/markitdown",
+      "ref": "main",
+      "commit": "4459ed01155f8e1a7ac007f441d34f0422746191",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 178253,
+      "tier": "default",
+      "subpath": "packages/markitdown-mcp",
+      "needsKey": false,
+      "launch": {
+        "runtime": "uvx",
+        "package": "markitdown-mcp",
+        "version": "0.0.1a4",
+        "bin": "markitdown-mcp",
+        "args": []
+      },
+      "note": "Office/PDF/图片 → Markdown，官方 MCP 包"
+    },
+    {
+      "id": "docling-project.docling-mcp",
+      "kind": "mcp-server",
+      "repo": "https://github.com/docling-project/docling-mcp",
+      "ref": "main",
+      "commit": "e08aae7fbb536c77c157dba2350adb102b0f101b",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 732,
+      "tier": "default",
+      "subpath": null,
+      "needsKey": false,
+      "launch": {
+        "runtime": "uvx",
+        "package": "docling-mcp",
+        "version": "3.2.0",
+        "bin": "docling-mcp-server",
+        "args": []
+      },
+      "note": "版式感知的文档解析"
+    },
+    {
+      "id": "haris-musa.excel-mcp-server",
+      "kind": "mcp-server",
+      "repo": "https://github.com/haris-musa/excel-mcp-server",
+      "ref": "main",
+      "commit": "f51340ecd5778952405044b203d3a2d4c8a46833",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 4156,
+      "tier": "default",
+      "subpath": null,
+      "needsKey": false,
+      "launch": {
+        "runtime": "uvx",
+        "package": "excel-mcp-server",
+        "version": "0.1.8",
+        "bin": "excel-mcp-server",
+        "args": [
+          "stdio"
+        ]
+      },
+      "note": "xlsx 读写：公式、格式、图表、透视"
+    },
+    {
+      "id": "vivekvells.mcp-pandoc",
+      "kind": "mcp-server",
+      "repo": "https://github.com/vivekVells/mcp-pandoc",
+      "ref": "main",
+      "commit": "7df0519cd7d976d7c3be978852f6178da5a37035",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 579,
+      "tier": "default",
+      "subpath": null,
+      "needsKey": false,
+      "launch": {
+        "runtime": "uvx",
+        "package": "mcp-pandoc",
+        "version": "0.11.1",
+        "bin": "mcp-pandoc",
+        "args": [],
+        "requiresBin": "pandoc",
+        "note": "还要本机有 pandoc"
+      },
+      "note": "pandoc 转换；docx/pptx 离线生成缺口先走它"
+    },
+    {
+      "id": "nickclyde.duckduckgo-mcp-server",
+      "kind": "mcp-server",
+      "repo": "https://github.com/nickclyde/duckduckgo-mcp-server",
+      "ref": "main",
+      "commit": "8182af3f2295017ca90527a924f48147fbf18d5b",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 1455,
+      "tier": "default",
+      "subpath": null,
+      "needsKey": false,
+      "launch": {
+        "runtime": "uvx",
+        "package": "duckduckgo-mcp-server",
+        "version": "0.7.0",
+        "bin": "duckduckgo-mcp-server",
+        "args": []
+      },
+      "note": "无密钥搜索"
+    },
+    {
+      "id": "ihor-sokoliuk.mcp-searxng",
+      "kind": "mcp-server",
+      "repo": "https://github.com/ihor-sokoliuk/mcp-searxng",
+      "ref": "main",
+      "commit": "e33a3c815293a283221b2a298e7dc3996acab04d",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 1201,
+      "tier": "default",
+      "subpath": null,
+      "needsKey": false,
+      "launch": {
+        "runtime": "node",
+        "package": "mcp-searxng",
+        "version": "2.1.0",
+        "bin": "dist/cli.js",
+        "args": [],
+        "requiresEnv": [
+          "SEARXNG_URL"
+        ],
+        "note": "要指向一个 SearXNG 实例（SEARXNG_URL）"
+      },
+      "note": "自托管 SearXNG，企业内可控"
+    },
+    {
+      "id": "aas-ee.open-websearch",
+      "kind": "mcp-server",
+      "repo": "https://github.com/Aas-ee/open-webSearch",
+      "ref": "main",
+      "commit": "829b2d9f5c18c579ad93d30f221aea3a9d8df190",
+      "license": "Apache-2.0",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 1787,
+      "tier": "default",
+      "subpath": null,
+      "needsKey": false,
+      "launch": {
+        "runtime": "node",
+        "package": "open-websearch",
+        "version": "2.1.11",
+        "bin": "build/index.js",
+        "args": []
+      },
+      "note": "多引擎，无密钥"
+    },
+    {
+      "id": "zcaceres.fetch-mcp",
+      "kind": "mcp-server",
+      "repo": "https://github.com/zcaceres/fetch-mcp",
+      "ref": "main",
+      "commit": "1ddb1a59cb09a2d38e759f2d7a97829680cbe514",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 821,
+      "tier": "default",
+      "subpath": null,
+      "needsKey": false,
+      "launch": null,
+      "note": "HTTP 抓取",
+      "launchNote": "npm 上的 fetch-mcp 归属未核实（与仓库作者不一定同一人），暂不启动"
+    },
+    {
+      "id": "modelcontextprotocol.servers",
+      "kind": "mcp-server",
+      "repo": "https://github.com/modelcontextprotocol/servers",
+      "ref": "main",
+      "commit": "d73f99efbfd40c3aa1b61e88728b3d49fb52608f",
+      "license": "MIT OR Apache-2.0",
+      "licenseSource": "根 LICENSE（2026-09-05 核）：项目处于 MIT → Apache-2.0 过渡期，两者皆宽松；src/filesystem package.json 写 SEE LICENSE IN LICENSE",
+      "stars": 90088,
+      "tier": "default",
+      "subpath": "src/filesystem",
+      "needsKey": false,
+      "launch": null,
+      "note": "官方参考实现（仓库级许可证 NOASSERTION，逐包核对后再进）",
+      "launchNote": "官方参考实现；filesystem 服务器要以允许目录作参数，且 Ruyin 已有自己的文件工具 —— 暂不启动"
+    },
+    {
+      "id": "executeautomation.mcp-playwright",
+      "kind": "mcp-server",
+      "repo": "https://github.com/executeautomation/mcp-playwright",
+      "ref": "main",
+      "commit": "2349c2891e7c499c8c07b7d78c7f3fb4c797a1da",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 5642,
+      "tier": "installed-disabled",
+      "subpath": null,
+      "needsKey": false,
+      "launch": null,
+      "note": "Playwright 备选",
+      "launchNote": "vendored 后 134 MB（自带 playwright），不随包；第二批按需下载"
+    },
+    {
+      "id": "opendatalab.mineru-document-explorer",
+      "kind": "mcp-server",
+      "repo": "https://github.com/opendatalab/MinerU-Document-Explorer",
+      "ref": "main",
+      "commit": "a7e9c6cc25b7edbf4ebd35aea8e270523a8a3e40",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 631,
+      "tier": "installed-disabled",
+      "subpath": null,
+      "needsKey": false,
+      "launch": null,
+      "note": "文档索引与检索（中文强）",
+      "launchNote": "PyPI 无同名包，发行形态未核实"
+    },
+    {
+      "id": "korigamik.markitdown_mcp_server",
+      "kind": "mcp-server",
+      "repo": "https://github.com/KorigamiK/markitdown_mcp_server",
+      "ref": "main",
+      "commit": "5cf1f29034a35d68888b6e9b5fd46831cb30befd",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 87,
+      "tier": "installed-disabled",
+      "subpath": null,
+      "needsKey": false,
+      "launch": null,
+      "note": "markitdown 另一包装",
+      "launchNote": "未发布到 PyPI / npm，需从仓库构建"
+    },
+    {
+      "id": "negokaz.excel-mcp-server",
+      "kind": "mcp-server",
+      "repo": "https://github.com/negokaz/excel-mcp-server",
+      "ref": "main",
+      "commit": "1ff4340573c3e421920282da1602afd89f3bb282",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 1021,
+      "tier": "installed-disabled",
+      "subpath": null,
+      "needsKey": false,
+      "launch": null,
+      "note": "xlsx 读写备选",
+      "launchNote": "vendored 后 100 MB（launcher 附各平台二进制），不随包；第二批按需下载"
+    },
+    {
+      "id": "sbroenne.mcp-server-excel",
+      "kind": "mcp-server",
+      "repo": "https://github.com/sbroenne/mcp-server-excel",
+      "ref": "main",
+      "commit": "9c2d5607493adca4a098527922f9769d9de74644",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 660,
+      "tier": "installed-disabled",
+      "subpath": null,
+      "needsKey": false,
+      "launch": null,
+      "note": "驱动真实 Excel（Windows）",
+      "launchNote": ".NET 发行，Windows 下驱动真实 Excel；随包打法未定"
+    },
+    {
+      "id": "ykarapazar.word-mcp-live",
+      "kind": "mcp-server",
+      "repo": "https://github.com/ykarapazar/word-mcp-live",
+      "ref": "main",
+      "commit": "c6c76179f66b27846d8f6a822a683e144d9288cb",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 202,
+      "tier": "installed-disabled",
+      "subpath": null,
+      "needsKey": false,
+      "launch": null,
+      "note": "编辑打开中的 Word 文档",
+      "launchNote": "发行形态未核实"
+    },
+    {
+      "id": "yb2460.harness-anything",
+      "kind": "mcp-server",
+      "repo": "https://github.com/yb2460/harness-anything",
+      "ref": "master",
+      "commit": "dcb3e516dee1e7b4c83e1909a07062a0bb8dea0a",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 1678,
+      "tier": "installed-disabled",
+      "subpath": null,
+      "needsKey": false,
+      "launch": null,
+      "note": "WPS/MS Office 控制 hub",
+      "launchNote": "发行形态未核实"
+    },
+    {
+      "id": "anysearch-ai.anysearch-mcp-server",
+      "kind": "mcp-server",
+      "repo": "https://github.com/anysearch-ai/anysearch-mcp-server",
+      "ref": "main",
+      "commit": "f4ca4d4941e4c122be6522c1afc76012f1669654",
+      "license": "Apache-2.0",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 1840,
+      "tier": "installed-disabled",
+      "subpath": null,
+      "needsKey": false,
+      "launch": null,
+      "note": "统一实时搜索（部分需密钥）",
+      "launchNote": "npm 无同名包，发行形态未核实"
+    },
+    {
+      "id": "yokingma.one-search-mcp",
+      "kind": "mcp-server",
+      "repo": "https://github.com/yokingma/one-search-mcp",
+      "ref": "main",
+      "commit": "16eb424608888949165f6a668d476cbdf79afc20",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 139,
+      "tier": "installed-disabled",
+      "subpath": null,
+      "needsKey": false,
+      "launch": null,
+      "note": "搜索 + 抓取（部分需密钥）",
+      "launchNote": "vendored 后 95 MB（自带浏览器驱动），不随包；第二批按需下载"
+    },
+    {
+      "id": "tavily-ai.tavily-mcp",
+      "kind": "mcp-server",
+      "repo": "https://github.com/tavily-ai/tavily-mcp",
+      "ref": "main",
+      "commit": "248dc9e3e385305ad3281120284ff662af4b5940",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 2370,
+      "tier": "runos-registered",
+      "subpath": null,
+      "needsKey": true,
+      "launch": null,
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
+    },
+    {
+      "id": "exa-labs.exa-mcp-server",
+      "kind": "mcp-server",
+      "repo": "https://github.com/exa-labs/exa-mcp-server",
+      "ref": "main",
+      "commit": "15ffb50519e719dc791cdc750ce5ed1934c0a1ed",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 4971,
+      "tier": "runos-registered",
+      "subpath": null,
+      "needsKey": true,
+      "launch": null,
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
+    },
+    {
+      "id": "brave.brave-search-mcp-server",
+      "kind": "mcp-server",
+      "repo": "https://github.com/brave/brave-search-mcp-server",
+      "ref": "main",
+      "commit": "2d15f633f7076791f4e9397429b09fcc79ae8609",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 1422,
+      "tier": "runos-registered",
+      "subpath": null,
+      "needsKey": true,
+      "launch": null,
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
+    },
+    {
+      "id": "firecrawl.firecrawl-mcp-server",
+      "kind": "mcp-server",
+      "repo": "https://github.com/firecrawl/firecrawl-mcp-server",
+      "ref": "main",
+      "commit": "518e9299817aca118f0b3f5dded4c5fe7889d24e",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 7399,
+      "tier": "runos-registered",
+      "subpath": null,
+      "needsKey": true,
+      "launch": null,
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
+    },
+    {
+      "id": "leehanchung.bing-search-mcp",
+      "kind": "mcp-server",
+      "repo": "https://github.com/leehanchung/bing-search-mcp",
+      "ref": "main",
+      "commit": "887097adcc0c2b9de67843bed072245afc05dd70",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 79,
+      "tier": "runos-registered",
+      "subpath": null,
+      "needsKey": true,
+      "launch": null,
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
+    },
+    {
+      "id": "jina-ai.mcp",
+      "kind": "mcp-server",
+      "repo": "https://github.com/jina-ai/mcp",
+      "ref": "main",
+      "commit": "96147b1db9393d5b40726838d1305158896c8dbd",
+      "license": "Apache-2.0",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 838,
+      "tier": "runos-registered",
+      "subpath": null,
+      "needsKey": true,
+      "launch": null,
+      "note": "远程服务，需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
+    },
+    {
+      "id": "apify.actors-mcp-server",
+      "kind": "mcp-server",
+      "repo": "https://github.com/apify/actors-mcp-server",
+      "ref": "master",
+      "commit": "4bf6ecb79421765b97d611f2c6e2b027845cf43b",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 6024,
+      "tier": "runos-registered",
+      "subpath": null,
+      "needsKey": true,
+      "launch": null,
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
+    },
+    {
+      "id": "evilran.baidu-mcp-server",
+      "kind": "mcp-server",
+      "repo": "https://github.com/Evilran/baidu-mcp-server",
+      "ref": "main",
+      "commit": "728492b5a703078df2b6a77ff0f6ccad78cbdc87",
+      "license": "MIT",
+      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
+      "stars": 28,
+      "tier": "runos-registered",
+      "subpath": null,
+      "needsKey": true,
+      "launch": null,
+      "note": "百度搜索（社区小仓，弱）；需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
+    }
+  ]
+}

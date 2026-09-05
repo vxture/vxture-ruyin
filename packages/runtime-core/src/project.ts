@@ -416,6 +416,7 @@ export class ProjectRuntime {
       connectors: this.ports.connectors ?? new Map(),
       ranker: this.ports.ranker,
       tools: this.ports.tools,
+      skills: this.ports.skills,
       isCancelled: this.ports.isCancelled,
     });
   }

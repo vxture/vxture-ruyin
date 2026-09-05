@@ -33,7 +33,7 @@ function projectView(over: Partial<ProjectView> = {}): ProjectView {
   return {
     meta: {
       id: "prj_1",
-      productId: "vxture.bid",
+      productId: "bidproposal",
       productVersion: "1.0.0",
       name: "投标项目",
       projectType: "project",
@@ -41,7 +41,7 @@ function projectView(over: Partial<ProjectView> = {}): ProjectView {
       workspaceId: "wsp_1",
     },
     businessState: "drafting",
-    product: { id: "vxture.bid", name: "标书编写", version: "1.0.0" },
+    product: { id: "bidproposal", name: "标书编写", version: "1.0.0" },
     tasks: [],
     states: {
       object: "bid",

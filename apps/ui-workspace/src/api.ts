@@ -275,13 +275,67 @@ export interface ConnectorView {
   transport: "stdio";
   command: string;
   args: string[];
-  source: "lan" | "private";
+  /** bundled = 随安装包预置的 MCP 服务器（能力平台里的「工具」），不能卸载只能停用。 */
+  source: "lan" | "private" | "bundled";
   installedAt: string;
   /** 本机生效态（通则 B-3）。`stashed` = 存下来但没启用（添加时没连上）。 */
   state: "active" | "stashed";
   health: { ok: boolean; detail?: string; checkedAt: string };
   /** 运行中的服务器暴露的工具名；契约里 provider: connector 的工具靠同名接上。 */
   tools: string[];
+  /** 预置服务器才有：怎么起、现在为什么起不了。 */
+  bundled?: { runtime: string; blocked?: string; note?: string };
+}
+
+/** 技能来源的四层（ADR-018 §2.3），近者优先。 */
+export type SkillLayer = "bundled" | "distributed" | "user" | "project";
+
+/** 技能登记册的一条。源头：apps/local-host/src/skill-registry.ts 的 SkillView（守卫对字段）。 */
+export interface SkillView {
+  name: string;
+  description: string;
+  layer: SkillLayer;
+  /** 预置：清单来源 id；产品分发：产品 id；用户 / 项目：目录名。 */
+  source: string;
+  version?: string;
+  license?: string;
+  /** 预置三档之一（default / installed-disabled / runos-registered）。 */
+  tier?: string;
+  enabled: boolean;
+  /** 被更近的一层同名技能盖住：那一条生效，这一条不生效。 */
+  shadowedBy?: SkillLayer;
+  /** 带 scripts/：本地不跑（TD-005）。 */
+  hasScripts: boolean;
+  allowedTools?: string[];
+  dir: string;
+}
+
+export interface SkillLayerInfo {
+  layer: SkillLayer;
+  dir?: string;
+  present: boolean;
+  count: number;
+}
+
+export interface SkillListing {
+  items: SkillView[];
+  layers: SkillLayerInfo[];
+  scannedAt: string;
+}
+
+/** 工具登记册的一条。源头：apps/local-host/src/tool-registry.ts 的 ToolView（守卫对字段）。 */
+export interface ToolView {
+  id: string;
+  kind: "builtin" | "connector" | "mcp-server";
+  source: string;
+  /** registered = 预置清单登记了但本机还起不来（TD-042）；runos = 经 Runos 注册，本机不装。 */
+  status: "available" | "unavailable" | "registered" | "runos";
+  detail?: string;
+  license?: string;
+  tier?: string;
+  tools?: string[];
+  /** mcp-server：有本机启动规格（能启动 / 能停），还是只登记。 */
+  launchable?: boolean;
 }
 
 export interface Binding {
@@ -624,6 +678,24 @@ export class Api {
   installFromRegistry = (id: string, version: string) =>
     this.call<InstalledPackage & { from: "registry" }>("/registry/install", "POST", { id, version });
   connectors = () => this.call<{ items: ConnectorView[] }>("/connectors");
+  /** 能力平台（ADR-018）：技能四层清单；给了 `project` 就把项目层也算进来。 */
+  skills = (project?: string) =>
+    this.call<SkillListing>(`/skills${project ? `?project=${encodeURIComponent(project)}` : ""}`);
+  /** 一条技能的全文（SKILL.md 原文）与资源清单。 */
+  skill = (name: string) =>
+    this.call<{ name: string; description: string; layer: SkillLayer; version?: string; content: string; resources: string[] }>(
+      `/skills/${encodeURIComponent(name)}`,
+    );
+  /** 通则 B-3：动作是 enable / disable，状态是字段。键是 (layer, source, name)：同层两个来源可能带同名技能。 */
+  setSkillEnabled = (target: { name: string; layer: SkillLayer; source: string }, enabled: boolean) =>
+    this.call<SkillView>(`/skills/${encodeURIComponent(target.name)}/${enabled ? "enable" : "disable"}`, "POST", {
+      layer: target.layer,
+      source: target.source,
+    });
+  /** 重扫本机各层，并向每个已装产品的能力面对一次分发目录。 */
+  refreshSkills = () => this.call<SkillListing & { distributed: unknown }>("/skills/refresh", "POST");
+  /** 工具登记册：内建 + 连接器暴露的 + 预置清单登记的 MCP 服务器。 */
+  tools = () => this.call<{ items: ToolView[] }>("/tools");
   installConnector = (input: {
     id: string;
     command: string;
@@ -644,6 +716,8 @@ export class Api {
       input,
     );
   /** 启用一个暂存的连接器：守护进程会重新试一次，通不过仍是暂存。 */
+  /** 停用：停进程、从内核名单拿掉；用户装的转暂存，预置的记为未启用。 */
+  deactivateConnector = (id: string) => this.call<ConnectorView>(`/connectors/${encodeURIComponent(id)}/deactivate`, "POST");
   activateConnector = (id: string) =>
     this.call<ConnectorView>(`/connectors/${id}/activate`, "POST");
   removeConnector = (id: string) =>

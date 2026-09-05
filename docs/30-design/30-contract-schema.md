@@ -42,7 +42,7 @@ Verification 作为 Task Definition 的子结构进入 MVP；
 |---|---|---|---|
 | D1 | 契约格式 | YAML（规范用 JSON Schema 定义） | 人可读、可评审；JSON Schema 生态成熟，两个运行时可用同一校验器 |
 | D2 | 文件形态 | 单一 manifest：`ruyin.product.yaml` | 单一事实源；包内其它文件由 manifest 引用 |
-| D3 | 产品 ID | 命名空间式 `vxture.bid` | 天然隔离，支持未来第三方 publisher |
+| D3 | 产品 ID | 命名空间式 `bidproposal` | 天然隔离，支持未来第三方 publisher |
 | D4 | 版本模型 | 契约 schema 版本（`contract`）与产品版本（`product.version`）分离 | 契约规范演进不强迫产品发版，反之亦然 |
 | D5 | 引用完整性 | 契约内所有交叉引用必须可解析 | 加载期失败优于运行期失败 |
 | D6 | 数据分类入契约 | 每个 Context Type 必须标注 data class 与 sensitivity | 同步策略与推理传输策略需要静态依据（03 §19.1、02 §15.2） |
@@ -90,8 +90,8 @@ L4 签名校验     包完整性与发布者身份（见 §18）
 
 ```yaml
 product:
-  id: vxture.bid          # 必填。命名空间式，全局唯一，[a-z0-9.-]
-  name: 标书编写           # 必填。展示名
+  id: bidproposal          # 必填。= 平台产品目录的 product_code（订阅判定、能力面路径、act.sub 都按它对账；2026-09-05 起不再用 vxture. 命名空间）
+  name: 标书方案智能体           # 必填。展示名
   version: 1.0.0          # 必填。SemVer
   publisher: vxture       # 必填。发布者 ID，必须与包签名身份一致（R12）
   runtime:
@@ -257,6 +257,12 @@ tools:
 
 ---
 
+> **技能的两个内建工具（2026-09-05，ADR-018 §2.4）。** 声明了 `tasks[].skills` 的任务
+> 自动获得 `use_skill`（回 SKILL.md 原文 + 资源清单）与 `read_skill_resource`（只读
+> `references/` `assets/`）两个工具，**不写进 `tools[]`**：它们随技能声明而来，没有
+> 技能的任务没有它们。两个都是 `local_read` / `allow`，与别的工具一样过 Tool Gate，
+> 契约的 `permissions.local_read` 照样压在上面。`scripts/` 本地不跑也不读（TD-005）。
+
 # 12. tasks —— Task Definition
 
 对齐 02 §9.1 / 03 §16：
@@ -279,6 +285,8 @@ tasks:
       - search_knowledge
       - read_file
       - write_document
+    skills:                     # 可选（ADR-018 §2.5）：Agent Skills 名，kebab ≤64；任务内唯一且须有 capability（R16）
+      - officecli-word-form     # 在不在本机由 Harness 启动前判，缺的按名拒绝（同「宿主不实现的工具」）
     verification:
       - id: requirement_coverage
         kind: ai_assisted       # automated | ai_assisted | human
@@ -365,6 +373,7 @@ sync:
 | R13 | `input_schema.required` 中每个名字均已声明；`local_read`/`local_write`/`export` 类工具至少标注一个 `x-ruyin-ref: path` 参数 | L2 |
 | R14 | 声明了 tools 的 task 必须至少声明一条 capability——工具只在能力回合内被调用，`capabilities: []` 的任务一个回合都不跑，声明的工具永远调不到 | L2 |
 | R15 | `provider: connector` 的工具 category 只能是 `query` 或 `external_send`——其余类别靠路径参数过目录授权（连接器工具没有路径可查）或是模型自己的产出 | L1 |
+| R16 | `tasks[].skills` 在任务内唯一；声明了 skills 的 task 必须至少一条 capability（技能在能力回合里被 `use_skill` 打开）。名字格式（kebab、≤64）是 L1 pattern；**在不在本机清单里是 L3**：登记册按机器、按项目，lint 看不见，Harness 启动前查并按名拒绝（ADR-018） | L1 / L2 / L3 |
 
 ---
 
@@ -376,8 +385,8 @@ sync:
 contract: "0.1"
 
 product:
-  id: vxture.bid
-  name: 标书编写
+  id: bidproposal
+  name: 标书方案智能体
   version: 1.0.0
   publisher: vxture
   runtime:

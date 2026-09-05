@@ -12,7 +12,7 @@
  * 它不依赖任何测试框架 —— 返回结构化结果，各宿主用自己的 runner 包一层。
  * 依赖 node:test 就等于宣布只有 Node 宿主能验一致性，而那正好否定了它的用途。
  *
- * **它也不依赖任何具体产品。** 契约由调用方给（本仓用 products/bid 这个夹具），
+ * **它也不依赖任何具体产品。** 契约由调用方给（本仓用 products/bidproposal 这个夹具），
  * 检查断言的全是契约无关的语义：状态序列、闸门决策、检查点种类、审计顺序、
  * 恢复语义、验证顺序、硬底线。
  */
@@ -37,7 +37,7 @@ export interface ConformanceCheck {
 export interface ConformanceInput {
   /** 每次检查都要一套干净的 ports —— 检查之间不共享状态。 */
   makePorts: () => Promise<RuntimePorts> | RuntimePorts;
-  /** 被验的契约。本仓用 products/bid 夹具；任何合法契约都应当通过。 */
+  /** 被验的契约。本仓用 products/bidproposal 夹具；任何合法契约都应当通过。 */
   contract: RuntimeContract;
   /** 用完一套 ports 后的清理（关库、删临时目录）。 */
   dispose?: (ports: RuntimePorts) => Promise<void> | void;

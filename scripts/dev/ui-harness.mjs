@@ -11,7 +11,7 @@
  * 用法：pnpm dev:ui —— 它会打印一个带令牌的地址，浏览器打开即可。
  * 前置：先 pnpm -r build（它读的是各包的 dist）。
  */
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -38,6 +38,9 @@ const { FtsRanker, reindexBinding, searchContext } = await import(
 const { LocalToolExecutor } = await import(`${ROOT}/apps/local-host/dist/tool-executor.js`);
 const { EventBus } = await import(`${ROOT}/apps/local-host/dist/events.js`);
 const { ConnectorRegistry } = await import(`${ROOT}/apps/local-host/dist/connector-registry.js`);
+const { SkillRegistry } = await import(`${ROOT}/apps/local-host/dist/skill-registry.js`);
+const { ToolRegistryView } = await import(`${ROOT}/apps/local-host/dist/tool-registry.js`);
+const { BundledToolServers } = await import(`${ROOT}/apps/local-host/dist/tool-servers.js`);
 const { readFileSync } = await import("node:fs");
 
 const PORT = Number(process.env.PORT ?? 17470);
@@ -59,13 +62,39 @@ const storage = new SqliteStoragePort(dataDir, await KeyManager.open(dataDir));
 // 观察台允许装未签名连接器（它本来就只用桩数据、只在本机）。要试的话，dist 里有
 // 一个假的 MCP 服务器：命令 node，参数 apps/local-host/dist/fake-mcp-server.js。
 const connectorLookup = new Map([["local-fs", new LocalFsConnector()]]);
+// 预置的 MCP 服务器（pnpm tools:pull 才有）：观察台里能真的启动 / 停止。
+const bundledTools = new BundledToolServers({
+  toolsDir: `${repo}/resources/tools`,
+  dataDir,
+  log: (l) => console.error(l),
+});
 const connectorRegistry = new ConnectorRegistry(dataDir, connectorLookup, {
   allowUnsigned: true,
   log: (l) => console.error(l),
+  bundled: bundledTools,
 });
 const executor = new LocalToolExecutor((pid, q, scope, limit) =>
   searchContext(storage, pid, q, scope, limit),
 );
+// 能力平台（ADR-018）：预置层读仓内 resources/skills（先 pnpm skills:pull 才有）。
+// 样例契约声明了预置层的技能；开发机没拉过（pnpm skills:pull）时在用户层放几份桩，
+// 否则观察台一启动任务就被按名拒绝。桩只有前言，看得出是桩。
+const bid = parseContract(readFileSync(`${repo}/products/bidproposal/ruyin.product.yaml`, "utf8"));
+if (!existsSync(`${repo}/resources/skills/index.json`)) {
+  for (const task of bid.tasks) {
+    for (const name of task.skills ?? []) {
+      const dir = join(dataDir, "skills", "user", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: 观察台桩（真的在预置层，先 pnpm skills:pull）\n---\n# ${name}\n`);
+    }
+  }
+  console.error("[uiharness] resources/skills not pulled - stub skills placed in the user layer");
+}
+const skillRegistry = new SkillRegistry({
+  bundledDir: `${repo}/resources/skills`,
+  dataDir,
+  log: (l) => console.error(l),
+});
 const runtime = new ProjectRuntime({
   storage,
   clock: nodeClock,
@@ -75,9 +104,9 @@ const runtime = new ProjectRuntime({
   connectors: connectorLookup,
   ranker: new FtsRanker(storage),
   tools: executor,
+  skills: skillRegistry,
 });
 
-const bid = parseContract(readFileSync(`${repo}/products/bid/ruyin.product.yaml`, "utf8"));
 const names = ["某储能电站 EPC 投标", "城市轨道信号系统投标", "数据中心机电总包投标"];
 let first;
 for (const name of names) {
@@ -127,6 +156,13 @@ const server = createLocalApi({
   platform,
   reindex: (pid, b) => reindexBinding(storage, pid, b, connectorLookup.get(b.connector)),
   connectors: connectorRegistry,
+  skills: skillRegistry,
+  tools: new ToolRegistryView({
+    supportsBuiltin: (id) => executor.supports(id),
+    hasSkills: () => true,
+    connectors: () => connectorRegistry.list(),
+    bundledServers: () => bundledTools.list(),
+  }),
   // 主题中转：界面上报，壳取值给窗口按钮上色（观察台里没有壳，但端点要在，
   // 否则那条通路在这儿看不见）。
   chromeTheme: {

@@ -15,7 +15,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -23,7 +23,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
+import { MemorySkills, ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { KeyManager } from "./keys.js";
@@ -37,6 +37,9 @@ import { loadProducts } from "./products.js";
 import { ProductRegistry } from "./product-registry.js";
 import { createLocalApi, type LocalApiDeps } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
+import { SkillRegistry } from "./skill-registry.js";
+import { ToolRegistryView } from "./tool-registry.js";
+import { BundledToolServers } from "./tool-servers.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -90,6 +93,8 @@ async function startServer(
     connectors: lookup,
     ranker: new FtsRanker(storage),
     tools: executor,
+    // 样例契约声明了技能：测试装配用内存登记册应答，不要求先拉预置层。
+    skills: MemorySkills.forContract(loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal")!.contract),
   });
   const token = "srv-test-token";
   const server = createLocalApi({
@@ -290,10 +295,10 @@ test("HTTP /registry: unreachable is a 200 with status unreachable (not an empty
     assert.equal(body.status, "ok");
     // The rig requires signatures (production posture): the catalog is visible, not installable.
     assert.equal(body.installable, false);
-    const bid = body.items.find((i) => i.id === "vxture.bid");
+    const bid = body.items.find((i) => i.id === "bidproposal");
     assert.ok(bid);
     assert.equal(bid.signed, false);
-    // products/bid is the dev-mode builtin in this rig, so 1.0.0 shows as installed.
+    // products/bidproposal is the dev-mode builtin in this rig, so 1.0.0 shows as installed.
     assert.equal(bid.installed, true);
     assert.deepEqual(bid.installedVersions, ["1.0.0"]);
   } finally {
@@ -309,7 +314,7 @@ test("HTTP POST /registry/install: 503 when the index is unreachable, 404 for an
     const missing = await fetch(`${prod.base}/registry/install`, {
       method: "POST",
       headers: prod.json,
-      body: JSON.stringify({ id: "vxture.bid", version: "9.9.9" }),
+      body: JSON.stringify({ id: "bidproposal", version: "9.9.9" }),
     });
     assert.equal(missing.status, 404);
     assert.equal(((await missing.json()) as { code: string }).code, "REGISTRY_ENTRY_NOT_FOUND");
@@ -317,7 +322,7 @@ test("HTTP POST /registry/install: 503 when the index is unreachable, 404 for an
     const refused = await fetch(`${prod.base}/registry/install`, {
       method: "POST",
       headers: prod.json,
-      body: JSON.stringify({ id: "vxture.bid", version: "1.0.0" }),
+      body: JSON.stringify({ id: "bidproposal", version: "1.0.0" }),
     });
     assert.equal(refused.status, 403);
     const body = (await refused.json()) as { code: string; message: string };
@@ -334,7 +339,7 @@ test("HTTP POST /registry/install: 503 when the index is unreachable, 404 for an
     const dup = await fetch(`${dev.base}/registry/install`, {
       method: "POST",
       headers: dev.json,
-      body: JSON.stringify({ id: "vxture.bid", version: "1.0.0" }),
+      body: JSON.stringify({ id: "bidproposal", version: "1.0.0" }),
     });
     assert.equal(dup.status, 422);
     assert.equal(((await dup.json()) as { code: string }).code, "PACKAGE_INVALID");
@@ -350,7 +355,7 @@ test("HTTP POST /registry/install: 503 when the index is unreachable, 404 for an
     const res = await fetch(`${down.base}/registry/install`, {
       method: "POST",
       headers: down.json,
-      body: JSON.stringify({ id: "vxture.bid", version: "1.0.0" }),
+      body: JSON.stringify({ id: "bidproposal", version: "1.0.0" }),
     });
     assert.equal(res.status, 503);
     assert.equal(((await res.json()) as { code: string }).code, "REGISTRY_UNREACHABLE");
@@ -375,18 +380,18 @@ function signedInTo(workspaceId: string, extra: Partial<PlatformService> = {}): 
 }
 
 async function projectIn(rig: Rig, workspaceId: string): Promise<string> {
-  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid")!;
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal")!;
   const meta = await rig.runtime.createProject(bid.contract, "投标项目", workspaceId);
   return meta.id;
 }
 
 /** 归属之前的记录：待导入队列，不属于任何工作区（同integration.test.ts的构造方式）。 */
 async function unattributedProject(rig: Rig, id: string): Promise<void> {
-  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid")!;
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal")!;
   const store = await rig.storage.createProjectStore(id);
   await store.putMeta({
     id,
-    productId: "vxture.bid",
+    productId: "bidproposal",
     productVersion: "1.0.0",
     contractVersion: "0.1",
     name: "老项目",
@@ -598,14 +603,14 @@ void test("HTTP POST /entitlements/refresh: no refreshEntitlements configured st
 void test("HTTP /products/:id/activate|deactivate|pin-version wire through; unknown ids 404 with the right code", async () => {
   const rig = await startServer();
   try {
-    const deactivate = await fetch(`${rig.base}/products/vxture.bid/deactivate`, {
+    const deactivate = await fetch(`${rig.base}/products/bidproposal/deactivate`, {
       method: "POST",
       headers: rig.headers,
     });
     assert.equal(deactivate.status, 200);
     assert.equal(((await deactivate.json()) as { state: string }).state, "inactive");
 
-    const activate = await fetch(`${rig.base}/products/vxture.bid/activate`, {
+    const activate = await fetch(`${rig.base}/products/bidproposal/activate`, {
       method: "POST",
       headers: rig.headers,
     });
@@ -619,7 +624,7 @@ void test("HTTP /products/:id/activate|deactivate|pin-version wire through; unkn
     assert.equal(badActivate.status, 404);
     assert.equal(((await badActivate.json()) as { code: string }).code, "PRODUCT_NOT_FOUND");
 
-    const badPin = await fetch(`${rig.base}/products/vxture.bid/pin-version`, {
+    const badPin = await fetch(`${rig.base}/products/bidproposal/pin-version`, {
       method: "POST",
       headers: rig.json,
       body: JSON.stringify({ version: "9.9.9" }),
@@ -1107,5 +1112,154 @@ test("pick-folder: 请求挂着等壳送结果；壳先问起始目录；没接�
     assert.equal(r.status, 404);
   } finally {
     closeRig(bare);
+  }
+});
+
+// ───────────────────────── 能力平台（ADR-018）：/skills 与 /tools ─────────────────────────
+
+function skillFixture(): { dataDir: string; registry: SkillRegistry } {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-srv-skills-"));
+  const user = join(dataDir, "skills", "user", "tender-style");
+  mkdirSync(join(user, "references"), { recursive: true });
+  writeFileSync(join(user, "SKILL.md"), "---\nname: tender-style\ndescription: House style for tenders\n---\n# Style\n");
+  writeFileSync(join(user, "references", "tone.md"), "# Tone\n");
+  return { dataDir, registry: new SkillRegistry({ bundledDir: join(dataDir, "no-bundle"), dataDir, ttlMs: 0 }) };
+}
+
+test("skills: without a registry the surface says so (503), never an empty list", async () => {
+  const rig = await startServer();
+  try {
+    const res = await fetch(`${rig.base}/skills`, { headers: rig.headers });
+    assert.equal(res.status, 503);
+    assert.equal(((await res.json()) as { code: string }).code, "SKILLS_NOT_AVAILABLE");
+    const tools = await fetch(`${rig.base}/tools`, { headers: rig.headers });
+    assert.equal(tools.status, 503);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+test("skills: list / read / disable / refresh, and the tool registry view", async () => {
+  const { dataDir, registry } = skillFixture();
+  const rig = await startServer({
+    skills: registry,
+    tools: new ToolRegistryView({
+      supportsBuiltin: (id) => id !== "export_result",
+      hasSkills: () => true,
+      bundledServers: () => [
+        { id: "microsoft.playwright-mcp", tier: "default", license: "Apache-2.0", launch: null, launchNote: "测试里不启动" },
+        { id: "tavily-ai.tavily-mcp", tier: "runos-registered", needsKey: true, launch: null },
+      ],
+    }),
+  });
+  try {
+    const list = await fetch(`${rig.base}/skills`, { headers: rig.headers });
+    assert.equal(list.status, 200);
+    const listing = (await list.json()) as { items: Array<{ name: string; layer: string; enabled: boolean }>; layers: Array<{ layer: string; present: boolean }> };
+    assert.deepEqual(listing.items.map((s) => [s.name, s.layer, s.enabled]), [["tender-style", "user", true]]);
+    assert.equal(listing.layers.find((l) => l.layer === "bundled")?.present, false);
+
+    const one = await fetch(`${rig.base}/skills/tender-style`, { headers: rig.headers });
+    assert.equal(one.status, 200);
+    const doc = (await one.json()) as { content: string; resources: string[] };
+    assert.match(doc.content, /^---\nname: tender-style/);
+    assert.deepEqual(doc.resources, ["references/tone.md"]);
+
+    const badLayer = await fetch(`${rig.base}/skills/tender-style/disable`, { method: "POST", headers: rig.json, body: JSON.stringify({ layer: "cloud", source: "user" }) });
+    assert.equal(badLayer.status, 400);
+    assert.equal(((await badLayer.json()) as { code: string }).code, "SKILL_LAYER_INVALID");
+
+    const off = await fetch(`${rig.base}/skills/tender-style/disable`, { method: "POST", headers: rig.json, body: JSON.stringify({ layer: "user", source: "user" }) });
+    assert.equal(off.status, 200);
+    assert.equal(((await off.json()) as { enabled: boolean }).enabled, false);
+    // 停用了就读不到：对任务来说它不在。
+    const gone = await fetch(`${rig.base}/skills/tender-style`, { headers: rig.headers });
+    assert.equal(gone.status, 404);
+    assert.equal(((await gone.json()) as { code: string }).code, "SKILL_NOT_FOUND");
+
+    const missing = await fetch(`${rig.base}/skills/no-such/enable`, { method: "POST", headers: rig.json, body: JSON.stringify({ layer: "user", source: "user" }) });
+    assert.equal(missing.status, 404);
+
+    // 没有能力面：刷新只重扫本机，并说清分发层没有来源。
+    const refresh = await fetch(`${rig.base}/skills/refresh`, { method: "POST", headers: rig.json });
+    assert.equal(refresh.status, 200);
+    const refreshed = (await refresh.json()) as { items: unknown[]; distributed: { unavailable?: string } };
+    assert.equal(refreshed.items.length, 1);
+    assert.match(refreshed.distributed.unavailable ?? "", /没有配置能力面/);
+
+    const tools = await fetch(`${rig.base}/tools`, { headers: rig.headers });
+    assert.equal(tools.status, 200);
+    const items = ((await tools.json()) as { items: Array<{ id: string; kind: string; status: string }> }).items;
+    const byId = new Map(items.map((t) => [t.id, t]));
+    assert.equal(byId.get("read_file")?.status, "available");
+    assert.equal(byId.get("export_result")?.status, "unavailable");
+    assert.equal(byId.get("use_skill")?.status, "available");
+    assert.equal(byId.get("microsoft.playwright-mcp")?.status, "registered");
+    assert.equal(byId.get("tavily-ai.tavily-mcp")?.status, "runos");
+  } finally {
+    closeRig(rig);
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("bundled tool servers: /connectors lists them, activate starts, deactivate stops, DELETE is refused as CONNECTOR_BUNDLED, /tools shows launchable status", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-srv-tools-"));
+  const toolsDir = join(dataDir, "bundle");
+  const fake = fileURLToPath(new URL("./fake-mcp-server.js", import.meta.url));
+  mkdirSync(join(toolsDir, "fake.server", "node_modules", "fake-mcp"), { recursive: true });
+  writeFileSync(join(toolsDir, "fake.server", "node_modules", "fake-mcp", "cli.js"), readFileSync(fake));
+  writeFileSync(
+    join(toolsDir, "index.json"),
+    JSON.stringify({
+      servers: [
+        { id: "fake.server", tier: "default", license: "MIT", launch: { runtime: "node", package: "fake-mcp", version: "1.0.0", bin: "cli.js" }, vendored: { dir: "fake.server", package: "fake-mcp@1.0.0", entry: "node_modules/fake-mcp/cli.js" } },
+        { id: "registered.only", tier: "default", license: "MIT", launch: null, launchNote: "发行形态未核实" },
+      ],
+    }),
+  );
+  const bundled = new BundledToolServers({ toolsDir, dataDir, execPath: process.execPath, hasUvx: () => false });
+  const connectors = new ConnectorRegistry(dataDir, new Map(), { allowUnsigned: false, bundled, timeoutMs: 5000 });
+  const rig = await startServer({
+    connectors,
+    tools: new ToolRegistryView({
+      supportsBuiltin: () => true,
+      hasSkills: () => true,
+      connectors: () => connectors.list(),
+      bundledServers: () => bundled.list(),
+    }),
+  });
+  try {
+    const list = (await (await fetch(`${rig.base}/connectors`, { headers: rig.headers })).json()) as { items: Array<{ id: string; source: string; state: string }> };
+    assert.deepEqual(list.items.map((c) => [c.id, c.source, c.state]), [["fake.server", "bundled", "stashed"]]);
+
+    let tools = (await (await fetch(`${rig.base}/tools`, { headers: rig.headers })).json()) as { items: Array<{ id: string; status: string; launchable?: boolean; detail?: string }> };
+    assert.equal(tools.items.find((t) => t.id === "fake.server")?.status, "registered");
+    assert.equal(tools.items.find((t) => t.id === "fake.server")?.launchable, true);
+    assert.equal(tools.items.find((t) => t.id === "registered.only")?.launchable, undefined);
+    assert.equal(tools.items.find((t) => t.id === "registered.only")?.detail, "发行形态未核实");
+
+    const on = await fetch(`${rig.base}/connectors/fake.server/activate`, { method: "POST", headers: rig.json });
+    assert.equal(on.status, 200);
+    assert.equal(((await on.json()) as { state: string }).state, "active");
+    tools = (await (await fetch(`${rig.base}/tools`, { headers: rig.headers })).json()) as typeof tools;
+    assert.equal(tools.items.find((t) => t.id === "fake.server")?.status, "available");
+
+    const del = await fetch(`${rig.base}/connectors/fake.server`, { method: "DELETE", headers: rig.headers });
+    assert.equal(del.status, 400);
+    assert.equal(((await del.json()) as { code: string }).code, "CONNECTOR_BUNDLED");
+
+    const off = await fetch(`${rig.base}/connectors/fake.server/deactivate`, { method: "POST", headers: rig.json });
+    assert.equal(off.status, 200);
+    assert.equal(((await off.json()) as { state: string }).state, "stashed");
+    const missing = await fetch(`${rig.base}/connectors/nope/deactivate`, { method: "POST", headers: rig.json });
+    assert.equal(missing.status, 404);
+
+    const env = await fetch(`${rig.base}/connectors/fake.server/env`, { method: "POST", headers: rig.json, body: JSON.stringify({ env: { SEARXNG_URL: "http://x" } }) });
+    assert.equal(env.status, 200);
+    assert.deepEqual(bundled.envFor("fake.server"), { SEARXNG_URL: "http://x" });
+  } finally {
+    await connectors.stopAll();
+    closeRig(rig);
+    rmSync(dataDir, { recursive: true, force: true });
   }
 });

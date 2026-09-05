@@ -34,7 +34,7 @@
 - [x] `apps/shell`：Electron 壳（utilityProcess 拉起 daemon + 健康等待 + 窗口指向 daemon 自服务的 Dev Console；`--smoke` 启动验证）；daemon 在 `/` 直接提供 Dev UI —— 浏览器访问（Local Web）与 Electron 同源同页，02 §17 "Web 是访问方式" 从第一天成立
 
 **W2 完成（2026-07-24）。** 开发环境注意：国内网络安装 Electron 需 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`（README 已记）。
-- [x] `products/bid`：`ruyin.product.yaml`（30-contract-schema §16 落地，同时是测试主 fixture）
+- [x] `products/bidproposal`：`ruyin.product.yaml`（30-contract-schema §16 落地，同时是测试主 fixture）
 - [x] CI 转实（部分）：contract-lint job 接入 quality-gate（TD-004 已回收）；build/test-coverage 已有真实工作（TD-003 待 runtime-core 单测后关闭）
 
 ## W3 · Phase B：Bid 单产品可用
@@ -135,7 +135,7 @@
 
 > **判据：装上 Ruyin 的机器，能不能承载一个业务超级智能体走完它的作业。**
 >
-> **不按任何具体产品规划。** `products/bid` 是测试夹具（TD-006），它的旅程
+> **不按任何具体产品规划。** `products/bidproposal` 是测试夹具（TD-006），它的旅程
 > —— 招标文件、需求矩阵、导出标书 —— **不构成 MVP 的定义**。用具体产品的
 > 旅程去定义框架，得到的是那个产品的脚手架，不是框架。
 
@@ -390,3 +390,13 @@ HTTP 打过；`pdf.ts`（壳渲染通道）与 `loadProducts`（开发态产品�
 `apps/ui-workspace`（React 界面）当时仍无 `test` 脚本，不在这批范围内
 （TD-031）；两者后续由 #82（壳）与 #83–#84（ui-workspace 六个大组件）补齐，
 TD-031 已回收。
+
+## 探针 · DeepSeek Harness 能不能当引擎（2026-09-06 → 2026-09-19，owner 2026-09-05 批准）
+
+- 依据：ADR-019（已接受）；计划、判据与进度：`40-implementation/30-harness-dsh-spike.md` §6 / §8。
+- 形态：一人、时间盒两周、分支 `spike/dsh-engine` **不进 main**；产出 = 报告 + 可运行的分支。
+- 通过判据：C1–C7 对着 dsh 版 Harness 全过；§2.3 三条出路之一被证明可行且写明代价；
+  体积 / 启动 / 内存增量的数字给 owner 看过再定阈值。
+- 通过后：ADR-002 / ADR-008 / ADR-011 修订，云端嵌 dsh headless，广度按插件逐项接入。
+  不通过：报告归档 90-memory，内核走 ADR-019 §3.1，状态机底座另评 LangGraph.js。
+- 探针期间 main 上的能力平台（ADR-018）照常推进，两边不互相等。

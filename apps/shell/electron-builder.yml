@@ -28,6 +28,15 @@ extraResources:
     to: products
     filter:
       - "**/ruyin.product.yaml"
+  # 预置技能层（ADR-018 §2.3）：构建时按 resources/skill-manifest.json 拉取到仓内
+  # resources/skills（scripts/release/pull-skills.mjs，pack.mjs 会先跑它），连同
+  # index.json 与每个来源的许可证文件一起进包。首启离线可用。
+  - from: ../../resources/skills
+    to: skills
+  # 预置的 MCP 服务器（ADR-018 §2.2）：scripts/release/pull-tools.mjs 把 node 形态的
+  # vendored 到 resources/tools/<id>/node_modules，连同 index.json（启动规格 + 许可证）。
+  - from: ../../resources/tools
+    to: tools
 win:
   # 显式指路而不是靠 electron-builder 自动找 build/icon.ico —— `build/` 在
   # .gitignore 里是整目录忽略的，图标放那儿就进不了仓库。**没有这一行的后果是

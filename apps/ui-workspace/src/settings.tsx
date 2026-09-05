@@ -34,6 +34,10 @@ import {
   Api,
   ApiError,
   type ConnectorView,
+  type SkillLayer,
+  type SkillListing,
+  type SkillView,
+  type ToolView,
   type DataDirCheck,
   type SessionInfo,
   type SystemInfo,
@@ -87,6 +91,7 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
       {view === "general" && <SystemSection system={system} api={api} />}
       {view === "connectors" && <ConnectorsSection api={api} />}
       {view === "connectors-add" && <AddConnectorPage api={api} />}
+      {view === "skills" && <SkillsSection api={api} />}
       {view === "database" && <DatabaseSection />}
       {view === "updates" && <UpdatesSection system={system} api={api} />}
       {view === "about" && <AboutSection system={system} />}
@@ -545,12 +550,21 @@ function ConnectorsSection({ api }: { api: Api }) {
       setFailed(String((e as Error).message));
     }
   };
+  const stop = async (target: string) => {
+    setFailed(null);
+    try {
+      await api.deactivateConnector(target);
+      await reload();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    }
+  };
 
   return (
     <SettingsBlock
       icon="plugs-connected"
       title="已安装的连接器"
-      desc="局域网 / 私有服务经本机 MCP 连接器进入项目上下文；每个项目还要单独授权才能用"
+      desc="来源管理：添加、测试、授权本机 MCP 连接器（局域网 / 私有系统）；它们暴露的工具出现在「能力平台」的清单里，每个项目还要单独授权才能用"
       aside={
         unavailable ? undefined : (
           // 走地址，不是换状态：添加页有自己的地址，返回是真的返回（第 5 条）。
@@ -574,7 +588,7 @@ function ConnectorsSection({ api }: { api: Api }) {
               <code className="row-main" title={`${c.command} ${c.args.join(" ")}`}>
                 {c.id}
               </code>
-              <span className="row-tag">{c.source}</span>
+              <span className="row-tag">{c.source === "bundled" ? "预置" : c.source}</span>
               {/* 暴露了哪些工具：契约里 provider: connector 的工具要靠同名才接得上，
                   用户对着契约就能看出接没接。 */}
               {c.tools.length > 0 && (
@@ -598,9 +612,18 @@ function ConnectorsSection({ api }: { api: Api }) {
                   启用
                 </Button>
               )}
-              <Button variant="ghost" size="sm" onClick={() => void remove(c.id)}>
-                卸载
-              </Button>
+              {/* 预置的随安装包来，卸不掉，只能停用；用户装的才有「卸载」。 */}
+              {c.source === "bundled" ? (
+                c.state === "active" && (
+                  <Button variant="ghost" size="sm" onClick={() => void stop(c.id)}>
+                    停用
+                  </Button>
+                )
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => void remove(c.id)}>
+                  卸载
+                </Button>
+              )}
             </li>
           ))}
         </ul>
@@ -1162,5 +1185,230 @@ function AboutSection({ system }: { system: SystemInfo | null }) {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * 能力平台（ADR-018 §2.7）—— 本机装着的能力：技能（指令包）与工具（可执行）。
+ *
+ * 用户在这里看得见、管得着，但**不直接用**：调用它们的只有产品，且产品必须在
+ * 契约里声明（§2.5）。所以这一页没有「运行」按钮，只有启用 / 停用与刷新。
+ * 四层来源同名时近者优先，被盖住的那条如实标「被覆盖」，而不是从清单里消失。
+ */
+const LAYER_LABEL: Record<SkillLayer, string> = {
+  bundled: "预置",
+  distributed: "产品分发",
+  user: "用户",
+  project: "项目",
+};
+const TIER_LABEL: Record<string, string> = {
+  default: "默认启用",
+  "installed-disabled": "装而不启用",
+  "runos-registered": "经 Runos",
+};
+const TOOL_STATUS: Record<ToolView["status"], { label: string; tone: "success" | "warning" | "neutral" }> = {
+  available: { label: "可用", tone: "success" },
+  unavailable: { label: "不可用", tone: "warning" },
+  registered: { label: "已登记", tone: "neutral" },
+  runos: { label: "经 Runos", tone: "neutral" },
+};
+const TOOL_KIND: Record<ToolView["kind"], string> = {
+  builtin: "内建",
+  connector: "连接器",
+  "mcp-server": "MCP 服务器",
+};
+
+function SkillsSection({ api }: { api: Api }) {
+  const [listing, setListing] = useState<SkillListing | null>(null);
+  const [tools, setTools] = useState<ToolView[] | null>(null);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [layer, setLayer] = useState<"all" | SkillLayer>("all");
+
+  const reload = async () => {
+    try {
+      setListing(await api.skills());
+      setUnavailable(null);
+      setFailed(null);
+    } catch (e) {
+      // 503 = 这套装配没有技能登记册。这是一个事实，不是错误，单独说。
+      if (e instanceof ApiError && e.status === 503) {
+        setListing({ items: [], layers: [], scannedAt: "" });
+        setUnavailable(e.message);
+      } else {
+        setFailed(String((e as Error).message));
+      }
+    }
+    try {
+      setTools((await api.tools()).items);
+    } catch {
+      setTools([]);
+    }
+  };
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api]);
+
+  const refresh = async () => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      await api.refreshSkills();
+      await reload();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggle = async (s: SkillView) => {
+    setFailed(null);
+    try {
+      await api.setSkillEnabled({ name: s.name, layer: s.layer, source: s.source }, !s.enabled);
+      await reload();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    }
+  };
+
+  const items = (listing?.items ?? []).filter((s) => layer === "all" || s.layer === layer);
+  const layerSummary = (listing?.layers ?? []).map((l) => `${LAYER_LABEL[l.layer]} ${l.count}`).join(" · ");
+  // 预置的 MCP 服务器：启动 = 真起进程、握手、列工具；起不了的原因照原样转达。
+  const [starting, setStarting] = useState<string | null>(null);
+  const launch = async (t: ToolView, on: boolean) => {
+    setFailed(null);
+    setStarting(t.id);
+    try {
+      if (on) await api.activateConnector(t.id);
+      else await api.deactivateConnector(t.id);
+      await reload();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    } finally {
+      setStarting(null);
+    }
+  };
+
+  return (
+    <>
+      <SettingsBlock
+        icon="sparkles"
+        title="技能"
+        desc="本机装着的指令包（Agent Skills）：预置 → 产品分发 → 用户 → 项目，同名近者优先。只有产品在契约里声明了的任务能读到它们"
+        aside={
+          unavailable ? undefined : (
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}>
+              {busy ? "刷新中…" : "刷新"}
+            </Button>
+          )
+        }
+      >
+        {failed && <div className="update-line update-line--warn">{failed}</div>}
+        {unavailable ? (
+          <p className="set-note">{unavailable}</p>
+        ) : listing === null ? (
+          <p className="set-note">…</p>
+        ) : (
+          <>
+            {/* 计数一行、筛选一行：挤在同一行里，计数会在选择框旁边折成两行。 */}
+            <p className="set-note">{layerSummary || "尚无技能"}</p>
+            <div className="row-item">
+              <NativeSelect
+                aria-label="按来源层筛选"
+                value={layer}
+                onChange={(e) => setLayer(e.target.value as "all" | SkillLayer)}
+              >
+                <option value="all">全部来源</option>
+                {(["bundled", "distributed", "user", "project"] as SkillLayer[]).map((l) => (
+                  <option key={l} value={l}>
+                    {LAYER_LABEL[l]}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            {items.length === 0 ? (
+              <p className="set-note">
+                {listing.items.length === 0
+                  ? "本机还没有任何技能。预置层随安装包来；开发态要先 pnpm skills:pull。"
+                  : "这一层没有技能。"}
+              </p>
+            ) : (
+              <ul className="row-list" aria-label="技能">
+                {items.map((s) => (
+                  <li key={`${s.layer}:${s.source}:${s.name}`} className="row-item">
+                    <code className="row-main" title={`${s.dir}\n${s.description}`}>
+                      {s.name}
+                    </code>
+                    <span className="row-tag">{LAYER_LABEL[s.layer]}</span>
+                    <span className="text-body-sm text-muted-foreground">
+                      {s.source}
+                      {s.version ? ` · v${s.version}` : ""}
+                      {s.license ? ` · ${s.license}` : ""}
+                      {s.tier ? ` · ${TIER_LABEL[s.tier] ?? s.tier}` : ""}
+                    </span>
+                    {/* 脚本本地不跑（TD-005）：标出来，而不是悄悄跳过。 */}
+                    {s.hasScripts && <StatusBadge tone="neutral">含脚本（本地不跑）</StatusBadge>}
+                    {s.shadowedBy ? (
+                      <StatusBadge tone="neutral">{`被${LAYER_LABEL[s.shadowedBy]}层覆盖`}</StatusBadge>
+                    ) : (
+                      <StatusBadge tone={s.enabled ? "success" : "neutral"}>{s.enabled ? "启用" : "停用"}</StatusBadge>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={() => void toggle(s)}>
+                      {s.enabled ? "停用" : "启用"}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </SettingsBlock>
+      <SettingsBlock
+        icon="plugs-connected"
+        title="工具"
+        desc="可执行的能力：运行时内建的、已装连接器暴露的、预置清单登记的 MCP 服务器。每一次调用都过 Tool Gate"
+      >
+        {tools === null ? (
+          <p className="set-note">…</p>
+        ) : tools.length === 0 ? (
+          <p className="set-note">没有工具登记册。</p>
+        ) : (
+          <ul className="row-list" aria-label="工具">
+            {tools.map((t) => (
+              <li key={`${t.kind}:${t.id}`} className="row-item">
+                <code className="row-main" title={t.detail ?? ""}>
+                  {t.id}
+                </code>
+                <span className="row-tag">{TOOL_KIND[t.kind]}</span>
+                {(t.license || t.tier) && (
+                  <span className="text-body-sm text-muted-foreground">
+                    {[t.license, t.tier ? (TIER_LABEL[t.tier] ?? t.tier) : undefined].filter(Boolean).join(" · ")}
+                  </span>
+                )}
+                {t.tools && t.tools.length > 0 && (
+                  <span className="text-body-sm text-muted-foreground mono">{`工具：${t.tools.join("、")}`}</span>
+                )}
+                {t.launchable && t.status !== "available" && t.detail && (
+                  <span className="text-body-sm text-muted-foreground">{t.detail}</span>
+                )}
+                <StatusBadge tone={TOOL_STATUS[t.status].tone}>{TOOL_STATUS[t.status].label}</StatusBadge>
+                {t.launchable && (
+                  <Button
+                    variant={t.status === "available" ? "ghost" : "outline"}
+                    size="sm"
+                    disabled={starting === t.id}
+                    onClick={() => void launch(t, t.status !== "available")}
+                  >
+                    {starting === t.id ? "…" : t.status === "available" ? "停止" : "启动"}
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </SettingsBlock>
+    </>
   );
 }

@@ -1,6 +1,6 @@
 {
   "name": "@vxture/ruyin-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ruyin developer CLI: contract lint, product packaging (.ruyinpkg) and the static registry index (docs/40-implementation/10-product-integration-guide.md; ruyin dev lands later).",
   "repository": {
     "type": "git",
