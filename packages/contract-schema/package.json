@@ -1,6 +1,6 @@
 {
   "name": "@vxture/ruyin-contract-schema",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ruyin Runtime Contract - TypeScript types, JSON Schema, and the R-series semantic validator (design authority: docs/30-design/30-contract-schema.md).",
   "repository": {
     "type": "git",
