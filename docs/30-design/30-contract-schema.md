@@ -91,7 +91,7 @@ L4 签名校验     包完整性与发布者身份（见 §18）
 ```yaml
 product:
   id: bidproposal          # 必填。= 平台产品目录的 product_code（订阅判定、能力面路径、act.sub 都按它对账；2026-09-05 起不再用 vxture. 命名空间）
-  name: 标书编写           # 必填。展示名
+  name: 标书方案智能体           # 必填。展示名
   version: 1.0.0          # 必填。SemVer
   publisher: vxture       # 必填。发布者 ID，必须与包签名身份一致（R12）
   runtime:
@@ -386,7 +386,7 @@ contract: "0.1"
 
 product:
   id: bidproposal
-  name: 标书编写
+  name: 标书方案智能体
   version: 1.0.0
   publisher: vxture
   runtime:
