@@ -1,11 +1,13 @@
-# ADR-018 工具技能：全部从外部获取、拉到本机可运行、随发布预置；格式对齐开放生态
+# ADR-018 技能与工具：全部从外部获取、拉到本机可运行、随发布预置；格式对齐开放生态
 
-- 状态：**提议（v2）**。v1（2026-09-05 上午）被 owner 否掉两处：不该自己造技能，
-  数量应至少上百。本稿按 owner 七条意见重写，待定稿。
+- 状态：**提议（v2.1）**。v1（2026-09-05 上午）被 owner 否掉两处：不该自己造技能，
+  数量应至少上百。v2 按 owner 七条意见重写；v2.1 记入 owner 已定的三条（§6），
+  余下一条待定（分区名）。
 - 日期：2026-09-05
 - 相关：ADR-006（skill 归 Ruyin，建在 Harness 上）、ADR-002（循环归 Harness）、
   ADR-005（本地连接器 = MCP）、ADR-009（能力面中转）、ADR-011（框架边界）、
-  30-contract-schema §11、TD-005（无沙箱不进 `execute_script`）、TD-034、TD-035
+  30-contract-schema §10 / §11、TD-005（无沙箱不进 `execute_script`）、TD-034、
+  TD-035；候选清单 `../../40-implementation/20-tools-skills-catalog-v1.md`
 
 ## 0. 先回答 owner 的一个问题：我们是不是建在 harness 上
 
@@ -18,9 +20,9 @@
   developer preview）是**另一个** harness：它的循环自己调模型、自己持提供方凭据。
   我们的循环在本地、推理在产品能力面后面（ADR-002 / ADR-009），客户端零秘密 ——
   这一点结构上不同。
-- 所以本 ADR 的口径是 **参照它的「接入方式与格式」，不把内核换成它**：格式对齐了，
-  它那个生态里的东西就能直接拉过来用；内核不换，是因为 developer preview 会破坏性
-  变更，而且换内核换不来任何产品能力。
+- 所以本 ADR 的口径是 **参照它的「接入方式、格式与管理界面」，不把内核换成它**：
+  格式对齐了，它那个生态里的东西就能直接拉过来用；内核不换，是因为 developer
+  preview 会破坏性变更，而且换内核换不来任何产品能力。
 
 ## 1. 现状
 
@@ -34,7 +36,7 @@
 
 ## 2. 决策（提议）
 
-### 2.1 名称与归集：一个分区，叫「工具技能」，两种条目
+### 2.1 归集：一个分区，两种条目
 
 | 条目 | 是什么 | 怎么跑 | 来源 |
 |---|---|---|---|
@@ -44,11 +46,11 @@
 这是 DeepSeek Harness、Claude Code、Codex、OpenCode、Kimi 已经趋同的划分：
 **工具是代码，技能是指令**；两者各有登记册，但对用户是一张清单。
 
-- 设置里新增分区「**工具技能**」（顺序：通用设置 / 工具技能 / 连接器 / 数据库 /
-  软件更新 / 关于）。一张清单：名称、种类（工具 / 技能）、来源、版本、状态。
-- 「连接器」保留，但职责收窄为**管理外部来源**（添加 / 测试 / 授权一个 MCP
-  服务器或内网系统）；它贡献出来的工具出现在「工具技能」清单里，而不是各页各管
-  一份。数据库不动。
+- 设置里新增一个分区（名称见 §2.7），一张清单：名称、种类（工具 / 技能）、来源、
+  版本、状态。
+- 「连接器」保留，职责**收窄为管理外部来源**（添加 / 测试 / 授权一个 MCP 服务器或
+  内网系统）；它贡献出来的工具出现在那张清单里，而不是各页各管一份。数据库不动。
+  **（owner 2026-09-05 已定）**
 
 ### 2.2 全部从外部获取，不自己造
 
@@ -56,39 +58,44 @@
 
 | 种类 | 从哪拉 | 拉到哪 | 怎么可运行 |
 |---|---|---|---|
-| 技能 | git 仓库 / zip / 本地目录；规范见 agentskills.io（`SKILL.md` 前言：`name`、`description` 必填；`license`、`compatibility`、`metadata`、`allowed-tools` 可选；目录名须等于 `name`） | `<dataDir>/skills/<source>/<name>/` | 全文按需加载（下面 2.4）；`scripts/` **暂不执行**（见 2.6） |
+| 技能 | git 仓库 / zip / 本地目录；规范见 agentskills.io（`SKILL.md` 前言：`name`、`description` 必填；`license`、`compatibility`、`metadata`、`allowed-tools` 可选；目录名须等于 `name`） | `<dataDir>/skills/<source>/<name>/` | 全文按需加载（§2.4）；`scripts/` **暂不执行**（§2.6） |
 | 工具 | MCP 服务器定义（与 DeepSeek Harness `dsh-mcp-client` 同形：`{transport:'stdio', serverName, command, args, env, cwd}` 或 `{transport:'streamable-http', url, headers}`） | `<dataDir>/tools/<serverName>.json` | 本地拉起子进程 / 连 HTTP；工具名加命名空间 `mcp__<serverName>__<name>`，与 dsh 一致 |
 
 生态规模足够支撑「上百个」：Agent Skills 是开放规范（Anthropic 发布，
 agentskills/agentskills 维护），官方仓 anthropics/skills、社区索引
-VoltAgent/awesome-agent-skills（1000+）、目录站已到数十万条；MCP 服务器目录
-同样以百计。**数量来自生态，不来自我们的开发工时。**
+VoltAgent/awesome-agent-skills（1000+）、目录站已到数十万条；MCP 服务器目录同样以
+百计。**数量来自生态，不来自我们的开发工时。**
 
 ### 2.3 随发布预置：清单跟着安装包走，首启离线可用
 
-- 仓内维护一份 **预置清单** `products/…` 之外的 `resources/skill-manifest.json`：
-  每条 = 来源（git URL + 钉死的 commit / zip 校验和）+ 纳入哪些技能 + 哪些 MCP
-  服务器定义。
-- **构建时按清单拉取**，打进安装包 `resources/skills/` 与 `resources/tools/`：
-  客户的域环境可能连不上 GitHub / npm，首启必须离线可用。
-- 首次启动把预置复制到 `<dataDir>`（用户层）；应用更新时刷新预置层。用户自己
-  加的来源在用户层，与预置层分开 —— 同名时**近者优先**（dsh 的分层规则：
-  project > custom > user > bundled，近层整体覆盖远层）。
+- 仓内维护一份 **预置清单** `resources/skill-manifest.json`：每条 = 来源（git URL +
+  钉死的 commit / zip 校验和）+ 纳入哪些技能 + 哪些 MCP 服务器定义 + 三档之一
+  （默认启用 / 装而不启用 / 需密钥）。
+- **构建时按清单拉取**，用 agentskills 的 `skills-ref validate` 校验前言，打进安装包
+  `resources/skills/` 与 `resources/tools/`：客户的域环境可能连不上 GitHub / npm，
+  首启必须离线可用。
+- 首次启动把预置复制到 `<dataDir>`（预置层）；应用更新时刷新预置层。用户自己加的
+  来源在用户层，与预置层分开 —— 同名时**近者优先**（dsh 的分层规则：project >
+  custom > user > bundled，近层整体覆盖远层）。
+- **第一批候选**：`../../40-implementation/20-tools-skills-catalog-v1.md`。每一条都
+  核实过存在、许可证、是否归档；技能约 270 条、MCP 服务器 34 个，按三档分。
 
-这就是 owner 说的「开发和发布后已预置链接」：发布物里带着经过挑选、版本钉死的
-一批；用户拿到的是已经能干活的机器，不是空壳加商店。
+**许可证是硬门槛，不是备注。** 查下来最重要的一条：Anthropic 官方的 docx / pdf /
+pptx / xlsx 四个技能是**专有许可、明文禁止分发与复制**，打进安装包就是分发 ——
+不能用。文档类改走 SenseNova（MIT）、OfficeCLI（Apache-2.0）、openai/skills 的
+Apache 条目，以及 MCP 侧的 markitdown / docling / excel-mcp-server / mcp-pandoc。
 
 ### 2.4 怎么接进我们的回合协议（参照 dsh 的进阶披露）
 
-dsh 的做法：目录只含 `name` + `description`（约 100 token / 条），作为一条
-用户角色的系统提醒注入；模型调 `skill({ name })` 工具拿全文，`resourceBase`
-按需取脚本与参考文件；`disable-model-invocation` / `user-invocable` 两个开关。
+dsh 的做法：目录只含 `name` + `description`（约 100 token / 条），作为一条用户
+角色的系统提醒注入；模型调 `skill({ name })` 工具拿全文，`resourceBase` 按需取脚本
+与参考文件；`disable-model-invocation` / `user-invocable` 两个开关。
 
 映射到我们（ADR-002 循环在本地，ADR-011 运行时只给事实）：
 
 | dsh | Ruyin |
 |---|---|
-| 系统提醒里的技能目录 | `TurnRequest.skills: SkillOffer[]`（`name` + `description`），**新增字段**，是数据不是措辞 —— 提供方决定怎么用 |
+| 系统提醒里的技能目录 | `TurnRequest.skills: SkillOffer[]`（`name` + `description`），**新增字段**，是数据不是措辞 —— 提供方决定怎么用 **（owner 已定）** |
 | `skill({name})` 工具 | 运行时实现的 `use_skill` 工具（内建，`category: local_read`）：返回 `SKILL.md` 全文 + 资源清单 |
 | `resourceBase` | `read_skill_resource` 工具：只读 `references/` `assets/`；路径限定在技能目录内 |
 | 工具注册 + `tools/pre-execute` allow/deny/ask | 现有 Tool Gate：硬底线 ∧ 用户策略 ∧ 契约默认 —— **一模一样的形状**，不用改 |
@@ -99,41 +106,81 @@ dsh 的做法：目录只含 `name` + `description`（约 100 token / 条），�
 
 ### 2.5 只有产品能调用（owner 第 5 条）
 
-工具技能是运行环境提供的**基础设施**，用户在设置里看得见、管得着，但**不直接
+技能与工具是运行环境提供的**基础设施**，用户在设置里看得见、管得着，但**不直接
 用**；调用它们的只有产品，且产品必须在契约里声明：
 
 ```yaml
 tasks:
   - id: generate_proposal
-    tools: [read_file, search_knowledge, mcp__docx__fill_template]   # ⊆ 本机工具技能清单
-    skills: [bid-writing-cn, tender-compliance-check]                 # 新增：⊆ 本机技能清单
+    tools: [read_file, search_knowledge, mcp__excel__write_sheet]   # ⊆ 本机工具清单
+    skills: [sn-da-excel-workflow, officecli-word-form]              # 新增：⊆ 本机技能清单
 ```
 
-- 契约新增 `tasks[].skills`（R8 同样约束：必须在清单里）；每回合只把**这个任务
-  声明的**技能送进 `TurnRequest.skills` —— 这也是「上百个」不会把每回合撑爆的
-  原因：清单在本机有几百条，一次任务只带它声明的几条。
+- 契约新增 `tasks[].skills`（R8 同样约束：必须在清单里）**（owner 已定）**；每回合
+  只把**这个任务声明的**技能送进 `TurnRequest.skills` —— 这也是「上百个」不会把每
+  回合撑爆的原因：清单在本机有几百条，一次任务只带它声明的几条。
 - 没声明的技能，模型看不见；没声明的工具，闸门直接拒。
 
 ### 2.6 不变的、和一条必须说清的限制
 
 - **不门控、不计量、不计费**（ADR-006）；**客户端零秘密**；**Tool Gate 不变**。
 - **技能里的 `scripts/` 暂不执行。** 那是任意代码，TD-005 说得很清楚：没有 OS 级
-  沙箱之前不进 `execute_script` 类。所以第一版技能 = 指令 + 参考 + 模板，脚本
-  在清单里标「需要沙箱」而不是悄悄跳过。dsh 有 `packages/sandbox`（含 e2b）
-  才敢跑脚本 —— 这是它比我们多的一块，也是我们下一步要不要引入的决定。
-- `allowed-tools` 前言字段（规范标为实验性）：读进来、显示出来，**不当作放行
-  依据** —— 放行只听 Tool Gate。
+  沙箱之前不进 `execute_script` 类。文档类技能的价值有一半在脚本（python-docx /
+  openpyxl / LibreOffice 渲染核对），第一版拿不到这一半；**真正落盘的是 MCP 工具**。
+  技能先当「怎么做」的知识，工具当「手」。脚本在清单里标「需要沙箱」而不是悄悄跳过。
+  dsh 有 `packages/sandbox`（含 e2b）才敢跑脚本 —— 这是它比我们多的一块，也是下一
+  步要不要引入的决定。
+- `allowed-tools` 前言字段（规范标为实验性）：读进来、显示出来，**不当作放行依据**
+  —— 放行只听 Tool Gate。
+- **需要外部 API 密钥的条目**（Tavily / Exa / Brave / Firecrawl…）：密钥归用户或企业
+  配置，走连接器那条来源管理路。
+
+### 2.7 分区叫什么（待 owner 定）
+
+行业现状（2026-09 查证）：
+
+| 产品 | 设置里的名字 | 备注 |
+|---|---|---|
+| Claude.ai | **Capabilities**（功能） | 组织设置里的开关：联网搜索等 |
+| Cursor | **Tools & MCP** | 逐服务器、逐工具开关 |
+| JetBrains DataGrip 2026.2 | **AI Agent Skills, MCP Tools** | 两个词并列 |
+| DeepSeek Harness | `skills` 与 `tools` 两个登记册；`extensions` 指动态插件 | 设置页按插件命名空间分卡 |
+| OpenAI Codex | 没有面板：`~/.codex/skills/` 目录即清单 | — |
+
+「能力集」贴近 Claude 的 Capabilities，但**在我们自己的词表里会撞车**：契约 §10 的
+`capabilities` 已经是「AI 能力需求」（模型能力，经能力面解析，ADR-009）。一个词
+在同一套系统里指两件事，契约作者和用户都会被绊倒。
+
+**建议：「技能与工具」。** 两个词都是行业通用的、各指一件事、且都不与契约词表冲突。
+备选：「工具技能」（v2 原名，同义但读起来像一个词）；「扩展」（dsh 用它指动态插件，
+含义不同，不取）；「能力集」（撞车，不取）。
+
+### 2.8 参照 dsh 的可视化管理面（owner 补充）
+
+看过它的实现之后，可借鉴的是三件事，而不是「一个安装器」：
+
+| dsh 的做法 | 我们的对应 |
+|---|---|
+| **插件面板是全局的**（`ui-cordis`）：一个侧栏座位带计数徽标，打开是每个定义的一行 —— 运行中 / 等待批准，行上有运行、停止、移除；**模型请求运行时要人批准，批准入口在任何会话里都够得着**，多标签页先答者胜 | 「技能与工具」清单的每一行：状态 + 启用 / 停用；模型请求启用一个未启用的工具时，走我们的 Checkpoint 队列（50-harness §6），不另起一套批准 |
+| **设置页按命名空间分卡**（`settings.plugin.item`）：插件注册命名空间 + schema，用户在一份文档里改值，改动实时生效；`role('secret')` 的字段值不回显 | 需密钥的 MCP 服务器定义 = 一张卡：非密钥字段可编辑，密钥经连接器来源管理进 OS 凭据库，卡上只显示「已配置」 |
+| **技能目录热刷新**（`skill-catalog-hot-refresh`）：监视技能根目录，增删即入目录；坏文件「警告并跳过」，不让一份坏技能拖垮整个目录 | 用户层技能目录同样监视；预置层随更新刷新。**坏技能只影响自己** |
+| 对话里 `skill` 调用有专属行（`web-skill-tool-row`）：折叠只显示技能名，展开是送给模型的原文 | 任务详情里的工具调用列表同样区分「用了哪个技能」与普通工具调用，展开能看到交给模型的原文 —— 审计要说得清 |
+
+一处纠正：它仓里的 `web-install-manifest` 是浏览器 PWA 清单（安装为桌面应用），
+**不是技能安装器** —— 它的技能「安装」就是把目录放进技能根，由热刷新接管。我们的
+「拉取到本机」也按这个模型做：拉取 = 把技能目录落进用户层根目录；不需要安装向导。
 
 ## 3. 后果
 
 - 契约 schema 改一处：`tasks[].skills`。R 系列加一条：技能名必须在本机清单里。
 - 回合协议改一处：`TurnRequest.skills`。产品能力面不认这个字段时忽略即可。
-- 守护进程：技能登记册（分层：预置 / 用户 / 项目）、工具登记册（内建 + MCP）、
-  `GET /skills` `GET /tools`、`use_skill` / `read_skill_resource` 两个内建工具、
-  MCP 工具接 Tool Gate（回收 TD-034）。
-- 构建链：`skill-manifest.json` → 构建时拉取 → `resources/`；packaged-smoke 要核
-  对预置层真的在包里。
-- 界面：「工具技能」分区（清单 + 来源 + 状态 + 刷新预置）；「连接器」收窄为来源管理。
+- 守护进程：技能登记册（分层：预置 / 用户 / 项目，近者优先，目录监视）、工具登记册
+  （内建 + MCP）、`GET /skills` `GET /tools`、`use_skill` / `read_skill_resource`
+  两个内建工具、MCP 工具接 Tool Gate（回收 TD-034）。
+- 构建链：`skill-manifest.json` → 构建时拉取 + `skills-ref validate` → `resources/`；
+  packaged-smoke 要核对预置层真的在包里、且每条的许可证文件随包同行。
+- 界面：新分区（清单 + 来源 + 状态 + 启用开关 + 刷新预置）；「连接器」收窄为来源
+  管理；任务详情里技能调用有专属行。
 - 写死的 `IMPLEMENTED` 集合被登记册取代。
 
 ## 4. 备选方案
@@ -145,13 +192,20 @@ tasks:
 | 技能商店让用户挑 | 与「发布后已预置」相反；预置层已经带着一批，用户层再加是补充 |
 | 全部技能进每回合 | 几百条 × 100 token 会撑爆每一回合；按任务契约限定才可行 |
 | 现在就跑 `scripts/` | 没有沙箱（TD-005）；先把指令类用起来 |
+| 用 Anthropic 官方 docx / xlsx / pptx / pdf 技能 | 专有许可，禁止分发 |
 
 ## 5. 待 owner 定
 
-1. **分区名与归集**：「工具技能」一张清单（工具 + 技能），「连接器」收窄为来源管理 —— 同意与否。
-2. **预置清单第一版收哪些来源**：建议 anthropics/skills 里文档处理类（docx / xlsx / pdf / pptx）
-   + 社区索引里文档与办公类，再加 1–2 个文档类 MCP 服务器；数量目标 100+。
-   要不要我先列一份候选清单（名称 + 来源 + 许可证）供你勾。
+1. **分区名**：建议「技能与工具」（§2.7）—— 同意与否。
+2. **第一批三档**：`40-implementation/20-tools-skills-catalog-v1.md` §4 的分档 ——
+   勾选 / 调整。特别是 docx / pptx 离线生成那个缺口，取 ② mcp-pandoc 先上、① fork
+   归档的 Word / PowerPoint MCP 补齐 —— 同意与否。
 3. **脚本执行**：第一版技能不跑 `scripts/`（无沙箱）—— 接受；还是把「引入 OS 级
    沙箱」提前立项。
-4. **契约与回合协议各加一个字段**（`tasks[].skills`、`TurnRequest.skills`）—— 同意与否。
+
+## 6. 已定（owner，2026-09-05）
+
+1. 「连接器」收窄为来源管理 —— 同意。
+2. 契约 `tasks[].skills` 与回合协议 `TurnRequest.skills` 两个字段 —— 同意。
+3. 第一批预置由本仓按业务口径（文档读取 / 编辑 / 浏览器操作 / 文档解析分析 / 在线
+   搜索 / 表格生成 / docx 模板）梳理，目标 100+ —— 清单已出（§2.3）。
