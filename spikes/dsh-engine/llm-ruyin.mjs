@@ -8,6 +8,9 @@
 // 来自宿主维护的 ToolLedger（tool-ledger.mjs）与 TaskFacts 名单，适配器只拿回调，不订阅事件。
 // **fail closed**：账本说不清作者的消息不转发——工具结果 / assistant / 污点 id 抛 INVALID_HISTORY（整步失败），
 // 外来 user 消息丢并计数。dsh 组的句子（拒绝、未知工具、输出校验、取消、中断收尾）一个字都不进请求。
+// 第四轮补的四条：失败 **code** 也是自由文本通道，只有允许清单里的 code 进模板（KNOWN_FAILURE_CODES）；
+// "这条 assistant 是我发的"不再从事件推、而是对着适配器发出前登记的块集指纹（ToolLedger.noteEmission）；
+// 工具结果的 callId 必须有人发出过；任何在读内容之前就说不清作者的记录，在走 block.content 之前就失败。
 //
 // 引用的 dsh 事实（NM = node_modules/@deepseek-ai）：
 //   LlmAdapter 只有 stream() 必需                     NM/dsh-llm/lib/types/index.d.ts:122-178
@@ -26,6 +29,10 @@
 //     循环按 user/message 追加、不查 role、不查 id 唯一   NM/dsh-agent-loop/lib/index.js:185, 692 → 559；NM/dsh-session/lib/index.js:1403-1424
 //     表面按 data.role 呈现                              NM/dsh-session/lib/index.js:131
 //   中途取消：块到不了日志                               NM/dsh-agent-loop/lib/index.js:626-627；interruptedBlocks 丢 tool-call 块 dsh-llm index.js:935-942
+//   失败 code 是任意字符串（没有词表校验）              NM/dsh-llm/lib/types/error.js:12-19（HarnessError）→ NM/dsh-tools/lib/index.js:2516-2521（toolErrorResult 照抄）
+//   post-execute 能替掉成功结果的内容 / value            NM/dsh-tools/lib/index.js:3392-3406（accept{value} 重投影 / accept{content} 换块，都不留 error）
+//   tool-result 块的 content 不一定是数组                NM/dsh-tools/lib/index.js:2468-2477（snapshotProjection 只要求 lossless JSON）→ dsh-llm index.js:72-86
+//   工具拿到 exec.agent 就能自己写日志                    NM/dsh-session/lib/index.js:1403-1445（session.append）——见本文件 L3 注与 NOTES 遗留 (d)
 //
 // 决定（第三轮 N5）：tool-call id 在一个会话里跨步骤唯一——包括表面从未见过的（中途取消、块没进日志的那种）。真实提供方
 // 用随机 id，能力面照此办理。适配器只强制它能证明的部分：进过日志的 id（含 compaction 后表面消失的）永久拒绝复用；
@@ -48,12 +55,33 @@ const VERIFY_PREFIX = "verify:";
 const EMPTY_SET = Object.freeze(new Set());
 /** dsh 取消路径写的两种结果（dsh-tools 3550-3585；循环补记的跳过 agent-loop 276-292）。内核从不记录被取消的步骤。 */
 const CANCELLED_CODES = Object.freeze(new Set(["ABORTED", "ABORTED_BEFORE_DISPATCH"]));
+/**
+ * **失败 code 是不可信输入**（第四轮 L1）。HarnessError 收任何字符串当 code（dsh-llm/lib/types/error.js:12-19，
+ * 从 dsh-llm/lib/index.js:1758 导出），dsh-tools 的 toolErrorResult 原样抄进 error.info（2516-2521），
+ * 于是工具体 / tools/pre-execute / tools/execute 里任何一处 `throw new HarnessError(msg, "<整句话>")` 都能
+ * 把一句话塞进 Ruyin 的模板。只有下面这几个 dsh 真会产生、适配器也真的理解的 code 允许出现在请求里；
+ * 别的一律退回 `tool "X" failed`，原始 code 只留在账本记录与 dropped.runtimeCodedResults 计数里。
+ *   UNKNOWN_TOOL           ToolNotFoundError            dsh-tools/lib/index.js:2441-2452
+ *   INVALID_TOOL_OUTPUT    ToolOutputError / projectionError  dsh-tools/lib/index.js:2454-2466
+ *   INVALID_ARGS           ToolArgsError（defineTool 包过的工具）dsh-tools/lib/index.js:811-816
+ *   ABORTED                TOOL_ABORTED                 dsh-tools/lib/index.js:2432
+ *   ABORTED_BEFORE_DISPATCH TOOL_ABORTED_BEFORE_DISPATCH dsh-tools/lib/index.js:2434
+ *   TOOL_OUTCOME_UNKNOWN / TOOL_NOT_STARTED  恢复时补写的悬空调用  dsh-session/lib/types/repair.js:11-13, 88-115
+ */
+const KNOWN_FAILURE_CODES = Object.freeze(new Set([
+  "UNKNOWN_TOOL", "INVALID_TOOL_OUTPUT", "INVALID_ARGS",
+  "ABORTED", "ABORTED_BEFORE_DISPATCH",
+  "TOOL_OUTCOME_UNKNOWN", "TOOL_NOT_STARTED",
+]));
+/** 系带加保险杠：即使允许清单以后长了，也只让像 code 的东西进模板。 */
+const CODE_SHAPE = /^[A-Z][A-Z0-9_]{0,39}$/;
 /** 什么都不知道的宿主：任何工具结果 / assistant 消息都是 INVALID_HISTORY，任何 user 消息都是外来的。 */
 const NO_HOST = Object.freeze({
   provenanceOf: () => undefined,
   isHostMessage: () => false,
   isAdapterAssistantMessage: () => false,
   isTaintedMessage: () => false,
+  isLoggedCall: () => false,
 });
 
 // ---------------------------------------------------------------------------
@@ -73,7 +101,10 @@ export function newDropped() {
     verdictBlocks: 0,
     nonTextBlocks: 0,         // 其它未知块（image 单独记在 droppedImageBlocks）
     runtimeToolResults: 0,    // dsh 运行时（不是工具）写的工具结果：转成 Ruyin 模板 / 宿主自己的理由，无 origin（harness.ts:1290-1295 的形状）
-    runtimeCodedResults: {},  // 其中 HarnessError 编码的，按 code 计（UNKNOWN_TOOL / INVALID_TOOL_OUTPUT …）：dsh 组的句子被 `tool "X" failed: CODE` 替掉
+    // 其中 HarnessError 编码的，按**原始 code**计（UNKNOWN_TOOL / INVALID_TOOL_OUTPUT …）：dsh 组的句子被 `tool "X" failed[: CODE]` 替掉。
+    // 无原型（L6a）：code 由攻击者可控，`__proto__` 这种键在字面量对象上会被静默丢掉、计数就漏了。
+    runtimeCodedResults: Object.create(null),
+    unknownFailureCodes: 0,   // 其中不在 KNOWN_FAILURE_CODES 里的：连 code 都不转发，只发 `tool "X" failed`
     droppedCancelledCalls: 0, // 被取消的工具调用（ABORTED / ABORTED_BEFORE_DISPATCH）：结果和发出它的 toolCalls 条目一起抹掉，dsh 的取消文本不进请求
     droppedImageBlocks: 0,    // image 块：适配器自己丢（不声明 inputModalities，dsh 就不会先改写成英文占位句）
     droppedForeignUserMessages: 0, // source.kind 'user' 但不是宿主发的消息（工具附加的 additionalContexts 可以冒充用户；id 对上内容对不上也算）
@@ -112,17 +143,37 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** 账本里的原始 code → 允许出现在请求里的 code（不认识的返回 undefined）。 */
+export function knownFailureCode(code) {
+  return typeof code === "string" && CODE_SHAPE.test(code) && KNOWN_FAILURE_CODES.has(code) ? code : undefined;
+}
+
 /**
- * Ruyin 自己的事实模板：HarnessError 编码的失败只转发 code 与工具名。dsh 组的那句话
- * （ToolNotFoundError 2449、ToolOutputError 2458、projectionError 2464-2466）一个字都不进请求。
+ * Ruyin 自己的事实模板：HarnessError 编码的失败只转发工具名与**允许清单里的** code。dsh 组的那句话
+ * （ToolNotFoundError 2449、ToolOutputError 2458、projectionError 2464-2466）以及攻击者自己编的 code
+ * 一个字都不进请求。
+ * @param {string|undefined} code  已经过 knownFailureCode 的 code；undefined = 只说"失败了"
  */
-function codedFailureFact(provenance, callId) {
-  return typeof provenance.tool === "string"
-    ? `tool "${provenance.tool}" failed: ${provenance.code}`
-    : `tool call "${callId}" failed: ${provenance.code}`;
+function codedFailureFact(provenance, callId, code) {
+  const subject = typeof provenance.tool === "string" ? `tool "${provenance.tool}"` : `tool call "${callId}"`;
+  return code === undefined ? `${subject} failed` : `${subject} failed: ${code}`;
 }
 
 const fnOr = (candidate, fallback) => (typeof candidate === "function" ? candidate : fallback);
+/**
+ * 宿主回调抛出 = 宿主自己坏了；对适配器而言那条历史仍然是"说不清作者的"（L6b）。
+ * 包成 LlmError INVALID_HISTORY，别让裸 TypeError 过 normalizeLlmFailure 变成 UNKNOWN。
+ */
+function guarded(fn, name) {
+  return (...args) => {
+    try {
+      return fn(...args);
+    } catch (error) {
+      if (error instanceof LlmError) throw error;
+      throw new LlmError(`host knowledge callback ${name}() failed`, "INVALID_HISTORY", { cause: error });
+    }
+  };
+}
 
 /**
  * @typedef {object} HostKnowledge  宿主知道、dsh 的消息表面上看不出来的几件事。缺哪一项按"什么都不知道"（fail closed）。
@@ -134,6 +185,9 @@ const fnOr = (candidate, fallback) => (typeof candidate === "function" ? candida
  *   这条 assistant 消息是不是本适配器产出的（账本从 assistant/message 事件记下的 id）。不是 = INVALID_HISTORY。
  * @property {(messageId: string) => boolean} isTaintedMessage
  *   账本标了污点的 id（user/message 事件里同一 id 出现两次、role 不是 user、或 source.kind 是 tool）= INVALID_HISTORY。
+ * @property {(callId: string) => boolean} isLoggedCall
+ *   账本里"进过日志"的 tool-call id（ToolLedger.loggedCalls）。工具结果的 callId 必须来自这一步已经映射过的 assistant
+ *   消息、或这个名单——否则就是凭空 append 出来的孤儿结果（第四轮 L3）。
  */
 
 /**
@@ -144,10 +198,12 @@ const fnOr = (candidate, fallback) => (typeof candidate === "function" ? candida
  * @returns {{ messages: object[], dropped: ReturnType<typeof newDropped> }}
  */
 export function mapMessages(messages, dropped = newDropped(), host = NO_HOST) {
-  const provenanceOf = fnOr(host?.provenanceOf, NO_HOST.provenanceOf);
-  const isHostMessage = fnOr(host?.isHostMessage, NO_HOST.isHostMessage);
-  const isAdapterAssistantMessage = fnOr(host?.isAdapterAssistantMessage, NO_HOST.isAdapterAssistantMessage);
-  const isTaintedMessage = fnOr(host?.isTaintedMessage, NO_HOST.isTaintedMessage);
+  // 四个回调都包一层：抛出的宿主回调是 INVALID_HISTORY，不是裸 TypeError（L6b）。
+  const provenanceOf = guarded(fnOr(host?.provenanceOf, NO_HOST.provenanceOf), "provenanceOf");
+  const isHostMessage = guarded(fnOr(host?.isHostMessage, NO_HOST.isHostMessage), "isHostMessage");
+  const isAdapterAssistantMessage = guarded(fnOr(host?.isAdapterAssistantMessage, NO_HOST.isAdapterAssistantMessage), "isAdapterAssistantMessage");
+  const isTaintedMessage = guarded(fnOr(host?.isTaintedMessage, NO_HOST.isTaintedMessage), "isTaintedMessage");
+  const isLoggedCall = guarded(fnOr(host?.isLoggedCall, NO_HOST.isLoggedCall), "isLoggedCall");
   const out = [];
   /** callId → out 里发出这个调用的 assistant 消息的下标（取消时那条 toolCalls 也要抹掉） */
   const issuedAt = new Map();
@@ -190,6 +246,11 @@ export function mapMessages(messages, dropped = newDropped(), host = NO_HOST) {
             texts.push(block.text);
             break;
           case "tool-call":
+            // 块的 id 必须是非空字符串（L6c）：没有它，issuedAt / 取消抹除 / 复用检查全部对不上 callId，
+            // 而 ToolCallId 在运行时只是字符串（brand.js:26-28），历史里出现别的东西就是损坏。
+            if (typeof block.id !== "string" || block.id === "") {
+              throw new LlmError(`assistant message "${typeof id === "string" ? id : "?"}" carries a tool-call block without a string id`, "INVALID_HISTORY");
+            }
             toolCalls.push({ id: block.id, tool: block.name, arguments: parseHistoryArguments(block.arguments, block.id) });
             break;
           case "reasoning":
@@ -228,15 +289,23 @@ export function mapMessages(messages, dropped = newDropped(), host = NO_HOST) {
       if (block.toolCallId !== callId) {
         throw new LlmError(`tool-result block for call "${callId}" names call "${String(block.toolCallId)}"`, "INVALID_HISTORY");
       }
+      if (!Array.isArray(block.content)) {
+        // L4：块的 content 不一定是数组——工具的 output.render 可以返回任意 lossless JSON（snapshotProjection dsh-tools 2468-2477
+        // 只要求"能无损 JSON 化"），createToolResultMessage 原样塞进块（dsh-llm 72-86）。原先直接 for...of 它 = 裸 TypeError。
+        throw new LlmError(`tool-result block for call "${callId}" carries a non-array content`, "INVALID_HISTORY");
+      }
       if (seenResults.has(callId)) {
         throw new LlmError(`call "${callId}" has more than one tool result on the session surface`, "INVALID_HISTORY");
       }
       seenResults.add(callId);
-      for (const inner of block.content ?? []) if (inner?.type !== "text") countNonText(inner);
-      const text = textOf(block.content);
+      if (!issuedAt.has(callId) && !isLoggedCall(callId)) {
+        // L3：拿到 exec.agent 的工具能直接 session.append 一条 tool/result 事件，callId 随便编——账本按 callId 建记录、
+        // 又按同一条事件记下 message.id，两边自洽。唯一能证伪的是"这个 callId 从来没有 assistant 消息发出过"。
+        throw new LlmError(`tool result for call "${callId}" names a call no assistant message ever issued`, "INVALID_HISTORY");
+      }
       const provenance = provenanceOf(callId);
 
-      if (provenance === undefined) {
+      if (provenance === undefined || provenance === null) {
         // 账本没有记录（不是这个进程产生的、或账本没接上）：不知道是谁写的就不转发——照转的反面是把 dsh 的渲染文本
         // （`Error: ` 前缀那一套）原样送进请求。
         throw new LlmError(`tool result for call "${callId}" has no ledger record`, "INVALID_HISTORY");
@@ -245,6 +314,9 @@ export function mapMessages(messages, dropped = newDropped(), host = NO_HOST) {
         // callId 对上了还不够：工具能 deferContext 一条 source.kind 'tool' + 真 callId 的消息。账本记的是 tool/result 事件里那条消息的 id。
         throw new LlmError(`tool result for call "${callId}" carries message id "${typeof id === "string" ? id : "?"}", the ledger recorded "${provenance.messageId ?? "none"}"`, "INVALID_HISTORY");
       }
+      // 出处站得住脚了才走内层的块（L4）：说不清作者的记录在读任何内容之前就已经失败了。
+      for (const inner of block.content) if (inner?.type !== "text") countNonText(inner);
+      const text = textOf(block.content);
       if (provenance.authored === "runtime" && CANCELLED_CODES.has(provenance.code)) {
         // 取消（dsh-tools 3550-3585 / agent-loop 276-292 写的 'tool call aborted[ before dispatch]'）：镜像内核——被取消的步骤
         // 从不进 messages。这条结果和发出它的那条 toolCalls 一起抹掉；发出方只剩空壳时整条抹掉。
@@ -266,8 +338,12 @@ export function mapMessages(messages, dropped = newDropped(), host = NO_HOST) {
         // 内容只能是 Ruyin 自己的：有 code 的用模板（dsh 组的句子不转发）；没 code 的只转发宿主自己登记过的理由；都没有就整步失败。
         dropped.runtimeToolResults += 1;
         if (typeof provenance.code === "string") {
-          dropped.runtimeCodedResults[provenance.code] = (dropped.runtimeCodedResults[provenance.code] ?? 0) + 1;
-          out.push({ role: "tool", callId, content: codedFailureFact(provenance, callId), isError: true });
+          // 原始 code 只进计数（无原型的桶，L6a：`__proto__` 也得算上）；进请求的只有允许清单里的那个（L1）。
+          const raw = provenance.code;
+          dropped.runtimeCodedResults[raw] = (Object.hasOwn(dropped.runtimeCodedResults, raw) ? dropped.runtimeCodedResults[raw] : 0) + 1;
+          const code = knownFailureCode(raw);
+          if (code === undefined) dropped.unknownFailureCodes += 1;
+          out.push({ role: "tool", callId, content: codedFailureFact(provenance, callId, code), isError: true });
           continue;
         }
         if (typeof provenance.hostReason === "string") {
@@ -505,14 +581,29 @@ function safeString(value) {
   }
 }
 
+/**
+ * Error 的 message 也是不可信的（第四轮 L5）：它可以是抛出的 getter（读一下就把原始失败换成别人的异常），
+ * 也可以是数字（LlmError 的构造器要求非空字符串，dsh-llm index.js:1035，否则**再抛一个裸 Error**）。
+ * 镜像 dsh 自己的 errorMessage（dsh-llm index.js:426-432）：读不出合法字符串就用兜底句。
+ */
+function safeMessage(error, fallback) {
+  try {
+    const message = error.message;
+    if (typeof message === "string" && message.length > 0) return message;
+  } catch {
+    /* 敌意 getter：原始失败比它重要 */
+  }
+  return fallback;
+}
+
 /** 网关抛出的东西 → 带 code 的 LlmError（普通 Error 过 normalizeLlmFailure 会变成 UNKNOWN）。 */
 export function classifyFailure(error) {
   if (error instanceof LlmError) return error;
   if (error instanceof TransientError) {
-    return new LlmError(error.message || "capability surface unreachable", "TRANSPORT", { cause: error });
+    return new LlmError(safeMessage(error, "capability surface unreachable"), "TRANSPORT", { cause: error });
   }
   if (error instanceof Error) {
-    return new LlmError(error.message || "capability surface failed", "CAPABILITY_ERROR", { cause: error });
+    return new LlmError(safeMessage(error, "capability surface failed"), "CAPABILITY_ERROR", { cause: error });
   }
   return new LlmError(safeString(error), "CAPABILITY_ERROR", { cause: error });
 }
@@ -542,15 +633,18 @@ export function raceAbort(promise, signal) {
 // 适配器
 // ---------------------------------------------------------------------------
 
-const LEDGER_METHODS = ["provenanceOf", "reconcileEmitted", "noteEmittedCalls", "isAdapterAssistantMessage", "isTaintedMessage"];
+const LEDGER_METHODS = [
+  "provenanceOf", "reconcileEmitted", "noteEmittedCalls", "noteEmission", "loggedCalls",
+  "isAdapterAssistantMessage", "isTaintedMessage",
+];
 
 export class RuyinCapabilityAdapter extends LlmAdapter {
   #gateway;
   #facts;
   #ledger;
   #log;
-  /** 三项"dsh 想塞进请求、被适配器挡下"的累计数（每请求的明细在 log 回调的 dropped 里；历史每次请求都重映射，所以同一条会累计多次）。 */
-  #counters = { droppedCancelledCalls: 0, droppedImageBlocks: 0, droppedForeignUserMessages: 0 };
+  /** 四项"dsh 想塞进请求、被适配器挡下"的累计数（每请求的明细在 log 回调的 dropped 里；历史每次请求都重映射，所以同一条会累计多次）。 */
+  #counters = { droppedCancelledCalls: 0, droppedImageBlocks: 0, droppedForeignUserMessages: 0, unknownFailureCodes: 0 };
 
   /**
    * @param {{ gateway: { turn(request: object): Promise<object> },
@@ -575,7 +669,7 @@ export class RuyinCapabilityAdapter extends LlmAdapter {
     this.#log = log;
   }
 
-  /** @returns {{ droppedCancelledCalls: number, droppedImageBlocks: number, droppedForeignUserMessages: number }} 快照 */
+  /** @returns {{ droppedCancelledCalls: number, droppedImageBlocks: number, droppedForeignUserMessages: number, unknownFailureCodes: number }} 快照 */
   get counters() {
     return { ...this.#counters };
   }
@@ -622,6 +716,7 @@ export class RuyinCapabilityAdapter extends LlmAdapter {
       isHostMessage: (message) => this.#facts.isHostMessage(sessionId, message),
       isAdapterAssistantMessage: (messageId) => ledger.isAdapterAssistantMessage(sessionId, messageId),
       isTaintedMessage: (messageId) => ledger.isTaintedMessage(sessionId, messageId),
+      isLoggedCall: (callId) => ledger.loggedCalls(sessionId).has(callId),
     };
     const { request, dropped } = toTurnRequest(options, facts, host);
     for (const key of Object.keys(this.#counters)) this.#counters[key] += dropped[key];
@@ -640,10 +735,10 @@ export class RuyinCapabilityAdapter extends LlmAdapter {
     const logged = ledger.reconcileEmitted(sessionId, historyCallIds(options));
     // 所有校验在第一个 chunk 之前；应答对着**发出去的请求**校验（offer / 生成轮 vs 验证轮）。
     const chunks = turnToChunks(turn, request, options, logged);
-    if (turn.kind === "tool_calls") {
-      // 先登记再 yield；是否真进了日志，下一次 reconcileEmitted 再定。
-      ledger.noteEmittedCalls(sessionId, turn.calls.map((call) => call.id));
-    }
+    // 先登记再 yield（L3）：block-end 里的那组块 = dsh 装配出来的 assistant 内容（assembler.js:64-71/94-96 原样返回它们）。
+    // 账本只把内容与这份登记对得上的 assistant/message 算成"本适配器产出的"；里面的 tool-call id 同时进 pending，
+    // 是否真进了日志，下一次 reconcileEmitted 再定。
+    ledger.noteEmission(sessionId, chunks.filter((c) => c.type === "block-end").map((c) => c.block));
     yield* chunks;
   }
 }

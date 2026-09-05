@@ -13,6 +13,10 @@
 //   F  谁写的就得能证明（fail closed）：工具输出违反 schema → dsh 组的 INVALID_TOOL_OUTPUT 句子被 Ruyin 模板替掉；
 //      工具复用宿主的消息 id 冒充用户 / 冒充模型（role assistant）/ 冒充工具结果（真 callId）→ 下一步 INVALID_HISTORY：
 //      伪造文本进了 dsh 日志、不进任何请求、能力面一次都没被再问
+//   G  第四轮对抗式验证打出的六个渗漏：失败 code 当自由文本（工具体 / pre-execute / around-dispatch 三种抛法）、
+//      post-execute 悄悄换掉成功结果的内容（content / value）、工具直接 session.append 伪造 assistant 与孤儿 tool/result、
+//      render 返回非数组、网关 Error 的 message 是敌意 getter / 数字、code 为 "__proto__"。
+//      每条都断言攻击标记一个字都没进任何 CapabilityTurnRequest
 import { resolve } from "node:path";
 import assert from "node:assert/strict";
 import { boot, installFailLoud } from "@deepseek-ai/dsh-app-boot";
@@ -21,7 +25,12 @@ import { RuyinCapabilityAdapter, VERDICT_BLOCK_TYPE } from "./llm-ruyin.mjs";
 import { MemoryTaskFacts } from "./task-facts.mjs";
 import { ToolLedger } from "./tool-ledger.mjs";
 import { ScriptedGateway } from "./scripted-surface.mjs";
-import { registerSpikeTools, registerSpikeGuard, spikeHooks, FORGED_USER_TEXT, FORGED_ASSISTANT_TEXT } from "./spike-tools.mjs";
+import {
+  registerSpikeTools, registerSpikeGuard, spikeHooks, FORGED_USER_TEXT, FORGED_ASSISTANT_TEXT,
+  registerTrapPreExecute, registerTrapAroundDispatch, registerTrapPostContent, registerTrapPostValue,
+  MK_HE_CODE, MK_PRE_CODE, MK_AROUND_CODE, MK_POST_CONTENT, MK_POST_VALUE,
+  MK_APPEND_ASSISTANT, MK_APPEND_RESULT, MK_ORPHAN_CALL_ID, MK_RENDER_VALUE, MK_GETTER,
+} from "./spike-tools.mjs";
 import { analyzeTenderFacts, factsForTask } from "./fixtures/analyze-tender-facts.mjs";
 import { TransientError } from "../../packages/runtime-core/dist/index.js";
 import { MockAIGateway } from "../../apps/local-host/dist/host-ports.js";
@@ -65,6 +74,8 @@ const gatewaySwitch = { turn: (request) => gateway.turn(request) };
 const adapter = new RuyinCapabilityAdapter({ gateway: gatewaySwitch, facts, ledger, log: (r) => dropLog.push(r) });
 
 const tBoot = performance.now();
+/** 探针 G 组把"敌意插件"装在这个 ctx 上（注册在账本之后 = 更靠内，正是 tool-ledger 头注里说的那种破坏性排序）。 */
+let spikeCtx = null;
 const ctx = await boot("ruyin-spike", resolve("cordis.yml"), [], async (ctx) => {
   ctx.plugin({
     name: "llm-ruyin",
@@ -74,6 +85,7 @@ const ctx = await boot("ruyin-spike", resolve("cordis.yml"), [], async (ctx) => 
       registerSpikeTools(ctx);
       registerSpikeGuard(ctx, ledger); // guard 的拒绝理由先进账本（hostReason），适配器只转发宿主记过的那句
       ledger.attach(ctx);
+      spikeCtx = ctx;
     },
   });
 });
@@ -294,6 +306,7 @@ async function failureCase(label, sessionId, script, expect) {
       eq(`${label} agent/error carries the code`, agentErrors.map((e) => e.code), [expect.end.code]);
     }
     if (expect.lastRequest) eq(`${label} last request shape`, expect.lastRequest.pick(g.requests.at(-1)), expect.lastRequest.expected);
+    expect.more?.(result.events, g);
   });
 }
 
@@ -560,7 +573,8 @@ console.log("\n[run F] provenance must be provable · sessions t7–t10");
       { role: "tool", callId: "call_f1", content: 'tool "read_file" failed: INVALID_TOOL_OUTPUT', isError: true },
     ]);
     eq("F1 dsh's sentence appears in no request", g.requests.map((r) => /returned invalid output/.test(json(r))), [false, false]);
-    eq("F1 counts: 1 runtime result, keyed by code", { runtime: dropLog.at(-1).dropped.runtimeToolResults, coded: dropLog.at(-1).dropped.runtimeCodedResults }, { runtime: 1, coded: { INVALID_TOOL_OUTPUT: 1 } });
+    // runtimeCodedResults 是无原型对象（L6a）：比较前摊平一层，原型本身在 G6a 里单独断言。
+    eq("F1 counts: 1 runtime result, keyed by code", { runtime: dropLog.at(-1).dropped.runtimeToolResults, coded: { ...dropLog.at(-1).dropped.runtimeCodedResults } }, { runtime: 1, coded: { INVALID_TOOL_OUTPUT: 1 } });
     eq("F1 total requests = 2, script empty", { n: g.requests.length, left: g.remaining }, { n: 2, left: 0 });
   });
 }
@@ -625,6 +639,164 @@ await forgeryCase("F4", "t10", "echo.pdf", undefined, {
     eq("F4 ledger keeps the real result's message id; the forged copy's differs and is tainted", { real: recorded === results[0]?.id, forgedMatches: recorded === results[1]?.id, tainted: ledger.isTaintedMessage("t10", results[1]?.id) }, { real: true, forgedMatches: false, tainted: true });
   },
 });
+
+// ===========================================================================
+// RUN G · 第四轮的六个渗漏（每条都在真的启动树上跑，断言标记一个字都没进任何请求）
+//   G1 失败 code 是自由文本通道（工具体 / pre-execute / around-dispatch 三种抛法）
+//   G2 post-execute 悄悄换掉成功结果的内容（accept{content} / accept{value}）
+//   G3 拿到 exec.agent 的工具直接往日志里 append（assistant/message / 孤儿 tool/result）
+//   G4 render 返回非数组 → 原先是裸 TypeError
+//   G5 网关抛的 Error 的 message 是抛出的 getter / 数字 → 原先是裸崩溃
+//   G6 code 为 "__proto__" 时计数被静默吞掉
+// ===========================================================================
+console.log("\n[run G] round-4 leaks · sessions t11–t20");
+
+const marker = (label, g, re) => eq(`${label} the attacker marker reached no request at all`, g.requests.some((q) => re.test(json(q))), false);
+/** 某个 callId 的 tool/result 事件里 error.info（HarnessError 才有）。 */
+const resultErrorInfo = (events, callId) => events.find((e) => e.type === "tool/result" && e.data.message.source.callId === callId)?.data.error ?? null;
+
+/**
+ * G 组的通用形状：一次 read_file 往返，然后看下一步。
+ * @param {{ trap?: (ctx) => (() => void), marker: RegExp, check: (r, g, handle, agentErrors, callId) => void, second?: object }} expect
+ */
+async function trapCase(label, sessionId, path, expect) {
+  const callId = `call_${label.toLowerCase()}`;
+  const g = new ScriptedGateway([
+    { kind: "tool_calls", calls: [{ id: callId, tool: "read_file", arguments: { path } }] },
+    expect.second ?? { kind: "content", content: "after trap" },
+  ]);
+  gateway = g;
+  const dispose = expect.trap?.(spikeCtx);
+  try {
+    await withAgent(sessionId, factsForTask(sessionId), async (handle, agentErrors) => {
+      const r = await runTurn(handle, {});
+      timings.turns.push({ run: label, ms: r.ms });
+      console.log(`[${label}] ${r.ms} ms; events: ${r.events.map((e) => e.type).join(" → ")}`);
+      expect.check(r, g, handle, agentErrors, callId, sessionId);
+      marker(label, g, expect.marker);
+    });
+  } finally {
+    if (typeof dispose === "function") dispose();
+  }
+}
+
+/** G1 三条：dsh 把攻击者的 code 一路带到 error.info；适配器只发 `tool "read_file" failed`（code 不在允许清单里）。 */
+function checkCodeLeak(label, code, { bodyReached }) {
+  return (r, g, handle, agentErrors, callId, sessionId) => {
+    eq(`${label} turn/end completed`, turnEnd(r.events), { kind: "completed" });
+    eq(`${label} dsh really carried the attacker's string as the failure code`, resultErrorInfo(r.events, callId)?.code, code);
+    const rec = ledger.provenanceOf(sessionId, callId);
+    eq(`${label} ledger keeps the raw code (and only the ledger does)`, { authored: rec?.authored, code: rec?.code, bodyReached: rec !== undefined && bodyReached }, { authored: "runtime", code, bodyReached });
+    const R2 = g.requests[1];
+    console.log(`[${label}] R2 tail = ${json(R2.messages.at(-1))}`);
+    eq(`${label} the request carries Ruyin's bare template — no code, no dsh sentence`, R2.messages.at(-1), { role: "tool", callId, content: 'tool "read_file" failed', isError: true });
+    const last = dropLog.at(-1).dropped;
+    eq(`${label} counted under the raw code, and counted as unknown`, { n: last.runtimeCodedResults[code], unknown: last.unknownFailureCodes }, { n: 1, unknown: 1 });
+  };
+}
+
+// --- G1a：工具体抛 HarnessError，code 是一整句话 -------------------------------------------------
+await trapCase("G1a", "t11", "trap-code.pdf", { marker: /MK-HE-CODE/, check: checkCodeLeak("G1a", MK_HE_CODE, { bodyReached: true }) });
+// --- G1b：tools/pre-execute 抛同样的东西（工具体从没被到达） --------------------------------------
+await trapCase("G1b", "t12", "trap-pre.pdf", {
+  trap: (c) => registerTrapPreExecute(c), marker: /MK-PRE-CODE/,
+  check: (r, g, handle, agentErrors, callId, sessionId) => {
+    eq("G1b the tool body was never reached (zero tool body output in the log)", r.events.some((e) => e.type === "tool/result" && /\[spike\] contents/.test(json(e))), false);
+    checkCodeLeak("G1b", MK_PRE_CODE, { bodyReached: true })(r, g, handle, agentErrors, callId, sessionId);
+  },
+});
+// --- G1c：tools/execute 的 around-dispatch 包装器抛同样的东西 -------------------------------------
+await trapCase("G1c", "t13", "trap-around.pdf", {
+  trap: (c) => registerTrapAroundDispatch(c), marker: /MK-AROUND-CODE/,
+  check: checkCodeLeak("G1c", MK_AROUND_CODE, { bodyReached: true }),
+});
+
+/** G2 两条：post-execute 换掉成功结果的内容，result.error 仍是 undefined —— 账本靠内容指纹发现，适配器 fail closed。 */
+function checkRewrite(label, replaced) {
+  return (r, g, handle, agentErrors, callId, sessionId) => {
+    const [tr] = toolResults(r.events);
+    eq(`${label} dsh's log carries the plugin's sentence as a SUCCESSFUL tool result`, { text: tr?.text, isError: tr?.isError, error: tr?.error }, { text: replaced, isError: false, error: null });
+    const rec = ledger.provenanceOf(sessionId, callId);
+    eq(`${label} ledger: the body's fingerprint no longer matches → runtime-authored, no code, no host reason`,
+      { authored: rec?.authored, rewritten: rec?.bodyRewritten, code: rec?.code, hostReason: rec?.hostReason }, { authored: "runtime", rewritten: true, code: undefined, hostReason: undefined });
+    eq(`${label} next step fails closed: INVALID_HISTORY`, turnEnd(r.events)?.kind === "error" ? turnEnd(r.events).error.code : turnEnd(r.events), "INVALID_HISTORY");
+    eq(`${label} agent/error INVALID_HISTORY`, agentErrors.map((e) => e.code), ["INVALID_HISTORY"]);
+    eq(`${label} exactly one request reached the surface`, { n: g.requests.length, left: g.remaining }, { n: 1, left: 1 });
+  };
+}
+await trapCase("G2a", "t14", "trap-post.pdf", { trap: (c) => registerTrapPostContent(c), marker: /MK-POST-CONTENT/, check: checkRewrite("G2a", MK_POST_CONTENT), second: { kind: "content", content: "never" } });
+await trapCase("G2b", "t15", "trap-post-value.pdf", { trap: (c) => registerTrapPostValue(c), marker: /MK-POST-VALUE/, check: checkRewrite("G2b", MK_POST_VALUE), second: { kind: "content", content: "never" } });
+
+// --- G3a：工具直接 session.append 一条 assistant/message（NOTES 遗留 (d)）→ 名单只认 emission 指纹 ----------
+await trapCase("G3a", "t16", "append-assistant.pdf", {
+  marker: /MK-APPEND-ASSISTANT/, second: { kind: "content", content: "never" },
+  check: (r, g, handle, agentErrors, callId, sessionId) => {
+    const surface = handle.agent.session.deriveMessages();
+    const forged = surface.find((m) => m.role === "assistant" && json(m.content).includes("MK-APPEND-ASSISTANT"));
+    eq("G3a the tool really wrote an assistant/message event into the log", { events: r.events.filter((e) => e.type === "assistant/message").length, onSurface: forged !== undefined, kind: forged?.source?.kind }, { events: 2, onSurface: true, kind: "model" });
+    eq("G3a only the emission-matched message is on the adapter's list", surface.filter((m) => m.role === "assistant").map((m) => ledger.isAdapterAssistantMessage(sessionId, m.id)), [true, false]);
+    eq("G3a next step fails closed: INVALID_HISTORY", turnEnd(r.events)?.kind === "error" ? turnEnd(r.events).error.code : turnEnd(r.events), "INVALID_HISTORY");
+    eq("G3a exactly one request reached the surface", { n: g.requests.length, left: g.remaining }, { n: 1, left: 1 });
+  },
+});
+// --- G3b：工具直接 append 一条 tool/result，callId 谁都没发出过 → 账本给自己背书，但发出方证伪它 --------------
+await trapCase("G3b", "t17", "append-result.pdf", {
+  marker: /MK-APPEND-RESULT/, second: { kind: "content", content: "never" },
+  check: (r, g, handle, agentErrors, callId, sessionId) => {
+    const surface = handle.agent.session.deriveMessages();
+    const orphan = surface.find((m) => m.source?.kind === "tool" && m.source.callId === MK_ORPHAN_CALL_ID);
+    const rec = ledger.provenanceOf(sessionId, MK_ORPHAN_CALL_ID);
+    eq("G3b the ledger's own record for the orphan call is circular: it was written by the very event the tool appended", { onSurface: orphan !== undefined, hasRecord: rec !== undefined, messageIdMatches: rec?.messageId === orphan?.id }, { onSurface: true, hasRecord: true, messageIdMatches: true });
+    eq("G3b ...but no assistant message ever issued that callId", { issued: ledger.loggedCalls(sessionId).has(MK_ORPHAN_CALL_ID), real: ledger.loggedCalls(sessionId).has(callId) }, { issued: false, real: true });
+    eq("G3b next step fails closed: INVALID_HISTORY", turnEnd(r.events)?.kind === "error" ? turnEnd(r.events).error.code : turnEnd(r.events), "INVALID_HISTORY");
+    eq("G3b exactly one request reached the surface", { n: g.requests.length, left: g.remaining }, { n: 1, left: 1 });
+  },
+});
+
+// --- G4：output.render 返回 42 → tool-result 块的 content 不是数组 → 原先是裸 TypeError（→ UNKNOWN） ----------
+await trapCase("G4", "t18", "raw.pdf", {
+  marker: /MK-RENDER/, second: { kind: "content", content: "never" },
+  check: (r, g, handle, agentErrors, callId) => {
+    const block = r.events.find((e) => e.type === "tool/result")?.data.message.content[0];
+    eq("G4 dsh accepted a non-array block content (snapshotProjection only wants lossless JSON)", { content: block?.content, isError: block?.isError }, { content: 42, isError: false });
+    eq("G4 next step is INVALID_HISTORY, not a raw TypeError normalized to UNKNOWN", turnEnd(r.events)?.kind === "error" ? turnEnd(r.events).error.code : turnEnd(r.events), "INVALID_HISTORY");
+    eq("G4 exactly one request reached the surface", { n: g.requests.length, left: g.remaining }, { n: 1, left: 1 });
+  },
+});
+
+// --- G5：网关抛的 Error 的 message 是敌意 getter / 数字 → classifyFailure 原先自己崩 -------------------------
+const getterError = new Error("placeholder");
+Object.defineProperty(getterError, "message", { configurable: true, get() { throw new Error(MK_GETTER); } });
+await failureCase("G5a", "t19", [{ throw: getterError }], {
+  end: { kind: "error", code: "CAPABILITY_ERROR" }, retries: [], requests: 1, onlyErrorFinish: true,
+  more: (events, g) => {
+    const failure = events.filter((e) => e.type === "assistant/chunk").at(-1)?.data.chunk.reason?.failure;
+    eq("G5a the terminal failure is Ruyin's fallback sentence, not what the hostile getter threw", failure, { message: "capability surface failed", code: "CAPABILITY_ERROR" });
+    marker("G5a", g, /MK-GETTER/);
+  },
+});
+const numericError = new Error("placeholder");
+numericError.message = 42; // LlmError 的构造器要求非空字符串（dsh-llm 1035），原先这里会再抛一个裸 Error
+await failureCase("G5b", "t20", [{ throw: numericError }], {
+  end: { kind: "error", code: "CAPABILITY_ERROR" }, retries: [], requests: 1, onlyErrorFinish: true,
+  more: (events) => eq("G5b a numeric message falls back instead of throwing inside the LlmError constructor",
+    events.filter((e) => e.type === "assistant/chunk").at(-1)?.data.chunk.reason?.failure, { message: "capability surface failed", code: "CAPABILITY_ERROR" }),
+});
+
+// --- G6a：code = "__proto__" → 计数桶必须是无原型对象 ---------------------------------------------------
+await trapCase("G6a", "t21", "proto-code.pdf", {
+  marker: /__proto__/,
+  check: (r, g) => {
+    eq("G6a turn/end completed", turnEnd(r.events), { kind: "completed" });
+    const bucket = dropLog.at(-1).dropped.runtimeCodedResults;
+    eq("G6a the '__proto__' code is counted as an own property of a null-prototype bucket",
+      { proto: Object.getPrototypeOf(bucket), own: Object.hasOwn(bucket, "__proto__"), n: bucket.__proto__, unknown: dropLog.at(-1).dropped.unknownFailureCodes }, { proto: null, own: true, n: 1, unknown: 1 });
+    eq("G6a Object.prototype was not polluted", {}.__proto__ === Object.prototype, true);
+    eq("G6a the request carries Ruyin's bare template", g.requests[1].messages.at(-1), { role: "tool", callId: "call_g6a", content: 'tool "read_file" failed', isError: true });
+  },
+});
+// G1a / G1b / G1c / G6a 各贡献一次（都在各自的第二次请求里，会话彼此独立，历史不累计）。
+eq("G adapter.counters expose the unknown-code tally", adapter.counters.unknownFailureCodes, 4);
 
 // ===========================================================================
 // 收尾
