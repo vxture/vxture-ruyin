@@ -40,6 +40,7 @@ const { EventBus } = await import(`${ROOT}/apps/local-host/dist/events.js`);
 const { ConnectorRegistry } = await import(`${ROOT}/apps/local-host/dist/connector-registry.js`);
 const { SkillRegistry } = await import(`${ROOT}/apps/local-host/dist/skill-registry.js`);
 const { ToolRegistryView } = await import(`${ROOT}/apps/local-host/dist/tool-registry.js`);
+const { BundledToolServers } = await import(`${ROOT}/apps/local-host/dist/tool-servers.js`);
 const { readFileSync } = await import("node:fs");
 
 const PORT = Number(process.env.PORT ?? 17470);
@@ -61,9 +62,16 @@ const storage = new SqliteStoragePort(dataDir, await KeyManager.open(dataDir));
 // 观察台允许装未签名连接器（它本来就只用桩数据、只在本机）。要试的话，dist 里有
 // 一个假的 MCP 服务器：命令 node，参数 apps/local-host/dist/fake-mcp-server.js。
 const connectorLookup = new Map([["local-fs", new LocalFsConnector()]]);
+// 预置的 MCP 服务器（pnpm tools:pull 才有）：观察台里能真的启动 / 停止。
+const bundledTools = new BundledToolServers({
+  toolsDir: `${repo}/resources/tools`,
+  dataDir,
+  log: (l) => console.error(l),
+});
 const connectorRegistry = new ConnectorRegistry(dataDir, connectorLookup, {
   allowUnsigned: true,
   log: (l) => console.error(l),
+  bundled: bundledTools,
 });
 const executor = new LocalToolExecutor((pid, q, scope, limit) =>
   searchContext(storage, pid, q, scope, limit),
@@ -153,7 +161,7 @@ const server = createLocalApi({
     supportsBuiltin: (id) => executor.supports(id),
     hasSkills: () => true,
     connectors: () => connectorRegistry.list(),
-    bundledIndex: () => skillRegistry.bundledIndex(),
+    bundledServers: () => bundledTools.list(),
   }),
   // 主题中转：界面上报，壳取值给窗口按钮上色（观察台里没有壳，但端点要在，
   // 否则那条通路在这儿看不见）。

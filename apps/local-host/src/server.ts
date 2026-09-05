@@ -29,7 +29,7 @@ import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import { apiError, REJECTION } from "./errors.js";
 import type { ToolProvider } from "@vxture/ruyin-contract-schema";
-import { ConnectorInstallRefusedError } from "./connector-registry.js";
+import { ConnectorBundledError, ConnectorInstallRefusedError } from "./connector-registry.js";
 import { RegistryError, downloadPackage, fetchRegistryIndex } from "./registry-client.js";
 import { join as joinPath } from "node:path";
 import type { EventBus } from "./events.js";
@@ -60,6 +60,10 @@ export interface ConnectorRegistryLike {
   }): Promise<{ ok: boolean; tools: string[]; detail?: string }>;
   /** 启用一个暂存的连接器：重新试，通了才转 active。 */
   activate(id: string): Promise<unknown>;
+  /** 停用：停进程、从内核名单拿掉；用户装的转暂存，预置的记回状态。 */
+  deactivate(id: string): Promise<unknown>;
+  /** 预置服务器要的环境变量（SEARXNG_URL 之类；不是密钥）。 */
+  setBundledEnv?(id: string, env: Record<string, string>): unknown;
   remove(id: string): Promise<void>;
   healthOf(id: string): Promise<unknown>;
 }
@@ -730,6 +734,27 @@ async function handle(
       );
       return;
     }
+    // POST /connectors/:id/deactivate —— 停进程；用户装的转暂存，预置的记为未启用。
+    if (method === "POST" && segments.length === 3 && segments[2] === "deactivate") {
+      try {
+        send(res, 200, await deps.connectors.deactivate(segments[1]!));
+      } catch (cause) {
+        send(res, 404, apiError("CONNECTOR_NOT_FOUND", cause instanceof Error ? cause.message : String(cause)));
+      }
+      return;
+    }
+    // POST /connectors/:id/env —— 预置服务器的环境变量（例如 SEARXNG_URL）。密钥不走这里。
+    if (method === "POST" && segments.length === 3 && segments[2] === "env") {
+      const body = await readJson(req);
+      const env = body["env"] && typeof body["env"] === "object" ? (body["env"] as Record<string, string>) : {};
+      try {
+        if (!deps.connectors.setBundledEnv) throw new Error("这套装配没有预置工具层");
+        send(res, 200, deps.connectors.setBundledEnv(segments[1]!, env));
+      } catch (cause) {
+        send(res, 400, apiError("CONNECTOR_INVALID", cause instanceof Error ? cause.message : String(cause)));
+      }
+      return;
+    }
     // POST /connectors/:id/activate —— 把暂存的那个真正启用起来。
     if (method === "POST" && segments.length === 3 && segments[2] === "activate") {
       try {
@@ -782,10 +807,12 @@ async function handle(
       try {
         await deps.connectors.remove(segments[1]!);
       } catch (cause) {
+        // 预置的不能卸载，只能停用 —— 这不是「找不到」，是「不许」。
+        const bundled = cause instanceof ConnectorBundledError;
         send(
           res,
-          404,
-          apiError("CONNECTOR_NOT_FOUND", cause instanceof Error ? cause.message : String(cause)),
+          bundled ? 400 : 404,
+          apiError(bundled ? "CONNECTOR_BUNDLED" : "CONNECTOR_NOT_FOUND", cause instanceof Error ? cause.message : String(cause)),
         );
         return;
       }

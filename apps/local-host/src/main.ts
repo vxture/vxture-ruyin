@@ -44,6 +44,7 @@ import { CapabilityClient } from "./capability-client.js";
 import { SkillRegistry } from "./skill-registry.js";
 import { refreshDistributedSkills } from "./skill-distribution.js";
 import { ToolRegistryView } from "./tool-registry.js";
+import { BundledToolServers } from "./tool-servers.js";
 import { fetchContract } from "./contract-fetch.js";
 import { EventBus } from "./events.js";
 import { KeyManager } from "./keys.js";
@@ -160,6 +161,9 @@ const capabilityBase = process.env["RUYIN_CAPABILITY_BASE"] ?? "";
 // RUYIN_SKILLS_DIR）；开发态是仓内 resources/skills —— 拉过（pnpm skills:pull）才有，
 // 没拉过就是没有预置层，启动日志会说。
 const bundledSkillsDir = process.env["RUYIN_SKILLS_DIR"] ?? resolve("resources/skills");
+// 预置的 MCP 服务器（ADR-018 §2.2）：packaged 在 <resources>/tools（壳给 RUYIN_TOOLS_DIR），
+// 开发态是仓内 resources/tools —— pnpm tools:pull 才有。
+const bundledToolsDir = process.env["RUYIN_TOOLS_DIR"] ?? resolve("resources/tools");
 
 /**
  * 目录选择框的中转。事件发出去、请求挂着等 —— 详见 folder-pick.ts 的头注释。
@@ -191,10 +195,17 @@ try {
 const localFs = new LocalFsConnector();
 // 内核拿着这同一份表；宿主注册表在运行时往里放进程外连接器（ADR-005 接缝 ④）。
 const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
+const bundledTools = new BundledToolServers({
+  toolsDir: bundledToolsDir,
+  dataDir,
+  log: (line) => console.error(line),
+});
 const connectorRegistry = new ConnectorRegistry(dataDir, connectors, {
   // 与包的先例同一姿态：签名信任锚（TD-012）就位前生产拒装，开发显式放行。
   allowUnsigned: process.env["RUYIN_ALLOW_UNSIGNED_CONNECTORS"] === "1",
   log: (line) => console.error(line),
+  // 预置的 MCP 服务器就是来源为 bundled 的连接器：起进程、列工具、接 Tool Gate 都走同一条路。
+  bundled: bundledTools,
 });
 process.on("exit", () => {
   // 子进程不该活得比守护进程久。同步 kill 就够：exit 里等不了 promise。
@@ -314,7 +325,7 @@ const server = createLocalApi({
     supportsBuiltin: (id) => toolExecutor.supports(id),
     hasSkills: () => true,
     connectors: () => connectorRegistry.list(),
-    bundledIndex: () => skillRegistry.bundledIndex(),
+    bundledServers: () => bundledTools.list(),
   }),
   ...(capabilityBase ? { refreshDistributedSkills: refreshAllDistributed } : {}),
   uiDir,
@@ -471,6 +482,28 @@ async function pdfSelfCheck(): Promise<void> {
   console.log(`[ruyin] pdf self-check: ok (${bytes.byteLength} bytes)`);
 }
 
+/**
+ * 打包冒烟时真的起一个 vendored 的 MCP 服务器（ADR-018 §2.2，TD-042）。
+ *
+ * 装进包不等于起得来：入口路径、Electron 当 Node 用（ELECTRON_RUN_AS_NODE）、
+ * 依赖树有没有被 electron-builder 拷散，只有真起一次才知道。挑第一个 node 形态、
+ * 不要环境变量的；起 → 握手 → tools/list → 停，不碰网络。没有 vendored 的就如实说。
+ */
+async function toolsSelfCheck(): Promise<void> {
+  const candidate = bundledTools
+    .launchable()
+    .find((s) => s.launch?.runtime === "node" && !(s.launch.requiresEnv?.length) && s.vendored);
+  if (!candidate) {
+    console.log("[ruyin] tools self-check: no vendored node server to try");
+    return;
+  }
+  const plan = bundledTools.plan(candidate.id);
+  if (!plan.ok) throw new Error(`${candidate.id}: ${plan.reason}`);
+  const probe = await connectorRegistry.probe({ id: candidate.id, command: plan.command, args: plan.args, env: plan.env });
+  if (!probe.ok) throw new Error(`${candidate.id}: ${probe.detail ?? "did not come up"}`);
+  console.log(`[ruyin] tools self-check: ok (${candidate.id}, ${probe.tools.length} tool(s))`);
+}
+
 // 装好的进程外连接器先起来再开门：起不来的照样登记（健康为 false），只记日志。
 await connectorRegistry.load();
 
@@ -523,11 +556,22 @@ server.listen(port, "127.0.0.1", () => {
       `[ruyin] skills: bundled ${n.bundled}${skillRegistry.bundledDir ? ` (${skillRegistry.bundledDir})` : " (no bundled layer)"}, distributed ${n.distributed}, user ${n.user}`,
     );
   }
+  {
+    const all = bundledTools.list();
+    const launchable = bundledTools.launchable();
+    console.log(
+      `[ruyin] tools: bundled ${all.length} server definition(s)${bundledTools.toolsDir ? ` (${bundledTools.toolsDir})` : " (no bundled tools layer)"}, ${launchable.length} launchable, ${bundledTools.enabledIds().length} enabled`,
+    );
+  }
   console.log(`[ruyin] listening on http://127.0.0.1:${port}`);
   console.log(`[ruyin] session token: ${token}`);
   if (process.env["RUYIN_SMOKE"] === "1") {
     void pdfSelfCheck().catch((cause) => {
       console.error("[ruyin] pdf self-check failed:", cause);
+      process.exit(1);
+    });
+    void toolsSelfCheck().catch((cause) => {
+      console.error("[ruyin] tools self-check failed:", cause);
       process.exit(1);
     });
   }

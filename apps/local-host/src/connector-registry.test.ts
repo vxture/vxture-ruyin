@@ -7,9 +7,12 @@ import test from "node:test";
 import type { ConnectorPort } from "@vxture/ruyin-core";
 import {
   CONNECTORS_FILE,
+  ConnectorBundledError,
   ConnectorInstallRefusedError,
   ConnectorRegistry,
 } from "./connector-registry.js";
+import { BundledToolServers } from "./tool-servers.js";
+import { mkdirSync } from "node:fs";
 
 const FAKE = fileURLToPath(new URL("./fake-mcp-server.js", import.meta.url));
 
@@ -221,4 +224,94 @@ test("registry: load skips stashed entries, and a manifest written before state 
   assert.deepEqual([...lookup.keys()], ["old"]);
   await registry.stopAll();
   rmSync(dataDir, { recursive: true, force: true });
+});
+
+// ───────────────── 预置的 MCP 服务器（ADR-018 §2.2 / TD-042）：来源为 bundled 的连接器 ─────────────────
+
+/** 一个 vendored 的 node 服务器：入口就是测试用的假 MCP 服务器。 */
+function bundledRig() {
+  const { dataDir, lookup, log } = fresh();
+  const toolsDir = join(dataDir, "tools-bundle");
+  mkdirSync(join(toolsDir, "fake.server", "node_modules", "fake-mcp"), { recursive: true });
+  writeFileSync(join(toolsDir, "fake.server", "node_modules", "fake-mcp", "cli.js"), readFileSync(FAKE));
+  writeFileSync(
+    join(toolsDir, "index.json"),
+    JSON.stringify({
+      servers: [
+        {
+          id: "fake.server",
+          tier: "default",
+          license: "MIT",
+          launch: { runtime: "node", package: "fake-mcp", version: "1.0.0", bin: "cli.js", args: [] },
+          vendored: { dir: "fake.server", package: "fake-mcp@1.0.0", entry: "node_modules/fake-mcp/cli.js" },
+        },
+        {
+          id: "py.only",
+          tier: "default",
+          license: "MIT",
+          launch: { runtime: "uvx", package: "some-py", version: "1.0.0" },
+        },
+      ],
+    }),
+  );
+  const bundled = new BundledToolServers({ toolsDir, dataDir, execPath: process.execPath, hasUvx: () => false });
+  const registry = new ConnectorRegistry(dataDir, lookup, { allowUnsigned: false, log: (l) => log.push(l), timeoutMs: 5000, bundled });
+  return { dataDir, lookup, log, registry, bundled };
+}
+
+test("bundled: listed as stashed until enabled; activate really starts it, lists its tools, and remembers; deactivate stops it", async () => {
+  const { registry, lookup, bundled, dataDir } = bundledRig();
+  await registry.load();
+  let list = await registry.list();
+  const fake = list.find((c) => c.id === "fake.server");
+  assert.ok(fake);
+  assert.equal(fake.source, "bundled");
+  assert.equal(fake.state, "stashed");
+  assert.equal(fake.health.detail, "未启用");
+  assert.equal(fake.bundled?.runtime, "node");
+  // uvx 的在这台机器上起不了：原因写在 blocked 里，不是「未启用」。
+  const py = list.find((c) => c.id === "py.only");
+  assert.match(py?.bundled?.blocked ?? "", /需要本机有 uv/);
+  assert.match(py?.health.detail ?? "", /uv/);
+
+  const view = await registry.activate("fake.server");
+  assert.equal(view.state, "active");
+  assert.ok(view.tools.length > 0);
+  assert.ok(lookup.has("fake.server"));
+  assert.equal(registry.exposes(view.tools[0]!), true);
+  assert.deepEqual(registry.providersOf(view.tools[0]!, ["fake.server"]), ["fake.server"]);
+  assert.equal(bundled.isEnabled("fake.server"), true);
+  // 启用状态不进 connectors.json —— 预置的不是用户装的。
+  assert.ok(!existsSync(join(dataDir, CONNECTORS_FILE)));
+
+  const off = await registry.deactivate("fake.server");
+  assert.equal(off.state, "stashed");
+  assert.equal(lookup.has("fake.server"), false);
+  assert.equal(bundled.isEnabled("fake.server"), false);
+
+  await assert.rejects(registry.remove("fake.server"), (e: unknown) => e instanceof ConnectorBundledError);
+  await assert.rejects(registry.activate("py.only"), /需要本机有 uv/);
+  await registry.stopAll();
+  rmSync(dataDir, { recursive: true, force: true });
+});
+
+test("bundled: an enabled server comes up at load; a user connector can be deactivated into stashed", async () => {
+  const { registry, bundled, lookup, dataDir } = bundledRig();
+  bundled.setEnabled("fake.server", true);
+  await registry.load();
+  assert.ok(lookup.has("fake.server"));
+  assert.equal((await registry.list()).find((c) => c.id === "fake.server")?.state, "active");
+  await registry.stopAll();
+  rmSync(dataDir, { recursive: true, force: true });
+
+  const user = fresh();
+  await user.registry.install({ id: "crm", command: process.execPath, args: [FAKE], source: "lan" });
+  const stashed = await user.registry.deactivate("crm");
+  assert.equal(stashed.state, "stashed");
+  assert.equal(user.lookup.has("crm"), false);
+  const persisted = JSON.parse(readFileSync(join(user.dataDir, CONNECTORS_FILE), "utf8")) as { items: Array<{ id: string; state: string }> };
+  assert.equal(persisted.items[0]?.state, "stashed");
+  await assert.rejects(user.registry.deactivate("nope"), /not installed/);
+  await user.registry.stopAll();
+  rmSync(user.dataDir, { recursive: true, force: true });
 });

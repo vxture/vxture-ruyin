@@ -1160,3 +1160,76 @@ test("能力平台：刷新进行中按钮变「刷新中…」并禁用，直�
   settle();
   expect(await screen.findByRole("button", { name: "刷新" })).toBeTruthy();
 });
+
+test("能力平台：预置的 MCP 服务器能启动 / 停止（走连接器的 activate / deactivate），起不了的原因就在行里", async () => {
+  const api = skillsApi({
+    tools: vi.fn().mockResolvedValue({
+      items: [
+        { id: "microsoft.playwright-mcp", kind: "mcp-server", source: "microsoft.playwright-mcp", status: "registered", launchable: true, detail: "可启动（node）；需要 Chromium", license: "Apache-2.0", tier: "default" },
+        { id: "aas-ee.open-websearch", kind: "mcp-server", source: "aas-ee.open-websearch", status: "available", launchable: true, detail: "运行中（node）", tools: ["search"] },
+        { id: "microsoft.markitdown", kind: "mcp-server", source: "microsoft.markitdown", status: "unavailable", launchable: true, detail: "需要本机有 uv（https://docs.astral.sh/uv/），uvx 不在 PATH 里" },
+        { id: "x.registered", kind: "mcp-server", source: "x.registered", status: "registered", detail: "发行形态未核实" },
+      ],
+    }),
+    activateConnector: vi.fn().mockResolvedValue({}),
+    deactivateConnector: vi.fn().mockResolvedValue({}),
+  });
+  renderSection("skills", api);
+  const tools = await screen.findByRole("list", { name: "工具" });
+  const rows = within(tools).getAllByRole("listitem");
+  await userEvent.click(within(rows[0]!).getByRole("button", { name: "启动" }));
+  expect(api.activateConnector).toHaveBeenCalledWith("microsoft.playwright-mcp");
+  await userEvent.click(within(rows[1]!).getByRole("button", { name: "停止" }));
+  expect(api.deactivateConnector).toHaveBeenCalledWith("aas-ee.open-websearch");
+  expect(within(rows[2]!).getByText(/需要本机有 uv/)).toBeTruthy();
+  expect(within(rows[2]!).getByRole("button", { name: "启动" })).toBeTruthy();
+  // 只登记的没有按钮。
+  expect(within(rows[3]!).queryByRole("button")).toBeNull();
+});
+
+test("连接器：预置的服务器标「预置」，只能停用不能卸载", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({
+      items: [
+        { id: "aas-ee.open-websearch", transport: "stdio", command: "C:/Ruyin.exe", args: ["cli.js"], source: "bundled", installedAt: "", state: "active", health: { ok: true, checkedAt: "" }, tools: ["search"], bundled: { runtime: "node" } },
+        { id: "crm", transport: "stdio", command: "node", args: ["crm.js"], source: "lan", installedAt: "2026-09-04", state: "active", health: { ok: true, checkedAt: "" }, tools: [] },
+      ],
+    }),
+    deactivateConnector: vi.fn().mockResolvedValue({}),
+    removeConnector: vi.fn().mockResolvedValue({}),
+  });
+  renderSection("connectors", api);
+  const list = await screen.findByRole("list", { name: "已安装的连接器" });
+  const rows = within(list).getAllByRole("listitem");
+  expect(within(rows[0]!).getByText("预置")).toBeTruthy();
+  expect(within(rows[0]!).queryByRole("button", { name: "卸载" })).toBeNull();
+  await userEvent.click(within(rows[0]!).getByRole("button", { name: "停用" }));
+  expect(api.deactivateConnector).toHaveBeenCalledWith("aas-ee.open-websearch");
+  expect(within(rows[1]!).getByRole("button", { name: "卸载" })).toBeTruthy();
+});
+
+test("能力平台 / 连接器：启动与停用失败时，原因照原样转达", async () => {
+  const api = skillsApi({
+    tools: vi.fn().mockResolvedValue({
+      items: [{ id: "microsoft.markitdown", kind: "mcp-server", source: "microsoft.markitdown", status: "unavailable", launchable: true, detail: "需要 uv" }],
+    }),
+    activateConnector: vi.fn().mockRejectedValue(new Error('bundled tool server "microsoft.markitdown" cannot start: 需要本机有 uv')),
+  });
+  renderSection("skills", api);
+  const tools = await screen.findByRole("list", { name: "工具" });
+  await userEvent.click(within(tools).getByRole("button", { name: "启动" }));
+  expect(await screen.findByText(/cannot start: 需要本机有 uv/)).toBeTruthy();
+
+  const connectorsApi = fakeApi({
+    connectors: vi.fn().mockResolvedValue({
+      items: [
+        { id: "aas-ee.open-websearch", transport: "stdio", command: "C:/Ruyin.exe", args: [], source: "bundled", installedAt: "", state: "active", health: { ok: true, checkedAt: "" }, tools: [], bundled: { runtime: "node" } },
+      ],
+    }),
+    deactivateConnector: vi.fn().mockRejectedValue(new Error("进程没停下来")),
+  });
+  renderSection("connectors", connectorsApi);
+  const list = await screen.findByRole("list", { name: "已安装的连接器" });
+  await userEvent.click(within(list).getByRole("button", { name: "停用" }));
+  expect(await screen.findByText("进程没停下来")).toBeTruthy();
+});

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generatedAt": "2026-09-05",
-  "$comment": "技能与工具预置清单（ADR-018 §2.3，owner 2026-09-05 定三档）。每条来源仓钉死 commit；许可证是硬门槛（none 不允许）。ruyin 构建时按它拉取预置进安装包；Runos 按它注册台账（vxture-foundation/vxture-runos#14）。人读版：docs/40-implementation/20-tools-skills-catalog-v1.md。",
+  "$comment": "技能与工具预置清单（ADR-018 §2.3，owner 2026-09-05 定三档）。每条来源仓钉死 commit；许可证是硬门槛（none 不允许）。ruyin 构建时按它拉取预置进安装包；Runos 按它注册台账（vxture-foundation/vxture-runos#14）。launch 为本机启动规格（node = 构建时 vendored 随包；uvx = 需本机 uv），2026-09-05 逐条核过包名 / 版本 / bin。人读版：docs/40-implementation/20-tools-skills-catalog-v1.md。",
   "tiers": {
     "default": "默认启用",
     "installed-disabled": "装而不启用",
@@ -414,7 +414,16 @@
       "tier": "default",
       "subpath": null,
       "needsKey": false,
-      "launch": null,
+      "launch": {
+        "runtime": "node",
+        "package": "@playwright/mcp",
+        "version": "0.0.80",
+        "bin": "cli.js",
+        "args": [
+          "--headless"
+        ],
+        "note": "需要 Chromium：首次用前 npx playwright install chromium（不随包，~150 MB）"
+      },
       "note": "~70 个 browser_* 工具"
     },
     {
@@ -429,7 +438,13 @@
       "tier": "default",
       "subpath": "packages/markitdown-mcp",
       "needsKey": false,
-      "launch": null,
+      "launch": {
+        "runtime": "uvx",
+        "package": "markitdown-mcp",
+        "version": "0.0.1a4",
+        "bin": "markitdown-mcp",
+        "args": []
+      },
       "note": "Office/PDF/图片 → Markdown，官方 MCP 包"
     },
     {
@@ -444,7 +459,13 @@
       "tier": "default",
       "subpath": null,
       "needsKey": false,
-      "launch": null,
+      "launch": {
+        "runtime": "uvx",
+        "package": "docling-mcp",
+        "version": "3.2.0",
+        "bin": "docling-mcp-server",
+        "args": []
+      },
       "note": "版式感知的文档解析"
     },
     {
@@ -459,7 +480,15 @@
       "tier": "default",
       "subpath": null,
       "needsKey": false,
-      "launch": null,
+      "launch": {
+        "runtime": "uvx",
+        "package": "excel-mcp-server",
+        "version": "0.1.8",
+        "bin": "excel-mcp-server",
+        "args": [
+          "stdio"
+        ]
+      },
       "note": "xlsx 读写：公式、格式、图表、透视"
     },
     {
@@ -474,7 +503,15 @@
       "tier": "default",
       "subpath": null,
       "needsKey": false,
-      "launch": null,
+      "launch": {
+        "runtime": "uvx",
+        "package": "mcp-pandoc",
+        "version": "0.11.1",
+        "bin": "mcp-pandoc",
+        "args": [],
+        "requiresBin": "pandoc",
+        "note": "还要本机有 pandoc"
+      },
       "note": "pandoc 转换；docx/pptx 离线生成缺口先走它"
     },
     {
@@ -489,7 +526,13 @@
       "tier": "default",
       "subpath": null,
       "needsKey": false,
-      "launch": null,
+      "launch": {
+        "runtime": "uvx",
+        "package": "duckduckgo-mcp-server",
+        "version": "0.7.0",
+        "bin": "duckduckgo-mcp-server",
+        "args": []
+      },
       "note": "无密钥搜索"
     },
     {
@@ -504,7 +547,17 @@
       "tier": "default",
       "subpath": null,
       "needsKey": false,
-      "launch": null,
+      "launch": {
+        "runtime": "node",
+        "package": "mcp-searxng",
+        "version": "2.1.0",
+        "bin": "dist/cli.js",
+        "args": [],
+        "requiresEnv": [
+          "SEARXNG_URL"
+        ],
+        "note": "要指向一个 SearXNG 实例（SEARXNG_URL）"
+      },
       "note": "自托管 SearXNG，企业内可控"
     },
     {
@@ -519,7 +572,13 @@
       "tier": "default",
       "subpath": null,
       "needsKey": false,
-      "launch": null,
+      "launch": {
+        "runtime": "node",
+        "package": "open-websearch",
+        "version": "2.1.11",
+        "bin": "build/index.js",
+        "args": []
+      },
       "note": "多引擎，无密钥"
     },
     {
@@ -535,7 +594,8 @@
       "subpath": null,
       "needsKey": false,
       "launch": null,
-      "note": "HTTP 抓取"
+      "note": "HTTP 抓取",
+      "launchNote": "npm 上的 fetch-mcp 归属未核实（与仓库作者不一定同一人），暂不启动"
     },
     {
       "id": "modelcontextprotocol.servers",
@@ -550,7 +610,8 @@
       "subpath": "src/filesystem",
       "needsKey": false,
       "launch": null,
-      "note": "官方参考实现（仓库级许可证 NOASSERTION，逐包核对后再进）"
+      "note": "官方参考实现（仓库级许可证 NOASSERTION，逐包核对后再进）",
+      "launchNote": "官方参考实现；filesystem 服务器要以允许目录作参数，且 Ruyin 已有自己的文件工具 —— 暂不启动"
     },
     {
       "id": "executeautomation.mcp-playwright",
@@ -565,7 +626,8 @@
       "subpath": null,
       "needsKey": false,
       "launch": null,
-      "note": "Playwright 备选"
+      "note": "Playwright 备选",
+      "launchNote": "vendored 后 134 MB（自带 playwright），不随包；第二批按需下载"
     },
     {
       "id": "opendatalab.mineru-document-explorer",
@@ -580,7 +642,8 @@
       "subpath": null,
       "needsKey": false,
       "launch": null,
-      "note": "文档索引与检索（中文强）"
+      "note": "文档索引与检索（中文强）",
+      "launchNote": "PyPI 无同名包，发行形态未核实"
     },
     {
       "id": "korigamik.markitdown_mcp_server",
@@ -595,7 +658,8 @@
       "subpath": null,
       "needsKey": false,
       "launch": null,
-      "note": "markitdown 另一包装"
+      "note": "markitdown 另一包装",
+      "launchNote": "未发布到 PyPI / npm，需从仓库构建"
     },
     {
       "id": "negokaz.excel-mcp-server",
@@ -610,7 +674,8 @@
       "subpath": null,
       "needsKey": false,
       "launch": null,
-      "note": "xlsx 读写备选"
+      "note": "xlsx 读写备选",
+      "launchNote": "vendored 后 100 MB（launcher 附各平台二进制），不随包；第二批按需下载"
     },
     {
       "id": "sbroenne.mcp-server-excel",
@@ -625,7 +690,8 @@
       "subpath": null,
       "needsKey": false,
       "launch": null,
-      "note": "驱动真实 Excel（Windows）"
+      "note": "驱动真实 Excel（Windows）",
+      "launchNote": ".NET 发行，Windows 下驱动真实 Excel；随包打法未定"
     },
     {
       "id": "ykarapazar.word-mcp-live",
@@ -640,7 +706,8 @@
       "subpath": null,
       "needsKey": false,
       "launch": null,
-      "note": "编辑打开中的 Word 文档"
+      "note": "编辑打开中的 Word 文档",
+      "launchNote": "发行形态未核实"
     },
     {
       "id": "yb2460.harness-anything",
@@ -655,7 +722,8 @@
       "subpath": null,
       "needsKey": false,
       "launch": null,
-      "note": "WPS/MS Office 控制 hub"
+      "note": "WPS/MS Office 控制 hub",
+      "launchNote": "发行形态未核实"
     },
     {
       "id": "anysearch-ai.anysearch-mcp-server",
@@ -670,7 +738,8 @@
       "subpath": null,
       "needsKey": false,
       "launch": null,
-      "note": "统一实时搜索（部分需密钥）"
+      "note": "统一实时搜索（部分需密钥）",
+      "launchNote": "npm 无同名包，发行形态未核实"
     },
     {
       "id": "yokingma.one-search-mcp",
@@ -685,7 +754,8 @@
       "subpath": null,
       "needsKey": false,
       "launch": null,
-      "note": "搜索 + 抓取（部分需密钥）"
+      "note": "搜索 + 抓取（部分需密钥）",
+      "launchNote": "vendored 后 95 MB（自带浏览器驱动），不随包；第二批按需下载"
     },
     {
       "id": "tavily-ai.tavily-mcp",
@@ -700,7 +770,8 @@
       "subpath": null,
       "needsKey": true,
       "launch": null,
-      "note": "需密钥 → Runos 保险库"
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
     },
     {
       "id": "exa-labs.exa-mcp-server",
@@ -715,7 +786,8 @@
       "subpath": null,
       "needsKey": true,
       "launch": null,
-      "note": "需密钥 → Runos 保险库"
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
     },
     {
       "id": "brave.brave-search-mcp-server",
@@ -730,7 +802,8 @@
       "subpath": null,
       "needsKey": true,
       "launch": null,
-      "note": "需密钥 → Runos 保险库"
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
     },
     {
       "id": "firecrawl.firecrawl-mcp-server",
@@ -745,7 +818,8 @@
       "subpath": null,
       "needsKey": true,
       "launch": null,
-      "note": "需密钥 → Runos 保险库"
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
     },
     {
       "id": "leehanchung.bing-search-mcp",
@@ -760,7 +834,8 @@
       "subpath": null,
       "needsKey": true,
       "launch": null,
-      "note": "需密钥 → Runos 保险库"
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
     },
     {
       "id": "jina-ai.mcp",
@@ -775,7 +850,8 @@
       "subpath": null,
       "needsKey": true,
       "launch": null,
-      "note": "远程服务，需密钥 → Runos 保险库"
+      "note": "远程服务，需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
     },
     {
       "id": "apify.actors-mcp-server",
@@ -790,7 +866,8 @@
       "subpath": null,
       "needsKey": true,
       "launch": null,
-      "note": "需密钥 → Runos 保险库"
+      "note": "需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
     },
     {
       "id": "evilran.baidu-mcp-server",
@@ -805,7 +882,8 @@
       "subpath": null,
       "needsKey": true,
       "launch": null,
-      "note": "百度搜索（社区小仓，弱）；需密钥 → Runos 保险库"
+      "note": "百度搜索（社区小仓，弱）；需密钥 → Runos 保险库",
+      "launchNote": "经 Runos 注册，本机不启动"
     }
   ]
 }

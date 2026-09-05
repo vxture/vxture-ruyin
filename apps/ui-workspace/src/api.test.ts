@@ -252,6 +252,7 @@ const WRAPPER_CASES: WrapperCase[] = [
   },
   { name: "refreshSkills", call: (api) => api.refreshSkills(), method: "POST", path: "/skills/refresh" },
   { name: "tools", call: (api) => api.tools(), method: "GET", path: "/tools" },
+  { name: "deactivateConnector", call: (api) => api.deactivateConnector("aas-ee.open-websearch"), method: "POST", path: "/connectors/aas-ee.open-websearch/deactivate" },
   { name: "fetchProduct", call: (api) => api.fetchProduct("bidproposal"), method: "POST", path: "/products/bidproposal/fetch" },
   { name: "registry", call: (api) => api.registry(), method: "GET", path: "/registry" },
   {

@@ -32,8 +32,26 @@ for (const e of [...(m.skills ?? []), ...(m.servers ?? [])]) {
   seen.add(e.id);
   if (!e.repo?.startsWith("https://github.com/")) errors.push(`${where}: repo 不是 GitHub URL`);
 }
+// launch（本机启动规格，ADR-018 §2.2 / TD-042）：有就得说清 runtime / 包 / 版本 / 入口；
+// 经 Runos 注册的不许有 launch（密钥不进本机）；没有 launch 的要写 launchNote 说为什么。
+for (const e of m.servers ?? []) {
+  const where = `${e.kind}:${e.id}`;
+  const l = e.launch;
+  if (l) {
+    if (e.tier === "runos-registered" || e.needsKey) errors.push(`${where}: 经 Runos 注册 / 需密钥的服务器不能有 launch`);
+    if (!["node", "uvx"].includes(l.runtime)) errors.push(`${where}: launch.runtime 只能是 node / uvx`);
+    if (!l.package || typeof l.package !== "string") errors.push(`${where}: launch.package 缺失`);
+    if (!/^[0-9]+\.[0-9]+(\.[0-9]+)?([.-][0-9A-Za-z.]+)?$/.test(l.version ?? "")) errors.push(`${where}: launch.version 不是钉死的版本号`);
+    if (l.runtime === "node" && !l.bin) errors.push(`${where}: node 形态要给包内入口 bin`);
+    if (l.args !== undefined && !Array.isArray(l.args)) errors.push(`${where}: launch.args 要是数组`);
+    if (l.requiresEnv !== undefined && !(Array.isArray(l.requiresEnv) && l.requiresEnv.every((k) => /^[A-Z][A-Z0-9_]*$/.test(k)))) errors.push(`${where}: requiresEnv 要是大写变量名数组`);
+  } else if (!e.launchNote) {
+    errors.push(`${where}: 没有 launch 就要写 launchNote（为什么本机起不了）`);
+  }
+}
+const launchable = (m.servers ?? []).filter((e) => e.launch).length;
 if (errors.length) {
   console.error(`[skill-manifest] ${errors.length} 处不合规：\n  - ` + errors.join("\n  - "));
   process.exit(1);
 }
-console.log(`[skill-manifest] OK - 技能来源 ${m.skills.length} 个、MCP 服务器 ${m.servers.length} 个，全部有许可证与来源、commit 已钉死。`);
+console.log(`[skill-manifest] OK - 技能来源 ${m.skills.length} 个、MCP 服务器 ${m.servers.length} 个（${launchable} 个带本机启动规格），全部有许可证与来源、commit 已钉死。`);

@@ -53,8 +53,10 @@ run("pnpm", ["--recursive", "build"], repoRoot);
 const skillPull = process.env["RUYIN_SKIP_SKILL_PULL"] !== "1";
 if (skillPull) {
   run("node", [join(repoRoot, "scripts", "release", "pull-skills.mjs")], repoRoot);
+  // 预置的 MCP 服务器（node 形态 vendored 进 resources/tools；TD-042）。
+  run("node", [join(repoRoot, "scripts", "release", "pull-tools.mjs")], repoRoot);
 } else {
-  console.log("[pack] skill pull SKIPPED (RUYIN_SKIP_SKILL_PULL=1) - the bundled layer is whatever resources/skills holds");
+  console.log("[pack] skill/tool pull SKIPPED (RUYIN_SKIP_SKILL_PULL=1) - the bundled layers are whatever resources/skills and resources/tools hold");
 }
 
 rmSync(daemonOut, { recursive: true, force: true });
@@ -179,6 +181,21 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
     process.exit(1);
   }
   console.log(`[pack] bundled skills in the packaged app: ${bundled}`);
+}
+
+// 预置的 MCP 服务器真的起得来：守护进程在冒烟时真起一个 vendored 的 node 服务器
+// （Electron 当 Node 用）、握手、列工具。拉过就必须起得来；没拉过如实说。
+{
+  const line = /\[ruyin\] tools self-check: (ok \(([^,]+), (\d+) tool\(s\)\)|no vendored node server to try)/.exec(smokeOut);
+  if (!line) {
+    console.error("[pack] FAILED: 守护进程没有报预置工具自检（缺 \"[ruyin] tools self-check\" 这一行）");
+    process.exit(1);
+  }
+  if (skillPull && !line[1].startsWith("ok")) {
+    console.error("[pack] FAILED: 拉取跑过了，包里却没有一个能试的 vendored 服务器 —— 看 electron-builder.yml 的 resources/tools 与壳的 RUYIN_TOOLS_DIR");
+    process.exit(1);
+  }
+  console.log(`[pack] bundled tool server self-check: ${line[1]}`);
 }
 
 // 打包形态下主密钥必须由 DPAPI 保护。

@@ -275,13 +275,16 @@ export interface ConnectorView {
   transport: "stdio";
   command: string;
   args: string[];
-  source: "lan" | "private";
+  /** bundled = 随安装包预置的 MCP 服务器（能力平台里的「工具」），不能卸载只能停用。 */
+  source: "lan" | "private" | "bundled";
   installedAt: string;
   /** 本机生效态（通则 B-3）。`stashed` = 存下来但没启用（添加时没连上）。 */
   state: "active" | "stashed";
   health: { ok: boolean; detail?: string; checkedAt: string };
   /** 运行中的服务器暴露的工具名；契约里 provider: connector 的工具靠同名接上。 */
   tools: string[];
+  /** 预置服务器才有：怎么起、现在为什么起不了。 */
+  bundled?: { runtime: string; blocked?: string; note?: string };
 }
 
 /** 技能来源的四层（ADR-018 §2.3），近者优先。 */
@@ -331,6 +334,8 @@ export interface ToolView {
   license?: string;
   tier?: string;
   tools?: string[];
+  /** mcp-server：有本机启动规格（能启动 / 能停），还是只登记。 */
+  launchable?: boolean;
 }
 
 export interface Binding {
@@ -711,6 +716,8 @@ export class Api {
       input,
     );
   /** 启用一个暂存的连接器：守护进程会重新试一次，通不过仍是暂存。 */
+  /** 停用：停进程、从内核名单拿掉；用户装的转暂存，预置的记为未启用。 */
+  deactivateConnector = (id: string) => this.call<ConnectorView>(`/connectors/${encodeURIComponent(id)}/deactivate`, "POST");
   activateConnector = (id: string) =>
     this.call<ConnectorView>(`/connectors/${id}/activate`, "POST");
   removeConnector = (id: string) =>

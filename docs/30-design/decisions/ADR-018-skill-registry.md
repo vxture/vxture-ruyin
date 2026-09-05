@@ -249,3 +249,18 @@ tasks:
 `pnpm skills:pull`，否则任务启动前按名拒绝 —— 测试装配与观察台用 `MemorySkills` /
 桩目录应答。没做、记着：任务详情里技能调用的专属行（§2.8 第 4 条）；用户层目录监视
 （现在是按需重扫，2 秒缓存）。
+
+### 7.1 工具半边（2026-09-05 晚，owner：「按照能启动的模式推进」）
+
+| 层 | 落地 |
+|---|---|
+| 清单 | `servers[].launch`：本机启动规格，2026-09-05 逐条在 registry.npmjs.org / pypi.org 核过包名、版本、bin。两种 runtime：**node**（构建时 vendored 随包，用 Ruyin 自带的 Node 起）、**uvx**（Python 包，要本机有 uv，不随包）。没有规格的写 `launchNote` 说为什么；经 Runos 注册 / 需密钥的不许有规格。守卫 `lint:skill-manifest` 查形状 |
+| 构建 | `pnpm tools:pull`（`scripts/release/pull-tools.mjs`）：`npm install --ignore-scripts` 到 `resources/tools/<id>/`，只留 win32-x64 的预编译二进制，去掉 .d.ts / map / 文档 / 测试；`index.json` 记入口与许可证。3 个 node 服务器 vendored 共 49.8 MB（playwright-mcp 15、mcp-searxng 11、open-websearch 24）；另外 3 个 node 形态的（executeautomation / negokaz / one-search）vendored 后各 100 MB 上下，**不随包**，记在 launchNote 里等第二批按需下载 |
+| 守护进程 | `tool-servers.ts`：读索引、记启用状态与用户给的环境变量（`<dataDir>/tools/state.json`）、出启动计划（缺 uv / 缺 pandoc / 缺 SEARXNG_URL / 未 vendored 各说各的）。**预置服务器就是来源为 `bundled` 的 MCP 连接器**：`ConnectorRegistry` 多一层，起进程、握手、tools/list、`exposes / providersOf / callTool` 与用户装的连接器同一条路，项目授权（ConnectorGrant）同样适用；不能卸载只能停用。路由：`POST /connectors/:id/activate` `deactivate` `env`，`DELETE` 对预置的回 `CONNECTOR_BUNDLED` |
+| 冒烟 | `RUYIN_SMOKE=1` 时真起第一个 vendored 的 node 服务器（握手 + tools/list + 停），`pack.mjs` 断言那一行。本机开发态实测：playwright-mcp 起来 24 个工具，open-websearch 经 API 启动 6 个工具再停下 |
+| 界面 | 能力平台的「工具」清单：有启动规格的行带「启动 / 停止」，起不了的原因就在行里；「连接器」页预置的标「预置」，只能停用 |
+
+**还没做**（TD-042 保留为 open）：uvx 形态要用户自己装 uv；playwright 的浏览器不随包（首次要
+`playwright install chromium`）；契约 `provider: connector` 的工具靠同名接上，预置服务器的
+工具名（`browser_navigate`、`search`…）要产品契约照着声明，还没有一份「预置工具名对照表」
+（TD-034 的那一半）；三个重的按需下载的通道。
