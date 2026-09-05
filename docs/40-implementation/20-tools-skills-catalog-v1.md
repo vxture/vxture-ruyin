@@ -18,8 +18,9 @@
 2. **技能里的 `scripts/` 暂不执行**（TD-005，无 OS 级沙箱）。文档类技能的价值有一半
    在脚本（python-docx / openpyxl / LibreOffice 渲染核对），这一半第一版拿不到；
    **真正落盘的是 MCP 工具**（§2）。技能先当「怎么做」的知识，工具当「手」。
-3. **需要外部 API 密钥的条目**（Tavily / Exa / Brave / Firecrawl / SerpApi 等），密钥
-   归用户或企业配置，走连接器那条来源管理路 —— 客户端零秘密不变。清单里标「需密钥」。
+3. **需要外部 API 密钥的条目**（Tavily / Exa / Brave / Firecrawl / SerpApi 等）**不进
+   本机**（ADR-020 §6-2，owner 2026-09-05 定）：它们经 Runos 注册，密钥放 Runos 的
+   凭证保险库、由 Runos 出站注入；产品经能力面调用。清单里标「经 Runos」。
 
 ## 1. 技能（Agent Skills 规范，`SKILL.md`）
 
@@ -168,6 +169,9 @@ GongRzhe 的 Word / PowerPoint 两个（MIT，2.1k / 1.9k★）**已归档**。�
 **中文搜索的现成 MCP 都弱**（百度 28★、博查无许可证）；更稳的路是 SearXNG 自托管
 + Agent-Reach（§1.5）。
 
+表里「密钥 = 是」的服务器，按 ADR-020 §6-2 **不进本机**：它们的家是 Runos（作为
+Connector 注册、保险库注入），本机只装「密钥 = 否」的几个。
+
 ### 2.5 基础（官方参考实现 modelcontextprotocol/servers）
 
 `filesystem`、`fetch`、`git`、`memory`、`sequentialthinking`、`time`、`everything`。
@@ -190,7 +194,7 @@ GongRzhe 的 Word / PowerPoint 两个（MIT，2.1k / 1.9k★）**已归档**。�
 |---|---|---|
 | **默认启用** | SenseNova 76、OfficeCLI 技能 12、openai 7、anthropics Apache 13、Agent-Reach、last30days、browser-search、xberg、translate-book、lackeyjb；工具：playwright-mcp、markitdown-mcp、docling-mcp、excel-mcp-server、mcp-pandoc、duckduckgo、searxng、open-webSearch、fetch、filesystem | 技能 ~115 · 工具 10 |
 | **装而不启用** | sandbase 99（多需密钥）、sanjay 24、microsoft、LambdaTest、MinerU、negokaz、word-mcp-live、harness-anything、one-search、anysearch | 技能 ~150 · 工具 6 |
-| **需密钥（连接器管理）** | tavily、exa、brave、firecrawl、bing、jina、apify、serpapi | 工具 8 |
+| **经 Runos 注册（不进本机）** | tavily、exa、brave、firecrawl、bing、jina、apify、serpapi —— 作为 Connector 注册进 Runos，密钥在其保险库；本机技能清单里只留一条「由产品经能力面提供」的说明 | 工具 8 |
 
 ## 5. 明确不进包的（及原因）
 

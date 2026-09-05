@@ -1,11 +1,13 @@
 # ADR-018 技能与工具：全部从外部获取、拉到本机可运行、随发布预置；格式对齐开放生态
 
-- 状态：**提议（v2.1）**。v1（2026-09-05 上午）被 owner 否掉两处：不该自己造技能，
-  数量应至少上百。v2 按 owner 七条意见重写；v2.1 记入 owner 已定的三条（§6），
-  余下一条待定（分区名）。
+- 状态：**提议（v2.2）**。v1 被 owner 否掉两处：不该自己造技能，数量应至少上百。
+  v2 按 owner 七条意见重写；v2.1 记入 owner 已定的三条（§6）；**v2.2 按 ADR-020
+  （已接受）修正三处**：技能来源加「产品分发」层、第三方密钥归 Runos 保险库、
+  脚本的 Runos Executor 出路只登记。余下一条待定（分区名）。
 - 日期：2026-09-05
 - 相关：ADR-006（skill 归 Ruyin，建在 Harness 上）、ADR-002（循环归 Harness）、
   ADR-005（本地连接器 = MCP）、ADR-009（能力面中转）、ADR-011（框架边界）、
+  **ADR-020（两个能力提供平台：Runos 分发与承载，Ruyin 执行）**、
   30-contract-schema §10 / §11、TD-005（无沙箱不进 `execute_script`）、TD-034、
   TD-035；候选清单 `../../40-implementation/20-tools-skills-catalog-v1.md`
 
@@ -58,7 +60,7 @@
 
 | 种类 | 从哪拉 | 拉到哪 | 怎么可运行 |
 |---|---|---|---|
-| 技能 | git 仓库 / zip / 本地目录；规范见 agentskills.io（`SKILL.md` 前言：`name`、`description` 必填；`license`、`compatibility`、`metadata`、`allowed-tools` 可选；目录名须等于 `name`） | `<dataDir>/skills/<source>/<name>/` | 全文按需加载（§2.4）；`scripts/` **暂不执行**（§2.6） |
+| 技能 | ① git 仓库 / zip / 本地目录（规范见 agentskills.io：`SKILL.md` 前言 `name`、`description` 必填；`license`、`compatibility`、`metadata`、`allowed-tools` 可选；目录名须等于 `name`）；② **Runos 分发**：产品能力面把 Runos 目录里分发给本产品的 Skill 转交过来（`GET /skills` + `GET /skills/:name`，带 `content_digest`，见接入指南 §5.4） | `<dataDir>/skills/<source>/<name>/`；Runos 来源记为 `runos:<capability_id>@<version>` | 全文按需加载（§2.4）；`scripts/` **本地暂不执行**（§2.6） |
 | 工具 | MCP 服务器定义（与 DeepSeek Harness `dsh-mcp-client` 同形：`{transport:'stdio', serverName, command, args, env, cwd}` 或 `{transport:'streamable-http', url, headers}`） | `<dataDir>/tools/<serverName>.json` | 本地拉起子进程 / 连 HTTP；工具名加命名空间 `mcp__<serverName>__<name>`，与 dsh 一致 |
 
 生态规模足够支撑「上百个」：Agent Skills 是开放规范（Anthropic 发布，
@@ -74,9 +76,11 @@ VoltAgent/awesome-agent-skills（1000+）、目录站已到数十万条；MCP �
 - **构建时按清单拉取**，用 agentskills 的 `skills-ref validate` 校验前言，打进安装包
   `resources/skills/` 与 `resources/tools/`：客户的域环境可能连不上 GitHub / npm，
   首启必须离线可用。
-- 首次启动把预置复制到 `<dataDir>`（预置层）；应用更新时刷新预置层。用户自己加的
-  来源在用户层，与预置层分开 —— 同名时**近者优先**（dsh 的分层规则：project >
-  custom > user > bundled，近层整体覆盖远层）。
+- 来源分**四层**（ADR-020 §6-1）：**预置**（随安装包）→ **产品分发**（Runos 经产品
+  能力面转交，按 `content_digest` 缓存、离线可用）→ **用户**（自己加的）→ **项目**。
+  同名时**近者优先**（dsh 的分层规则：project > custom > user > bundled，近层整体
+  覆盖远层）。首次启动把预置复制到 `<dataDir>`；应用更新时刷新预置层；产品分发层
+  在能力面可达时刷新。
 - **第一批候选**：`../../40-implementation/20-tools-skills-catalog-v1.md`。每一条都
   核实过存在、许可证、是否归档；技能约 270 条、MCP 服务器 34 个，按三档分。
 
@@ -124,16 +128,17 @@ tasks:
 ### 2.6 不变的、和一条必须说清的限制
 
 - **不门控、不计量、不计费**（ADR-006）；**客户端零秘密**；**Tool Gate 不变**。
-- **技能里的 `scripts/` 暂不执行。** 那是任意代码，TD-005 说得很清楚：没有 OS 级
-  沙箱之前不进 `execute_script` 类。文档类技能的价值有一半在脚本（python-docx /
+- **技能里的 `scripts/` 本地暂不执行。** 那是任意代码，TD-005 说得很清楚：没有 OS
+  级沙箱之前不进 `execute_script` 类。文档类技能的价值有一半在脚本（python-docx /
   openpyxl / LibreOffice 渲染核对），第一版拿不到这一半；**真正落盘的是 MCP 工具**。
   技能先当「怎么做」的知识，工具当「手」。脚本在清单里标「需要沙箱」而不是悄悄跳过。
-  dsh 有 `packages/sandbox`（含 e2b）才敢跑脚本 —— 这是它比我们多的一块，也是下一
-  步要不要引入的决定。
+  第二条出路已登记未启用（ADR-020 §6-3，TD-005）：不带业务数据的脚本可声明依赖
+  **Runos Executor** 在云端沙箱里跑。
 - `allowed-tools` 前言字段（规范标为实验性）：读进来、显示出来，**不当作放行依据**
   —— 放行只听 Tool Gate。
-- **需要外部 API 密钥的条目**（Tavily / Exa / Brave / Firecrawl…）：密钥归用户或企业
-  配置，走连接器那条来源管理路。
+- **需要外部 API 密钥的能力**（Tavily / Exa / Brave / Firecrawl…）：**不进本机**。它们
+  经 **Runos 注册**，密钥放 Runos 的凭证保险库、由 Runos 在出站调用时注入
+  （ADR-020 §6-2）；产品经能力面调用。本地连接器只管内网 / 私有系统（ADR-005 的本意）。
 
 ### 2.7 分区叫什么（待 owner 定）
 
@@ -182,6 +187,8 @@ tasks:
 - 界面：新分区（清单 + 来源 + 状态 + 启用开关 + 刷新预置）；「连接器」收窄为来源
   管理；任务详情里技能调用有专属行。
 - 写死的 `IMPLEMENTED` 集合被登记册取代。
+- 产品能力面多两个端点（`GET /skills`、`GET /skills/:name`），写进接入指南 §5.4；
+  bid 的云端能力面是第一个实现者（它也是 Runos 的第一个消费者，ADR-020 §6-4）。
 
 ## 4. 备选方案
 
