@@ -1,6 +1,7 @@
 # ADR-019 Harness 走向：内核保留、在接缝处引入生态；是否换成 DeepSeek Harness 由探针定
 
-- 状态：**提议**（owner 2026-09-05：「我们的 harness 是受挫的，有没有官方或优秀
+- 状态：**提议 1–3 已接受（owner 2026-09-05）；§4 三个决策点待分析** —— 分析见
+  `../../40-implementation/30-harness-dsh-spike.md`。（owner 原问：「我们的 harness 是受挫的，有没有官方或优秀
   开源可以借鉴或使用的」）
 - 日期：2026-09-05
 - 相关：50-harness.md、ADR-002（循环归 Harness，云端只出无状态推理）、ADR-008
