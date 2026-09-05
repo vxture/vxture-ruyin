@@ -21,6 +21,7 @@
 | [ADR-015](ADR-015-projects-belong-to-a-workspace.md) | 项目必须归属工作区，无归属不是一种受支持的状态 | 已接受 | 2026-08-31 |
 | [ADR-016](ADR-016-document-wire-format.md) | 结构化文档：上线格式是 Markdown，内部表示是 mdast，来源按路径给 | 已接受 | 2026-09-01 |
 | [ADR-017](ADR-017-pdf-rendering-lives-in-the-shell.md) | PDF 由壳里的 Chromium 渲染，字节回到守护进程落盘 | 已接受 | 2026-09-01 |
+| [ADR-019](ADR-019-harness-strategy.md) | Harness 走向：内核保留、在接缝处引入生态；是否换成 DeepSeek Harness 由两周探针定 | **提议** | 2026-09-05 |
 
 后续候选（定稿时立 ADR）：Electron vs Tauri（60 §5.1）、
 每 Workspace 一库（60 §7.1）、推理传输 ≠ 数据存储（10 §15.2）。
