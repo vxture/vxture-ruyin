@@ -148,6 +148,14 @@ export interface TaskDefinition {
   constraints?: string[];
   capabilities: string[];
   tools: string[];
+  /**
+   * Skills this task may read mid-turn (ADR-018 §2.5): Agent Skills names,
+   * each ⊆ the machine's skill registry at start (checked by the harness, not
+   * here - the registry is per machine). Only these are offered to the
+   * provider, which is what keeps a few-hundred-entry registry from
+   * travelling with every turn.
+   */
+  skills?: string[];
   verification: VerificationRule[];
 }
 

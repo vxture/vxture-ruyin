@@ -232,6 +232,26 @@ const WRAPPER_CASES: WrapperCase[] = [
     body: { connector: "crm" },
   },
   { name: "connectors", call: (api) => api.connectors(), method: "GET", path: "/connectors" },
+  // 能力平台（ADR-018）
+  { name: "skills", call: (api) => api.skills(), method: "GET", path: "/skills" },
+  { name: "skills(project)", call: (api) => api.skills("prj_1"), method: "GET", path: "/skills?project=prj_1" },
+  { name: "skill", call: (api) => api.skill("officecli-docx"), method: "GET", path: "/skills/officecli-docx" },
+  {
+    name: "setSkillEnabled(on)",
+    call: (api) => api.setSkillEnabled({ name: "sn-deep-research", layer: "bundled", source: "src" }, true),
+    method: "POST",
+    path: "/skills/sn-deep-research/enable",
+    body: { layer: "bundled", source: "src" },
+  },
+  {
+    name: "setSkillEnabled(off)",
+    call: (api) => api.setSkillEnabled({ name: "officecli-docx", layer: "user", source: "user" }, false),
+    method: "POST",
+    path: "/skills/officecli-docx/disable",
+    body: { layer: "user", source: "user" },
+  },
+  { name: "refreshSkills", call: (api) => api.refreshSkills(), method: "POST", path: "/skills/refresh" },
+  { name: "tools", call: (api) => api.tools(), method: "GET", path: "/tools" },
   { name: "fetchProduct", call: (api) => api.fetchProduct("vxture.bid"), method: "POST", path: "/products/vxture.bid/fetch" },
   { name: "registry", call: (api) => api.registry(), method: "GET", path: "/registry" },
   {

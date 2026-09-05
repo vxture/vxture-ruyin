@@ -9,6 +9,12 @@
 export const SUPPORTED_CONTRACT_VERSIONS = ["0.1"];
 
 const ID = { type: "string", pattern: "^[a-z][a-z0-9_]*$" };
+/**
+ * Agent Skills name (agentskills.io): lowercase letters, digits and single
+ * hyphens, at most 64 characters, and the directory name must equal it - the
+ * last part is the registry's business, the first two are this pattern's.
+ */
+const SKILL_NAME = { type: "string", pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", maxLength: 64 };
 const SEMVER = { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" };
 const NONEMPTY = { type: "string", minLength: 1 };
 
@@ -239,6 +245,7 @@ export const contractJsonSchema = {
           constraints: { type: "array", items: NONEMPTY },
           capabilities: { type: "array", items: ID },
           tools: { type: "array", items: ID },
+          skills: { type: "array", items: SKILL_NAME },
           verification: {
             type: "array",
             minItems: 1,

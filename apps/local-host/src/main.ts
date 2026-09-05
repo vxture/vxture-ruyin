@@ -41,6 +41,9 @@ import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
 import { shellPdfRenderer } from "./pdf.js";
 import { LocalToolExecutor } from "./tool-executor.js";
 import { CapabilityClient } from "./capability-client.js";
+import { SkillRegistry } from "./skill-registry.js";
+import { refreshDistributedSkills } from "./skill-distribution.js";
+import { ToolRegistryView } from "./tool-registry.js";
 import { fetchContract } from "./contract-fetch.js";
 import { EventBus } from "./events.js";
 import { KeyManager } from "./keys.js";
@@ -153,6 +156,11 @@ const productsDir = resolve(process.env["RUYIN_PRODUCTS_DIR"] ?? "products");
 // "not wired up" must never look like "working".
 const capabilityBase = process.env["RUYIN_CAPABILITY_BASE"] ?? "";
 
+// 技能登记册的预置层（ADR-018 §2.3）：packaged 在 <resources>/skills（壳给
+// RUYIN_SKILLS_DIR）；开发态是仓内 resources/skills —— 拉过（pnpm skills:pull）才有，
+// 没拉过就是没有预置层，启动日志会说。
+const bundledSkillsDir = process.env["RUYIN_SKILLS_DIR"] ?? resolve("resources/skills");
+
 /**
  * 目录选择框的中转。事件发出去、请求挂着等 —— 详见 folder-pick.ts 的头注释。
  * 在 events 建好之后才能发通知，所以用一个惰性引用：这一行在 events 之前。
@@ -208,6 +216,33 @@ const toolExecutor = new LocalToolExecutor(
   connectorRegistry,
 );
 
+// 四层技能目录，近者优先；启用状态记在 <dataDir>/skills/state.json（ADR-018）。
+const skillRegistry = new SkillRegistry({
+  bundledDir: bundledSkillsDir,
+  dataDir,
+  log: (line) => console.error(line),
+});
+
+/**
+ * 产品分发层：逐个已装产品问它的能力面（ADR-020 §3c）。要能力面；没有就没有
+ * 来源。启动时跑一次（不阻塞开门），设置里「刷新」再跑。
+ */
+async function refreshAllDistributed(): Promise<unknown[]> {
+  if (!capabilityBase) return [];
+  const outcomes = [];
+  for (const product of registry.installed()) {
+    outcomes.push(
+      await refreshDistributedSkills(
+        { baseUrl: capabilityBase, token: () => platform.bearerToken() },
+        product.id,
+        join(skillRegistry.distributedDir, product.id),
+      ),
+    );
+  }
+  skillRegistry.refresh();
+  return outcomes;
+}
+
 const runtime = new ProjectRuntime({
   storage,
   clock: nodeClock,
@@ -224,6 +259,7 @@ const runtime = new ProjectRuntime({
   connectors,
   ranker: new FtsRanker(storage),
   tools: toolExecutor,
+  skills: skillRegistry,
   isCancelled: (id) => cancelledTasks.has(id),
 });
 
@@ -272,6 +308,15 @@ const server = createLocalApi({
     return reindexBinding(storage, projectId, binding, connector);
   },
   connectors: connectorRegistry,
+  // 能力平台（ADR-018）：技能四层清单 + 工具登记册视图；分发层刷新要能力面。
+  skills: skillRegistry,
+  tools: new ToolRegistryView({
+    supportsBuiltin: (id) => toolExecutor.supports(id),
+    hasSkills: () => true,
+    connectors: () => connectorRegistry.list(),
+    bundledIndex: () => skillRegistry.bundledIndex(),
+  }),
+  ...(capabilityBase ? { refreshDistributedSkills: refreshAllDistributed } : {}),
   uiDir,
   platform,
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
@@ -429,6 +474,19 @@ async function pdfSelfCheck(): Promise<void> {
 // 装好的进程外连接器先起来再开门：起不来的照样登记（健康为 false），只记日志。
 await connectorRegistry.load();
 
+// 产品分发层：开门后对一次，不阻塞启动；拉不到就用本地那份（离线可用）。
+if (capabilityBase) {
+  void refreshAllDistributed()
+    .then((outcomes) => {
+      for (const o of outcomes as Array<{ product: string; status: string; fetched: string[]; reason?: string }>) {
+        console.log(
+          `[ruyin] skills: distributed layer for ${o.product}: ${o.status}${o.fetched.length ? ` (+${o.fetched.length})` : ""}${o.reason ? ` - ${o.reason}` : ""}`,
+        );
+      }
+    })
+    .catch((cause) => console.error("[ruyin] skills: distributed refresh failed:", cause));
+}
+
 server.listen(port, "127.0.0.1", () => {
   console.log(`[ruyin] local runtime ${VERSION}`);
   console.log(`[ruyin] data dir: ${dataDir}`);
@@ -459,6 +517,12 @@ server.listen(port, "127.0.0.1", () => {
       .map((p) => `${p.id}@${p.version}`)
       .join(", ") || "(none)"}`,
   );
+  {
+    const n = skillRegistry.counts();
+    console.log(
+      `[ruyin] skills: bundled ${n.bundled}${skillRegistry.bundledDir ? ` (${skillRegistry.bundledDir})` : " (no bundled layer)"}, distributed ${n.distributed}, user ${n.user}`,
+    );
+  }
   console.log(`[ruyin] listening on http://127.0.0.1:${port}`);
   console.log(`[ruyin] session token: ${token}`);
   if (process.env["RUYIN_SMOKE"] === "1") {

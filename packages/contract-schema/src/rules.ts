@@ -384,7 +384,41 @@ const r15: Rule = (c, errors) => {
   });
 };
 
-const RULES: Rule[] = [r1, r3, r4, r5, r7, r8, r9, r10, r11, r13, r14, r15];
+/**
+ * R16 - a task's skills (ADR-018 §2.5) are unique within the task, and a task
+ * that declares skills declares a capability to read them from.
+ *
+ * A skill is an instruction package the model reads mid-turn through the
+ * built-in `use_skill` tool; like tools (R14) it only exists inside a
+ * capability turn, so a task with `capabilities: []` could declare a hundred
+ * and never open one. Whether a declared skill is actually present is a
+ * runtime question - the registry is per machine and per project - and the
+ * harness answers it before the first turn, naming the missing ones, exactly
+ * as it does for tools no host implements. Lint cannot see a machine.
+ */
+const r16: Rule = (c, errors) => {
+  c.tasks.forEach((task, i) => {
+    const skills = task.skills ?? [];
+    const seen = new Set<string>();
+    skills.forEach((name, j) => {
+      if (seen.has(name)) {
+        err(errors, "R16", `tasks[${i}].skills[${j}]`, `skill "${name}" is declared twice in task "${task.id}"`);
+      }
+      seen.add(name);
+    });
+    if (skills.length > 0 && task.capabilities.length === 0) {
+      err(
+        errors,
+        "R16",
+        `tasks[${i}].capabilities`,
+        `task "${task.id}" declares skills (${skills.join(", ")}) but no capability to read them from - ` +
+          `a skill is opened inside a capability turn, so this task would complete without touching one`,
+      );
+    }
+  });
+};
+
+const RULES: Rule[] = [r1, r3, r4, r5, r7, r8, r9, r10, r11, r13, r14, r15, r16];
 
 export function runRules(contract: RuyinContract): ValidationError[] {
   const errors: ValidationError[] = [];

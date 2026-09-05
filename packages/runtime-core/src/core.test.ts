@@ -11,6 +11,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { parseContract } from "@vxture/ruyin-contract-schema";
 import type { RuyinContract, Tool } from "@vxture/ruyin-contract-schema";
 import {
+  checkResourcePath,
+  type AIGatewayPort,
+  type SkillDocument,
+  type SkillsPort,
+  type ToolCall,
   MemoryConnector,
   MemoryStoragePort,
   ProjectRuntime,
@@ -1926,4 +1931,156 @@ test("connector tools: a task needing a connector tool no connector exposes is r
   // The provider travels with the question: read_file is asked as runtime, lookup_account as connector.
   assert.ok(asked.some(([t, p]) => t === "lookup_account" && p === "connector"));
   assert.ok(asked.every(([t, p]) => t === "lookup_account" || p === "runtime"));
+});
+
+// ───────────────────────────── skills (ADR-018) ─────────────────────────────
+
+/** analyze_tender declares one skill; the registry is a fake port with one entry. */
+function withSkills(skills: string[] = ["docx-basics"]) {
+  const contract = structuredClone(bidContract) as RuyinContract;
+  const analyze = contract.tasks.find((t) => t.id === "analyze_tender");
+  assert.ok(analyze);
+  analyze.skills = skills;
+  return contract;
+}
+
+function fakeSkillsPort(): SkillsPort {
+  const doc: SkillDocument = {
+    name: "docx-basics",
+    description: "How to lay out a tender response in Word",
+    layer: "bundled",
+    version: "1.2.0",
+    content: "---\nname: docx-basics\ndescription: How to lay out a tender response in Word\n---\n# Steps\n1. Headings first.",
+    resources: ["references/guide.md", "assets/template.docx"],
+  };
+  return {
+    resolve: async (name) => (name === doc.name ? doc : undefined),
+    read: async (name) => (name === doc.name ? doc : undefined),
+    readResource: async (name, path) =>
+      name === doc.name && path === "references/guide.md"
+        ? { kind: "text", text: "# Guide\nUse styles, not manual formatting." }
+        : { kind: "unavailable", reason: `no such resource "${path}"` },
+  };
+}
+
+/** A provider that asks for the given calls once, then answers with content. */
+function askOnce(calls: ToolCall[], seen: CapabilityTurnRequest[] = []): AIGatewayPort {
+  let asked = false;
+  return {
+    turn: async (req) => {
+      seen.push(req);
+      if (!asked) {
+        asked = true;
+        return { kind: "tool_calls" as const, calls };
+      }
+      return { kind: "content" as const, content: "需求矩阵" };
+    },
+  };
+}
+
+test("skills: the turn carries the declared catalogue, use_skill returns the SKILL.md verbatim, and the audit names the skill", async () => {
+  const { ports, runtime, connector } = makeSelectionFixture();
+  ports.skills = fakeSkillsPort();
+  const seen: CapabilityTurnRequest[] = [];
+  ports.gateway = askOnce([{ id: "c1", tool: "use_skill", arguments: { name: "docx-basics" } }], seen);
+  const meta = await runtime.createProject(withSkills(), "ws", "wsp_test");
+  await bindTender(runtime, connector, meta.id);
+  const harness = await runtime.createHarness(meta.id);
+  const final = await approveThrough(harness, "analyze_tender");
+  assert.equal(final.state, "completed");
+
+  // The catalogue: name + description only, and the two skill tools are on offer.
+  const first = seen[0];
+  assert.ok(first);
+  assert.deepEqual(first.skills, [
+    { name: "docx-basics", description: "How to lay out a tender response in Word" },
+  ]);
+  assert.ok(first.tools.some((t) => t.id === "use_skill"));
+  assert.ok(first.tools.some((t) => t.id === "read_skill_resource"));
+
+  // The second turn saw the SKILL.md as a tool result, marked as such.
+  const second = seen[1];
+  assert.ok(second);
+  const toolMsg = second.messages.find((m) => m.role === "tool");
+  assert.ok(toolMsg && toolMsg.role === "tool");
+  assert.match(toolMsg.content, /^---\nname: docx-basics/);
+  assert.match(toolMsg.content, /\[skill resources: docx-basics\]\n- references\/guide.md\n- assets\/template.docx$/);
+  assert.deepEqual(toolMsg.origin, { kind: "tool_result", tool: "use_skill" });
+
+  const events = (await runtime.listAuditEvents(meta.id)).map(toAuditView);
+  const executed = events.find((e) => e.action === "tool.executed");
+  assert.ok(executed);
+  assert.equal(executed.outcome, "success");
+  assert.deepEqual(executed.payload, { tool: "use_skill", skill: "docx-basics" });
+});
+
+test("skills: a task declaring a skill this machine does not have is refused before any turn, by name", async () => {
+  const { ports, runtime } = makeSelectionFixture();
+  ports.skills = fakeSkillsPort();
+  const meta = await runtime.createProject(withSkills(["docx-basics", "no-such-skill"]), "ws", "wsp_test");
+  const harness = await runtime.createHarness(meta.id);
+  await assert.rejects(
+    harness.startTask("analyze_tender"),
+    /needs skills this machine does not have: no-such-skill/,
+  );
+  // No registry at all: the same refusal, naming every declared skill.
+  ports.skills = undefined;
+  const bare = await runtime.createHarness(meta.id);
+  await assert.rejects(bare.startTask("analyze_tender"), /docx-basics, no-such-skill/);
+});
+
+test("skills: an undeclared skill, a traversal path and a script are refused as tool errors; a reference file is read", async () => {
+  const { ports, runtime, connector } = makeSelectionFixture();
+  ports.skills = fakeSkillsPort();
+  const seen: CapabilityTurnRequest[] = [];
+  ports.gateway = askOnce(
+    [
+      { id: "c1", tool: "use_skill", arguments: { name: "other-skill" } },
+      { id: "c2", tool: "read_skill_resource", arguments: { name: "docx-basics", path: "../secret.md" } },
+      { id: "c3", tool: "read_skill_resource", arguments: { name: "docx-basics", path: "scripts/run.py" } },
+      { id: "c4", tool: "read_skill_resource", arguments: { name: "docx-basics", path: "references/guide.md" } },
+    ],
+    seen,
+  );
+  const meta = await runtime.createProject(withSkills(), "ws", "wsp_test");
+  await bindTender(runtime, connector, meta.id);
+  const harness = await runtime.createHarness(meta.id);
+  const final = await approveThrough(harness, "analyze_tender");
+  assert.equal(final.state, "completed");
+  const results = (seen[1]?.messages ?? []).filter((m) => m.role === "tool");
+  assert.equal(results.length, 4);
+  const byId = new Map(results.map((m) => (m.role === "tool" ? [m.callId, m] : ["", m])));
+  assert.match(byId.get("c1")!.content, /"other-skill" is not declared by task "analyze_tender"/);
+  assert.equal(byId.get("c1")!.role === "tool" && byId.get("c1")!.isError, true);
+  assert.match(byId.get("c2")!.content, /must not leave the skill directory/);
+  assert.match(byId.get("c3")!.content, /scripts\/.*TD-005/);
+  assert.equal(byId.get("c4")!.content, "# Guide\nUse styles, not manual formatting.");
+  assert.ok(!(byId.get("c4")!.role === "tool" && byId.get("c4")!.isError));
+});
+
+test("skills: a task that declares none never offers the skill tools, and a use_skill call is refused by the gate", async () => {
+  const { ports, runtime, connector } = makeSelectionFixture();
+  ports.skills = fakeSkillsPort();
+  const seen: CapabilityTurnRequest[] = [];
+  ports.gateway = askOnce([{ id: "c1", tool: "use_skill", arguments: { name: "docx-basics" } }], seen);
+  const meta = await runtime.createProject(structuredClone(bidContract) as RuyinContract, "ws", "wsp_test");
+  await bindTender(runtime, connector, meta.id);
+  const harness = await runtime.createHarness(meta.id);
+  const final = await approveThrough(harness, "analyze_tender");
+  assert.equal(final.state, "completed");
+  assert.equal(seen[0]?.skills, undefined);
+  assert.ok(!seen[0]?.tools.some((t) => t.id === "use_skill"));
+  const refusal = seen[1]?.messages.find((m) => m.role === "tool");
+  assert.ok(refusal && refusal.role === "tool" && refusal.isError);
+  assert.match(refusal.content, /not declared in the contract/);
+  const decision = (await runtime.listAuditEvents(meta.id)).map(toAuditView).find((e) => e.action === "tool.decision");
+  assert.equal(decision?.outcome, "rejected");
+});
+
+test("skills: checkResourcePath keeps reads inside references/ and assets/", () => {
+  assert.deepEqual(checkResourcePath("references/a/b.md"), { ok: true, path: "references/a/b.md" });
+  assert.deepEqual(checkResourcePath("assets\\t.docx"), { ok: true, path: "assets/t.docx" });
+  for (const bad of ["", "SKILL.md", "references", "/etc/passwd", "C:/x", "references/../SKILL.md", "assets//x", "scripts/run.py"]) {
+    assert.equal(checkResourcePath(bad).ok, false, bad);
+  }
 });

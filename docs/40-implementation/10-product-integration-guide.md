@@ -147,7 +147,7 @@ confidential 凭据、替用户换票、调 Atlas 与 Runos 的，是产品自�
 
 | 义务 | 内容 | 出处 |
 |---|---|---|
-| 回合端点 | `POST /capabilities/:id/turn`：收 `{objective, constraints, context[], messages[], tools[], skills[], revision?}`，回 `tool_calls | content | verdict`。运行时只给事实，措辞归产品 | 30-design/20；ADR-011 |
+| 回合端点 | `POST /capabilities/:id/turn`：收 `{objective, constraints, context[], messages[], tools[], skills[], revision?}`（`skills[]` = 该任务在契约 `tasks[].skills` 里声明、且本机有的那几条 `{name, description}`，2026-09-05 起 Ruyin 真的会送；模型要全文就调 `use_skill`），回 `tool_calls | content | verdict`。运行时只给事实，措辞归产品 | 30-design/20；ADR-011 |
 | 模型 | 用服务端会话里的用户 access token 做 OBO 换票（`act.sub` = 产品码），调 Atlas `POST /v1/chat`，每次必带 `taskId` | ADR-001；《产品接入范本》 |
 | Runos 能力 | 同一张 OBO 票调 Runos `POST /v1/mcp`（`aud=runos`、`scope=tool:runos`），四工具流 discover → resolve → invoke → report_outcome；`_meta.vxture.task_id` 与本地任务的 `taskId` 用**同一个值** —— 两边审计靠它对账 | ADR-020 §2 / §3 |
 | **技能目录转发** | 能力面把 Runos 分发给本产品的 Skill（`runos_invoke` 的 `fetch`，返回 `SKILL.md` 全文 + 资源块 + `content_digest`）**转交给 Ruyin**：暴露 `GET /skills`（目录：`name`、`description`、`capability_id@version`、`content_digest`）与 `GET /skills/:name`（全文与资源）。Ruyin 把它们进本机技能登记册的**产品分发层**，按 digest 缓存、离线可用 | ADR-020 §3 c / §6-1 |
