@@ -11,7 +11,7 @@
  * 用法：pnpm dev:ui —— 它会打印一个带令牌的地址，浏览器打开即可。
  * 前置：先 pnpm -r build（它读的是各包的 dist）。
  */
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -69,6 +69,19 @@ const executor = new LocalToolExecutor((pid, q, scope, limit) =>
   searchContext(storage, pid, q, scope, limit),
 );
 // 能力平台（ADR-018）：预置层读仓内 resources/skills（先 pnpm skills:pull 才有）。
+// 样例契约声明了预置层的技能；开发机没拉过（pnpm skills:pull）时在用户层放几份桩，
+// 否则观察台一启动任务就被按名拒绝。桩只有前言，看得出是桩。
+const bid = parseContract(readFileSync(`${repo}/products/bidproposal/ruyin.product.yaml`, "utf8"));
+if (!existsSync(`${repo}/resources/skills/index.json`)) {
+  for (const task of bid.tasks) {
+    for (const name of task.skills ?? []) {
+      const dir = join(dataDir, "skills", "user", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: 观察台桩（真的在预置层，先 pnpm skills:pull）\n---\n# ${name}\n`);
+    }
+  }
+  console.error("[uiharness] resources/skills not pulled - stub skills placed in the user layer");
+}
 const skillRegistry = new SkillRegistry({
   bundledDir: `${repo}/resources/skills`,
   dataDir,
@@ -86,7 +99,6 @@ const runtime = new ProjectRuntime({
   skills: skillRegistry,
 });
 
-const bid = parseContract(readFileSync(`${repo}/products/bid/ruyin.product.yaml`, "utf8"));
 const names = ["某储能电站 EPC 投标", "城市轨道信号系统投标", "数据中心机电总包投标"];
 let first;
 for (const name of names) {
