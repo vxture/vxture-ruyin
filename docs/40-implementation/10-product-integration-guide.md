@@ -154,6 +154,11 @@ confidential 凭据、替用户换票、调 Atlas 与 Runos 的，是产品自�
 | 第三方密钥 | **不经过 Ruyin，也不经过能力面的代码**：注册进 Runos 的凭证保险库，由 Runos 在出站调用时注入。产品侧只声明 `credential_requirements` | ADR-020 §6-2 |
 | 脚本 | 带 `scripts/` 的技能：本地不跑（TD-005）；不带业务数据的脚本可声明依赖 Runos Executor 在云端沙箱里跑 —— **登记未启用** | TD-005；ADR-020 §6-3 |
 
+**预置的 MCP 服务器怎么被产品用（2026-09-05，ADR-018 §7.1）**：它们在本机是来源为 `bundled`
+的连接器，用户在「能力平台」启动后，契约里 `provider: connector` 的工具按**同名**接上
+（例如 `browser_navigate`、`search`），项目还要授权那个连接器（ADR-005）。工具名以服务器
+`tools/list` 报的为准；对照表待补（TD-042 / TD-034）。
+
 **平台侧前提（2026-09-05 读平台代码核实）**：平台 token-exchange 的 `resolveOboContext` 只接受
 `aud` 等于 caller 自己 client id 的 subject_token；Ruyin 登录得到的用户 token `aud='ruyin'`，
 产品云端拿它去换票会被 `400 invalid_request` 拒掉。这是「桌面客户端 + 产品云端」形态第一次

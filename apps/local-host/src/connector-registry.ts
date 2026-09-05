@@ -22,6 +22,7 @@ import { dirname, join } from "node:path";
 import type { ConnectorHealth, ConnectorPort, ContextSource } from "@vxture/ruyin-core";
 import { McpConnector, type ConnectorToolOutcome } from "./connector-mcp.js";
 import type { ConnectorToolSource } from "./tool-executor.js";
+import type { BundledToolServers } from "./tool-servers.js";
 
 export const CONNECTORS_FILE = "connectors.json";
 
@@ -34,8 +35,12 @@ export interface InstalledConnector {
   command: string;
   args: string[];
   env?: Record<string, string>;
-  /** Which contract source kind this connector serves (lan / private). */
-  source: Extract<ContextSource, "lan" | "private">;
+  /**
+   * Which contract source kind this connector serves (lan / private) —— 或
+   * `bundled`：随安装包预置的 MCP 服务器（ADR-018 §2.2，tool-servers.ts），
+   * 不在 connectors.json 里，启用状态记在 <dataDir>/tools/state.json。
+   */
+  source: Extract<ContextSource, "lan" | "private"> | "bundled";
   installedAt: string;
   /**
    * 本机生效态（通则 B-3：一个 state 字符串，不用布尔取反）。
@@ -53,9 +58,13 @@ export interface ConnectorView extends InstalledConnector {
   health: ConnectorHealth;
   /** Tools the running server exposes (tools/list at start); empty when not running. */
   tools: string[];
+  /** 预置服务器才有：怎么起、现在为什么起不了（没 uv / 缺环境变量 / 没随包）。 */
+  bundled?: { runtime: string; blocked?: string; note?: string };
 }
 
 export class ConnectorInstallRefusedError extends Error {}
+/** 预置的服务器不能卸载 —— 它随安装包来，只能停用。 */
+export class ConnectorBundledError extends Error {}
 
 /** 暂存态的健康：不是「未运行」而是「没启用」—— 两件事在用户那里不一样。 */
 function stashedHealth(): ConnectorHealth {
@@ -88,9 +97,54 @@ export class ConnectorRegistry implements ConnectorToolSource {
       allowUnsigned: boolean;
       log?: (line: string) => void;
       timeoutMs?: number;
+      /** 预置的 MCP 服务器（随包）；缺省 = 这套装配没有预置工具层。 */
+      bundled?: BundledToolServers;
     },
   ) {
     this.manifestPath = join(dataDir, CONNECTORS_FILE);
+  }
+
+  /** 预置服务器的连接器 spec：命令 / 参数 / 环境由启动计划给，不落 connectors.json。 */
+  private bundledSpec(id: string): InstalledConnector | undefined {
+    const plan = this.options.bundled?.plan(id);
+    if (!plan?.ok) return undefined;
+    return {
+      id,
+      transport: "stdio",
+      command: plan.command,
+      args: plan.args,
+      env: plan.env,
+      source: "bundled",
+      installedAt: "",
+      state: "active",
+    };
+  }
+
+  private bundledView(id: string): ConnectorView {
+    const bundled = this.options.bundled!;
+    const server = bundled.get(id)!;
+    const live = this.live.get(id);
+    const plan = bundled.plan(id);
+    const enabled = bundled.isEnabled(id);
+    const checkedAt = new Date().toISOString();
+    return {
+      id,
+      transport: "stdio",
+      command: plan.ok ? plan.command : "",
+      args: plan.ok ? plan.args : [],
+      source: "bundled",
+      installedAt: "",
+      state: live ? "active" : "stashed",
+      health: live
+        ? { ok: true, checkedAt }
+        : { ok: false, detail: !plan.ok ? plan.reason : enabled ? "未运行" : "未启用", checkedAt },
+      tools: live?.tools() ?? [],
+      bundled: {
+        runtime: server.launch?.runtime ?? "",
+        ...(!plan.ok ? { blocked: plan.reason } : {}),
+        ...(server.launch?.note ? { note: server.launch.note } : {}),
+      },
+    };
   }
 
   /**
@@ -111,6 +165,31 @@ export class ConnectorRegistry implements ConnectorToolSource {
         );
       }
     }
+    // 预置层：用户启用过的起来；起不了的（没 uv、缺环境变量）只记日志，界面里如实标。
+    for (const id of this.options.bundled?.enabledIds() ?? []) {
+      const spec = this.bundledSpec(id);
+      if (!spec) {
+        const plan = this.options.bundled!.plan(id);
+        this.options.log?.(`[ruyin] bundled tool server "${id}" not started: ${plan.ok ? "?" : plan.reason}`);
+        continue;
+      }
+      try {
+        await this.bringUp(spec);
+      } catch (cause) {
+        this.options.log?.(
+          `[ruyin] bundled tool server "${id}" failed to start: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
+      }
+    }
+  }
+
+  /** 预置服务器的 id（有启动规格的那些）。 */
+  private bundledIds(): string[] {
+    return this.options.bundled?.launchable().map((s) => s.id) ?? [];
+  }
+
+  isBundled(id: string): boolean {
+    return this.bundledIds().includes(id);
   }
 
   async list(): Promise<ConnectorView[]> {
@@ -126,6 +205,7 @@ export class ConnectorRegistry implements ConnectorToolSource {
             },
       );
     }
+    for (const id of this.bundledIds()) out.push(this.bundledView(id));
     return out;
   }
 
@@ -265,6 +345,7 @@ export class ConnectorRegistry implements ConnectorToolSource {
    * 通不过就保持暂存并把原因带回去 —— 换个状态不会让它连上。
    */
   async activate(id: string): Promise<ConnectorView> {
+    if (this.isBundled(id)) return this.activateBundled(id);
     const spec = this.specs.find((s) => s.id === id);
     if (!spec) throw new Error(`connector "${id}" is not installed`);
     if (spec.state === "active") return this.viewOf(spec);
@@ -294,6 +375,60 @@ export class ConnectorRegistry implements ConnectorToolSource {
     throw new Error(`connector "${id}" still cannot start${detail ? ": " + detail : ""}`);
   }
 
+  /**
+   * 启用一个预置服务器：按启动计划起进程、握手、列工具；通了才记为启用。
+   * 起不了的原因照原样带回（没 uv / 缺环境变量 / 入口不存在 / 进程退出）。
+   */
+  private async activateBundled(id: string): Promise<ConnectorView> {
+    const bundled = this.options.bundled!;
+    if (this.live.get(id)) return this.bundledView(id);
+    const plan = bundled.plan(id);
+    if (!plan.ok) throw new Error(`bundled tool server "${id}" cannot start: ${plan.reason}`);
+    const spec = this.bundledSpec(id)!;
+    try {
+      await this.bringUp(spec);
+      const health = await this.healthOf(id);
+      if (health.ok) {
+        bundled.setEnabled(id, true);
+        return this.bundledView(id);
+      }
+      throw new Error(health.detail ?? "not healthy after start");
+    } catch (cause) {
+      const half = this.live.get(id);
+      if (half) await half.stop().catch(() => {});
+      this.live.delete(id);
+      this.lookup.delete(id);
+      throw new Error(`bundled tool server "${id}" still cannot start: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  }
+
+  /**
+   * 停用：停进程、从内核的名单里拿掉。预置的记回 state.json；用户装的转「暂存」——
+   * 配置留着，任务拿不到它（通则 B-3：动作是动词，状态是字符串）。
+   */
+  async deactivate(id: string): Promise<ConnectorView> {
+    const live = this.live.get(id);
+    if (live) await live.stop().catch(() => {});
+    this.live.delete(id);
+    this.lookup.delete(id);
+    if (this.isBundled(id)) {
+      this.options.bundled!.setEnabled(id, false);
+      return this.bundledView(id);
+    }
+    const spec = this.specs.find((s) => s.id === id);
+    if (!spec) throw new Error(`connector "${id}" is not installed`);
+    spec.state = "stashed";
+    this.writeManifest();
+    return this.viewOf(spec);
+  }
+
+  /** 预置服务器要的环境变量（例如 SEARXNG_URL）。不是密钥的地方 —— 密钥归 Runos 保险库。 */
+  setBundledEnv(id: string, env: Record<string, string>): ConnectorView {
+    if (!this.isBundled(id)) throw new Error(`"${id}" is not a bundled tool server`);
+    this.options.bundled!.setEnv(id, env);
+    return this.bundledView(id);
+  }
+
   private viewOf(spec: InstalledConnector): ConnectorView {
     return {
       ...spec,
@@ -310,6 +445,9 @@ export class ConnectorRegistry implements ConnectorToolSource {
   }
 
   async remove(id: string): Promise<void> {
+    if (this.isBundled(id)) {
+      throw new ConnectorBundledError(`"${id}" 随安装包预置，不能卸载，只能停用`);
+    }
     const idx = this.specs.findIndex((s) => s.id === id);
     if (idx < 0) throw new Error(`connector "${id}" is not installed`);
     const connector = this.live.get(id);

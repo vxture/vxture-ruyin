@@ -550,6 +550,15 @@ function ConnectorsSection({ api }: { api: Api }) {
       setFailed(String((e as Error).message));
     }
   };
+  const stop = async (target: string) => {
+    setFailed(null);
+    try {
+      await api.deactivateConnector(target);
+      await reload();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    }
+  };
 
   return (
     <SettingsBlock
@@ -579,7 +588,7 @@ function ConnectorsSection({ api }: { api: Api }) {
               <code className="row-main" title={`${c.command} ${c.args.join(" ")}`}>
                 {c.id}
               </code>
-              <span className="row-tag">{c.source}</span>
+              <span className="row-tag">{c.source === "bundled" ? "预置" : c.source}</span>
               {/* 暴露了哪些工具：契约里 provider: connector 的工具要靠同名才接得上，
                   用户对着契约就能看出接没接。 */}
               {c.tools.length > 0 && (
@@ -603,9 +612,18 @@ function ConnectorsSection({ api }: { api: Api }) {
                   启用
                 </Button>
               )}
-              <Button variant="ghost" size="sm" onClick={() => void remove(c.id)}>
-                卸载
-              </Button>
+              {/* 预置的随安装包来，卸不掉，只能停用；用户装的才有「卸载」。 */}
+              {c.source === "bundled" ? (
+                c.state === "active" && (
+                  <Button variant="ghost" size="sm" onClick={() => void stop(c.id)}>
+                    停用
+                  </Button>
+                )
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => void remove(c.id)}>
+                  卸载
+                </Button>
+              )}
             </li>
           ))}
         </ul>
@@ -1257,6 +1275,21 @@ function SkillsSection({ api }: { api: Api }) {
 
   const items = (listing?.items ?? []).filter((s) => layer === "all" || s.layer === layer);
   const layerSummary = (listing?.layers ?? []).map((l) => `${LAYER_LABEL[l.layer]} ${l.count}`).join(" · ");
+  // 预置的 MCP 服务器：启动 = 真起进程、握手、列工具；起不了的原因照原样转达。
+  const [starting, setStarting] = useState<string | null>(null);
+  const launch = async (t: ToolView, on: boolean) => {
+    setFailed(null);
+    setStarting(t.id);
+    try {
+      if (on) await api.activateConnector(t.id);
+      else await api.deactivateConnector(t.id);
+      await reload();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    } finally {
+      setStarting(null);
+    }
+  };
 
   return (
     <>
@@ -1357,7 +1390,20 @@ function SkillsSection({ api }: { api: Api }) {
                 {t.tools && t.tools.length > 0 && (
                   <span className="text-body-sm text-muted-foreground mono">{`工具：${t.tools.join("、")}`}</span>
                 )}
+                {t.launchable && t.status !== "available" && t.detail && (
+                  <span className="text-body-sm text-muted-foreground">{t.detail}</span>
+                )}
                 <StatusBadge tone={TOOL_STATUS[t.status].tone}>{TOOL_STATUS[t.status].label}</StatusBadge>
+                {t.launchable && (
+                  <Button
+                    variant={t.status === "available" ? "ghost" : "outline"}
+                    size="sm"
+                    disabled={starting === t.id}
+                    onClick={() => void launch(t, t.status !== "available")}
+                  >
+                    {starting === t.id ? "…" : t.status === "available" ? "停止" : "启动"}
+                  </Button>
+                )}
               </li>
             ))}
           </ul>

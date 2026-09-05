@@ -13,7 +13,7 @@
  */
 
 import { SKILL_TOOLS } from "@vxture/ruyin-core";
-import type { BundledIndex } from "./skill-registry.js";
+import type { BundledServer } from "./tool-servers.js";
 
 export type ToolKind = "builtin" | "connector" | "mcp-server";
 export type ToolStatus = "available" | "unavailable" | "registered" | "runos";
@@ -29,28 +29,23 @@ export interface ToolView {
   tier?: string;
   /** mcp-server / connector：它暴露（或清单说它有）的工具名。 */
   tools?: string[];
+  /** mcp-server：有本机启动规格（能启动 / 能停），还是只登记。 */
+  launchable?: boolean;
 }
 
 /** 内建四个 —— 与 tool-executor.ts 的 IMPLEMENTED 同一份名单，缺一个就是漂移。 */
 export const BUILTIN_TOOL_IDS = ["read_file", "write_document", "search_knowledge", "export_result"] as const;
-
-interface ManifestServer {
-  id: string;
-  repo?: string;
-  license?: string;
-  tier?: string;
-  needsKey?: boolean;
-  launch?: unknown;
-  note?: string;
-}
 
 export interface ToolRegistrySources {
   /** 运行时支持这个内建工具吗（search_knowledge 缺检索时不支持）。 */
   supportsBuiltin: (id: string) => boolean;
   /** 技能登记册在不在（不在 = 两个技能工具也不在）。 */
   hasSkills: () => boolean;
-  connectors?: () => Promise<Array<{ id: string; state: string; health: { ok: boolean; detail?: string }; tools: string[] }>>;
-  bundledIndex?: () => BundledIndex | undefined;
+  connectors?: () => Promise<
+    Array<{ id: string; source: string; state: string; health: { ok: boolean; detail?: string }; tools: string[]; bundled?: { blocked?: string } }>
+  >;
+  /** 预置的 MCP 服务器定义（tools/index.json）；缺省 = 没有预置工具层。 */
+  bundledServers?: () => BundledServer[];
 }
 
 export class ToolRegistryView {
@@ -78,7 +73,9 @@ export class ToolRegistryView {
         ...(skills ? {} : { detail: "没有技能登记册" }),
       });
     }
-    for (const c of (await this.sources.connectors?.()) ?? []) {
+    const connectors = (await this.sources.connectors?.()) ?? [];
+    for (const c of connectors) {
+      if (c.source === "bundled") continue; // 预置服务器按 mcp-server 列，见下
       const running = c.state === "active" && c.health.ok;
       out.push({
         id: c.id,
@@ -89,21 +86,31 @@ export class ToolRegistryView {
         tools: c.tools,
       });
     }
-    const servers = (this.sources.bundledIndex?.()?.servers ?? []) as ManifestServer[];
-    for (const s of servers) {
-      if (typeof s?.id !== "string") continue;
+    const byId = new Map(connectors.filter((c) => c.source === "bundled").map((c) => [c.id, c]));
+    for (const s of this.sources.bundledServers?.() ?? []) {
       const viaRunos = s.tier === "runos-registered" || s.needsKey === true;
-      const view: ToolView = {
-        id: s.id,
-        kind: "mcp-server",
-        source: s.id,
-        status: viaRunos ? "runos" : "registered",
-        detail: viaRunos
-          ? "经 Runos 注册，密钥在 Runos 保险库，本机不装（ADR-020 §6-2）"
-          : "已登记；本机启动规格未定，尚不能启动（TD-042）",
-      };
+      const view: ToolView = { id: s.id, kind: "mcp-server", source: s.id, status: "registered" };
       if (s.license) view.license = s.license;
       if (s.tier) view.tier = s.tier;
+      const live = byId.get(s.id);
+      if (viaRunos) {
+        view.status = "runos";
+        view.detail = "经 Runos 注册，密钥在 Runos 保险库，本机不装（ADR-020 §6-2）";
+      } else if (!s.launch) {
+        view.detail = s.launchNote ?? "已登记；本机启动规格未定（TD-042）";
+      } else if (live) {
+        // 有启动规格：状态是它此刻真实的样子。
+        view.launchable = true;
+        const running = live.state === "active" && live.health.ok;
+        view.status = running ? "available" : live.bundled?.blocked ? "unavailable" : "registered";
+        view.detail = running
+          ? `运行中（${s.launch.runtime}）${s.launch.note ? "；" + s.launch.note : ""}`
+          : (live.bundled?.blocked ?? live.health.detail ?? "未启用");
+        view.tools = live.tools;
+      } else {
+        view.launchable = true;
+        view.detail = `可启动（${s.launch.runtime}）${s.launch.note ? "；" + s.launch.note : ""}`;
+      }
       out.push(view);
     }
     return out;

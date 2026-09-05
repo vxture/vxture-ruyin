@@ -39,6 +39,7 @@ import { createLocalApi, type LocalApiDeps } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
 import { SkillRegistry } from "./skill-registry.js";
 import { ToolRegistryView } from "./tool-registry.js";
+import { BundledToolServers } from "./tool-servers.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -1145,7 +1146,10 @@ test("skills: list / read / disable / refresh, and the tool registry view", asyn
     tools: new ToolRegistryView({
       supportsBuiltin: (id) => id !== "export_result",
       hasSkills: () => true,
-      bundledIndex: () => ({ servers: [{ id: "microsoft.playwright-mcp", tier: "default", license: "Apache-2.0" }, { id: "tavily-ai.tavily-mcp", tier: "runos-registered", needsKey: true }] }),
+      bundledServers: () => [
+        { id: "microsoft.playwright-mcp", tier: "default", license: "Apache-2.0", launch: null, launchNote: "测试里不启动" },
+        { id: "tavily-ai.tavily-mcp", tier: "runos-registered", needsKey: true, launch: null },
+      ],
     }),
   });
   try {
@@ -1193,6 +1197,68 @@ test("skills: list / read / disable / refresh, and the tool registry view", asyn
     assert.equal(byId.get("microsoft.playwright-mcp")?.status, "registered");
     assert.equal(byId.get("tavily-ai.tavily-mcp")?.status, "runos");
   } finally {
+    closeRig(rig);
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("bundled tool servers: /connectors lists them, activate starts, deactivate stops, DELETE is refused as CONNECTOR_BUNDLED, /tools shows launchable status", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-srv-tools-"));
+  const toolsDir = join(dataDir, "bundle");
+  const fake = fileURLToPath(new URL("./fake-mcp-server.js", import.meta.url));
+  mkdirSync(join(toolsDir, "fake.server", "node_modules", "fake-mcp"), { recursive: true });
+  writeFileSync(join(toolsDir, "fake.server", "node_modules", "fake-mcp", "cli.js"), readFileSync(fake));
+  writeFileSync(
+    join(toolsDir, "index.json"),
+    JSON.stringify({
+      servers: [
+        { id: "fake.server", tier: "default", license: "MIT", launch: { runtime: "node", package: "fake-mcp", version: "1.0.0", bin: "cli.js" }, vendored: { dir: "fake.server", package: "fake-mcp@1.0.0", entry: "node_modules/fake-mcp/cli.js" } },
+        { id: "registered.only", tier: "default", license: "MIT", launch: null, launchNote: "发行形态未核实" },
+      ],
+    }),
+  );
+  const bundled = new BundledToolServers({ toolsDir, dataDir, execPath: process.execPath, hasUvx: () => false });
+  const connectors = new ConnectorRegistry(dataDir, new Map(), { allowUnsigned: false, bundled, timeoutMs: 5000 });
+  const rig = await startServer({
+    connectors,
+    tools: new ToolRegistryView({
+      supportsBuiltin: () => true,
+      hasSkills: () => true,
+      connectors: () => connectors.list(),
+      bundledServers: () => bundled.list(),
+    }),
+  });
+  try {
+    const list = (await (await fetch(`${rig.base}/connectors`, { headers: rig.headers })).json()) as { items: Array<{ id: string; source: string; state: string }> };
+    assert.deepEqual(list.items.map((c) => [c.id, c.source, c.state]), [["fake.server", "bundled", "stashed"]]);
+
+    let tools = (await (await fetch(`${rig.base}/tools`, { headers: rig.headers })).json()) as { items: Array<{ id: string; status: string; launchable?: boolean; detail?: string }> };
+    assert.equal(tools.items.find((t) => t.id === "fake.server")?.status, "registered");
+    assert.equal(tools.items.find((t) => t.id === "fake.server")?.launchable, true);
+    assert.equal(tools.items.find((t) => t.id === "registered.only")?.launchable, undefined);
+    assert.equal(tools.items.find((t) => t.id === "registered.only")?.detail, "发行形态未核实");
+
+    const on = await fetch(`${rig.base}/connectors/fake.server/activate`, { method: "POST", headers: rig.json });
+    assert.equal(on.status, 200);
+    assert.equal(((await on.json()) as { state: string }).state, "active");
+    tools = (await (await fetch(`${rig.base}/tools`, { headers: rig.headers })).json()) as typeof tools;
+    assert.equal(tools.items.find((t) => t.id === "fake.server")?.status, "available");
+
+    const del = await fetch(`${rig.base}/connectors/fake.server`, { method: "DELETE", headers: rig.headers });
+    assert.equal(del.status, 400);
+    assert.equal(((await del.json()) as { code: string }).code, "CONNECTOR_BUNDLED");
+
+    const off = await fetch(`${rig.base}/connectors/fake.server/deactivate`, { method: "POST", headers: rig.json });
+    assert.equal(off.status, 200);
+    assert.equal(((await off.json()) as { state: string }).state, "stashed");
+    const missing = await fetch(`${rig.base}/connectors/nope/deactivate`, { method: "POST", headers: rig.json });
+    assert.equal(missing.status, 404);
+
+    const env = await fetch(`${rig.base}/connectors/fake.server/env`, { method: "POST", headers: rig.json, body: JSON.stringify({ env: { SEARXNG_URL: "http://x" } }) });
+    assert.equal(env.status, 200);
+    assert.deepEqual(bundled.envFor("fake.server"), { SEARXNG_URL: "http://x" });
+  } finally {
+    await connectors.stopAll();
     closeRig(rig);
     rmSync(dataDir, { recursive: true, force: true });
   }
