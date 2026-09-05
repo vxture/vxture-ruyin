@@ -185,7 +185,7 @@ body {
   word-break: break-all;
 }
 
-/* Product identifier line under a card title (vxture.bid@1.0.0). Block so it
+/* Product identifier line under a card title (bidproposal@1.0.0). Block so it
    drops below the single-line description while inheriting the title column's
    indent; one shade fainter than the description; mono, truncates on overflow. */
 .product-ident {

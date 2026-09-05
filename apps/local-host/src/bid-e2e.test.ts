@@ -234,7 +234,7 @@ void test("标书：四个任务连起来跑，最后落下一份真能打开的
   });
 
   try {
-    const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+    const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal");
     assert.ok(bid, "标书产品必须能通过契约校验才谈得上跑");
     const meta = await runtime.createProject(bid.contract, "储能 EPC 投标", "wsp_test");
     await runtime.addGrant(meta.id, work, "readwrite");
@@ -331,7 +331,7 @@ void test("标书：下游任务看得见上游写出来的东西", async () => 
   });
 
   try {
-    const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid");
+    const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal");
     assert.ok(bid);
     const meta = await runtime.createProject(bid.contract, "分目录", "wsp_test");
     await runtime.addGrant(meta.id, work, "readwrite");

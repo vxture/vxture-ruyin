@@ -116,12 +116,12 @@ test("createProject validates, persists, and seeds the initial state", async () 
   const ports = makePorts();
   const runtime = new ProjectRuntime(ports);
   const meta = await runtime.createProject(bidContract, "投标项目 A", "wsp_test");
-  assert.equal(meta.productId, "vxture.bid");
+  assert.equal(meta.productId, "bidproposal");
   assert.equal(meta.projectType, "project");
 
   const view = await runtime.openProject(meta.id);
   assert.equal(view.businessState, "draft");
-  assert.equal(view.contract.product.id, "vxture.bid");
+  assert.equal(view.contract.product.id, "bidproposal");
 
   const listed = await runtime.listProjects();
   assert.equal(listed.length, 1);
@@ -156,7 +156,7 @@ test("导入：只填空白，不给已归属的项目搬家", async () => {
   const store = await ports.storage.createProjectStore("ws_legacy");
   await store.putMeta({
     id: "ws_legacy",
-    productId: "vxture.bid",
+    productId: "bidproposal",
     productVersion: "1.0.0",
     contractVersion: "0.1",
     name: "老项目",
@@ -1674,7 +1674,7 @@ test("导出：无归属项目省略 workspaceId 字段；零审计事件时链�
   const store = await ports.storage.createProjectStore("prj_legacy_export");
   await store.putMeta({
     id: "prj_legacy_export",
-    productId: "vxture.bid",
+    productId: "bidproposal",
     productVersion: "1.0.0",
     contractVersion: "0.1",
     name: "老项目",

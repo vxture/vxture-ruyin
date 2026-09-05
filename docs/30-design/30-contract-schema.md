@@ -42,7 +42,7 @@ Verification 作为 Task Definition 的子结构进入 MVP；
 |---|---|---|---|
 | D1 | 契约格式 | YAML（规范用 JSON Schema 定义） | 人可读、可评审；JSON Schema 生态成熟，两个运行时可用同一校验器 |
 | D2 | 文件形态 | 单一 manifest：`ruyin.product.yaml` | 单一事实源；包内其它文件由 manifest 引用 |
-| D3 | 产品 ID | 命名空间式 `vxture.bid` | 天然隔离，支持未来第三方 publisher |
+| D3 | 产品 ID | 命名空间式 `bidproposal` | 天然隔离，支持未来第三方 publisher |
 | D4 | 版本模型 | 契约 schema 版本（`contract`）与产品版本（`product.version`）分离 | 契约规范演进不强迫产品发版，反之亦然 |
 | D5 | 引用完整性 | 契约内所有交叉引用必须可解析 | 加载期失败优于运行期失败 |
 | D6 | 数据分类入契约 | 每个 Context Type 必须标注 data class 与 sensitivity | 同步策略与推理传输策略需要静态依据（03 §19.1、02 §15.2） |
@@ -90,7 +90,7 @@ L4 签名校验     包完整性与发布者身份（见 §18）
 
 ```yaml
 product:
-  id: vxture.bid          # 必填。命名空间式，全局唯一，[a-z0-9.-]
+  id: bidproposal          # 必填。= 平台产品目录的 product_code（订阅判定、能力面路径、act.sub 都按它对账；2026-09-05 起不再用 vxture. 命名空间）
   name: 标书编写           # 必填。展示名
   version: 1.0.0          # 必填。SemVer
   publisher: vxture       # 必填。发布者 ID，必须与包签名身份一致（R12）
@@ -376,7 +376,7 @@ sync:
 contract: "0.1"
 
 product:
-  id: vxture.bid
+  id: bidproposal
   name: 标书编写
   version: 1.0.0
   publisher: vxture

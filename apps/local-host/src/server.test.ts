@@ -290,7 +290,7 @@ test("HTTP /registry: unreachable is a 200 with status unreachable (not an empty
     assert.equal(body.status, "ok");
     // The rig requires signatures (production posture): the catalog is visible, not installable.
     assert.equal(body.installable, false);
-    const bid = body.items.find((i) => i.id === "vxture.bid");
+    const bid = body.items.find((i) => i.id === "bidproposal");
     assert.ok(bid);
     assert.equal(bid.signed, false);
     // products/bid is the dev-mode builtin in this rig, so 1.0.0 shows as installed.
@@ -309,7 +309,7 @@ test("HTTP POST /registry/install: 503 when the index is unreachable, 404 for an
     const missing = await fetch(`${prod.base}/registry/install`, {
       method: "POST",
       headers: prod.json,
-      body: JSON.stringify({ id: "vxture.bid", version: "9.9.9" }),
+      body: JSON.stringify({ id: "bidproposal", version: "9.9.9" }),
     });
     assert.equal(missing.status, 404);
     assert.equal(((await missing.json()) as { code: string }).code, "REGISTRY_ENTRY_NOT_FOUND");
@@ -317,7 +317,7 @@ test("HTTP POST /registry/install: 503 when the index is unreachable, 404 for an
     const refused = await fetch(`${prod.base}/registry/install`, {
       method: "POST",
       headers: prod.json,
-      body: JSON.stringify({ id: "vxture.bid", version: "1.0.0" }),
+      body: JSON.stringify({ id: "bidproposal", version: "1.0.0" }),
     });
     assert.equal(refused.status, 403);
     const body = (await refused.json()) as { code: string; message: string };
@@ -334,7 +334,7 @@ test("HTTP POST /registry/install: 503 when the index is unreachable, 404 for an
     const dup = await fetch(`${dev.base}/registry/install`, {
       method: "POST",
       headers: dev.json,
-      body: JSON.stringify({ id: "vxture.bid", version: "1.0.0" }),
+      body: JSON.stringify({ id: "bidproposal", version: "1.0.0" }),
     });
     assert.equal(dup.status, 422);
     assert.equal(((await dup.json()) as { code: string }).code, "PACKAGE_INVALID");
@@ -350,7 +350,7 @@ test("HTTP POST /registry/install: 503 when the index is unreachable, 404 for an
     const res = await fetch(`${down.base}/registry/install`, {
       method: "POST",
       headers: down.json,
-      body: JSON.stringify({ id: "vxture.bid", version: "1.0.0" }),
+      body: JSON.stringify({ id: "bidproposal", version: "1.0.0" }),
     });
     assert.equal(res.status, 503);
     assert.equal(((await res.json()) as { code: string }).code, "REGISTRY_UNREACHABLE");
@@ -375,18 +375,18 @@ function signedInTo(workspaceId: string, extra: Partial<PlatformService> = {}): 
 }
 
 async function projectIn(rig: Rig, workspaceId: string): Promise<string> {
-  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid")!;
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal")!;
   const meta = await rig.runtime.createProject(bid.contract, "投标项目", workspaceId);
   return meta.id;
 }
 
 /** 归属之前的记录：待导入队列，不属于任何工作区（同integration.test.ts的构造方式）。 */
 async function unattributedProject(rig: Rig, id: string): Promise<void> {
-  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "vxture.bid")!;
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal")!;
   const store = await rig.storage.createProjectStore(id);
   await store.putMeta({
     id,
-    productId: "vxture.bid",
+    productId: "bidproposal",
     productVersion: "1.0.0",
     contractVersion: "0.1",
     name: "老项目",
@@ -598,14 +598,14 @@ void test("HTTP POST /entitlements/refresh: no refreshEntitlements configured st
 void test("HTTP /products/:id/activate|deactivate|pin-version wire through; unknown ids 404 with the right code", async () => {
   const rig = await startServer();
   try {
-    const deactivate = await fetch(`${rig.base}/products/vxture.bid/deactivate`, {
+    const deactivate = await fetch(`${rig.base}/products/bidproposal/deactivate`, {
       method: "POST",
       headers: rig.headers,
     });
     assert.equal(deactivate.status, 200);
     assert.equal(((await deactivate.json()) as { state: string }).state, "inactive");
 
-    const activate = await fetch(`${rig.base}/products/vxture.bid/activate`, {
+    const activate = await fetch(`${rig.base}/products/bidproposal/activate`, {
       method: "POST",
       headers: rig.headers,
     });
@@ -619,7 +619,7 @@ void test("HTTP /products/:id/activate|deactivate|pin-version wire through; unkn
     assert.equal(badActivate.status, 404);
     assert.equal(((await badActivate.json()) as { code: string }).code, "PRODUCT_NOT_FOUND");
 
-    const badPin = await fetch(`${rig.base}/products/vxture.bid/pin-version`, {
+    const badPin = await fetch(`${rig.base}/products/bidproposal/pin-version`, {
       method: "POST",
       headers: rig.json,
       body: JSON.stringify({ version: "9.9.9" }),

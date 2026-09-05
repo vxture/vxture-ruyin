@@ -4,7 +4,7 @@
 contract: "0.1"
 
 product:
-  id: vxture.bid
+  id: bidproposal
   name: 标书编写
   version: 1.0.0
   publisher: vxture

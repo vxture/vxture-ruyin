@@ -60,3 +60,6 @@ Thumbs.db
 *.swo
 
 .claude/
+
+# Bundled skill layer, pulled at build time from resources/skill-manifest.json (ADR-018)
+resources/skills/

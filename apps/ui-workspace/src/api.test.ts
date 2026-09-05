@@ -115,21 +115,21 @@ const WRAPPER_CASES: WrapperCase[] = [
   },
   {
     name: "activateProduct",
-    call: (api) => api.activateProduct("vxture.bid"),
+    call: (api) => api.activateProduct("bidproposal"),
     method: "POST",
-    path: "/products/vxture.bid/activate",
+    path: "/products/bidproposal/activate",
   },
   {
     name: "deactivateProduct",
-    call: (api) => api.deactivateProduct("vxture.bid"),
+    call: (api) => api.deactivateProduct("bidproposal"),
     method: "POST",
-    path: "/products/vxture.bid/deactivate",
+    path: "/products/bidproposal/deactivate",
   },
   {
     name: "pinProductVersion",
-    call: (api) => api.pinProductVersion("vxture.bid", "1.2.0"),
+    call: (api) => api.pinProductVersion("bidproposal", "1.2.0"),
     method: "POST",
-    path: "/products/vxture.bid/pin-version",
+    path: "/products/bidproposal/pin-version",
     body: { version: "1.2.0" },
   },
   { name: "checkUpdate", call: (api) => api.checkUpdate(), method: "GET", path: "/updates/check" },
@@ -137,10 +137,10 @@ const WRAPPER_CASES: WrapperCase[] = [
   { name: "projects", call: (api) => api.projects(), method: "GET", path: "/projects" },
   {
     name: "createProject",
-    call: (api) => api.createProject("vxture.bid", "投标项目"),
+    call: (api) => api.createProject("bidproposal", "投标项目"),
     method: "POST",
     path: "/projects",
-    body: { product: "vxture.bid", name: "投标项目" },
+    body: { product: "bidproposal", name: "投标项目" },
   },
   {
     name: "importProject",
@@ -232,14 +232,14 @@ const WRAPPER_CASES: WrapperCase[] = [
     body: { connector: "crm" },
   },
   { name: "connectors", call: (api) => api.connectors(), method: "GET", path: "/connectors" },
-  { name: "fetchProduct", call: (api) => api.fetchProduct("vxture.bid"), method: "POST", path: "/products/vxture.bid/fetch" },
+  { name: "fetchProduct", call: (api) => api.fetchProduct("bidproposal"), method: "POST", path: "/products/bidproposal/fetch" },
   { name: "registry", call: (api) => api.registry(), method: "GET", path: "/registry" },
   {
     name: "installFromRegistry",
-    call: (api) => api.installFromRegistry("vxture.bid", "1.0.0"),
+    call: (api) => api.installFromRegistry("bidproposal", "1.0.0"),
     method: "POST",
     path: "/registry/install",
-    body: { id: "vxture.bid", version: "1.0.0" },
+    body: { id: "bidproposal", version: "1.0.0" },
   },
   {
     name: "installConnector",
@@ -301,9 +301,9 @@ const WRAPPER_CASES: WrapperCase[] = [
   { name: "logout", call: (api) => api.logout(), method: "POST", path: "/auth/logout" },
   {
     name: "entitlements",
-    call: (api) => api.entitlements(["vxture.bid", "vxture.crm"]),
+    call: (api) => api.entitlements(["bidproposal", "vxture.crm"]),
     method: "GET",
-    path: "/entitlements?products=vxture.bid%2Cvxture.crm",
+    path: "/entitlements?products=bidproposal%2Cvxture.crm",
   },
 ];
 
@@ -331,15 +331,15 @@ for (const c of WRAPPER_CASES) {
 void test("Api.installPackage: uploads raw bytes with an octet-stream content-type, not JSON", async () => {
   const fetchMock = vi
     .fn()
-    .mockResolvedValue(jsonResponse({ productId: "vxture.bid", version: "1.2.0", signed: false }));
+    .mockResolvedValue(jsonResponse({ productId: "bidproposal", version: "1.2.0", signed: false }));
   globalThis.fetch = fetchMock;
   const api = new Api("tok_123");
   const bytes = new Uint8Array([1, 2, 3]);
-  const file = new File([bytes], "vxture.bid.ruyinpkg");
+  const file = new File([bytes], "bidproposal.ruyinpkg");
 
   const result = await api.installPackage(file);
 
-  expect(result).toEqual({ productId: "vxture.bid", version: "1.2.0", signed: false });
+  expect(result).toEqual({ productId: "bidproposal", version: "1.2.0", signed: false });
   const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
   expect(path).toBe("/products/install");
   expect(init.method).toBe("POST");

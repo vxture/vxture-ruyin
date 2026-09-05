@@ -94,7 +94,7 @@ vi.mock("./pending", () => ({
 
 function product(over: Partial<ProductInfo> = {}): ProductInfo {
   return {
-    id: "vxture.bid",
+    id: "bidproposal",
     name: "标书编写",
     version: "1.0.0",
     installed: true,
@@ -113,7 +113,7 @@ function product(over: Partial<ProductInfo> = {}): ProductInfo {
 function workspace(over: Partial<ProjectMeta> = {}): ProjectMeta {
   return {
     id: "prj_1",
-    productId: "vxture.bid",
+    productId: "bidproposal",
     productVersion: "1.0.0",
     name: "投标项目",
     projectType: "project",
@@ -252,7 +252,7 @@ void test("Workbench: 最近工作 is newest-first, and each row carries its pro
   const api = fakeApi({
     products: vi
       .fn()
-      .mockResolvedValue([product({ id: "vxture.bid", name: "标书编写" })]),
+      .mockResolvedValue([product({ id: "bidproposal", name: "标书编写" })]),
     projects: vi.fn().mockResolvedValue(
       projectList([
         workspace({
@@ -545,14 +545,14 @@ void test("Workbench: search also matches a project by its productId, not just i
   const { Workbench } = await import("./workbench");
   const api = fakeApi({
     projects: vi.fn().mockResolvedValue(
-      projectList([workspace({ name: "无关名字", productId: "vxture.bid" })]),
+      projectList([workspace({ name: "无关名字", productId: "bidproposal" })]),
     ),
   });
   render(<Workbench api={api} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
-  await user.type(screen.getByPlaceholderText("搜索项目、产品与动作…"), "vxture.bid");
+  await user.type(screen.getByPlaceholderText("搜索项目、产品与动作…"), "bidproposal");
   const results = within(await screen.findByRole("listbox"));
   expect(await results.findByText("无关名字")).toBeInTheDocument();
 });
