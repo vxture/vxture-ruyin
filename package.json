@@ -24,6 +24,7 @@
     "gen:app-icon": "pnpm --filter @vxture/ruyin-shell exec electron ../../scripts/release/make-app-icon.mjs",
     "lint:tech-debt": "node scripts/guardrails/check-tech-debt-table.mjs",
     "lint:versions": "node scripts/guardrails/check-package-versions.mjs",
-    "lint:css-tokens": "node scripts/guardrails/check-css-tokens.mjs"
+    "lint:css-tokens": "node scripts/guardrails/check-css-tokens.mjs",
+    "lint:skill-manifest": "node scripts/guardrails/check-skill-manifest.mjs"
   }
 }
