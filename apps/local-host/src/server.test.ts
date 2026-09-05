@@ -15,7 +15,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,8 @@ import { loadProducts } from "./products.js";
 import { ProductRegistry } from "./product-registry.js";
 import { createLocalApi, type LocalApiDeps } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
+import { SkillRegistry } from "./skill-registry.js";
+import { ToolRegistryView } from "./tool-registry.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -1107,5 +1109,89 @@ test("pick-folder: 请求挂着等壳送结果；壳先问起始目录；没接�
     assert.equal(r.status, 404);
   } finally {
     closeRig(bare);
+  }
+});
+
+// ───────────────────────── 能力平台（ADR-018）：/skills 与 /tools ─────────────────────────
+
+function skillFixture(): { dataDir: string; registry: SkillRegistry } {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-srv-skills-"));
+  const user = join(dataDir, "skills", "user", "tender-style");
+  mkdirSync(join(user, "references"), { recursive: true });
+  writeFileSync(join(user, "SKILL.md"), "---\nname: tender-style\ndescription: House style for tenders\n---\n# Style\n");
+  writeFileSync(join(user, "references", "tone.md"), "# Tone\n");
+  return { dataDir, registry: new SkillRegistry({ bundledDir: join(dataDir, "no-bundle"), dataDir, ttlMs: 0 }) };
+}
+
+test("skills: without a registry the surface says so (503), never an empty list", async () => {
+  const rig = await startServer();
+  try {
+    const res = await fetch(`${rig.base}/skills`, { headers: rig.headers });
+    assert.equal(res.status, 503);
+    assert.equal(((await res.json()) as { code: string }).code, "SKILLS_NOT_AVAILABLE");
+    const tools = await fetch(`${rig.base}/tools`, { headers: rig.headers });
+    assert.equal(tools.status, 503);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+test("skills: list / read / disable / refresh, and the tool registry view", async () => {
+  const { dataDir, registry } = skillFixture();
+  const rig = await startServer({
+    skills: registry,
+    tools: new ToolRegistryView({
+      supportsBuiltin: (id) => id !== "export_result",
+      hasSkills: () => true,
+      bundledIndex: () => ({ servers: [{ id: "microsoft.playwright-mcp", tier: "default", license: "Apache-2.0" }, { id: "tavily-ai.tavily-mcp", tier: "runos-registered", needsKey: true }] }),
+    }),
+  });
+  try {
+    const list = await fetch(`${rig.base}/skills`, { headers: rig.headers });
+    assert.equal(list.status, 200);
+    const listing = (await list.json()) as { items: Array<{ name: string; layer: string; enabled: boolean }>; layers: Array<{ layer: string; present: boolean }> };
+    assert.deepEqual(listing.items.map((s) => [s.name, s.layer, s.enabled]), [["tender-style", "user", true]]);
+    assert.equal(listing.layers.find((l) => l.layer === "bundled")?.present, false);
+
+    const one = await fetch(`${rig.base}/skills/tender-style`, { headers: rig.headers });
+    assert.equal(one.status, 200);
+    const doc = (await one.json()) as { content: string; resources: string[] };
+    assert.match(doc.content, /^---\nname: tender-style/);
+    assert.deepEqual(doc.resources, ["references/tone.md"]);
+
+    const badLayer = await fetch(`${rig.base}/skills/tender-style/disable`, { method: "POST", headers: rig.json, body: JSON.stringify({ layer: "cloud", source: "user" }) });
+    assert.equal(badLayer.status, 400);
+    assert.equal(((await badLayer.json()) as { code: string }).code, "SKILL_LAYER_INVALID");
+
+    const off = await fetch(`${rig.base}/skills/tender-style/disable`, { method: "POST", headers: rig.json, body: JSON.stringify({ layer: "user", source: "user" }) });
+    assert.equal(off.status, 200);
+    assert.equal(((await off.json()) as { enabled: boolean }).enabled, false);
+    // 停用了就读不到：对任务来说它不在。
+    const gone = await fetch(`${rig.base}/skills/tender-style`, { headers: rig.headers });
+    assert.equal(gone.status, 404);
+    assert.equal(((await gone.json()) as { code: string }).code, "SKILL_NOT_FOUND");
+
+    const missing = await fetch(`${rig.base}/skills/no-such/enable`, { method: "POST", headers: rig.json, body: JSON.stringify({ layer: "user", source: "user" }) });
+    assert.equal(missing.status, 404);
+
+    // 没有能力面：刷新只重扫本机，并说清分发层没有来源。
+    const refresh = await fetch(`${rig.base}/skills/refresh`, { method: "POST", headers: rig.json });
+    assert.equal(refresh.status, 200);
+    const refreshed = (await refresh.json()) as { items: unknown[]; distributed: { unavailable?: string } };
+    assert.equal(refreshed.items.length, 1);
+    assert.match(refreshed.distributed.unavailable ?? "", /没有配置能力面/);
+
+    const tools = await fetch(`${rig.base}/tools`, { headers: rig.headers });
+    assert.equal(tools.status, 200);
+    const items = ((await tools.json()) as { items: Array<{ id: string; kind: string; status: string }> }).items;
+    const byId = new Map(items.map((t) => [t.id, t]));
+    assert.equal(byId.get("read_file")?.status, "available");
+    assert.equal(byId.get("export_result")?.status, "unavailable");
+    assert.equal(byId.get("use_skill")?.status, "available");
+    assert.equal(byId.get("microsoft.playwright-mcp")?.status, "registered");
+    assert.equal(byId.get("tavily-ai.tavily-mcp")?.status, "runos");
+  } finally {
+    closeRig(rig);
+    rmSync(dataDir, { recursive: true, force: true });
   }
 });

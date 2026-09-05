@@ -38,6 +38,8 @@ const { FtsRanker, reindexBinding, searchContext } = await import(
 const { LocalToolExecutor } = await import(`${ROOT}/apps/local-host/dist/tool-executor.js`);
 const { EventBus } = await import(`${ROOT}/apps/local-host/dist/events.js`);
 const { ConnectorRegistry } = await import(`${ROOT}/apps/local-host/dist/connector-registry.js`);
+const { SkillRegistry } = await import(`${ROOT}/apps/local-host/dist/skill-registry.js`);
+const { ToolRegistryView } = await import(`${ROOT}/apps/local-host/dist/tool-registry.js`);
 const { readFileSync } = await import("node:fs");
 
 const PORT = Number(process.env.PORT ?? 17470);
@@ -66,6 +68,12 @@ const connectorRegistry = new ConnectorRegistry(dataDir, connectorLookup, {
 const executor = new LocalToolExecutor((pid, q, scope, limit) =>
   searchContext(storage, pid, q, scope, limit),
 );
+// 能力平台（ADR-018）：预置层读仓内 resources/skills（先 pnpm skills:pull 才有）。
+const skillRegistry = new SkillRegistry({
+  bundledDir: `${repo}/resources/skills`,
+  dataDir,
+  log: (l) => console.error(l),
+});
 const runtime = new ProjectRuntime({
   storage,
   clock: nodeClock,
@@ -75,6 +83,7 @@ const runtime = new ProjectRuntime({
   connectors: connectorLookup,
   ranker: new FtsRanker(storage),
   tools: executor,
+  skills: skillRegistry,
 });
 
 const bid = parseContract(readFileSync(`${repo}/products/bid/ruyin.product.yaml`, "utf8"));
@@ -127,6 +136,13 @@ const server = createLocalApi({
   platform,
   reindex: (pid, b) => reindexBinding(storage, pid, b, connectorLookup.get(b.connector)),
   connectors: connectorRegistry,
+  skills: skillRegistry,
+  tools: new ToolRegistryView({
+    supportsBuiltin: (id) => executor.supports(id),
+    hasSkills: () => true,
+    connectors: () => connectorRegistry.list(),
+    bundledIndex: () => skillRegistry.bundledIndex(),
+  }),
   // 主题中转：界面上报，壳取值给窗口按钮上色（观察台里没有壳，但端点要在，
   // 否则那条通路在这儿看不见）。
   chromeTheme: {

@@ -443,3 +443,40 @@ test("R15: a connector-provided tool must be query or external_send", () => {
   });
   assert.ok(!unknown.ok);
 });
+
+/**
+ * R16（ADR-018 §2.5）：task 的 skills 在任务内唯一；声明了 skills 的任务必须有
+ * 能力 —— 技能是在能力回合里被 `use_skill` 打开的，没有回合就没有人打开它。
+ * 名字格式（kebab、≤64）是 L1 的 pattern，这里顺带钉一次。
+ */
+test("R16: skills are unique within a task and need a capability to be read from", () => {
+  const c = structuredClone(base);
+  const task = c.tasks.find((t) => t.id === "generate_proposal");
+  assert.ok(task);
+  task.skills = ["sn-da-excel-workflow", "officecli-word-form"];
+  assert.ok(!rules(validateContract(structuredClone(c))).includes("R16"));
+
+  task.skills = ["sn-da-excel-workflow", "sn-da-excel-workflow"];
+  assert.ok(rules(validateContract(structuredClone(c))).includes("R16"));
+
+  task.skills = ["sn-da-excel-workflow"];
+  task.capabilities = [];
+  task.tools = []; // keep R14 out of the picture: this assertion is about skills
+  const result = validateContract(c);
+  assert.ok(rules(result).includes("R16"));
+  assert.match(result.errors.find((e) => e.rule === "R16")?.message ?? "", /no capability to read them from/);
+});
+
+test("skills: an Agent Skills name is kebab-case, at most 64 characters (L1)", () => {
+  for (const bad of ["Docx_Basics", "docx--basics", "-docx", "docx-", "a".repeat(65)]) {
+    const r = mutate((c) => {
+      c.tasks[0]!.skills = [bad];
+    });
+    assert.ok(!r.ok, `expected "${bad}" to be refused`);
+    assert.ok(r.errors.some((e) => e.rule === "L1" && e.path.includes("skills")), bad);
+  }
+  const good = mutate((c) => {
+    c.tasks[0]!.skills = ["docx-basics", "a1", "x".repeat(64)];
+  });
+  assert.ok(!good.errors.some((e) => e.path.includes("skills")));
+});

@@ -13,6 +13,8 @@ export type SectionId =
    * 它不进侧栏：侧栏是「我能去哪儿」，添加是从列表页发起的一个动作。
    */
   | "connectors-add"
+  /** 能力平台（ADR-018 §2.7）：本机装着的技能与工具，一张清单。代码标识符仍叫 skills。 */
+  | "skills"
   | "database"
   | "updates"
   | "about";
@@ -28,6 +30,7 @@ export const SETTINGS_SECTIONS: Array<{ id: SectionId; label: string; icon: stri
   { id: "account", label: "账户", icon: "role" },
   { id: "general", label: "通用设置", icon: "settings" },
   { id: "connectors", label: "连接器", icon: "plugs-connected" },
+  { id: "skills", label: "能力平台", icon: "sparkles" },
   { id: "database", label: "数据库", icon: "table" },
   { id: "updates", label: "软件更新", icon: "arrow-down" },
   { id: "about", label: "关于", icon: "info" },

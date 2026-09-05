@@ -81,6 +81,59 @@ export interface ToolOffer {
   description?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Skills (ADR-018) - instruction packages the model reads mid-turn
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a skill came from (ADR-018 §2.3): bundled with the installer, handed
+ * down by the product's cloud surface (Runos distribution), added by the user,
+ * or placed in this project. Nearer layers override farther ones by name.
+ */
+export type SkillLayer = "bundled" | "distributed" | "user" | "project";
+
+/**
+ * The catalogue line a provider sees this turn - name + description, about a
+ * hundred tokens (ADR-018 §2.4). Data, not phrasing: how to put "these skills
+ * exist" to a model is the product's business.
+ */
+export interface SkillOffer {
+  name: string;
+  description: string;
+}
+
+export interface SkillSummary extends SkillOffer {
+  layer: SkillLayer;
+  version?: string | undefined;
+}
+
+export interface SkillDocument extends SkillSummary {
+  /** SKILL.md verbatim, front matter included - the model reads what the author wrote. */
+  content: string;
+  /**
+   * Relative paths under references/ and assets/ the model may ask for with
+   * read_skill_resource. scripts/ is listed nowhere: skill scripts do not run
+   * locally until an OS-level sandbox exists (TD-005).
+   */
+  resources: string[];
+}
+
+export type SkillResource =
+  | { kind: "text"; text: string; truncated?: boolean }
+  | { kind: "unavailable"; reason: string };
+
+/**
+ * The host's skill registry as the kernel sees it. Per project, because the
+ * project layer sits on top of the machine's layers (a project may carry its
+ * own copy of a skill and it wins there and only there). "Enabled" is decided
+ * inside: a skill the user switched off is one this port does not return.
+ */
+export interface SkillsPort {
+  resolve(name: string, projectId: string): Promise<SkillSummary | undefined>;
+  read(name: string, projectId: string): Promise<SkillDocument | undefined>;
+  readResource(name: string, path: string, projectId: string): Promise<SkillResource>;
+}
+
 /**
  * Where a piece of content came from - and therefore how it must be treated.
  *
@@ -189,6 +242,13 @@ export interface CapabilityTurnRequest {
    * runtime cannot gate would be a lie (50-harness section 5).
    */
   tools: ToolOffer[];
+  /**
+   * Skills this task declared and this machine has (ADR-018 §2.4): the
+   * catalogue, not the text. The provider offers them to the model however it
+   * sees fit; the model asks for the full text with `use_skill`, which is one
+   * of the `tools` above whenever this list is non-empty.
+   */
+  skills?: SkillOffer[];
   /**
    * Present only on a revision round: which rules failed last time and why
    * (50-harness 7.2). Handed over as data - the runtime does not write the
@@ -601,6 +661,8 @@ export interface RuntimePorts {
   ranker?: RankerPort;
   /** Executes tools the Tool Gate lets through. */
   tools?: ToolExecutorPort;
+  /** The layered skill registry (ADR-018); absent = no task may declare skills. */
+  skills?: SkillsPort;
   /** True once the user has asked this task to stop (see HarnessDeps). */
   isCancelled?: (taskInstanceId: string) => boolean;
 }

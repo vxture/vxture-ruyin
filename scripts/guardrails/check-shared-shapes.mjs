@@ -86,6 +86,11 @@ const SHARED = [
   ["ContextItemMeta", "ContextItemMeta", "packages/runtime-core/src/ports.ts"],
   ["Binding", "Binding", "packages/runtime-core/src/ports.ts"],
   ["ConnectorGrant", "ConnectorGrant", "packages/runtime-core/src/ports.ts"],
+  // 能力平台（ADR-018）：界面那份技能 / 工具视图必须和守护进程的一字不差。
+  ["SkillView", "SkillView", "apps/local-host/src/skill-registry.ts"],
+  ["SkillLayerInfo", "SkillLayerInfo", "apps/local-host/src/skill-registry.ts"],
+  ["SkillListing", "SkillListing", "apps/local-host/src/skill-registry.ts"],
+  ["ToolView", "ToolView", "apps/local-host/src/tool-registry.ts"],
 ];
 
 const sources = new Map();

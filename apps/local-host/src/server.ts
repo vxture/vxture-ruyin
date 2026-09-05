@@ -22,6 +22,8 @@ import {
 import { DEV_UI_HTML } from "./dev-ui.js";
 import type { ProductRegistry } from "./product-registry.js";
 import type { TaskRunner } from "./task-runner.js";
+import { SkillNotFoundError, type SkillListing, type SkillView } from "./skill-registry.js";
+import type { SkillDocument, SkillLayer } from "@vxture/ruyin-core";
 import { installPackage } from "./installer.js";
 import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
@@ -62,6 +64,14 @@ export interface ConnectorRegistryLike {
   healthOf(id: string): Promise<unknown>;
 }
 
+/** 服务端只用登记册的这几个口；完整类型在 skill-registry.ts。 */
+export interface SkillRegistryLike {
+  list(projectId?: string): SkillListing;
+  read(name: string, projectId: string): Promise<SkillDocument | undefined>;
+  setEnabled(target: { layer: SkillLayer; source: string; name: string }, enabled: boolean): SkillView;
+  refresh(): void;
+}
+
 export interface LocalApiDeps {
   runtime: ProjectRuntime;
   /** 受管产品资产（安装 / 启用 / 订阅可用性，30-contract-schema §18）。 */
@@ -77,7 +87,18 @@ export interface LocalApiDeps {
    * `/connectors` 如实回答「没有」，而不是空列表冒充「一个都没装」。
    */
   connectors?: ConnectorRegistryLike;
-  /** Built Workspace UI directory; when set, served at / (dev console moves to /dev). */
+  /**
+   * 技能登记册（ADR-018）。缺省 = 这套装配没有，`/skills` 如实回答 503，而不是
+   * 一张空清单冒充「一条都没装」。
+   */
+  skills?: SkillRegistryLike;
+  /** 工具登记册的只读视图（能力平台里「工具」那一半）。 */
+  tools?: { list(): Promise<unknown[]> };
+  /**
+   * 刷新产品分发层：逐个已装产品问它的能力面要技能目录。要能力面，未配置时
+   * 缺省 —— `POST /skills/refresh` 那时只重扫本机，并说清没有分发来源。
+   */
+  refreshDistributedSkills?: () => Promise<unknown[]>;
   uiDir?: string;
   /** Vxture platform integration (C1 identity + C2 entitlements); absent in
    *  tests that exercise the runtime surface only. */
@@ -771,6 +792,74 @@ async function handle(
       send(res, 200, { removed: segments[1] });
       return;
     }
+  }
+
+  // --- 能力平台（ADR-018）：技能登记册（四层，近者优先）与工具登记册 ---
+  if (segments[0] === "skills") {
+    if (!deps.skills) {
+      send(res, 503, apiError("SKILLS_NOT_AVAILABLE", "这套装配没有技能登记册"));
+      return;
+    }
+    const project = url.searchParams.get("project") ?? undefined;
+    if (method === "GET" && segments.length === 1) {
+      send(res, 200, deps.skills.list(project));
+      return;
+    }
+    // POST /skills/refresh —— 重扫本机各层，并向每个已装产品的能力面对一次分发目录。
+    if (method === "POST" && segments.length === 2 && segments[1] === "refresh") {
+      deps.skills.refresh();
+      const distributed = deps.refreshDistributedSkills ? await deps.refreshDistributedSkills() : undefined;
+      deps.skills.refresh();
+      send(res, 200, {
+        ...deps.skills.list(project),
+        // 没有能力面就没有分发来源：说清，不用空数组冒充「对过了、没变化」。
+        distributed: distributed ?? { unavailable: "没有配置能力面，产品分发层没有来源" },
+      });
+      return;
+    }
+    if (method === "GET" && segments.length === 2) {
+      const doc = await deps.skills.read(segments[1]!, project ?? "");
+      if (!doc) {
+        send(res, 404, apiError("SKILL_NOT_FOUND", `技能「${segments[1]}」不在本机清单里（或已停用）`));
+        return;
+      }
+      send(res, 200, doc);
+      return;
+    }
+    // POST /skills/:name/enable | disable，body { layer, source }（通则 B-3：动作是动词，状态是字符串）
+    if (method === "POST" && segments.length === 3 && (segments[2] === "enable" || segments[2] === "disable")) {
+      const body = await readJson(req);
+      const layer = String(body["layer"] ?? "");
+      if (!["bundled", "distributed", "user", "project"].includes(layer)) {
+        send(res, 400, apiError("SKILL_LAYER_INVALID", "layer 必须是 bundled / distributed / user / project 之一"));
+        return;
+      }
+      try {
+        send(
+          res,
+          200,
+          deps.skills.setEnabled(
+            { layer: layer as SkillLayer, source: String(body["source"] ?? ""), name: segments[1]! },
+            segments[2] === "enable",
+          ),
+        );
+      } catch (cause) {
+        if (cause instanceof SkillNotFoundError) {
+          send(res, 404, apiError("SKILL_NOT_FOUND", cause.message));
+          return;
+        }
+        throw cause;
+      }
+      return;
+    }
+  }
+  if (method === "GET" && path === "/tools") {
+    if (!deps.tools) {
+      send(res, 503, apiError("TOOLS_NOT_AVAILABLE", "这套装配没有工具登记册"));
+      return;
+    }
+    send(res, 200, { items: await deps.tools.list() });
+    return;
   }
 
   // GET /products - 受管资产视图：已装 + 启用态 + 订阅可用性（§18.5）

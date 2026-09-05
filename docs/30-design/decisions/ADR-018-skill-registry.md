@@ -218,3 +218,32 @@ tasks:
 3. 第一批预置由本仓按业务口径（文档读取 / 编辑 / 浏览器操作 / 文档解析分析 / 在线
    搜索 / 表格生成 / docx 模板）梳理，目标 100+ —— 清单已出（§2.3）。
 4. 分区名「能力平台」（2026-09-05）。
+
+## 7. 实施记录（2026-09-05，技能半边落地）
+
+落了什么（PR「能力平台：技能登记册」）：
+
+| 层 | 落地 | 在哪 |
+|---|---|---|
+| 契约 | `tasks[].skills`（L1 pattern：kebab ≤64）+ **R16**（任务内唯一、须有 capability）| `packages/contract-schema`；30-contract-schema §12 / §15 |
+| 回合协议 | `TurnRequest.skills: SkillOffer[]`（name + description），只在任务声明了技能时带 | `packages/runtime-core/src/ports.ts` |
+| 内核 | `SkillsPort`（resolve / read / readResource）；`use_skill` `read_skill_resource` 两个内建工具随 `tasks[].skills` 而来、过同一道 Tool Gate、在内核里执行；启动前缺的技能按名拒绝（同不可运行的工具）；审计 `tool.executed` 带 `skill` | `packages/runtime-core/src/skills.ts`、`harness.ts` |
+| 守护进程 | 四层登记册（预置 / 产品分发 / 用户 / 项目，近者优先；同层重名先扫到的生效；启用状态 `<dataDir>/skills/state.json`；坏 SKILL.md 警告并跳过）；产品分发层按能力面 `GET /skills` `GET /skills/:name` 刷新、按摘要缓存、离线照用；`GET /skills` `GET /skills/:name` `POST /skills/:name/enable|disable` `POST /skills/refresh` `GET /tools` | `apps/local-host/src/skill-registry.ts`、`skill-distribution.ts`、`tool-registry.ts`、`server.ts` |
+| 构建链 | `pnpm skills:pull`：按清单钉死的 commit 稀疏检出、校验前言、连同许可证落 `resources/skills/` + `index.json`；`pack.mjs` 先拉再打包，冒烟断言包里的预置层非空 | `scripts/release/pull-skills.mjs`、`pack.mjs`、`electron-builder.yml` |
+| 界面 | 设置分区「能力平台」：技能清单（层 / 来源 / 许可证 / 档位 / 含脚本 / 启用 / 被覆盖，按层筛选，刷新）+ 工具清单（内建 / 连接器 / MCP 服务器，状态如实）；「连接器」文案收窄为来源管理 | `apps/ui-workspace/src/settings.tsx` |
+
+与 §2 原文的三处出入，记下不改判：
+
+1. **预置层就地读取、不复制进 `<dataDir>`**（§2.3 写的是「首次启动把预置复制到
+   `<dataDir>`；应用更新时刷新预置层」）。就地读，更新装完它自然就是新的，少一份会
+   过期的副本；用户的启用 / 停用单独落 `state.json`，不动预置文件也记得住。
+2. **目录名 ≠ 前言 `name` 的技能照收**，索引里记 `warning`（规范要求两者相等；
+   Agent-Reach 等仓不合）。登记册按前言 `name` 认 —— dsh 同样如此；跳过它等于把一条
+   默认档的技能悄悄丢掉。前言本身不合格（名字 / 描述）的仍然跳过。
+3. **工具那一半只到「登记」**：清单里 27 条 MCP 服务器的 `launch` 规格还是空的，本机
+   起不来；工具登记册把它们列为「已登记」而不是「可用」。收口在 **TD-042**（与 TD-034
+   一起：起得来之后接 Tool Gate）。
+
+没做、记着：契约里 bid 样例还没声明 `skills`（预置层在包里验过之后再加，否则开发机
+没拉过预置层，任务一启动就被按名拒绝）；任务详情里技能调用的专属行（§2.8 第 4 条）；
+用户层目录监视（现在是按需重扫，2 秒缓存）。
