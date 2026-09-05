@@ -34,8 +34,8 @@ after(() => {
 function seed(dir: string): void {
   mkdirSync(join(dir, "runtime"), { recursive: true });
   writeFileSync(join(dir, "runtime", "master.key.dpapi"), "KEY");
-  mkdirSync(join(dir, "products", "vxture.bid", "1.0.0"), { recursive: true });
-  writeFileSync(join(dir, "products", "vxture.bid", "1.0.0", "ruyin.product.yaml"), "id: vxture.bid");
+  mkdirSync(join(dir, "products", "bidproposal", "1.0.0"), { recursive: true });
+  writeFileSync(join(dir, "products", "bidproposal", "1.0.0", "ruyin.product.yaml"), "id: bidproposal");
   mkdirSync(join(dir, "projects", "prj_1", "files"), { recursive: true });
   writeFileSync(join(dir, "projects", "prj_1", "project.db"), "DB");
   writeFileSync(join(dir, "projects", "prj_1", "project.db-wal"), "WAL");

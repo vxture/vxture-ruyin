@@ -52,7 +52,7 @@ test("flow C: CLI registry -> index -> download checked against the listing -> i
       const index = await fetchRegistryIndex({ base: BASE, fetchImpl });
       assert.equal(index.status, "ok");
       if (index.status !== "ok") return;
-      const entry = index.items.find((i) => i.id === "vxture.bid");
+      const entry = index.items.find((i) => i.id === "bidproposal");
       assert.ok(entry);
       assert.equal(entry.signed, false);
       assert.equal(entry.runtime.minimum, "0.1.0");
@@ -70,7 +70,7 @@ test("flow C: CLI registry -> index -> download checked against the listing -> i
         (e: unknown) => e instanceof InstallError && /not countersigned/.test(e.message),
       );
       const installed = installPackage(bytes, { storeDir, runtimeVersion: "0.1.0", requireSignature: false });
-      assert.equal(installed.productId, "vxture.bid");
+      assert.equal(installed.productId, "bidproposal");
       assert.equal(installed.signed, false);
       assert.ok(existsSync(join(installed.dir, "ruyin.product.yaml")));
 

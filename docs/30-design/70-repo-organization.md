@@ -201,7 +201,7 @@ dl.vxture.com/ruyin/
 ├── beta/…（同构）
 └── products/
     ├── index.json                 # MVP 版产品包清单（= 静态 Registry）
-    └── vxture.bid/bid-1.0.0.ruyinpkg
+    └── bidproposal/bid-1.0.0.ruyinpkg
 ```
 
 **下载地址就是发布地址**（dl 主机的渠道目录，见上面的目录树）：

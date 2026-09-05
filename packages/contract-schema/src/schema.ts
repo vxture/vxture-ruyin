@@ -76,7 +76,7 @@ export const contractJsonSchema = {
       additionalProperties: false,
       required: ["id", "name", "version", "publisher", "runtime"],
       properties: {
-        id: { type: "string", pattern: "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$" },
+        id: { type: "string", pattern: "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$" },
         name: NONEMPTY,
         version: SEMVER,
         publisher: { type: "string", pattern: "^[a-z][a-z0-9-]*$" },

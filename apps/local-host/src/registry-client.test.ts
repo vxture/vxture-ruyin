@@ -22,13 +22,13 @@ const SHA = createHash("sha256").update(PKG).digest("hex");
 
 function entry(over: Partial<RegistryEntry> = {}): RegistryEntry {
   return {
-    id: "vxture.bid",
+    id: "bidproposal",
     name: "标书编写",
     version: "1.0.0",
     publisher: "vxture",
     runtime: { minimum: "0.1.0" },
-    file: "vxture.bid/vxture.bid-1.0.0.ruyinpkg",
-    url: `${BASE}/vxture.bid/vxture.bid-1.0.0.ruyinpkg`,
+    file: "bidproposal/bidproposal-1.0.0.ruyinpkg",
+    url: `${BASE}/bidproposal/bidproposal-1.0.0.ruyinpkg`,
     sha256: SHA,
     size: PKG.length,
     signed: false,
@@ -46,7 +46,7 @@ test("index: a good index is ok with its items; the default base is the dl host 
   assert.equal(out.status, "ok");
   if (out.status !== "ok") return;
   assert.equal(out.base, BASE);
-  assert.equal(out.items[0]?.id, "vxture.bid");
+  assert.equal(out.items[0]?.id, "bidproposal");
   assert.equal(out.checkedAt, "t");
   const dflt = await fetchRegistryIndex({ fetchImpl: respond("", 404) });
   assert.equal(dflt.base, "https://dl.vxture.com/ruyin/products");
@@ -60,7 +60,7 @@ test("index: every bad index is unreachable with the reason - HTTP error, not JS
     [respond(JSON.stringify({ schema: INDEX_SCHEMA })), /no items array/],
     [respond(JSON.stringify({ schema: INDEX_SCHEMA, items: [{ id: "x" }] })), /malformed entry/],
     [respond(JSON.stringify({ schema: INDEX_SCHEMA, items: [entry({ sha256: "nothex" })] })), /malformed entry/],
-    [respond(JSON.stringify({ schema: INDEX_SCHEMA, items: [entry(), entry()] })), /lists vxture.bid@1.0.0 twice/],
+    [respond(JSON.stringify({ schema: INDEX_SCHEMA, items: [entry(), entry()] })), /lists bidproposal@1.0.0 twice/],
     [(async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch, /unreachable: ECONNREFUSED/],
   ];
   for (const [fetchImpl, reason] of cases) {

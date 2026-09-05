@@ -240,7 +240,7 @@ function InstallMenu({
 }
 
 const BLURBS: Record<string, string> = {
-  "vxture.bid": "招标解析 · 需求矩阵 · 方案生成 · 覆盖校验",
+  "bidproposal": "招标解析 · 需求矩阵 · 方案生成 · 覆盖校验",
 };
 
 /**

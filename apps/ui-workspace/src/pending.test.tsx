@@ -8,7 +8,7 @@ function row(over: Partial<PendingConfirmation> = {}): PendingConfirmation {
   return {
     projectId: "prj_1",
     projectName: "某储能电站 EPC 投标",
-    productId: "vxture.bid",
+    productId: "bidproposal",
     taskInstanceId: "ti_1",
     taskId: "run",
     checkpointId: "cp_1",

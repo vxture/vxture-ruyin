@@ -16,7 +16,7 @@ import { Api, type ProductInfo, type ProjectMeta, type SessionInfo } from "./api
 
 function product(over: Partial<ProductInfo> = {}): ProductInfo {
   return {
-    id: "vxture.bid",
+    id: "bidproposal",
     name: "标书编写",
     version: "1.0.0",
     installed: true,
@@ -35,7 +35,7 @@ function product(over: Partial<ProductInfo> = {}): ProductInfo {
 function workspace(over: Partial<ProjectMeta> = {}): ProjectMeta {
   return {
     id: "prj_1",
-    productId: "vxture.bid",
+    productId: "bidproposal",
     productVersion: "1.0.0",
     name: "投标项目",
     projectType: "project",
@@ -295,12 +295,12 @@ void test("ProductCard: the badge tells the four states apart - 已订阅 / 本�
 
 void test("ProductCard: the code sits under the name; the version lives bottom-left, flush with the icon, followed by the count and its unit", () => {
   renderHome({
-    products: [product({ id: "vxture.bid", version: "2.3.0" })],
+    products: [product({ id: "bidproposal", version: "2.3.0" })],
     workspaces: [workspace(), workspace({ id: "prj_2" })],
   });
   // owner 2026-09-04：名称下面只留产品 code；版本移到左下角、顶头对齐图标，
   // 关键数字紧随其后，单位「项目」是再小再淡的一档。
-  expect(document.querySelector(".pcard-ident")?.textContent?.trim()).toBe("vxture.bid");
+  expect(document.querySelector(".pcard-ident")?.textContent?.trim()).toBe("bidproposal");
   const meta = document.querySelector(".pcard-foot > .pcard-meta") as HTMLElement;
   expect(meta.querySelector(".pcard-version")?.textContent).toBe("v2.3.0");
   expect(meta.querySelector(".pcard-count b")?.textContent).toBe("2");
@@ -348,9 +348,9 @@ void test("StatusCards: three cards in a row, the explanation lives in the toolt
 
 void test("ProductCard: only this product's projects are counted, not every project on the machine", () => {
   renderHome({
-    products: [product({ id: "vxture.bid" })],
+    products: [product({ id: "bidproposal" })],
     workspaces: [
-      workspace({ id: "p1", productId: "vxture.bid" }),
+      workspace({ id: "p1", productId: "bidproposal" }),
       workspace({ id: "p2", productId: "vxture.other" }),
       workspace({ id: "p3", productId: "vxture.other" }),
     ],
@@ -377,13 +377,13 @@ void test("ProductCard: 打开 with no project yet creates the first one named a
   const onCreated = vi.fn();
   renderHome({
     api: fakeApi({ createProject }),
-    products: [product({ id: "vxture.bid", name: "标书编写" })],
+    products: [product({ id: "bidproposal", name: "标书编写" })],
     workspaces: [],
     onCreated,
   });
   await userEvent.click(screen.getByRole("button", { name: "打开" }));
   // 首页不再有取名字的表单：让人在还没进门时先取名，是把产品的第一步搬进了框架。
-  expect(createProject).toHaveBeenCalledWith("vxture.bid", "标书编写");
+  expect(createProject).toHaveBeenCalledWith("bidproposal", "标书编写");
   await vi.waitFor(() => expect(onCreated).toHaveBeenCalledWith("prj_new"));
 });
 
@@ -434,11 +434,11 @@ void test("ProductCard: 已停用 can be re-enabled here, then refreshes; a fail
   const onRefresh = vi.fn();
   renderHome({
     api: fakeApi({ activateProduct }),
-    products: [product({ id: "vxture.bid", availability: "disabled" })],
+    products: [product({ id: "bidproposal", availability: "disabled" })],
     onRefresh,
   });
   await userEvent.click(screen.getByRole("button", { name: "启用" }));
-  expect(activateProduct).toHaveBeenCalledWith("vxture.bid");
+  expect(activateProduct).toHaveBeenCalledWith("bidproposal");
   await vi.waitFor(() => expect(onRefresh).toHaveBeenCalled());
 });
 
@@ -774,7 +774,7 @@ void test("HomePage: a blocked (not_entitled) card does not also get 未接通 -
 /* ---------------- 静态产品库（流 C）------------------------------------------ */
 
 const bidItem = {
-  id: "vxture.bid",
+  id: "bidproposal",
   name: "标书编写",
   version: "1.0.0",
   publisher: "vxture",
@@ -825,7 +825,7 @@ void test("HomePage/产品库: an installable catalog lists packages with 未签
     .fn()
     .mockResolvedValueOnce({ status: "ok", base: "https://dl", generatedAt: "g", checkedAt: "t", installable: true, items: [bidItem] })
     .mockResolvedValue({ status: "ok", base: "https://dl", generatedAt: "g", checkedAt: "t", installable: true, items: [{ ...bidItem, installed: true }] });
-  const installFromRegistry = vi.fn().mockResolvedValue({ productId: "vxture.bid", version: "1.0.0", signed: false, from: "registry" });
+  const installFromRegistry = vi.fn().mockResolvedValue({ productId: "bidproposal", version: "1.0.0", signed: false, from: "registry" });
   const onRefresh = vi.fn();
   const api = fakeApi({ registry, installFromRegistry });
   render(
@@ -838,7 +838,7 @@ void test("HomePage/产品库: an installable catalog lists packages with 未签
   expect(within(list).getByText("标书编写")).toBeInTheDocument();
   expect(within(list).getByText("未签名")).toBeInTheDocument();
   await user.click(within(list).getByRole("button", { name: "安装" }));
-  expect(installFromRegistry).toHaveBeenCalledWith("vxture.bid", "1.0.0");
+  expect(installFromRegistry).toHaveBeenCalledWith("bidproposal", "1.0.0");
   expect(await within(list).findByText("已安装")).toBeInTheDocument();
   expect(onRefresh).toHaveBeenCalled();
 });
@@ -960,7 +960,7 @@ void test("ProductCard: 更新版本 appears only when the store holds a newer v
   );
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "更新版本 v1.2.0" }));
-  expect(pinProductVersion).toHaveBeenCalledWith("vxture.bid", "1.2.0");
+  expect(pinProductVersion).toHaveBeenCalledWith("bidproposal", "1.2.0");
   await vi.waitFor(() => expect(onRefresh).toHaveBeenCalled());
   unmount();
 
@@ -1020,7 +1020,7 @@ void test("ProductCard: clicking the card body selects it for the sidebar; butto
   const user = userEvent.setup();
   const card = document.querySelector(".pcard") as HTMLElement;
   await user.click(card.querySelector(".pcard-desc")!);
-  expect(onSelectProduct).toHaveBeenLastCalledWith("vxture.bid");
+  expect(onSelectProduct).toHaveBeenLastCalledWith("bidproposal");
   await user.click(screen.getByRole("link", { name: "智能体介绍" }));
   expect(onSelectProduct).toHaveBeenCalledTimes(1);
 });
@@ -1037,7 +1037,7 @@ void test("ProductCard: a selected card is marked, and clicking it again reports
       onCreated={noop}
       onRefresh={noop}
       onError={noop}
-      selectedProductId="vxture.bid"
+      selectedProductId="bidproposal"
       onSelectProduct={onSelectProduct}
     />,
   );
@@ -1082,7 +1082,7 @@ void test("更新 button: carries a new tag only while some product has a newer 
   const button = header().getByRole("button", { name: /更新/ });
   expect(button.querySelector(".dot-new")?.textContent).toBe("new");
   await userEvent.setup().click(button);
-  await vi.waitFor(() => expect(fetchProduct).toHaveBeenCalledWith("vxture.bid"));
+  await vi.waitFor(() => expect(fetchProduct).toHaveBeenCalledWith("bidproposal"));
   unmount();
 
   render(
