@@ -5,7 +5,7 @@ contract: "0.1"
 
 product:
   id: bidproposal
-  name: 标书编写
+  name: 标书方案智能体          # = 平台产品目录 product_name（2026-09-05 owner：名字对齐平台）
   version: 1.0.0
   publisher: vxture
   runtime:
