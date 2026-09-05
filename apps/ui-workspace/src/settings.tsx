@@ -809,10 +809,12 @@ function DataDirRow({ system, api }: { system: SystemInfo | null; api: Api }) {
           </span>
         </p>
       )}
-      {!pending && last?.status === "moved" && last.to && (
-        <p className="set-note">
-          上次搬移已完成：数据现在在 <span className="mono">{last.to}</span>。
-        </p>
+      {/* 成功的回执**只在搬完的那一次启动**出现（justNow），并且不重复路径 ——
+          新位置就写在正上方那一行里。再往后这条就是历史，而历史不该占着设置页
+          （owner 2026-09-05）。失败不同：数据还在原处，那是要人处理的状态，
+          所以它一直显示到下一次动作为止。 */}
+      {!pending && last?.status === "moved" && last.justNow && (
+        <p className="set-note">数据已搬到上面这个新位置，旧目录里只剩缓存。</p>
       )}
 
       {/* 待搬状态下的两个动作跟着那条提醒走：它们说的是「这次搬移」，不是

@@ -432,6 +432,8 @@ export interface SystemInfo {
     to?: string;
     at?: string;
     reason?: string;
+    /** 这一次启动刚搬完的。回执只给这一次 —— 之后它只是历史。 */
+    justNow?: boolean;
   };
 }
 

@@ -354,7 +354,14 @@ const server = createLocalApi({
       return readLocation(locationFile).pending;
     },
     get lastMove() {
-      return readLocation(locationFile).lastMove ?? moved.outcome;
+      const stored = readLocation(locationFile).lastMove ?? moved.outcome;
+      // **回执要有寿命。** 「搬完了」只在真正搬了的那一次启动里算一条消息 ——
+      // 再往后它就只是历史，而历史已经写在「数据目录」那一行的路径里了（owner
+      // 2026-09-05：搬完之后设置页里一直挂着一行「上次搬移已完成」）。失败
+      // 不受这条限制：数据还在原处，那是个要人处理的状态，不是回执。
+      const justNow =
+        moved.movedNow && stored.status === "moved" && stored.at === moved.outcome.at;
+      return justNow ? { ...stored, justNow: true } : stored;
     },
   },
 });
