@@ -182,6 +182,8 @@ export interface LocalApiDeps {
       to?: string;
       at?: string;
       reason?: string;
+      /** 这一次启动刚搬完的 —— 只有这一轮进程会说 true。界面据此只在那一次给回执。 */
+      justNow?: boolean;
     };
     startedAt: string;
   };

@@ -896,6 +896,39 @@ void test("Settings/存储位置: 选目录这一步本身失败也照原样转�
   restore();
 });
 
+void test("Settings/存储位置: 搬完的回执只在那一次启动出现，且不重复路径", async () => {
+  // 搬完的那一次启动：守护进程标了 justNow —— 给一句回执，但路径不再写一遍，
+  // 它就在正上方那一行里。
+  const fresh = fakeApi({
+    system: vi.fn().mockResolvedValue(
+      systemInfo({
+        dataDir: "D:/New folder",
+        lastMove: { status: "moved", from: "C:/old", to: "D:/New folder", at: "t1", justNow: true },
+      }),
+    ),
+  });
+  const { unmount } = renderSection("general", fresh);
+  expect(await screen.findByText(/数据已搬到上面这个新位置/)).toBeInTheDocument();
+  // 那一行写的是新目录，回执里不再重复 —— 页面上 D:/New folder 只出现一次。
+  expect(screen.getAllByText("D:/New folder")).toHaveLength(1);
+  unmount();
+
+  // 再往后的每一次启动：同一条 lastMove 还在指针里，但它已经是历史 —— 不显示
+  // （owner 2026-09-05：搬完之后设置页里一直挂着一行「上次搬移已完成」）。
+  const later = fakeApi({
+    system: vi.fn().mockResolvedValue(
+      systemInfo({
+        dataDir: "D:/New folder",
+        lastMove: { status: "moved", from: "C:/old", to: "D:/New folder", at: "t1" },
+      }),
+    ),
+  });
+  renderSection("general", later);
+  expect(await screen.findByText("D:/New folder")).toBeInTheDocument();
+  expect(screen.queryByText(/数据已搬到上面这个新位置/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/上次搬移已完成/)).not.toBeInTheDocument();
+});
+
 void test("Settings/存储位置: 浏览器里不给更改入口 —— 系统目录框只有壳弹得出来", async () => {
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })) });
   renderSection("general", api);
