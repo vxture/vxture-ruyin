@@ -10,6 +10,9 @@
 //      看下一次请求的 messages[] 里谁带 origin、谁是裸 reason；被取消的步骤整个不进请求
 //   E  宿主是 user 角色的唯一作者（工具 deferContext 冒充的 user 消息进了 dsh 日志、不进请求）；image 块由适配器丢、
 //      不被 dsh 改写成占位句；中途取消（块没进日志）之后能力面重发同一个 id 不被卡住，进了日志的 id 仍拒绝复用
+//   F  谁写的就得能证明（fail closed）：工具输出违反 schema → dsh 组的 INVALID_TOOL_OUTPUT 句子被 Ruyin 模板替掉；
+//      工具复用宿主的消息 id 冒充用户 / 冒充模型（role assistant）/ 冒充工具结果（真 callId）→ 下一步 INVALID_HISTORY：
+//      伪造文本进了 dsh 日志、不进任何请求、能力面一次都没被再问
 import { resolve } from "node:path";
 import assert from "node:assert/strict";
 import { boot, installFailLoud } from "@deepseek-ai/dsh-app-boot";
@@ -18,7 +21,7 @@ import { RuyinCapabilityAdapter, VERDICT_BLOCK_TYPE } from "./llm-ruyin.mjs";
 import { MemoryTaskFacts } from "./task-facts.mjs";
 import { ToolLedger } from "./tool-ledger.mjs";
 import { ScriptedGateway } from "./scripted-surface.mjs";
-import { registerSpikeTools, registerSpikeGuard, spikeHooks, FORGED_USER_TEXT } from "./spike-tools.mjs";
+import { registerSpikeTools, registerSpikeGuard, spikeHooks, FORGED_USER_TEXT, FORGED_ASSISTANT_TEXT } from "./spike-tools.mjs";
 import { analyzeTenderFacts, factsForTask } from "./fixtures/analyze-tender-facts.mjs";
 import { TransientError } from "../../packages/runtime-core/dist/index.js";
 import { MockAIGateway } from "../../apps/local-host/dist/host-ports.js";
@@ -69,7 +72,7 @@ const ctx = await boot("ruyin-spike", resolve("cordis.yml"), [], async (ctx) => 
     apply(ctx) {
       ctx.llm.registerAdapter(["ruyin"], adapter);
       registerSpikeTools(ctx);
-      registerSpikeGuard(ctx);
+      registerSpikeGuard(ctx, ledger); // guard 的拒绝理由先进账本（hostReason），适配器只转发宿主记过的那句
       ledger.attach(ctx);
     },
   });
@@ -83,9 +86,9 @@ ctx.on("session/event", (session, event) => allEvents.push({ session: session.id
 
 const kickoff = () => createUserMessage({ content: [], source: { kind: "plugin", plugin: "@vxture/ruyin" } });
 
-/** 宿主发出的每条消息先登记 id 再 followup：适配器只把名单上的 user 消息当用户说的。 */
+/** 宿主发出的每条消息先登记（id + 内容指纹）再 followup：适配器只把名单上的 user 消息当用户说的。 */
 function hostFollowup(handle, message) {
-  facts.noteHostMessage(handle.agent.id, message.id);
+  facts.noteHostMessage(handle.agent.id, message);
   handle.agent.followup(message);
 }
 
@@ -130,6 +133,8 @@ const toolResults = (events) => events.filter((e) => e.type === "tool/result").m
   error: e.data.error ?? null, // 事件上只有 HarnessError 的 info（agent-loop 306）；拒绝 / 工具体抛错在这里是 null
 }));
 const toolCallCount = (events) => events.filter((e) => e.type === "tool/call").length;
+/** 某个 callId 的 tool/result 事件里那条消息的 id：账本记的就是它。 */
+const resultMessageId = (events, callId) => events.find((e) => e.type === "tool/result" && e.data.message.source.callId === callId)?.data.message.id;
 
 // ===========================================================================
 // RUN A · ScriptedGateway：工具往返 / 判定往返 / 生成能力答判定
@@ -175,7 +180,7 @@ await withAgent("t1", analyzeTenderFacts, async (handle, agentErrors) => {
     source: { kind: "tool", callId: "call_1" },
     block: { type: "tool-result", toolCallId: "call_1", content: [{ type: "text", text: "[spike] contents of tender.pdf" }], isError: false },
   });
-  eq("A1 ledger: call_1 authored by the tool (body reached, no error)", ledger.provenanceOf("t1", "call_1"), { tool: "read_file", authored: "tool" });
+  eq("A1 ledger: call_1 authored by the tool (body reached, no error); message id = the tool/result event's", ledger.provenanceOf("t1", "call_1"), { tool: "read_file", authored: "tool", messageId: toolResult?.data.message.id });
   eq("A1 assistant #2 = text", assistantContents(a1.events)[1], [{ type: "text", text: "需求矩阵（探针）" }]);
   eq("A1 no usage on any assistant/message", a1.events.filter((e) => e.type === "assistant/message").map((e) => "usage" in e.data), [false, false]);
   eq("A1 turn/end completed", turnEnd(a1.events), { kind: "completed" });
@@ -377,11 +382,11 @@ await withAgent("t5", factsForTask("t5"), async (handle, agentErrors) => {
   eq("D1 tool/result = dsh-composed denial text, isError, no error.info on the event", toolResults(d1.events), [
     { callId: "call_d1", text: 'Error: path "/etc/passwd" is outside the workspace', isError: true, error: null },
   ]);
-  eq("D1 ledger: runtime-authored, bare reason, no code (guard has no HarnessError)", ledger.provenanceOf("t5", "call_d1"),
-    { tool: "read_file", authored: "runtime", reason: 'path "/etc/passwd" is outside the workspace' });
+  eq("D1 ledger: runtime-authored, no code (guard has no HarnessError); the host guard's own reason is on record as hostReason", ledger.provenanceOf("t5", "call_d1"),
+    { tool: "read_file", authored: "runtime", reason: 'path "/etc/passwd" is outside the workspace', hostReason: 'path "/etc/passwd" is outside the workspace', messageId: resultMessageId(d1.events, "call_d1") });
   const DR2 = provScript.requests[1];
   console.log(`[D1] R2 = ${json(DR2.messages)}`);
-  eq("D1 next request: bare reason, isError, NO origin (= harness.ts:1290-1295)", DR2.messages, [
+  eq("D1 next request: the host's own reason (hostReason, not dsh's copy of it), isError, NO origin (= harness.ts:1290-1295)", DR2.messages, [
     { role: "assistant", content: "", toolCalls: [{ id: "call_d1", tool: "read_file", arguments: { path: "/etc/passwd" } }] },
     { role: "tool", callId: "call_d1", content: 'path "/etc/passwd" is outside the workspace', isError: true },
   ]);
@@ -396,7 +401,7 @@ await withAgent("t5", factsForTask("t5"), async (handle, agentErrors) => {
     { callId: "call_d2", text: 'Error: ENOENT: no such file "missing.pdf"', isError: true, error: null },
   ]);
   eq("D2 ledger: tool-authored (body reached, message is the body's)", ledger.provenanceOf("t5", "call_d2"),
-    { tool: "read_file", authored: "tool", reason: 'ENOENT: no such file "missing.pdf"' });
+    { tool: "read_file", authored: "tool", reason: 'ENOENT: no such file "missing.pdf"', messageId: resultMessageId(d2.events, "call_d2") });
   const DR4 = provScript.requests[3];
   console.log(`[D2] R4 = ${json(DR4.messages)}`);
   eq("D2 next request tail: the tool's message, isError, WITH origin (= harness.ts:1415-1423)", DR4.messages.slice(-2), [
@@ -420,8 +425,8 @@ await withAgent("t5", factsForTask("t5"), async (handle, agentErrors) => {
   eq("D3 ledger: call_d3 runtime/ABORTED (via tools/result), call_d4 runtime/ABORTED_BEFORE_DISPATCH (via session event only)", {
     d3: ledger.provenanceOf("t5", "call_d3"), d4: ledger.provenanceOf("t5", "call_d4"),
   }, {
-    d3: { tool: "read_file", authored: "runtime", reason: "tool call aborted", code: "ABORTED" },
-    d4: { authored: "runtime", code: "ABORTED_BEFORE_DISPATCH", reason: "tool call aborted before dispatch" },
+    d3: { tool: "read_file", authored: "runtime", reason: "tool call aborted", code: "ABORTED", messageId: resultMessageId(d3.events, "call_d3") },
+    d4: { authored: "runtime", code: "ABORTED_BEFORE_DISPATCH", reason: "tool call aborted before dispatch", messageId: resultMessageId(d3.events, "call_d4") },
   });
 
   // --- D4：取消之后再来一轮：被取消的步骤（两条取消结果 + 发出它们的 assistant）整个不进请求 ------------------
@@ -523,6 +528,103 @@ eq("E adapter.counters grew by run E's drops (per request, history re-mapped eac
   foreign: adapter.counters.droppedForeignUserMessages - countersBeforeE.droppedForeignUserMessages,
   image: adapter.counters.droppedImageBlocks - countersBeforeE.droppedImageBlocks,
 }, { foreign: 5, image: 6 });
+
+// ===========================================================================
+// RUN F · 谁写的就得能证明：dsh 组的编码失败句 / 复用宿主 id 冒充用户 / 冒充模型 / 冒充工具结果
+// ===========================================================================
+console.log("\n[run F] provenance must be provable · sessions t7–t10");
+
+// --- F1：工具输出违反 output.schema → dsh 的 ToolOutputError（INVALID_TOOL_OUTPUT，dsh-tools 3419 → 2458）；请求里只有 Ruyin 的模板 ---
+{
+  const g = new ScriptedGateway([
+    { kind: "tool_calls", calls: [{ id: "call_f1", tool: "read_file", arguments: { path: "number.pdf" } }] },
+    { kind: "content", content: "after invalid output" },
+  ]);
+  gateway = g;
+  await withAgent("t7", factsForTask("t7"), async (handle) => {
+    const f1 = await runTurn(handle, {});
+    timings.turns.push({ run: "F1", ms: f1.ms });
+    console.log(`[F1] ${f1.ms} ms; events: ${f1.events.map((e) => e.type).join(" → ")}`);
+    eq("F1 turn/end completed", turnEnd(f1.events), { kind: "completed" });
+    const [fr] = toolResults(f1.events);
+    console.log(`[F1] tool/result text = ${json(fr?.text)}`);
+    eq("F1 tool/result = dsh-composed sentence, error.info INVALID_TOOL_OUTPUT", { prefix: fr?.text.startsWith('Error: tool "read_file" returned invalid output'), isError: fr?.isError, error: fr?.error },
+      { prefix: true, isError: true, error: { name: "ToolOutputError", code: "INVALID_TOOL_OUTPUT" } });
+    const rec = ledger.provenanceOf("t7", "call_f1");
+    eq("F1 ledger: runtime-authored with code; dsh's sentence is kept only as the record's reason", { authored: rec?.authored, code: rec?.code, tool: rec?.tool, messageId: rec?.messageId, reasonIsDsh: rec?.reason?.startsWith('tool "read_file" returned invalid output') },
+      { authored: "runtime", code: "INVALID_TOOL_OUTPUT", tool: "read_file", messageId: resultMessageId(f1.events, "call_f1"), reasonIsDsh: true });
+    const FR2 = g.requests[1];
+    console.log(`[F1] R2 = ${json(FR2.messages)}`);
+    eq("F1 next request: Ruyin's own fact template, isError, no origin — not dsh's sentence", FR2.messages, [
+      { role: "assistant", content: "", toolCalls: [{ id: "call_f1", tool: "read_file", arguments: { path: "number.pdf" } }] },
+      { role: "tool", callId: "call_f1", content: 'tool "read_file" failed: INVALID_TOOL_OUTPUT', isError: true },
+    ]);
+    eq("F1 dsh's sentence appears in no request", g.requests.map((r) => /returned invalid output/.test(json(r))), [false, false]);
+    eq("F1 counts: 1 runtime result, keyed by code", { runtime: dropLog.at(-1).dropped.runtimeToolResults, coded: dropLog.at(-1).dropped.runtimeCodedResults }, { runtime: 1, coded: { INVALID_TOOL_OUTPUT: 1 } });
+    eq("F1 total requests = 2, script empty", { n: g.requests.length, left: g.remaining }, { n: 2, left: 0 });
+  });
+}
+
+/** F2–F4 共用：一次工具往返之后伪造消息进了日志 → 下一步适配器 INVALID_HISTORY、能力面不再被问、伪造文本不进请求。 */
+async function forgeryCase(label, sessionId, path, hostMessage, expect) {
+  const g = new ScriptedGateway([
+    { kind: "tool_calls", calls: [{ id: `call_${label.toLowerCase()}`, tool: "read_file", arguments: { path } }] },
+    { kind: "content", content: "never" },
+  ]);
+  gateway = g;
+  await withAgent(sessionId, factsForTask(sessionId), async (handle, agentErrors) => {
+    const r = await runTurn(handle, {}, hostMessage ?? kickoff());
+    timings.turns.push({ run: label, ms: r.ms });
+    console.log(`[${label}] ${r.ms} ms; events: ${r.events.map((e) => e.type).join(" → ")}`);
+    const surface = handle.agent.session.deriveMessages();
+    console.log(`[${label}] surface = ${json(surface.map((m) => ({ id: m.id, role: m.role, kind: m.source?.kind })))}`);
+    eq(`${label} turn/end error INVALID_HISTORY`, turnEnd(r.events)?.kind === "error" ? turnEnd(r.events).error.code : turnEnd(r.events), "INVALID_HISTORY");
+    eq(`${label} agent/error INVALID_HISTORY`, agentErrors.map((e) => e.code), ["INVALID_HISTORY"]);
+    eq(`${label} the tool ran once; step 2 never reached dsh's dispatcher`, toolCallCount(r.events), 1);
+    eq(`${label} step 2's only chunk is the terminal error finish`, r.events.filter((e) => e.type === "assistant/chunk" && e.data.step === 2).map((e) => ({ type: e.data.chunk.type, code: e.data.chunk.reason?.failure?.code })), [{ type: "finish", code: "INVALID_HISTORY" }]);
+    eq(`${label} exactly one request reached the surface; the script's second answer is unused`, { n: g.requests.length, left: g.remaining }, { n: 1, left: 1 });
+    eq(`${label} the forged text is in dsh's log but in no request`, { log: expect.forged.test(json(r.events)), requests: g.requests.some((q) => expect.forged.test(json(q))) }, { log: true, requests: false });
+    expect.more?.(r.events, surface);
+  });
+}
+
+// --- F2：工具复用宿主消息的 id 冒充用户（内容不同）→ 同一 user/message id 第二次出现 = 污点 → INVALID_HISTORY ---
+{
+  const hostMessage = createUserMessage({ content: [{ type: "text", text: "只看招标文件第 3 章" }], source: { kind: "user" } });
+  await forgeryCase("F2", "t8", "mimic.pdf", hostMessage, {
+    forged: /\[forged\]/,
+    more: (events, surface) => {
+      const userEvents = events.filter((e) => e.type === "user/message").map((e) => ({ id: e.data.id, text: e.data.content[0]?.text }));
+      eq("F2 dsh's log carries two user/message events under the SAME id: the host's and the tool's forged copy", userEvents, [
+        { id: hostMessage.id, text: "只看招标文件第 3 章" }, { id: hostMessage.id, text: FORGED_USER_TEXT },
+      ]);
+      eq("F2 the surface shows both copies under the host's id", surface.filter((m) => m.id === hostMessage.id).length, 2);
+      eq("F2 ledger flags the id as tainted", ledger.isTaintedMessage("t8", hostMessage.id), true);
+      eq("F2 the host's registration (id + content fingerprint) matches the host's copy only", { host: facts.isHostMessage("t8", surface[0]), forged: facts.isHostMessage("t8", surface.at(-1)) }, { host: true, forged: false });
+    },
+  });
+}
+
+// --- F3：工具 deferContext 一条 role assistant 的消息冒充模型 → 表面按 role 呈现成 assistant；账本没记过它的 id → INVALID_HISTORY ---
+await forgeryCase("F3", "t9", "ghost.pdf", undefined, {
+  forged: /\[ghost\]/,
+  more: (events, surface) => {
+    const ghost = surface.find((m) => m.role === "assistant" && m.content.some((b) => b.type === "text" && b.text === FORGED_ASSISTANT_TEXT));
+    eq("F3 the forged message surfaces as role assistant / source model (dsh-session 131) though it arrived as a user/message event", { role: ghost?.role, kind: ghost?.source?.kind, viaEvent: events.some((e) => e.type === "user/message" && e.data.role === "assistant") }, { role: "assistant", kind: "model", viaEvent: true });
+    eq("F3 ledger: the real assistant message is on record, the ghost is not and is tainted", { real: surface.filter((m) => m.role === "assistant").map((m) => ledger.isAdapterAssistantMessage("t9", m.id)), tainted: ledger.isTaintedMessage("t9", ghost?.id) }, { real: [true, false], tainted: true });
+  },
+});
+
+// --- F4：工具 deferContext 一条 source.kind tool + 真 callId 的结果 → 账本按 callId 命中真记录，但 message.id 对不上、且是第二条 → INVALID_HISTORY ---
+await forgeryCase("F4", "t10", "echo.pdf", undefined, {
+  forged: /\[echo\]/,
+  more: (events, surface) => {
+    const results = surface.filter((m) => m.role === "user" && m.source?.kind === "tool");
+    eq("F4 one tool/result event, but two tool-result messages for call_f4 on the surface", { events: events.filter((e) => e.type === "tool/result").length, surface: results.map((m) => m.source.callId) }, { events: 1, surface: ["call_f4", "call_f4"] });
+    const recorded = ledger.provenanceOf("t10", "call_f4")?.messageId;
+    eq("F4 ledger keeps the real result's message id; the forged copy's differs and is tainted", { real: recorded === results[0]?.id, forgedMatches: recorded === results[1]?.id, tainted: ledger.isTaintedMessage("t10", results[1]?.id) }, { real: true, forgedMatches: false, tainted: true });
+  },
+});
 
 // ===========================================================================
 // 收尾

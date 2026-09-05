@@ -226,3 +226,48 @@ day-1 读的 `eventsSnapshot` 是私有缓存字段）。
   喂回 attach 的 session/event 分支）；(b) 工具还能伪造 **tool 结果**：deferContext 一条 source.kind 'tool' + 真实 callId 的消息，账本按 callId
   查会命中真记录——要堵得让账本记下真结果的 message.id（session/event tool/result 的 message.id）并按 id 核对，本轮未做；
   (c) `droppedForeignUserMessages` / `droppedImageBlocks` 是每请求重映射的累计数，不是"发生过几次"。
+
+## 2026-09-06 · 修正（第三轮）——ADR-011 三条阻断 + 六条非阻断（`node probe.mjs` 全绿 147 条断言，`node --test llm-ruyin.test.mjs` 56/56）
+
+- **B1 · 有 code 的运行时结果照转了 dsh 组的句子**。ToolOutputError `tool "X" returned invalid output: …`（dsh-tools 2458）、projectionError
+  （2464-2466）、ToolNotFoundError（2449）的 message 全是 dsh 写的，原先 mapMessages 对 authored:'runtime' 非取消的结果把 provenance.reason 原样转发。
+  现在：记录带 code → content 是 Ruyin 自己的模板 `tool "<name>" failed: <CODE>`（记录没有工具名时 `tool call "<callId>" failed: <CODE>`）、isError、
+  无 origin，计 `dropped.runtimeCodedResults[code]`（runtimeToolResults 仍总计）；dsh 的句子只留在账本记录的 reason 里。无 code 的运行时结果
+  （guard / pre-execute 拒绝 3128-3140、流水线抛错 3150-3155、post-execute block）：宿主作者身份必须显式——`registerSpikeGuard(ctx, ledger)` 拒绝前先
+  `ledger.noteHostDenial(sessionId, callId, reason)`，tools/result 时账本只把**与 dsh 记的 error.message 一字不差**的宿主理由附成 `hostReason`；
+  mapMessages 只转发 hostReason，无 code 又无 hostReason → INVALID_HISTORY。llm-ruyin 里去 `Error: ` 前缀的兜底删了（账本的 stripErrorPrefix 只用于
+  跳过调用的记录 reason，不再转发）。探针 F1：read_file "number.pdf" 返回 42 违反 output.schema → dsh 日志
+  `Error: tool "read_file" returned invalid output: "value" must be a string`（error.info INVALID_TOOL_OUTPUT），R2 = `tool "read_file" failed: INVALID_TOOL_OUTPUT`，
+  `/returned invalid output/` 在请求里为 false；D1 的拒绝现在走 hostReason（文字相同，出处变了）。
+- **B2 · 宿主名单只按 id**。工具能 `exec.agent.session.deriveMessages()` 读到宿主的 id，再 deferContext 一条复用该 id 的伪造 user 消息（dsh 追加时不查唯一
+  也不查 role：agent-loop 185 → 559，dsh-session 1403-1424）。现在 `noteHostMessage(sessionId, message)` 记 id + 内容指纹（键排序后的 JSON，
+  `contentFingerprint`），`isHostMessage(sessionId, message)` 两者都对得上才算；账本的 session/event 监听器把 user/message 事件里第二次出现的 id、
+  role 不是 user 的、source.kind 是 tool 的标成**污点**（`isTaintedMessage`）；mapMessages 对污点 id、以及表面上同一 id 出现两次 → INVALID_HISTORY
+  （整步失败，不是丢一条：宿主那条也一起作废）。探针 F2：mimic.pdf 复用宿主 id → dsh 日志两条同 id 的 user/message、表面两条，下一步 INVALID_HISTORY、
+  能力面只被问过一次、`[forged]` 不在请求里。E1（自编 id 的 poser.pdf）行为不变：外来、丢并计数。
+- **B3 · assistant/model 消息不查出处**。工具能 deferContext 一条 role 'assistant' 的消息（dsh-tools 3046-3048），表面按 data.role 呈现成 assistant
+  （dsh-session 131）。现在账本从 assistant/message 事件（含 interrupted 的，agent-loop 639-654 / 680-688）记 message.id（`isAdapterAssistantMessage`）；
+  mapMessages 对不在名单的 assistant 消息 → **INVALID_HISTORY**——选 fail closed 而不是丢并计数：伪造的模型发言是持久日志的一部分，这段历史不能再拿去问
+  能力面；代价是该会话从此不能续，宿主得开新会话。探针 F3：ghost.pdf → 表面出现 role assistant / kind model 的伪造消息（进来时是 user/message 事件），
+  下一步 INVALID_HISTORY、`[ghost]` 不在请求里。
+- **N1 · 伪造工具结果（真 callId，第二轮遗留 (b)）**。账本从 tool/result 事件记 message.id（同一 callId 只记第一次）；mapMessages 要求 callId **和** message.id
+  都对上，同一 callId 第二条结果 → INVALID_HISTORY；user/message 事件里 source.kind 'tool' 的也标污点。探针 F4：echo.pdf → 一个 tool/result 事件、表面两条
+  call_f4 的结果，下一步 INVALID_HISTORY、`[echo]` 不在请求里。遗留 (b) 关闭。
+- **N2 · tool-ledger.mjs:30 源码里是一个真 NUL 字节**（git 当二进制文件，diff 只显示 Bin）。现在写成两字符转义 `"\0"`，运行时分隔符不变（U+0000）。
+  NOTES 之前没有写过这件事——第二轮 `diff --stat` 里的 `Bin 7779 -> 10389 bytes` 就是它；本轮 HEAD 的 blob 仍是二进制，所以 `--stat` 还显示 Bin，提交后转为文本。
+- **N3 · 取消结果重复出现、发出方已抹掉 → 裸 TypeError**。mapMessages 记已映射过的 callId，重复 → INVALID_HISTORY；发出方查找加 `issuer !== undefined` 护栏。
+- **N4 · user/tool 分支形状**。要求 callId 是非空字符串、`content.length === 1`、唯一块是 tool-result、`block.toolCallId === source.callId`，否则 INVALID_HISTORY
+  （createToolResultMessage 只造这一种形状，agent-loop 296-300 / dsh-llm 72-80）。
+- **决定（N5）**：tool-call id 在一个会话里**跨步骤唯一，包括表面从未见过的**（中途取消、块没进日志的那种）；真实提供方用随机 id，能力面照此办理。适配器只
+  强制它能证明的：进过日志的 id 永久拒绝复用（D3 型取消也算，compaction 后表面消失也算），没进日志的 id 对账后放开（E2 型）——放开不是许可，重发同一个 id
+  是能力面违反本决定，只是这里查不出来、也不该为此杀掉会话。无行为变更；同样写进 llm-ruyin.mjs 头注释。
+- **N6**：ruyin-verdict 的类型层增强不动（第一轮已记）。
+- 接口变化：`mapMessages` 第三参 `{ provenanceOf, isHostMessage(message), isAdapterAssistantMessage(id), isTaintedMessage(id) }`，缺哪项按 fail closed
+  （前三项缺席 = 该类消息全部不可信；缺 isTaintedMessage = 没有额外黑名单）；账本新增 `noteHostDenial / isAdapterAssistantMessage / assistantMessageIds /
+  isTaintedMessage / taintedMessageIds`，记录多 `messageId / hostReason`；适配器构造检查五个账本方法；`registerSpikeGuard(ctx, ledger)`；
+  探针 `hostFollowup` 登记整条消息。测试桩：表面消息 id 必须唯一（h* / m* / r_<callId>），hostOf 自动配 messageId。
+- 度量（本次）：boot 194 ms；RSS 结束 92 MB；F1 7 ms、F2 7 ms、F3 3 ms、F4 6 ms；全局 session/event 17 个会话 405 个事件。
+- 遗留：(a) 不变且加重——账本是进程内存，重启后恢复的会话不只工具结果，连 assistant 名单、message id 都没有 → INVALID_HISTORY，续跑要持久化账本或重放事件；
+  (d) 拿到 `exec.agent` 的工具能直接 `exec.agent.session.append(...)` 伪造 assistant/message / tool/result **事件**——那是另一个威胁面（它能写日志本身），
+  按事件记名单的账本挡不住，要靠 dsh 侧对工具收窄 agent 句柄；(e) surfaceOp replace 一条 tool/result（durable-result 类插件，dsh-session 221-225）会让
+  message.id 对不上 → INVALID_HISTORY，本组合没有这种插件，接入时要让账本听 replace。
