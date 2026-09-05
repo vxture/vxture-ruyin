@@ -154,6 +154,12 @@ confidential 凭据、替用户换票、调 Atlas 与 Runos 的，是产品自�
 | 第三方密钥 | **不经过 Ruyin，也不经过能力面的代码**：注册进 Runos 的凭证保险库，由 Runos 在出站调用时注入。产品侧只声明 `credential_requirements` | ADR-020 §6-2 |
 | 脚本 | 带 `scripts/` 的技能：本地不跑（TD-005）；不带业务数据的脚本可声明依赖 Runos Executor 在云端沙箱里跑 —— **登记未启用** | TD-005；ADR-020 §6-3 |
 
+**平台侧前提（2026-09-05 读平台代码核实）**：平台 token-exchange 的 `resolveOboContext` 只接受
+`aud` 等于 caller 自己 client id 的 subject_token；Ruyin 登录得到的用户 token `aud='ruyin'`，
+产品云端拿它去换票会被 `400 invalid_request` 拒掉。这是「桌面客户端 + 产品云端」形态第一次
+撞上单受众纪律，解法（Ruyin 按产品申请受众 RFC 8707 `resource`，或平台侧受托登记）与 bid
+的登记一起提在 vxture-platform/vxture-platform#198。**不定，任何产品的云端能力面在生产上都通不了。**
+
 **第一个消费者。** Runos 至今按「baseline-only until first consumer」运行（Runos
 ADR-014）。owner 2026-09-05 定：**bid 产品的云端能力面是 Runos 的第一个消费者**。
 也就是说 bid 的云端要先于任何别的产品把上表跑通 —— 它同时是本指南这一节的活体样本。

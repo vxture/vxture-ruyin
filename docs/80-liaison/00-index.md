@@ -8,3 +8,4 @@
 | `20-2607241440-ruyin-dl-vhost-request.md` | L2 下载主机选址 + `dl.vxture.com` vhost | open | W4 |
 | `30-2607241450-ruyin-native-client-integration.md` | L3 原生客户端三件（PKCE / entitlement / AI Gateway） | (a) met · (b) partial · (c) withdrawn（ADR-009） | (b) 剩余 → 产品自动拉取 |
 | `40-2608301530-ruyin-l3-client-registration-blockers.md` | L3 补充：回调登记 / ruyin-beta / 权益基址（附实测） | (1)(2) met · (3) open | C2 公网基址 |
+| vxture-platform/vxture-platform#198（issue，按 §10 开在平台仓） | L4 bid 云端能力面接入：OBO subject_token 受众（现规则必拒）+ bid 按暂用名登记 | open | 生产上 bid 三个鉴权端点 |
