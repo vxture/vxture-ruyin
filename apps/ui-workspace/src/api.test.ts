@@ -252,6 +252,35 @@ const WRAPPER_CASES: WrapperCase[] = [
   },
   { name: "refreshSkills", call: (api) => api.refreshSkills(), method: "POST", path: "/skills/refresh" },
   { name: "tools", call: (api) => api.tools(), method: "GET", path: "/tools" },
+  // 获取通道（ADR-018 §7.2）：请求体里**只有 id 与可选的 from** —— 地址不在界面手上，
+  // 它从守护进程刚读出的那份随包清单里来。
+  { name: "components", call: (api) => api.components(), method: "GET", path: "/components" },
+  {
+    name: "acquireComponent(https)",
+    call: (api) => api.acquireComponent("browser.chromium-headless-shell"),
+    method: "POST",
+    path: "/components/browser.chromium-headless-shell/acquire",
+    body: {},
+  },
+  {
+    name: "acquireComponent(本地文件)",
+    call: (api) => api.acquireComponent("browser.chromium-headless-shell", "E:/offline/x.zip"),
+    method: "POST",
+    path: "/components/browser.chromium-headless-shell/acquire",
+    body: { from: "E:/offline/x.zip" },
+  },
+  {
+    name: "cancelComponent",
+    call: (api) => api.cancelComponent("browser.chromium-headless-shell"),
+    method: "POST",
+    path: "/components/browser.chromium-headless-shell/cancel",
+  },
+  {
+    name: "removeComponent",
+    call: (api) => api.removeComponent("browser.chromium-headless-shell"),
+    method: "DELETE",
+    path: "/components/browser.chromium-headless-shell",
+  },
   { name: "deactivateConnector", call: (api) => api.deactivateConnector("aas-ee.open-websearch"), method: "POST", path: "/connectors/aas-ee.open-websearch/deactivate" },
   { name: "fetchProduct", call: (api) => api.fetchProduct("bidproposal"), method: "POST", path: "/products/bidproposal/fetch" },
   { name: "registry", call: (api) => api.registry(), method: "GET", path: "/registry" },

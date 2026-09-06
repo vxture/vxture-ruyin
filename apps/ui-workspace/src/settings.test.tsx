@@ -1233,3 +1233,202 @@ test("能力平台 / 连接器：启动与停用失败时，原因照原样转�
   await userEvent.click(within(list).getByRole("button", { name: "停用" }));
   expect(await screen.findByText("进程没停下来")).toBeTruthy();
 });
+
+/* ---- 能力平台 / 获取通道（ADR-018 §7.2，TD-042）---- */
+
+/** 一件未获取的载荷：体积 / 许可证 / 来源主机都在，点之前就看得见。 */
+const shellComponent = {
+  id: "browser.chromium-headless-shell",
+  state: "not-acquired" as const,
+  downloadBytes: 120_200_717,
+  diskBytes: 283_200_000,
+  license: "BSD-3-Clause",
+  origin: "cdn.playwright.dev",
+};
+
+function acquisitionApi(over: Record<string, unknown> = {}) {
+  return skillsApi({
+    tools: vi.fn().mockResolvedValue({
+      items: [
+        {
+          id: "microsoft.playwright-mcp",
+          kind: "mcp-server",
+          source: "microsoft.playwright-mcp",
+          status: "needs-acquisition",
+          launchable: true,
+          license: "Apache-2.0",
+          tier: "default",
+          detail: "未获取：需下载 114.6 MB（占盘 270.1 MB）—— 在「能力平台」里点「获取」，或从本地文件导入",
+          tools: ["browser_navigate", "browser_click"],
+          component: shellComponent,
+        },
+        {
+          id: "aas-ee.open-websearch",
+          kind: "mcp-server",
+          source: "aas-ee.open-websearch",
+          status: "available",
+          launchable: true,
+          detail: "运行中（node）",
+          tools: ["search"],
+        },
+      ],
+    }),
+    acquireComponent: vi.fn().mockResolvedValue({}),
+    cancelComponent: vi.fn().mockResolvedValue({ cancelled: true }),
+    pickFolder: vi.fn().mockResolvedValue({ path: "E:/offline-tools" }),
+    ...over,
+  });
+}
+
+test("能力平台：未获取的行有自己的徽标，体积 / 许可证 / 来源主机都在按钮左边", async () => {
+  renderSection("skills", acquisitionApi());
+  const tools = await screen.findByRole("list", { name: "工具" });
+  const row = within(tools).getAllByRole("listitem")[0]!;
+  expect(within(row).getByText("未获取")).toBeTruthy();
+  // 点之前必须看得见要下多少、什么许可证、从哪个主机来。
+  expect(within(row).getByText(/需下载 114\.6 MB（占盘 270\.1 MB）/)).toBeTruthy();
+  expect(within(row).getByText(/BSD-3-Clause/)).toBeTruthy();
+  expect(within(row).getByText(/来自 cdn\.playwright\.dev/)).toBeTruthy();
+  // 停着 / 还没获取的行也列工具名 —— 用户在下载之前就看得见会多出哪些工具。
+  expect(within(row).getByText("工具：browser_navigate、browser_click")).toBeTruthy();
+  // 顶上那句常驻事实数的是「能不能起」，不是清单上有几条。
+  expect(screen.getByText(/预置 1 个，随安装包而来、不下载任何字节；另有 1 个需要获取/)).toBeTruthy();
+});
+
+test("能力平台：点「获取」只带 id —— 地址不在界面手上", async () => {
+  const api = acquisitionApi();
+  renderSection("skills", api);
+  const tools = await screen.findByRole("list", { name: "工具" });
+  await userEvent.click(within(tools).getByRole("button", { name: "获取" }));
+  expect(api.acquireComponent).toHaveBeenCalledWith("browser.chromium-headless-shell", undefined);
+});
+
+test("能力平台：「从本地文件导入」走系统目录框（气隙机器那条路）", async () => {
+  const api = acquisitionApi();
+  renderSection("skills", api);
+  const tools = await screen.findByRole("list", { name: "工具" });
+  await userEvent.click(within(tools).getByRole("button", { name: "从本地文件导入" }));
+  expect(api.pickFolder).toHaveBeenCalled();
+  expect(api.acquireComponent).toHaveBeenCalledWith("browser.chromium-headless-shell", "E:/offline-tools");
+});
+
+test("能力平台：用户在目录框里取消，就什么都不做", async () => {
+  const api = acquisitionApi({ pickFolder: vi.fn().mockResolvedValue({ cancelled: true }) });
+  renderSection("skills", api);
+  const tools = await screen.findByRole("list", { name: "工具" });
+  await userEvent.click(within(tools).getByRole("button", { name: "从本地文件导入" }));
+  expect(api.acquireComponent).not.toHaveBeenCalled();
+});
+
+test("能力平台：获取中显示进度与「取消」，不显示「获取」", async () => {
+  const api = acquisitionApi({
+    tools: vi.fn().mockResolvedValue({
+      items: [
+        {
+          id: "microsoft.playwright-mcp",
+          kind: "mcp-server",
+          source: "microsoft.playwright-mcp",
+          status: "acquiring",
+          launchable: true,
+          component: { ...shellComponent, state: "acquiring", receivedBytes: 45_298_483, totalBytes: 120_200_717 },
+        },
+      ],
+    }),
+  });
+  renderSection("skills", api);
+  const tools = await screen.findByRole("list", { name: "工具" });
+  const row = within(tools).getAllByRole("listitem")[0]!;
+  expect(within(row).getByText("43.2 MB / 114.6 MB")).toBeTruthy();
+  expect(within(row).queryByRole("button", { name: "获取" })).toBeNull();
+  await userEvent.click(within(row).getByRole("button", { name: "取消" }));
+  expect(api.cancelComponent).toHaveBeenCalledWith("browser.chromium-headless-shell");
+});
+
+test.each([
+  ["unreachable", /网络到不了/],
+  // 「上游已经没有这一版了」与「网络到不了」**必须是两句话**：前者重试一百次
+  // 还是 404，把它说成后者，用户会一直重试一件永远不会成的事。
+  ["gone", /重试没有用/],
+  // 回执在、文件被杀毒隔离掉了：这一种要说的是「先移除」，不是「再点一次」。
+  ["payload-missing", /文件不在了/],
+  ["mismatch", /与清单里那条摘要不符，已丢弃/],
+  ["no-space", /磁盘不够/],
+  ["license-missing", /缺许可证文件，已回滚/],
+  ["refused-origin", /来源不在允许的名单里/],
+  ["cancelled", /已取消/],
+] as const)("能力平台：获取失败各说各的 —— %s 不折叠成一句「失败了」", async (state, said) => {
+  const api = acquisitionApi({
+    tools: vi.fn().mockResolvedValue({
+      items: [
+        {
+          id: "microsoft.playwright-mcp",
+          kind: "mcp-server",
+          source: "microsoft.playwright-mcp",
+          status: "needs-acquisition",
+          launchable: true,
+          component: { ...shellComponent, state, reason: "守护进程原样转达的那一句" },
+        },
+      ],
+    }),
+  });
+  renderSection("skills", api);
+  const tools = await screen.findByRole("list", { name: "工具" });
+  const row = within(tools).getAllByRole("listitem")[0]!;
+  expect(within(row).getByText(said)).toBeTruthy();
+  // 原因照原样转达，不改写成「请稍后再试」。
+  expect(within(row).getByText(/守护进程原样转达的那一句/)).toBeTruthy();
+  // 失败之后按钮还在：这是一个用户点一下就能再试的事实。
+  expect(within(row).getByRole("button", { name: "获取" })).toBeTruthy();
+});
+
+test("能力平台：获取失败时把守护进程的原话摆出来", async () => {
+  const api = acquisitionApi({
+    acquireComponent: vi.fn().mockRejectedValue(new Error("sha256 abc 与清单的 def 不符 —— 字节已丢弃")),
+  });
+  renderSection("skills", api);
+  const tools = await screen.findByRole("list", { name: "工具" });
+  await userEvent.click(within(tools).getByRole("button", { name: "获取" }));
+  expect(await screen.findByText(/字节已丢弃/)).toBeTruthy();
+});
+
+test("能力平台：探不到工具名时写一句原因，不写空数组", async () => {
+  const api = acquisitionApi({
+    tools: vi.fn().mockResolvedValue({
+      items: [
+        {
+          id: "haris-musa.excel-mcp-server",
+          kind: "mcp-server",
+          source: "haris-musa.excel-mcp-server",
+          status: "unavailable",
+          launchable: true,
+          toolsUnprobed: "本次构建没有 vendored 它（runtime = uvx）",
+        },
+      ],
+    }),
+  });
+  renderSection("skills", api);
+  const tools = await screen.findByRole("list", { name: "工具" });
+  expect(within(tools).getByText(/工具名未探到：本次构建没有 vendored 它/)).toBeTruthy();
+});
+
+test("能力平台：取消失败时也把原话摆出来（reload 之后再放，否则会被抹掉）", async () => {
+  const api = acquisitionApi({
+    cancelComponent: vi.fn().mockRejectedValue(new Error("已经落地了，取消不了")),
+    tools: vi.fn().mockResolvedValue({
+      items: [
+        {
+          id: "microsoft.playwright-mcp",
+          kind: "mcp-server",
+          source: "microsoft.playwright-mcp",
+          status: "acquiring",
+          launchable: true,
+          component: { ...shellComponent, state: "acquiring", receivedBytes: 1, totalBytes: 2 },
+        },
+      ],
+    }),
+  });
+  renderSection("skills", api);
+  const tools = await screen.findByRole("list", { name: "工具" });
+  await userEvent.click(within(tools).getByRole("button", { name: "取消" }));
+  expect(await screen.findByText("已经落地了，取消不了")).toBeTruthy();
+});

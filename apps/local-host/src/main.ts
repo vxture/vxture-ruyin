@@ -44,6 +44,7 @@ import { CapabilityClient } from "./capability-client.js";
 import { SkillRegistry } from "./skill-registry.js";
 import { refreshDistributedSkills } from "./skill-distribution.js";
 import { ToolRegistryView } from "./tool-registry.js";
+import { ComponentStore, readComponentSpecs } from "./component-store.js";
 import { BundledToolServers } from "./tool-servers.js";
 import { fetchContract } from "./contract-fetch.js";
 import { EventBus } from "./events.js";
@@ -195,9 +196,28 @@ try {
 const localFs = new LocalFsConnector();
 // 内核拿着这同一份表；宿主注册表在运行时往里放进程外连接器（ADR-005 接缝 ④）。
 const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
+/**
+ * 获取通道（ADR-018 §7.2）：随包不带、要用户点一次才落到本机的载荷。组件表跟着
+ * `resources/tools/index.json` 进安装包，摘要写在里面、不经网络。
+ *
+ * **启动路径上不下载任何东西** —— 这里只读清单、只算状态；真的取字节只发生在
+ * 用户点了「获取」之后（`POST /components/:id/acquire`）。check-update-policy.mjs
+ * 钉住这一条：这个文件里不许出现 `acquire`。
+ */
+const componentManifest = readComponentSpecs(resolve(bundledToolsDir, "index.json"), (line) =>
+  console.error(line),
+);
+const componentStore = new ComponentStore({
+  dataDir,
+  components: () => componentManifest.components,
+  allowedOrigins: () => componentManifest.allowedOrigins,
+  // 只说什么变了，不带数值：界面收到再去 GET /components。
+  onChanged: () => events.publish({ kind: "component" }),
+});
 const bundledTools = new BundledToolServers({
   toolsDir: bundledToolsDir,
   dataDir,
+  components: componentStore,
   log: (line) => console.error(line),
 });
 const connectorRegistry = new ConnectorRegistry(dataDir, connectors, {
@@ -326,7 +346,26 @@ const server = createLocalApi({
     hasSkills: () => true,
     connectors: () => connectorRegistry.list(),
     bundledServers: () => bundledTools.list(),
+    // 起不了时说清是哪一种起不了：「未获取」与「未随包」「需要 uv」是三件事。
+    planFor: (id) => bundledTools.plan(id),
+    componentStatus: (id) => {
+      const s = componentStore.status(id);
+      return s
+        ? {
+            id: s.id,
+            state: s.state,
+            downloadBytes: s.downloadBytes,
+            diskBytes: s.diskBytes,
+            license: s.license,
+            origin: s.origin,
+            ...(s.receivedBytes === undefined ? {} : { receivedBytes: s.receivedBytes }),
+            ...(s.totalBytes === undefined ? {} : { totalBytes: s.totalBytes }),
+            ...(s.reason ? { reason: s.reason } : {}),
+          }
+        : undefined;
+    },
   }),
+  components: componentStore,
   ...(capabilityBase ? { refreshDistributedSkills: refreshAllDistributed } : {}),
   uiDir,
   platform,
@@ -504,6 +543,30 @@ async function toolsSelfCheck(): Promise<void> {
   console.log(`[ruyin] tools self-check: ok (${candidate.id}, ${probe.tools.length} tool(s))`);
 }
 
+/**
+ * uvx 形态也真起一次（TD-042 点名缺的那条）。
+ *
+ * 与 node 形态是两条完全不同的链：随包的 uv.exe 要在**这台机器上**跑起来、
+ * 预取的 CPython 要能被它认出来、缓存要真的够解析出那个包 —— 少一样都只在
+ * 装机之后才现形。构建时 `seed-uv-cache.mjs` 已经在一个空的 UV_TOOL_DIR 里
+ * 断网起过一次，但那是**构建机**；这一跑证明的是 electron-builder 把这棵树
+ * 拷进包之后它还成立。
+ */
+async function uvxSelfCheck(): Promise<void> {
+  const candidate = bundledTools
+    .launchable()
+    .find((s) => s.launch?.runtime === "uvx" && !(s.launch.requiresEnv?.length) && !s.launch.requiresBin);
+  if (!candidate) {
+    console.log("[ruyin] uvx self-check: no seeded uvx server to try");
+    return;
+  }
+  const plan = bundledTools.plan(candidate.id);
+  if (!plan.ok) throw new Error(`${candidate.id}: ${plan.reason}`);
+  const probe = await connectorRegistry.probe({ id: candidate.id, command: plan.command, args: plan.args, env: plan.env });
+  if (!probe.ok) throw new Error(`${candidate.id}: ${probe.detail ?? "did not come up"}`);
+  console.log(`[ruyin] uvx self-check: ok (${candidate.id}, ${probe.tools.length} tool(s))`);
+}
+
 // 装好的进程外连接器先起来再开门：起不来的照样登记（健康为 false），只记日志。
 await connectorRegistry.load();
 
@@ -566,13 +629,18 @@ server.listen(port, "127.0.0.1", () => {
   console.log(`[ruyin] listening on http://127.0.0.1:${port}`);
   console.log(`[ruyin] session token: ${token}`);
   if (process.env["RUYIN_SMOKE"] === "1") {
-    void pdfSelfCheck().catch((cause) => {
-      console.error("[ruyin] pdf self-check failed:", cause);
-      process.exit(1);
-    });
-    void toolsSelfCheck().catch((cause) => {
-      console.error("[ruyin] tools self-check failed:", cause);
-      process.exit(1);
-    });
+    // **顺序有意义，不是风格。** 壳等的是 PDF 那条自检的标记，等到就宣布通过并退出
+    // （ADR-017）。所以 PDF 必须排在最后：并发跑的话，慢的那条还没打印，进程就没了 ——
+    // CI 上就是这么丢掉 uvx 自检那一行的（uv 要现搭一个临时环境，比另外两条都慢）。
+    void (async () => {
+      try {
+        await toolsSelfCheck();
+        await uvxSelfCheck();
+        await pdfSelfCheck();
+      } catch (cause) {
+        console.error("[ruyin] smoke self-check failed:", cause);
+        process.exit(1);
+      }
+    })();
   }
 });

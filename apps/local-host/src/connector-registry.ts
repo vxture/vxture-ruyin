@@ -18,6 +18,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ConnectorHealth, ConnectorPort, ContextSource } from "@vxture/ruyin-core";
 import { McpConnector, type ConnectorToolOutcome } from "./connector-mcp.js";
@@ -86,6 +87,7 @@ interface Manifest {
 
 export class ConnectorRegistry implements ConnectorToolSource {
   private readonly manifestPath: string;
+  private readonly workRoot: string;
   private readonly live = new Map<string, McpConnector>();
   private specs: InstalledConnector[] = [];
 
@@ -102,6 +104,28 @@ export class ConnectorRegistry implements ConnectorToolSource {
     },
   ) {
     this.manifestPath = join(dataDir, CONNECTORS_FILE);
+    // **刻意不放数据目录下**，见 workDirFor 的注释。
+    this.workRoot = join(tmpdir(), "ruyin-connector-work");
+  }
+
+  /**
+   * 连接器进程的工作目录：`<系统临时目录>/ruyin-connector-work/<id>`。
+   *
+   * 为什么必须给一个：MCP 服务器会往 cwd 里写东西 —— playwright-mcp 每访问一页就在
+   * `.playwright-mcp/` 下留一份 .yml 快照。不给就是**继承守护进程的 cwd**，而那是
+   * 「应用是从哪个目录被启动的」：在 CI 里是仓库根（上一轮探测就在仓里留下了四个
+   * 未跟踪文件），在装好的机器上可能是 Program Files —— 一个多半写不进去的地方。
+   *
+   * 为什么不是 `<dataDir>/connector-work`：**Windows 上一个进程的 cwd 会把那个目录
+   * 连同它的所有上级锁住**（写这一条时是被测试当场证明的：子进程还活着时
+   * `rmSync(dataDir)` 直接 EPERM）。数据目录是可以搬家的（设置 → 数据位置），
+   * 而把它做成某个连接器进程的 cwd，等于让「有连接器在跑」变成「搬不了家」。
+   * 这里写的都是可以随时丢的临时文件，临时目录才是它们该在的地方。
+   */
+  private workDirFor(id: string): string {
+    const dir = join(this.workRoot, id.replace(/[^A-Za-z0-9._-]/g, "_"));
+    mkdirSync(dir, { recursive: true });
+    return dir;
   }
 
   /** 预置服务器的连接器 spec：命令 / 参数 / 环境由启动计划给，不落 connectors.json。 */
@@ -266,6 +290,9 @@ export class ConnectorRegistry implements ConnectorToolSource {
         command: input.command,
         args: Array.isArray(input.args) ? input.args.map(String) : [],
         ...(input.env ? { env: input.env } : {}),
+        // 试连也给工作目录：**这一条是打包冒烟真正走的那条路**（RUYIN_SMOKE=1 起
+        // 一个 vendored 的 node 服务器），而 playwright-mcp 一起来就往 cwd 里写。
+        cwd: this.workDirFor(input.id || "probe"),
       },
       this.options.timeoutMs !== undefined ? { timeoutMs: this.options.timeoutMs } : {},
     );
@@ -467,7 +494,7 @@ export class ConnectorRegistry implements ConnectorToolSource {
   private async bringUp(spec: InstalledConnector): Promise<void> {
     const { id, command, args, env } = spec;
     const connector = new McpConnector(
-      { id, command, args, ...(env ? { env } : {}) },
+      { id, command, args, ...(env ? { env } : {}), cwd: this.workDirFor(id) },
       this.options.timeoutMs !== undefined ? { timeoutMs: this.options.timeoutMs } : {},
     );
     // Registered before start so a failed start still leaves a name the UI

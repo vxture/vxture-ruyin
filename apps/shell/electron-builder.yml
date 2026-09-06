@@ -37,6 +37,12 @@ extraResources:
   # vendored 到 resources/tools/<id>/node_modules，连同 index.json（启动规格 + 许可证）。
   - from: ../../resources/tools
     to: tools
+  # Python 引导件（ADR-018 §7.2，owner 2026-09-06 定第 1 条）：uv 静态二进制 +
+  # uv 托管的 CPython + 预取好的 wheel 缓存。没有它，uvx 形态的服务器在气隙 /
+  # 域受限的机器上永远是死的 —— 连侧载来的 wheel 都跑不了。
+  # 由 scripts/release/seed-uv-cache.mjs 生成，那一步自己核对 uv 的 sha256。
+  - from: ../../resources/uv
+    to: uv
 win:
   # 显式指路而不是靠 electron-builder 自动找 build/icon.ico —— `build/` 在
   # .gitignore 里是整目录忽略的，图标放那儿就进不了仓库。**没有这一行的后果是

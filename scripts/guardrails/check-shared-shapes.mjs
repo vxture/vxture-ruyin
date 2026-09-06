@@ -91,6 +91,22 @@ const SHARED = [
   ["SkillLayerInfo", "SkillLayerInfo", "apps/local-host/src/skill-registry.ts"],
   ["SkillListing", "SkillListing", "apps/local-host/src/skill-registry.ts"],
   ["ToolView", "ToolView", "apps/local-host/src/tool-registry.ts"],
+  // 获取通道（ADR-018 §7.2）：界面照 ComponentStatus 渲染体积 / 许可证 / 来源主机
+  // 与进度。少一个字段，界面就少显示一件**点下去之前必须看见**的事。
+  ["ComponentStatus", "ComponentStatus", "apps/local-host/src/component-store.ts"],
+];
+
+/**
+ * 界面复制的**联合类型**：[界面里的名字, 源头里的名字, 源头文件]。
+ *
+ * 接口比字段，联合比成员。为什么单列一份：`ComponentState` 是 `Record<
+ * ComponentState, string>` 的键 —— 界面少一种状态，TypeScript 会喊；但**服务端多
+ * 一种、界面也多一种拼错的**，或者界面留着一种服务端早已不发的，编译都过得去，
+ * 而那一种失败要么显示成 undefined，要么是一条永不触发的分支（X-1 词表规则里
+ * 「加一个永不抛出的码」的同一个毛病）。
+ */
+const SHARED_UNIONS = [
+  ["ComponentState", "ComponentState", "apps/local-host/src/component-store.ts"],
 ];
 
 const sources = new Map();
@@ -122,6 +138,43 @@ for (const [uiName, sourceName, from] of SHARED) {
   }
   if (extra.length) {
     problems.push(`${name}：界面多出 ${extra.join("、")}（${from} 里没有）`);
+  }
+}
+
+/** 从一份 .ts 源里抠出某个字符串联合类型的成员（排序后）。 */
+function unionMembers(source, name) {
+  const start = source.search(new RegExp(`type ${name}\\s*=`));
+  if (start < 0) return null;
+  const end = source.indexOf(";", start);
+  const body = source.slice(start, end < 0 ? source.length : end);
+  return [...new Set([...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]))].sort();
+}
+
+for (const [uiName, sourceName, from] of SHARED_UNIONS) {
+  if (!sources.has(from)) {
+    sources.set(from, readFileSync(join(repoRoot, from), "utf8"));
+  }
+  const a = unionMembers(sources.get(from), sourceName);
+  const b = unionMembers(ui, uiName);
+  if (!a) {
+    problems.push(`${from} 里找不到 type ${sourceName}`);
+    continue;
+  }
+  if (!b) {
+    problems.push(`界面里找不到 type ${uiName}（源头：${from} 的 ${sourceName}）`);
+    continue;
+  }
+  const missing = a.filter((k) => !b.includes(k));
+  const extra = b.filter((k) => !a.includes(k));
+  if (missing.length) {
+    problems.push(
+      `${uiName}：界面少了 ${missing.join("、")} —— 那一种情况到了界面会显示成空白`,
+    );
+  }
+  if (extra.length) {
+    problems.push(
+      `${uiName}：界面多出 ${extra.join("、")}（${from} 里没有）—— 一条永不触发的分支`,
+    );
   }
 }
 
@@ -250,5 +303,6 @@ if (problems.length > 0) {
 }
 
 console.log(
-  `[shared-shapes] OK - ${SHARED.length} 个共享类型 + 事件词表 + 标题栏高度一致。`,
+  `[shared-shapes] OK - ${SHARED.length} 个共享接口 + ${SHARED_UNIONS.length} 个共享联合类型 + ` +
+    "事件词表 + 标题栏高度一致。",
 );

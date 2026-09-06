@@ -27,6 +27,11 @@
     "lint:css-tokens": "node scripts/guardrails/check-css-tokens.mjs",
     "lint:skill-manifest": "node scripts/guardrails/check-skill-manifest.mjs",
     "skills:pull": "node scripts/release/pull-skills.mjs",
-    "tools:pull": "node scripts/release/pull-tools.mjs"
+    "tools:pull": "node scripts/release/pull-tools.mjs",
+    "tools:names": "node scripts/release/pull-tools.mjs --docs-only",
+    "lint:tool-names": "node scripts/release/pull-tools.mjs --docs-only --check",
+    "test:guardrails": "node --test \"scripts/guardrails/*.test.mjs\" \"scripts/release/*.test.mjs\"",
+    "uv:seed": "node scripts/release/seed-uv-cache.mjs",
+    "components:verify": "node scripts/release/verify-components.mjs"
   }
 }
