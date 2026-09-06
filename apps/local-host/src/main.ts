@@ -629,17 +629,18 @@ server.listen(port, "127.0.0.1", () => {
   console.log(`[ruyin] listening on http://127.0.0.1:${port}`);
   console.log(`[ruyin] session token: ${token}`);
   if (process.env["RUYIN_SMOKE"] === "1") {
-    void pdfSelfCheck().catch((cause) => {
-      console.error("[ruyin] pdf self-check failed:", cause);
-      process.exit(1);
-    });
-    void toolsSelfCheck().catch((cause) => {
-      console.error("[ruyin] tools self-check failed:", cause);
-      process.exit(1);
-    });
-    void uvxSelfCheck().catch((cause) => {
-      console.error("[ruyin] uvx self-check failed:", cause);
-      process.exit(1);
-    });
+    // **顺序有意义，不是风格。** 壳等的是 PDF 那条自检的标记，等到就宣布通过并退出
+    // （ADR-017）。所以 PDF 必须排在最后：并发跑的话，慢的那条还没打印，进程就没了 ——
+    // CI 上就是这么丢掉 uvx 自检那一行的（uv 要现搭一个临时环境，比另外两条都慢）。
+    void (async () => {
+      try {
+        await toolsSelfCheck();
+        await uvxSelfCheck();
+        await pdfSelfCheck();
+      } catch (cause) {
+        console.error("[ruyin] smoke self-check failed:", cause);
+        process.exit(1);
+      }
+    })();
   }
 });
