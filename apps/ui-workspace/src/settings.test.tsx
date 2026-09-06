@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@vxture/design-system";
 import { useEffect, useState } from "react";
@@ -1053,44 +1053,92 @@ function skillsApi(over: Partial<Api> = {}): Api {
   });
 }
 
+/**
+ * 小类默认收着（owner 2026-09-07：大类可收缩、小类按业务功能下拉展开），所以取
+ * 行之前先把小类全部展开。
+ *
+ * 顺带把这一组用例从**按下标**断言改成**按内容**断言。分组之后行序由组序决定，
+ * 再写 `rows[1]` 就只是在断言分类算法 —— 而这些用例问的从来是「有没有这一条、
+ * 它说了什么」。
+ */
+async function capabilityRows(kind: "技能" | "工具"): Promise<HTMLElement[]> {
+  // 展开要放在 waitFor 里重试：清单是异步拉的，先点一次的话那时小类还不存在。
+  // 展开是幂等的 —— 开过的小类 aria-expanded 变 true，不会再被点到。
+  const lists = await waitFor(() => {
+    for (const trigger of screen.queryAllByRole("button", { expanded: false })) fireEvent.click(trigger);
+    return screen.getAllByRole("list", { name: new RegExp(`^${kind} · `) });
+  });
+  return lists.flatMap((list) => within(list).getAllByRole("listitem"));
+}
+
+/** 按行内文字取一行。取不到就把现有的行全打出来 —— 断言失败要能读懂。 */
+function rowWith(rows: HTMLElement[], text: string | RegExp): HTMLElement {
+  const hit = rows.find((r) =>
+    typeof text === "string" ? (r.textContent ?? "").includes(text) : text.test(r.textContent ?? ""),
+  );
+  if (!hit) {
+    throw new Error(
+      `没有匹配「${text}」的行；现有 ${rows.length} 行：\n` + rows.map((r) => r.textContent).join("\n"),
+    );
+  }
+  return hit;
+}
+
 test("能力平台：技能按层列出，被覆盖 / 停用 / 含脚本各说各的，工具的状态如实", async () => {
   renderSection("skills", skillsApi());
-  const skills = await screen.findByRole("list", { name: "技能" });
-  const rows = within(skills).getAllByRole("listitem");
+  const rows = await capabilityRows("技能");
   expect(rows).toHaveLength(3);
   // 预置层那条 officecli-docx 被用户层盖住：标「被覆盖」，不标「启用」。
-  expect(within(rows[0]!).getByText("被用户层覆盖")).toBeTruthy();
-  expect(within(rows[0]!).getByText("预置")).toBeTruthy();
+  const shadowed = rowWith(rows, "iofficeai.officecli");
+  expect(within(shadowed).getByText("被用户层覆盖")).toBeTruthy();
+  expect(within(shadowed).getByText("预置")).toBeTruthy();
   // 装而不启用：停用，且标出含脚本。
-  expect(within(rows[1]!).getByText("停用")).toBeTruthy();
-  expect(within(rows[1]!).getByText("含脚本（本地不跑）")).toBeTruthy();
-  expect(within(rows[1]!).getByText(/装而不启用/)).toBeTruthy();
+  const disabled = rowWith(rows, "sn-deep-research");
+  expect(within(disabled).getByText("停用")).toBeTruthy();
+  expect(within(disabled).getByText("含脚本（本地不跑）")).toBeTruthy();
+  expect(within(disabled).getByText(/装而不启用/)).toBeTruthy();
   // 用户层那条生效。
-  expect(within(rows[2]!).getByText("启用")).toBeTruthy();
+  const mine = rowWith(rows, /v1\.2\.0/);
+  expect(within(mine).getByText("启用")).toBeTruthy();
   expect(screen.getByText("预置 2 · 产品分发 0 · 用户 1")).toBeTruthy();
 
-  const tools = screen.getByRole("list", { name: "工具" });
-  const toolRows = within(tools).getAllByRole("listitem");
+  const toolRows = await capabilityRows("工具");
   expect(toolRows).toHaveLength(6);
-  expect(within(toolRows[4]!).getByText("工具：crm_lookup、crm_write")).toBeTruthy();
-  expect(within(toolRows[5]!).getByText("custom-tier")).toBeTruthy();
-  expect(within(rows[2]!).getByText(/v1\.2\.0/)).toBeTruthy();
-  expect(within(toolRows[2]!).getByText("已登记")).toBeTruthy();
-  expect(within(toolRows[2]!).getByText("MCP 服务器")).toBeTruthy();
-  expect(within(toolRows[3]!).getByText("经 Runos")).toBeTruthy();
+  expect(within(rowWith(toolRows, "crm")).getByText("工具：crm_lookup、crm_write")).toBeTruthy();
+  expect(within(rowWith(toolRows, "x.custom")).getByText("custom-tier")).toBeTruthy();
+  const playwright = rowWith(toolRows, "microsoft.playwright-mcp");
+  expect(within(playwright).getByText("已登记")).toBeTruthy();
+  expect(within(playwright).getByText("MCP 服务器")).toBeTruthy();
+  expect(within(rowWith(toolRows, "tavily")).getByText("经 Runos")).toBeTruthy();
+});
+
+test("能力平台：两个大类可以收起，收起之后条数还在（owner 2026-09-07）", async () => {
+  renderSection("skills", skillsApi());
+  // 展开态：行在。
+  expect(await capabilityRows("技能")).toHaveLength(3);
+  // 计数挂在标题上，收起之后它是唯一还看得见的量 —— 所以先确认它在。
+  const heads = screen.getAllByRole("heading", { level: 3 });
+  expect(heads.some((h) => (h.textContent ?? "").startsWith("技能") && h.textContent!.includes("3"))).toBe(true);
+
+  await userEvent.click(screen.getAllByRole("button", { name: "收起" })[0]!);
+  // 收起：这一类的小类清单整个不在了，但标题与条数还在。
+  expect(screen.queryAllByRole("list", { name: /^技能 · / })).toHaveLength(0);
+  expect(screen.getAllByRole("heading", { level: 3 }).some((h) => (h.textContent ?? "").startsWith("技能"))).toBe(true);
+
+  await userEvent.click(screen.getByRole("button", { name: "展开" }));
+  expect(await capabilityRows("技能")).toHaveLength(3);
 });
 
 test("能力平台：停用走 disable、启用走 enable（B-3 动词），键带 layer/source；刷新调 refresh 再重拉", async () => {
   const api = skillsApi();
   renderSection("skills", api);
-  const skills = await screen.findByRole("list", { name: "技能" });
-  const rows = within(skills).getAllByRole("listitem");
-  await userEvent.click(within(rows[1]!).getByRole("button", { name: "启用" }));
+  const rows = await capabilityRows("技能");
+  await userEvent.click(within(rowWith(rows, "sn-deep-research")).getByRole("button", { name: "启用" }));
   expect(api.setSkillEnabled).toHaveBeenCalledWith(
     { name: "sn-deep-research", layer: "bundled", source: "opensensenova.sensenova-skills" },
     true,
   );
-  await userEvent.click(within(rows[2]!).getByRole("button", { name: "停用" }));
+  await userEvent.click(within(rowWith(rows, /v1\.2\.0/)).getByRole("button", { name: "停用" }));
   expect(api.setSkillEnabled).toHaveBeenCalledWith({ name: "officecli-docx", layer: "user", source: "user" }, false);
 
   await userEvent.click(screen.getByRole("button", { name: "刷新" }));
@@ -1100,9 +1148,9 @@ test("能力平台：停用走 disable、启用走 enable（B-3 动词），键�
 
 test("能力平台：按层筛选只看用户层；没有登记册时说清，不是空清单", async () => {
   renderSection("skills", skillsApi());
-  await screen.findByRole("list", { name: "技能" });
+  expect(await capabilityRows("技能")).toHaveLength(3);
   fireEvent.change(screen.getByLabelText("按来源层筛选"), { target: { value: "user" } });
-  expect(within(screen.getByRole("list", { name: "技能" })).getAllByRole("listitem")).toHaveLength(1);
+  expect(await capabilityRows("技能")).toHaveLength(1);
   fireEvent.change(screen.getByLabelText("按来源层筛选"), { target: { value: "distributed" } });
   expect(screen.getByText("这一层没有技能。")).toBeTruthy();
 
@@ -1120,9 +1168,9 @@ test("能力平台：拉不到（非 503）就说拉不到；开关与刷新失�
     tools: vi.fn().mockRejectedValue(new Error("no tools")),
   });
   renderSection("skills", api);
-  const skills = await screen.findByRole("list", { name: "技能" });
+  const rows = await capabilityRows("技能");
   expect(await screen.findByText("没有工具登记册。")).toBeTruthy();
-  await userEvent.click(within(within(skills).getAllByRole("listitem")[1]!).getByRole("button", { name: "启用" }));
+  await userEvent.click(within(rowWith(rows, "sn-deep-research")).getByRole("button", { name: "启用" }));
   expect(await screen.findByText("state.json 写不进去")).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "刷新" }));
   expect(await screen.findByText("能力面 503")).toBeTruthy();
@@ -1153,7 +1201,7 @@ test("能力平台：刷新进行中按钮变「刷新中…」并禁用，直�
   let settle!: () => void;
   const api = skillsApi({ refreshSkills: vi.fn().mockReturnValue(new Promise<void>((ok) => (settle = ok))) });
   renderSection("skills", api);
-  await screen.findByRole("list", { name: "技能" });
+  await capabilityRows("技能");
   await userEvent.click(screen.getByRole("button", { name: "刷新" }));
   const busy = screen.getByRole("button", { name: "刷新中…" });
   expect((busy as HTMLButtonElement).disabled).toBe(true);
@@ -1175,16 +1223,16 @@ test("能力平台：预置的 MCP 服务器能启动 / 停止（走连接器的
     deactivateConnector: vi.fn().mockResolvedValue({}),
   });
   renderSection("skills", api);
-  const tools = await screen.findByRole("list", { name: "工具" });
-  const rows = within(tools).getAllByRole("listitem");
-  await userEvent.click(within(rows[0]!).getByRole("button", { name: "启动" }));
+  const rows = await capabilityRows("工具");
+  await userEvent.click(within(rowWith(rows, "microsoft.playwright-mcp")).getByRole("button", { name: "启动" }));
   expect(api.activateConnector).toHaveBeenCalledWith("microsoft.playwright-mcp");
-  await userEvent.click(within(rows[1]!).getByRole("button", { name: "停止" }));
+  await userEvent.click(within(rowWith(rows, "aas-ee.open-websearch")).getByRole("button", { name: "停止" }));
   expect(api.deactivateConnector).toHaveBeenCalledWith("aas-ee.open-websearch");
-  expect(within(rows[2]!).getByText(/需要本机有 uv/)).toBeTruthy();
-  expect(within(rows[2]!).getByRole("button", { name: "启动" })).toBeTruthy();
+  const noUv = rowWith(rows, "microsoft.markitdown");
+  expect(within(noUv).getByText(/需要本机有 uv/)).toBeTruthy();
+  expect(within(noUv).getByRole("button", { name: "启动" })).toBeTruthy();
   // 只登记的没有按钮。
-  expect(within(rows[3]!).queryByRole("button")).toBeNull();
+  expect(within(rowWith(rows, "x.registered")).queryByRole("button")).toBeNull();
 });
 
 test("连接器：预置的服务器标「预置」，只能停用不能卸载", async () => {
@@ -1216,8 +1264,8 @@ test("能力平台 / 连接器：启动与停用失败时，原因照原样转�
     activateConnector: vi.fn().mockRejectedValue(new Error('bundled tool server "microsoft.markitdown" cannot start: 需要本机有 uv')),
   });
   renderSection("skills", api);
-  const tools = await screen.findByRole("list", { name: "工具" });
-  await userEvent.click(within(tools).getByRole("button", { name: "启动" }));
+  const rows = await capabilityRows("工具");
+  await userEvent.click(within(rows[0]!).getByRole("button", { name: "启动" }));
   expect(await screen.findByText(/cannot start: 需要本机有 uv/)).toBeTruthy();
 
   const connectorsApi = fakeApi({
@@ -1282,8 +1330,7 @@ function acquisitionApi(over: Record<string, unknown> = {}) {
 
 test("能力平台：未获取的行有自己的徽标，体积 / 许可证 / 来源主机都在按钮左边", async () => {
   renderSection("skills", acquisitionApi());
-  const tools = await screen.findByRole("list", { name: "工具" });
-  const row = within(tools).getAllByRole("listitem")[0]!;
+  const row = rowWith(await capabilityRows("工具"), "microsoft.playwright-mcp");
   expect(within(row).getByText("未获取")).toBeTruthy();
   // 点之前必须看得见要下多少、什么许可证、从哪个主机来。
   expect(within(row).getByText(/需下载 114\.6 MB（占盘 270\.1 MB）/)).toBeTruthy();
@@ -1298,16 +1345,16 @@ test("能力平台：未获取的行有自己的徽标，体积 / 许可证 / �
 test("能力平台：点「获取」只带 id —— 地址不在界面手上", async () => {
   const api = acquisitionApi();
   renderSection("skills", api);
-  const tools = await screen.findByRole("list", { name: "工具" });
-  await userEvent.click(within(tools).getByRole("button", { name: "获取" }));
+  const rows = await capabilityRows("工具");
+  await userEvent.click(within(rowWith(rows, "microsoft.playwright-mcp")).getByRole("button", { name: "获取" }));
   expect(api.acquireComponent).toHaveBeenCalledWith("browser.chromium-headless-shell", undefined);
 });
 
 test("能力平台：「从本地文件导入」走系统目录框（气隙机器那条路）", async () => {
   const api = acquisitionApi();
   renderSection("skills", api);
-  const tools = await screen.findByRole("list", { name: "工具" });
-  await userEvent.click(within(tools).getByRole("button", { name: "从本地文件导入" }));
+  const rows = await capabilityRows("工具");
+  await userEvent.click(within(rowWith(rows, "microsoft.playwright-mcp")).getByRole("button", { name: "从本地文件导入" }));
   expect(api.pickFolder).toHaveBeenCalled();
   expect(api.acquireComponent).toHaveBeenCalledWith("browser.chromium-headless-shell", "E:/offline-tools");
 });
@@ -1315,8 +1362,8 @@ test("能力平台：「从本地文件导入」走系统目录框（气隙机�
 test("能力平台：用户在目录框里取消，就什么都不做", async () => {
   const api = acquisitionApi({ pickFolder: vi.fn().mockResolvedValue({ cancelled: true }) });
   renderSection("skills", api);
-  const tools = await screen.findByRole("list", { name: "工具" });
-  await userEvent.click(within(tools).getByRole("button", { name: "从本地文件导入" }));
+  const rows = await capabilityRows("工具");
+  await userEvent.click(within(rowWith(rows, "microsoft.playwright-mcp")).getByRole("button", { name: "从本地文件导入" }));
   expect(api.acquireComponent).not.toHaveBeenCalled();
 });
 
@@ -1336,8 +1383,7 @@ test("能力平台：获取中显示进度与「取消」，不显示「获取�
     }),
   });
   renderSection("skills", api);
-  const tools = await screen.findByRole("list", { name: "工具" });
-  const row = within(tools).getAllByRole("listitem")[0]!;
+  const row = rowWith(await capabilityRows("工具"), "microsoft.playwright-mcp");
   expect(within(row).getByText("43.2 MB / 114.6 MB")).toBeTruthy();
   expect(within(row).queryByRole("button", { name: "获取" })).toBeNull();
   await userEvent.click(within(row).getByRole("button", { name: "取消" }));
@@ -1372,8 +1418,7 @@ test.each([
     }),
   });
   renderSection("skills", api);
-  const tools = await screen.findByRole("list", { name: "工具" });
-  const row = within(tools).getAllByRole("listitem")[0]!;
+  const row = rowWith(await capabilityRows("工具"), "microsoft.playwright-mcp");
   expect(within(row).getByText(said)).toBeTruthy();
   // 原因照原样转达，不改写成「请稍后再试」。
   expect(within(row).getByText(/守护进程原样转达的那一句/)).toBeTruthy();
@@ -1386,8 +1431,8 @@ test("能力平台：获取失败时把守护进程的原话摆出来", async ()
     acquireComponent: vi.fn().mockRejectedValue(new Error("sha256 abc 与清单的 def 不符 —— 字节已丢弃")),
   });
   renderSection("skills", api);
-  const tools = await screen.findByRole("list", { name: "工具" });
-  await userEvent.click(within(tools).getByRole("button", { name: "获取" }));
+  const rows = await capabilityRows("工具");
+  await userEvent.click(within(rowWith(rows, "microsoft.playwright-mcp")).getByRole("button", { name: "获取" }));
   expect(await screen.findByText(/字节已丢弃/)).toBeTruthy();
 });
 
@@ -1407,8 +1452,8 @@ test("能力平台：探不到工具名时写一句原因，不写空数组", as
     }),
   });
   renderSection("skills", api);
-  const tools = await screen.findByRole("list", { name: "工具" });
-  expect(within(tools).getByText(/工具名未探到：本次构建没有 vendored 它/)).toBeTruthy();
+  const rows = await capabilityRows("工具");
+  expect(within(rows[0]!).getByText(/工具名未探到：本次构建没有 vendored 它/)).toBeTruthy();
 });
 
 test("能力平台：取消失败时也把原话摆出来（reload 之后再放，否则会被抹掉）", async () => {
@@ -1428,7 +1473,7 @@ test("能力平台：取消失败时也把原话摆出来（reload 之后再放�
     }),
   });
   renderSection("skills", api);
-  const tools = await screen.findByRole("list", { name: "工具" });
-  await userEvent.click(within(tools).getByRole("button", { name: "取消" }));
+  const rows = await capabilityRows("工具");
+  await userEvent.click(within(rows[0]!).getByRole("button", { name: "取消" }));
   expect(await screen.findByText("已经落地了，取消不了")).toBeTruthy();
 });

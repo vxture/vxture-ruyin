@@ -29,8 +29,15 @@ export type SectionId =
 export const SETTINGS_SECTIONS: Array<{ id: SectionId; label: string; icon: string }> = [
   { id: "account", label: "账户", icon: "role" },
   { id: "general", label: "通用设置", icon: "settings" },
-  { id: "connectors", label: "连接器", icon: "plugs-connected" },
+  /**
+   * 能力平台在连接器**前面**（owner 2026-09-07）。
+   *
+   * 两者是「有什么能力」与「这些能力从哪儿接进来」的关系：连接器是能力平台的
+   * 一个**来源**，不是与它并列的另一件事。来源排在结果前面，读者就得先理解一个
+   * 他还没有理由关心的东西。
+   */
   { id: "skills", label: "能力平台", icon: "sparkles" },
+  { id: "connectors", label: "连接器", icon: "plugs-connected" },
   { id: "database", label: "数据库", icon: "table" },
   { id: "updates", label: "软件更新", icon: "arrow-down" },
   { id: "about", label: "关于", icon: "info" },
