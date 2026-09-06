@@ -24,6 +24,8 @@ export type CapabilityGroupId =
   | "document"
   | "sheet"
   | "data"
+  | "finance"
+  | "market"
   | "slide"
   | "research"
   | "browser"
@@ -55,7 +57,9 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
   { id: "document", label: "文档", desc: "Word / PDF / Markdown、写作、排版、合同与标书" },
   { id: "sheet", label: "表格", desc: "Excel / CSV 读写、公式、透视、图表" },
   { id: "data", label: "数据", desc: "SQL、数据库、统计与分析" },
+  { id: "finance", label: "财务", desc: "现金流、对账、预算差异、营收与成本" },
   { id: "slide", label: "演示", desc: "PPT / 幻灯片" },
+  { id: "market", label: "市场与舆情", desc: "品牌监测、竞品与客户情报、评价与口碑" },
   { id: "research", label: "检索", desc: "联网搜索、资料调研、情报汇集" },
   { id: "browser", label: "浏览器", desc: "网页自动化、抓取、截屏" },
   { id: "media", label: "图像与音视频", desc: "图片、视频、音频、OCR" },
@@ -75,10 +79,31 @@ const KEYWORDS: Record<Exclude<CapabilityGroupId, "other">, readonly string[]> =
     "docx", "word", "pdf", "markdown", "文档", "写作", "排版", "论文", "thesis",
     "合同", "标书", "投标", "报告", "简历", "resume", "pandoc", "docling",
     "markitdown", "公文", "写作助手", "校对", "typst", "latex",
+    "prd", "product requirements", "comms", "communications", "纪要", "typography",
   ],
   sheet: ["excel", "xlsx", "xls", "csv", "spreadsheet", "表格", "工作表", "透视", "pivot", "单元格"],
   data: ["sql", "database", "数据库", "统计", "分析", "analytics", "dataset", "数据清洗", "bi ", "指标"],
+  finance: [
+    "cash flow", "cash-flow", "现金流", "财务", "reconcil", "对账", "variance",
+    "预算", "budget", "ledger", "台账", "payroll", "薪酬", "invoice", "发票",
+    "revenue", "营收", "runway", "会计", "accounting", "p&l", "成本",
+  ],
   slide: ["ppt", "pptx", "slide", "幻灯", "presentation", "keynote", "deck", "演示文稿"],
+  /**
+   * 这一组的词**必须够具体**。第一版写了裸的 monitor / reviews / brand / market，
+   * 结果把 screenshot-capture（monitor）、jules（reviews）、brand-guidelines（brand）、
+   * flight-tracker（monitor）、deep-research（market）全吸了过来 —— 它们一个都不是
+   * 市场舆情。裸词在这一组特别危险：这些字在任何一条描述里都可能顺口出现。
+   */
+  market: [
+    "品牌监测", "brand monitoring", "brand mention", "舆情", "口碑", "评价",
+    "customer reviews", "product reviews", "user reviews", "business reviews",
+    "review-aggregat", "content performance", "engagement rate",
+    "competitor", "竞品", "sentiment", "seo", "serp", "backlink", "hashtag",
+    "hiring", "招聘", "press mention", "media coverage", "thought leader",
+    "firmographic", "sales intelligence", "social proof", "market research",
+    "market sizing", "市场调研", "市场研究", "local market", "公关",
+  ],
   research: [
     "search", "搜索", "检索", "调研", "research", "情报", "serp", "duckduckgo",
     "tavily", "brave", "bing", "baidu", "exa", "jina", "firecrawl", "searxng",
@@ -86,14 +111,20 @@ const KEYWORDS: Record<Exclude<CapabilityGroupId, "other">, readonly string[]> =
   ],
   browser: ["browser", "playwright", "puppeteer", "浏览器", "抓取", "爬", "crawl", "scrape", "截屏", "screenshot"],
   language: ["translate", "translation", "翻译", "润色", "语法", "i18n", "本地化", "改写", "术语"],
-  media: ["image", "图片", "图像", "video", "视频", "audio", "音频", "语音", "ocr", "vision", "绘图", "配图"],
+  media: [
+    "image", "图片", "图像", "video", "视频", "audio", "音频", "语音", "ocr",
+    "vision", "绘图", "配图", "infographic", "信息图", "海报",
+  ],
   dev: [
     "code", "代码", "git", "github", "api", "sdk", "debug", "调试", "test", "测试",
     "python", "typescript", "javascript", "编程", "重构", "lint", "ci ", "部署",
+    // 不写裸的 "notebook"：notebooklm（知识库）里也有它，会被开发组抢走。
+    "jupyter", "ipynb", "coding", "react", "frontend", "前端", "scaffold",
   ],
   collab: [
     "email", "邮件", "calendar", "日程", "会议", "notion", "jira", "slack", "飞书",
     "钉钉", "crm", "客户", "工单", "知识库", "notebooklm", "看板",
+    "meeting", "minutes", "ticket", "triage", "chat", "task management", "任务管理",
   ],
 };
 

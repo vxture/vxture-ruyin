@@ -36,6 +36,31 @@ describe("classifyCapability", () => {
     expect(classifyCapability({ id: "ihor-sokoliuk.mcp-searxng", name: "" })).toBe("research");
   });
 
+  it("财务与市场舆情各自成组", () => {
+    expect(classifyCapability({ name: "cash-flow-snapshot", description: "30/60/90 天现金流预测" })).toBe("finance");
+    expect(classifyCapability({ name: "reconciliation", description: "Reconcile accounts against the GL" })).toBe("finance");
+    expect(classifyCapability({ name: "brand-monitoring", description: "Brand monitoring across social" })).toBe("market");
+    expect(classifyCapability({ name: "competitor-monitor", description: "Track competitor websites" })).toBe("market");
+  });
+
+  it("市场组的词必须够具体 —— 裸词会把不相干的东西吸过来", () => {
+    // 这四条是实测踩到的：第一版把 monitor / reviews / brand / market 写成裸词，
+    // 它们就分别吸走了截屏、代理编码、品牌配色和深度研究。裸词在这一组格外危险，
+    // 因为这些字在任何一条描述里都可能顺口出现。
+    expect(
+      classifyCapability({ name: "screenshot-capture", description: "Capture screenshots of any public URL" }),
+    ).toBe("browser");
+    expect(
+      classifyCapability({ name: "jules", description: "Delegate coding tasks to an AI agent; reviews the diff" }),
+    ).toBe("dev");
+    expect(
+      classifyCapability({ name: "deep-research", description: "Autonomous multi-step research, incl. market questions" }),
+    ).toBe("research");
+    expect(
+      classifyCapability({ name: "flight-tracker", description: "Track flight status and airport monitoring" }),
+    ).toBe("other");
+  });
+
   it("认不出来就是「其他」，不猜一个看起来很像的", () => {
     expect(classifyCapability({ name: "xberg", description: "" })).toBe("other");
     expect(classifyCapability({ name: "", description: "" })).toBe("other");
