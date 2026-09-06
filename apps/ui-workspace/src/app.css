@@ -1262,3 +1262,93 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   flex-wrap: wrap;
   padding-top: var(--spacing-sm);
 }
+
+/* ---------- 18. 标题栏搜索框：把内容看清 ---------- */
+/*
+ * DS 给的是 `bg-muted/60` —— 半透明的 --muted 叠在标题栏上。标题栏本身又是
+ * `color-mix(--card 88%, --foreground 4%)`，两层叠完，框与栏的亮度差只剩几个
+ * 百分点：框的边界看不出来，里面的字也就没有一个稳定的底可依（owner 2026-09-07
+ * 报「搜索框内容看不清」）。
+ *
+ * 修法是给它一个**不透明的底 + 一道描边**：底用 --card（跟着主题走，亮暗两套
+ * 都成立），描边用 --border。文字与占位符仍由 DS 给（--foreground /
+ * --muted-foreground），它们对 --card 的对比度是设计系统自己保证过的 —— 这里
+ * 只把「底」换成一个它们本来就该站的底。
+ *
+ * 选择器用 :has 精确定位那一个框，不动标题栏里别的东西。
+ */
+.app-topbar div:has(> input[type="search"]) {
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+/* 聚焦时 DS 会把底换成 --card 并加环；此时描边让位给环，否则两圈叠着。 */
+.app-topbar div:has(> input[type="search"]):focus-within { border-color: transparent; }
+
+/* ---------- 19. 能力平台：同步说明、大类计数与折叠、业务小类 ---------- */
+/* 顶上那句「同出一份登记册」。它是这一屏的前提，所以在第一个板块之前、
+   与板块同宽；图标只是锚点，信息全在文字里。 */
+.cap-sync {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-xs);
+  margin: 0 0 var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  line-height: 1.6;
+}
+.cap-sync strong { color: var(--foreground); font-weight: 500; }
+
+/* 大类标题上的条数：收起之后它是唯一还看得见的量，所以不能只当装饰。 */
+.set-block-count {
+  margin-left: var(--spacing-xs);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 400;
+  vertical-align: middle;
+}
+.set-block-toggle { margin-left: var(--spacing-xs); flex: 0 0 auto; }
+
+/* 业务小类：一行一个，标题行里是「名称 · 条数 · 一句说明」。
+   说明在窄屏先被截掉 —— 名称与条数是找东西用的，说明是解释用的。 */
+.cap-groups { display: block; }
+.cap-group { border-bottom: 1px solid var(--border); }
+.cap-group:last-child { border-bottom: none; }
+/* DS 的 AccordionTrigger 默认把内容两端撑开（标题在左、箭头在右），于是
+   「名称 / 条数 / 说明」被摊成三列，中间两段大空白。这里改回一行读的顺序：
+   名称 → 条数 → 说明，说明吃掉剩余宽度，箭头仍在最右。 */
+.cap-group-head {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: var(--spacing-xs);
+}
+.cap-group-head > svg { margin-left: auto; align-self: center; flex: 0 0 auto; }
+.cap-group-label { font-weight: 500; color: var(--foreground); }
+.cap-group-count {
+  margin-left: var(--spacing-xs);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.cap-group-desc {
+  flex: 1 1 auto;
+  margin-left: var(--spacing-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  font-weight: 400;
+}
+@media (max-width: 760px) { .cap-group-desc { display: none; } }

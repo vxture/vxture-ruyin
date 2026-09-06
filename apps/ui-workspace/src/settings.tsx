@@ -11,6 +11,10 @@
 
 import { useEffect, useState } from "react";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
   Avatar,
   AvatarFallback,
   AvatarImage,
@@ -50,6 +54,7 @@ import {
 export { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
 import { resolveSection, type SectionId } from "./settings-sections";
 import { NoticeBar } from "./notice-bar";
+import { groupCapabilities } from "./capability-groups";
 import { useHostChrome } from "./host-chrome";
 
 const UI_VERSION = "0.2.0";
@@ -113,6 +118,9 @@ function SettingsBlock({
   title,
   desc,
   aside,
+  collapsible = false,
+  defaultOpen = true,
+  count,
   children,
 }: {
   icon: React.ComponentProps<typeof Icon>["name"];
@@ -120,8 +128,19 @@ function SettingsBlock({
   desc?: string;
   /** 板块级动作，靠右（例如账号信息的「在线修改」）。 */
   aside?: React.ReactNode;
+  /**
+   * 可收起（owner 2026-09-07）。**默认关着这个能力**：绝大多数板块只有三五行，
+   * 给它们一个折叠钮等于多一个没有意义的状态。只有内容长到会把别的板块顶出
+   * 屏幕的（能力平台的两大类）才打开它。
+   */
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  /** 收起时仍然看得见的条数 —— 折叠不该把「这里有多少东西」一起藏掉。 */
+  count?: number;
   children: React.ReactNode;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const body = <div className="set-block-body">{children}</div>;
   return (
     <section className="card set-block">
       <header className="set-block-head">
@@ -129,12 +148,26 @@ function SettingsBlock({
           <Icon name={icon} size="sm" />
         </span>
         <div className="set-block-titles">
-          <h3 className="set-block-title">{title}</h3>
+          <h3 className="set-block-title">
+            {title}
+            {typeof count === "number" && <span className="set-block-count">{count}</span>}
+          </h3>
           {desc && <p className="set-block-desc">{desc}</p>}
         </div>
         {aside && <span className="set-block-aside">{aside}</span>}
+        {collapsible && (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            className="set-block-toggle"
+          >
+            {open ? "收起" : "展开"}
+          </Button>
+        )}
       </header>
-      <div className="set-block-body">{children}</div>
+      {(!collapsible || open) && body}
     </section>
   );
 }
@@ -1379,10 +1412,32 @@ function SkillsSection({ api }: { api: Api }) {
     await acquire(componentId, picked.path);
   };
 
+  const skillGroups = groupCapabilities(items, (s) => ({ name: s.name, description: s.description }));
+  const toolGroups = groupCapabilities(tools ?? [], (t) => ({ id: t.id, name: t.id, description: t.detail }));
+
   return (
     <>
+      {/*
+        这一屏顶上的一句事实（owner 2026-09-07）：本机这份能力不是本机自己攒的，
+        它与云端两处**同出一份登记册**。
+
+        措辞到「同一份登记册」为止，**不写「实时同步」**：三处用的是同一份预置
+        清单（ruyin 构建时按它随包，Runos 按它注册台账），产品还能经能力面把技能
+        下发到本机 —— 但那不是一条实时通道，此刻三边的清单未必逐条相同。写「同步」
+        会让用户以为在这里看到的就是云端此刻的样子。
+      */}
+      <p className="cap-sync">
+        <Icon name="cloud" size="sm" aria-hidden />
+        <span>
+          与 <strong>Vxture 平台</strong>（云端工作区）、<strong>Runos</strong>（云端能力面）
+          <strong>同出一份能力登记册</strong>；这里显示的是 <strong>RUYIN 智能工作台</strong>
+          （本机）此刻真正装着的那一份。
+        </span>
+      </p>
       <SettingsBlock
         icon="sparkles"
+        collapsible
+        count={items.length}
         title="技能"
         desc="本机装着的指令包（Agent Skills）：预置 → 产品分发 → 用户 → 项目，同名近者优先。只有产品在契约里声明了的任务能读到它们"
         aside={
@@ -1423,8 +1478,17 @@ function SkillsSection({ api }: { api: Api }) {
                   : "这一层没有技能。"}
               </p>
             ) : (
-              <ul className="row-list" aria-label="技能">
-                {items.map((s) => (
+              <Accordion type="multiple" className="cap-groups">
+                {skillGroups.map(({ group, items: rows }) => (
+                  <AccordionItem key={group.id} value={group.id} className="cap-group">
+                    <AccordionTrigger className="cap-group-head">
+                      <span className="cap-group-label">{group.label}</span>
+                      <span className="cap-group-count">{rows.length}</span>
+                      <span className="cap-group-desc">{group.desc}</span>
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <ul className="row-list" aria-label={`技能 · ${group.label}`}>
+                {rows.map((s) => (
                   <li key={`${s.layer}:${s.source}:${s.name}`} className="row-item">
                     <code className="row-main" title={`${s.dir}\n${s.description}`}>
                       {s.name}
@@ -1448,13 +1512,19 @@ function SkillsSection({ api }: { api: Api }) {
                     </Button>
                   </li>
                 ))}
-              </ul>
+                      </ul>
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
             )}
           </>
         )}
       </SettingsBlock>
       <SettingsBlock
         icon="plugs-connected"
+        collapsible
+        count={tools?.length ?? 0}
         title="工具"
         desc="可执行的能力：运行时内建的、已装连接器暴露的、预置清单登记的 MCP 服务器。每一次调用都过 Tool Gate"
       >
@@ -1466,8 +1536,17 @@ function SkillsSection({ api }: { api: Api }) {
           <>
             {/* 常驻的一句事实：随包的与要获取的各多少。用户不必点开每一行去数。 */}
             <p className="set-note">{bundledSummary(tools)}</p>
-            <ul className="row-list" aria-label="工具">
-              {tools.map((t) => (
+            <Accordion type="multiple" className="cap-groups">
+              {toolGroups.map(({ group, items: rows }) => (
+                <AccordionItem key={group.id} value={group.id} className="cap-group">
+                  <AccordionTrigger className="cap-group-head">
+                    <span className="cap-group-label">{group.label}</span>
+                    <span className="cap-group-count">{rows.length}</span>
+                    <span className="cap-group-desc">{group.desc}</span>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <ul className="row-list" aria-label={`工具 · ${group.label}`}>
+              {rows.map((t) => (
                 <li key={`${t.kind}:${t.id}`} className="row-item">
                   <code className="row-main" title={t.detail ?? ""}>
                     {t.id}
@@ -1541,7 +1620,11 @@ function SkillsSection({ api }: { api: Api }) {
                   )}
                 </li>
               ))}
-            </ul>
+                    </ul>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
           </>
         )}
       </SettingsBlock>
