@@ -200,6 +200,26 @@ const launchable = servers.filter((e) => e.launch).length;
 const offlineDefault = servers.filter((e) => e.tier === "default").length;
 // 随包 ≠ 开箱即起：要环境变量或外部程序的那几条，随包但点下去起不来。
 // 这两个数字必须分开报 —— 合成一个数就是「预置 10 个」那个错的小一号版本。
+// pythonRuntime 也走「钉死 + 校验」那条规则：随包的 uv 是可执行文件，
+// 一个没钉哈希的可执行文件进安装包，比一个没钉哈希的按需组件更糟 —— 它不用
+// 用户点一下就已经在每台机器上了。
+if (m.pythonRuntime?.uv) {
+  const uv = m.pythonRuntime.uv;
+  const where = "pythonRuntime.uv";
+  if (!/^https:\/\//.test(uv.upstream ?? "")) errors.push(`${where}: upstream 必须是 https`);
+  if (!/^[0-9a-f]{64}$/.test(uv.sha256 ?? "")) errors.push(`${where}: sha256 不是 40+ 位十六进制的钉死值`);
+  if (!Number.isInteger(uv.size) || uv.size <= 0) errors.push(`${where}: size 缺失`);
+  if (!uv.license || !uv.licenseSource) errors.push(`${where}: 许可证与出处都要写`);
+  if (!Array.isArray(uv.licenseFiles) || uv.licenseFiles.length === 0) {
+    errors.push(`${where}: licenseFiles 要列出随件落盘的许可证正文`);
+  }
+  for (const id of m.pythonRuntime.seed ?? []) {
+    const s = (m.servers ?? []).find((x) => x.id === id);
+    if (!s) errors.push(`pythonRuntime.seed: 清单里没有 ${id}`);
+    else if (s.launch?.runtime !== "uvx") errors.push(`pythonRuntime.seed: ${id} 不是 uvx 形态`);
+  }
+}
+
 const needsSetup = (m.servers ?? []).filter(
   (e) => e.tier === "default" && e.launch && ((e.launch.requiresEnv ?? []).length > 0 || e.launch.requiresBin),
 ).length;

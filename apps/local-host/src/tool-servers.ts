@@ -298,6 +298,9 @@ export class BundledToolServers {
       env: {
         ...(cache ? { UV_CACHE_DIR: cache } : {}),
         ...(python ? { UV_PYTHON_INSTALL_DIR: python } : {}),
+        // 不写进用户的漫游配置（`%APPDATA%\uv\tools`）。uvx 起的是临时环境，
+        // 这个目录只是它的落脚点；钉在数据目录下，行为可预期、卸载也带得走。
+        UV_TOOL_DIR: join(this.options.dataDir, "tools", "uv-tools"),
         // 缺什么就失败，绝不自己去下一个 Python 解释器。
         UV_PYTHON_DOWNLOADS: "never",
         UV_NO_PROGRESS: "1",

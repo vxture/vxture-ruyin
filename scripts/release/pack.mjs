@@ -55,6 +55,9 @@ if (skillPull) {
   run("node", [join(repoRoot, "scripts", "release", "pull-skills.mjs")], repoRoot);
   // 预置的 MCP 服务器（node 形态 vendored 进 resources/tools；TD-042）。
   run("node", [join(repoRoot, "scripts", "release", "pull-tools.mjs")], repoRoot);
+  // Python 引导件：uv + CPython + 预取缓存。它自己核 uv 的 sha256，并在最后
+  // 用一个空的 UV_TOOL_DIR 断网真起一次 —— 那一跑才是「随包这棵树自己够」的凭据。
+  run("node", [join(repoRoot, "scripts", "release", "seed-uv-cache.mjs")], repoRoot);
 } else {
   console.log("[pack] skill/tool pull SKIPPED (RUYIN_SKIP_SKILL_PULL=1) - the bundled layers are whatever resources/skills and resources/tools hold");
 }
@@ -196,6 +199,24 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
     process.exit(1);
   }
   console.log(`[pack] bundled tool server self-check: ${line[1]}`);
+}
+
+// uvx 形态也真起了一次（TD-042 点名缺的那条）。node 形态过了不代表 Python 半边过了：
+// 随包的 uv.exe、预取的 CPython、缓存够不够解析，是另一条完全不同的链。
+{
+  const line = /[ruyin] uvx self-check: (ok (([^,]+), (d+) tool(s))|no seeded uvx server to try)/.exec(smokeOut);
+  if (!line) {
+    console.error("[pack] FAILED: 守护进程没有报 uvx 自检（缺 \"[ruyin] uvx self-check\" 这一行）");
+    process.exit(1);
+  }
+  if (skillPull && !line[1].startsWith("ok")) {
+    console.error(
+      "[pack] FAILED: 种过 Python 半边，包里却没有一个能试的 uvx 服务器 —— 看 electron-builder.yml 的 resources/uv 与清单的 pythonRuntime.seed。",
+        "       的 resources/uv 与清单的 pythonRuntime.seed。",
+    );
+    process.exit(1);
+  }
+  console.log(`[pack] uvx self-check: ${line[1]}`);
 }
 
 // 打包形态下主密钥必须由 DPAPI 保护。

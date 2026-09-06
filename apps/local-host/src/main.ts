@@ -543,6 +543,30 @@ async function toolsSelfCheck(): Promise<void> {
   console.log(`[ruyin] tools self-check: ok (${candidate.id}, ${probe.tools.length} tool(s))`);
 }
 
+/**
+ * uvx 形态也真起一次（TD-042 点名缺的那条）。
+ *
+ * 与 node 形态是两条完全不同的链：随包的 uv.exe 要在**这台机器上**跑起来、
+ * 预取的 CPython 要能被它认出来、缓存要真的够解析出那个包 —— 少一样都只在
+ * 装机之后才现形。构建时 `seed-uv-cache.mjs` 已经在一个空的 UV_TOOL_DIR 里
+ * 断网起过一次，但那是**构建机**；这一跑证明的是 electron-builder 把这棵树
+ * 拷进包之后它还成立。
+ */
+async function uvxSelfCheck(): Promise<void> {
+  const candidate = bundledTools
+    .launchable()
+    .find((s) => s.launch?.runtime === "uvx" && !(s.launch.requiresEnv?.length) && !s.launch.requiresBin);
+  if (!candidate) {
+    console.log("[ruyin] uvx self-check: no seeded uvx server to try");
+    return;
+  }
+  const plan = bundledTools.plan(candidate.id);
+  if (!plan.ok) throw new Error(`${candidate.id}: ${plan.reason}`);
+  const probe = await connectorRegistry.probe({ id: candidate.id, command: plan.command, args: plan.args, env: plan.env });
+  if (!probe.ok) throw new Error(`${candidate.id}: ${probe.detail ?? "did not come up"}`);
+  console.log(`[ruyin] uvx self-check: ok (${candidate.id}, ${probe.tools.length} tool(s))`);
+}
+
 // 装好的进程外连接器先起来再开门：起不来的照样登记（健康为 false），只记日志。
 await connectorRegistry.load();
 
@@ -611,6 +635,10 @@ server.listen(port, "127.0.0.1", () => {
     });
     void toolsSelfCheck().catch((cause) => {
       console.error("[ruyin] tools self-check failed:", cause);
+      process.exit(1);
+    });
+    void uvxSelfCheck().catch((cause) => {
+      console.error("[ruyin] uvx self-check failed:", cause);
       process.exit(1);
     });
   }

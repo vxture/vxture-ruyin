@@ -21,7 +21,15 @@
       "license": "MIT OR Apache-2.0",
       "licenseSource": "0.12.10 tag 上 LICENSE-MIT 与 LICENSE-APACHE 并存（2026-09-06 核）",
       "upstream": "https://github.com/astral-sh/uv/releases/download/0.12.10/uv-x86_64-pc-windows-msvc.zip",
-      "note": "uvx.exe 只是壳，离开 uv.exe 跑不了 —— 两个都装进包"
+      "note": "uvx.exe 只是壳，离开 uv.exe 跑不了 —— 两个都装进包",
+      "sha256": "f65744f94072152b1f86ba2aace4d01f1124d9a8ecb235805039e3718c36cac2",
+      "size": 16989876,
+      "checksumUpstream": "https://github.com/astral-sh/uv/releases/download/0.12.10/uv-x86_64-pc-windows-msvc.zip.sha256",
+      "checksumNote": "上游发布了 .sha256，2026-09-06 取回与实际字节逐位一致 —— 这一条不是我们自己算完就算数的孤证。",
+      "licenseFiles": [
+        "LICENSE-MIT",
+        "LICENSE-APACHE"
+      ]
     },
     "cpython": {
       "version": "3.13.15",
@@ -526,7 +534,7 @@
       "license": "MIT",
       "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
       "stars": 4156,
-      "tier": "installed-disabled",
+      "tier": "default",
       "subpath": null,
       "needsKey": false,
       "launch": {
@@ -542,7 +550,10 @@
         }
       },
       "note": "xlsx 读写：公式、格式、图表、透视。wheel 在构建时预取进随包的 uv cache，运行时 --offline 起，一个字节都不下载",
-      "launchNote": "启动契约已经落地（tool-servers.ts：随包 uv.exe 的绝对路径 + --offline + UV_CACHE_DIR / UV_PYTHON_INSTALL_DIR / UV_PYTHON_DOWNLOADS=never，不留联网回退），预取脚本也在（scripts/release/seed-uv-cache.mjs）。**但 uv、CPython 与预取好的 wheel 缓存这一次没有真的装进安装包**，所以一台干净机器上它此刻还起不来 —— 因此记为 installed-disabled 而不是 default。等这三样进了 electron-builder 且 packaged-smoke 真起过一次 uvx 形态，改这一行的 tier 即可（lint:skill-manifest 会顺带要求 offline.cacheSeeded 与 pythonRuntime.seed 对上）。TD-042。"
+      "launchNote": "启动契约已经落地（tool-servers.ts：随包 uv.exe 的绝对路径 + --offline + UV_CACHE_DIR / UV_PYTHON_INSTALL_DIR / UV_PYTHON_DOWNLOADS=never，不留联网回退），预取脚本也在（scripts/release/seed-uv-cache.mjs）。**但 uv、CPython 与预取好的 wheel 缓存这一次没有真的装进安装包**，所以一台干净机器上它此刻还起不来 —— 因此记为 installed-disabled 而不是 default。等这三样进了 electron-builder 且 packaged-smoke 真起过一次 uvx 形态，改这一行的 tier 即可（lint:skill-manifest 会顺带要求 offline.cacheSeeded 与 pythonRuntime.seed 对上）。TD-042。",
+      "offline": {
+        "cacheSeeded": true
+      }
     },
     {
       "id": "vivekvells.mcp-pandoc",
