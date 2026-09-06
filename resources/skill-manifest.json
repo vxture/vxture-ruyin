@@ -8,11 +8,10 @@
     "acquire-on-demand": "随包不带，要点一次获取（可从网络，也可从本地文件）",
     "runos-registered": "经 Runos 注册，不进本机（密钥在 Runos 保险库）"
   },
-  "$comment_allowedOrigins": "获取通道只走这份闭合白名单里的 origin。比 registry-client.ts 的「索引自己的 origin」宽一点，理由是 pandoc 与 Chrome for Testing 我们没有再分发权 —— 镜像到自己的主机本身就是再分发。不许出现凭据、鉴权头（客户端零秘密，CLAUDE.md 硬规则）。 storage.googleapis.com 是 Chrome for Testing 真正存字节的地方（2026-09-07 加）：它比前三条宽 —— 那是一个多租户对象存储，桶名之下谁都能放东西。它进名单的理由不是「这个域可信」，而是**白名单从来不是唯一的门**：真正认字节的是每条组件自己钉死的sha256，白名单只负责把请求限制在少数几个地方、并且在发请求之前就限制住。",
+  "$comment_allowedOrigins": "获取通道只走这份闭合白名单里的 origin。比 registry-client.ts 的「索引自己的 origin」宽一点，理由是 pandoc 与 Chrome for Testing 我们没有再分发权 —— 镜像到自己的主机本身就是再分发。不许出现凭据、鉴权头（客户端零秘密，CLAUDE.md 硬规则）。名单里每一条都要说得出它为谁而留：storage.googleapis.com = 唯一在用的那条（browser.chromium-headless-shell，2026-09-07 加）；github.com 与 objects.githubusercontent.com = 给 TD-042 里还没落地的 pandoc / markitdown 留的，落地之前它们没有使用者。cdn.playwright.dev 已于 2026-09-07 删除：那条组件改走直链之后它就没有使用者了，而一个白名单里留着的死条目，读起来和一条在用的一模一样 —— 名单的价值恰恰在于它短。",
   "allowedOrigins": [
     "https://github.com",
     "https://objects.githubusercontent.com",
-    "https://cdn.playwright.dev",
     "https://storage.googleapis.com"
   ],
   "$comment_pythonRuntime": "Python 半边的使能件：机器上没有 uv，侧载来的 wheel 也一样跑不了。uv 与 uv 托管的 CPython 随安装包走，运行时 UV_PYTHON_DOWNLOADS=never + uvx --offline，不留联网回退 —— 有回退，首次运行就可能悄悄偏离钉死的版本。seed 列的包在构建时预取进随包的 uv cache（scripts/release/seed-uv-cache.mjs），由 pack.mjs 断言，不是手写的承诺。",
