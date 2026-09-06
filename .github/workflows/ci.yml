@@ -52,11 +52,11 @@ jobs:
       OSV_SCANNER_VERSION: "2.4.0"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache osv-scanner binary
         id: osv-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /tmp/osv-bin
           key: osv-scanner-${{ env.OSV_SCANNER_VERSION }}-linux-amd64
@@ -96,7 +96,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # The version guardrail diffs against the newest packages-v* tag;
           # a depth-1 checkout has neither the tag nor the history.
@@ -162,10 +162,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -210,10 +210,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -261,10 +261,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -299,10 +299,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -313,7 +313,7 @@ jobs:
       # clock here; without this the job spends most of its time downloading
       # the same ~200MB every run.
       - name: Cache Electron downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/AppData/Local/electron/Cache
