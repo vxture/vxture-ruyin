@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-09-05",
+  "generatedAt": "2026-09-06",
   "$comment": "技能与工具预置清单（ADR-018 §2.3，owner 2026-09-05 定三档；§7.2 加第四档 acquire-on-demand）。每条来源仓钉死 commit；许可证是硬门槛（none 不允许）。ruyin 构建时按它拉取预置进安装包；Runos 按它注册台账（vxture-foundation/vxture-runos#14）。launch 为本机启动规格（node = 构建时 vendored 随包；uvx = 随包 uv + 随包 wheel 缓存，离线起）。components[] 是随包不带、要用户点一次才获取的载荷，摘要写在这里、随安装包同行 —— 上游若换了字节，校验不过，什么都不落地。人读版：docs/40-implementation/20-tools-skills-catalog-v1.md；预置工具名对照表：docs/40-implementation/40-bundled-tool-names.md。",
   "tiers": {
     "default": "默认启用（随包，不下载任何字节就能起）",
@@ -550,7 +550,7 @@
         }
       },
       "note": "xlsx 读写：公式、格式、图表、透视。wheel 在构建时预取进随包的 uv cache，运行时 --offline 起，一个字节都不下载",
-      "launchNote": "启动契约已经落地（tool-servers.ts：随包 uv.exe 的绝对路径 + --offline + UV_CACHE_DIR / UV_PYTHON_INSTALL_DIR / UV_PYTHON_DOWNLOADS=never，不留联网回退），预取脚本也在（scripts/release/seed-uv-cache.mjs）。**但 uv、CPython 与预取好的 wheel 缓存这一次没有真的装进安装包**，所以一台干净机器上它此刻还起不来 —— 因此记为 installed-disabled 而不是 default。等这三样进了 electron-builder 且 packaged-smoke 真起过一次 uvx 形态，改这一行的 tier 即可（lint:skill-manifest 会顺带要求 offline.cacheSeeded 与 pythonRuntime.seed 对上）。TD-042。",
+      "launchNote": "启动契约在 tool-servers.ts（随包 uv.exe 的绝对路径 + --offline + UV_CACHE_DIR / UV_PYTHON_INSTALL_DIR / UV_PYTHON_DOWNLOADS=never / UV_TOOL_DIR，不留联网回退），预取脚本是 scripts/release/seed-uv-cache.mjs。**uv、CPython 与预热好的 wheel 缓存已随包**（2026-09-06 进 electron-builder 的 extraResources），packaged-smoke 在装好的应用里真起过一次：`[pack] uvx self-check: ok (haris-musa.excel-mcp-server, 25 tool(s))` —— 所以这一行是 default。档位与「装没装进包、能不能起」是同一件事（lint:skill-manifest 第 1 条），offline.cacheSeeded 要与 pythonRuntime.seed 对上。TD-042。",
       "offline": {
         "cacheSeeded": true
       }
