@@ -34,10 +34,10 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -99,7 +99,7 @@ jobs:
         run: node packages/cli/dist/main.js registry products --out apps/shell/release/products --base-url https://dl.vxture.com/ruyin/products
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ruyin-${{ steps.meta.outputs.channel }}-${{ steps.meta.outputs.version }}
           if-no-files-found: error
@@ -123,7 +123,7 @@ jobs:
     environment: ${{ startsWith(github.ref_name, 'v') && 'production' || 'beta' }}
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ruyin-${{ needs.build-installer.outputs.channel }}-${{ needs.build-installer.outputs.version }}
           path: staged
