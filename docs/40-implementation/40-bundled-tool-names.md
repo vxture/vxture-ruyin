@@ -21,27 +21,11 @@
 
 | 服务器（连接器 id） | 档位 | 工具数 | 工具名（契约里照这个写） |
 |---|---|---|---|
-| `microsoft.playwright-mcp` | default | 24 | `browser_click`、`browser_close`、`browser_console_messages`、`browser_drag`、`browser_drop`、`browser_evaluate` ⚠️、`browser_file_upload`、`browser_fill_form`、`browser_find`、`browser_handle_dialog`、`browser_hover`、`browser_navigate`、`browser_navigate_back`、`browser_network_request`、`browser_network_requests`、`browser_press_key`、`browser_resize`、`browser_run_code_unsafe` ⚠️、`browser_select_option`、`browser_snapshot`、`browser_tabs`、`browser_take_screenshot`、`browser_type`、`browser_wait_for` |
-| `haris-musa.excel-mcp-server` | installed-disabled | — | _未探到：本次构建没有 vendored 它（runtime = uvx）_ |
-| `vivekvells.mcp-pandoc` | installed-disabled | — | _未探到：本次构建没有 vendored 它（runtime = uvx）_ |
-| `ihor-sokoliuk.mcp-searxng` | default | 4 | `searxng_instance_info`、`searxng_search_suggestions`、`searxng_web_search`、`web_url_read` |
 | `aas-ee.open-websearch` | default | 6 | `fetchCsdnArticle`、`fetchGithubReadme`、`fetchJuejinArticle`、`fetchLinuxDoArticle`、`fetchWebContent`、`search` |
-| `negokaz.excel-mcp-server` | default | 7 | `excel_copy_sheet`、`excel_create_table`、`excel_describe_sheets`、`excel_format_range`、`excel_read_sheet`、`excel_screen_capture`、`excel_write_to_sheet` |
 
 ## ⚠️ 标了的那几个：能跑任意代码
 
-这一版探到 2 个：`browser_evaluate`、`browser_run_code_unsafe`。
-
-**照登，不藏。** 对照表的职责是记录事实 —— 藏起来只会让下一个人以为自己看漏了。
-
-挡住它们的是 `packages/contract-schema/src/schema.ts` 里 `category` 的**闭合枚举**
-（只允许 local_read / local_write / query / generate / export / external_send）加上
-`additionalProperties: false`，**不是任何一条 R 规则** —— 全仓核过，R 系列里没有一条
-提到 `execute_script`（TD-005 行 2026-09-02 的机制更正）。不写清楚，契约作者会去找
-一条不存在的规则，并可能以为护栏丢了。
-
-跟进项（**本次不占用 R 编号** —— 那要改 30-contract-schema §15 的权威表）：加一条
-R 规则，拒绝 `provider: connector` 且工具名命中这份 deny 列表的声明。
+这一版没有探到这类工具名。
 
 ## 探不到的那些
 

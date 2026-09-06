@@ -366,8 +366,31 @@ async function probeToolNames(servers) {
     }
   }
   } finally {
-    rmSync(probeCwd, { recursive: true, force: true });
+    await removeWhenReleased(probeCwd);
   }
+}
+
+/**
+ * 删探针的临时工作目录 —— **要等，而且等不到也不能让构建挂掉**。
+ *
+ * Windows 上子进程的工作目录会被句柄锁住，而句柄不是随 `stop()` 同步释放的：
+ * CI 上第一次跑就撞了 `EBUSY: rmdir`，把整条 packaged-smoke 打断在「四个服务器
+ * 的工具名都已经探到了」之后 —— 探针成功了，收摊失败了，构建报失败。
+ *
+ * 所以：退避重试几次；仍然删不掉就**只警告**。它在系统临时目录里，操作系统会清；
+ * 拿一次临时目录的残留去换一次构建失败，是拿重要的东西换不重要的东西。
+ */
+async function removeWhenReleased(dir) {
+  for (const wait of [0, 50, 150, 400, 1000]) {
+    if (wait) await new Promise((done) => setTimeout(done, wait));
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (cause) {
+      if (cause?.code !== "EBUSY" && cause?.code !== "ENOTEMPTY" && cause?.code !== "EPERM") throw cause;
+    }
+  }
+  console.warn(`[pull-tools] 临时探针目录没能删掉（子进程句柄未释放），留给系统清理：${dir}`);
 }
 
 /**

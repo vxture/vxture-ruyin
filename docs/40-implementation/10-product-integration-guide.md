@@ -174,12 +174,7 @@ CI 在 `packaged-smoke` 里盯着它：pack 刚跑过 pull-tools，随后一句 
 <!-- BUNDLED-TOOLS:BEGIN -->
 | 服务器（连接器 id） | 档位 | 工具数 | 工具名（契约里照这个写） |
 |---|---|---|---|
-| `microsoft.playwright-mcp` | default | 24 | `browser_click`、`browser_close`、`browser_console_messages`、`browser_drag`、`browser_drop`、`browser_evaluate` ⚠️、`browser_file_upload`、`browser_fill_form`、`browser_find`、`browser_handle_dialog`、`browser_hover`、`browser_navigate`、`browser_navigate_back`、`browser_network_request`、`browser_network_requests`、`browser_press_key`、`browser_resize`、`browser_run_code_unsafe` ⚠️、`browser_select_option`、`browser_snapshot`、`browser_tabs`、`browser_take_screenshot`、`browser_type`、`browser_wait_for` |
-| `haris-musa.excel-mcp-server` | installed-disabled | — | _未探到：本次构建没有 vendored 它（runtime = uvx）_ |
-| `vivekvells.mcp-pandoc` | installed-disabled | — | _未探到：本次构建没有 vendored 它（runtime = uvx）_ |
-| `ihor-sokoliuk.mcp-searxng` | default | 4 | `searxng_instance_info`、`searxng_search_suggestions`、`searxng_web_search`、`web_url_read` |
 | `aas-ee.open-websearch` | default | 6 | `fetchCsdnArticle`、`fetchGithubReadme`、`fetchJuejinArticle`、`fetchLinuxDoArticle`、`fetchWebContent`、`search` |
-| `negokaz.excel-mcp-server` | default | 7 | `excel_copy_sheet`、`excel_create_table`、`excel_describe_sheets`、`excel_format_range`、`excel_read_sheet`、`excel_screen_capture`、`excel_write_to_sheet` |
 <!-- BUNDLED-TOOLS:END -->
 
 需要先获取载荷才能起的服务器，用户在「能力平台」里点一次「获取」（或从本地文件导入）；
