@@ -22,7 +22,7 @@
 | [ADR-016](ADR-016-document-wire-format.md) | 结构化文档：上线格式是 Markdown，内部表示是 mdast，来源按路径给 | 已接受 | 2026-09-01 |
 | [ADR-017](ADR-017-pdf-rendering-lives-in-the-shell.md) | PDF 由壳里的 Chromium 渲染，字节回到守护进程落盘 | 已接受 | 2026-09-01 |
 | [ADR-018](ADR-018-skill-registry.md) | 技能与工具：外部获取 + Runos 产品分发四层来源、拉到本机可运行、随发布预置；格式对齐 Agent Skills 与 MCP；候选清单见 40-implementation/20 | 已接受 | 2026-09-05 |
-| [ADR-019](ADR-019-harness-strategy.md) | Harness 走向：内核保留、在接缝处引入生态；约束 D 改为条件约束；DeepSeek Harness 两周探针已批准（2026-09-06 → 2026-09-19），换不换由探针定 | 已接受 | 2026-09-05 |
+| [ADR-019](ADR-019-harness-strategy.md) | Harness 走向：**内核保留，不换成 DeepSeek Harness**（探针 2026-09-06 结案：判据 C7 硬底线不可绕在 dsh 里不成立）；广度按 ADR-018 从接缝引入；约束 D 回到原样 | 已接受 | 2026-09-05 |
 | [ADR-020](ADR-020-two-capability-planes.md) | 两个能力提供平台：Runos（云端商业能力面，分发与承载）与 Ruyin（本地执行环境）—— 机制对照、接线与对 ADR-018 的修正 | 已接受 | 2026-09-05 |
 
 后续候选（定稿时立 ADR）：Electron vs Tauri（60 §5.1）、
