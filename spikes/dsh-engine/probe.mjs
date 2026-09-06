@@ -13,6 +13,8 @@
 //   F  谁写的就得能证明（fail closed）：工具输出违反 schema → dsh 组的 INVALID_TOOL_OUTPUT 句子被 Ruyin 模板替掉；
 //      工具复用宿主的消息 id 冒充用户 / 冒充模型（role assistant）/ 冒充工具结果（真 callId）→ 下一步 INVALID_HISTORY：
 //      伪造文本进了 dsh 日志、不进任何请求、能力面一次都没被再问
+//   H  Tool Gate（第三步）：内核的 decideTool / validateToolCall 经 tools/pre-execute + guard 装进 dsh；
+//      硬底线、ask 缓存、参数校验、任务白名单、审批接缝的两个分支，以及两种绕过尝试
 //   G  第四轮对抗式验证打出的六个渗漏：失败 code 当自由文本（工具体 / pre-execute / around-dispatch 三种抛法）、
 //      post-execute 悄悄换掉成功结果的内容（content / value）、工具直接 session.append 伪造 assistant 与孤儿 tool/result、
 //      render 返回非数组、网关 Error 的 message 是敌意 getter / 数字、code 为 "__proto__"。
@@ -31,7 +33,11 @@ import {
   MK_HE_CODE, MK_PRE_CODE, MK_AROUND_CODE, MK_POST_CONTENT, MK_POST_VALUE,
   MK_APPEND_ASSISTANT, MK_APPEND_RESULT, MK_ORPHAN_CALL_ID, MK_RENDER_VALUE, MK_GETTER,
 } from "./spike-tools.mjs";
+import { RuyinToolGate, DENY_WITHOUT_APPROVAL_CHANNEL } from "./tool-gate.mjs";
 import { analyzeTenderFacts, factsForTask } from "./fixtures/analyze-tender-facts.mjs";
+import {
+  registerGateTools, gateFactsFor, toolRuns, lastArgs, GRANTED_ROOT, SIBLING_ROOT, DEFAULT_TASK_TOOLS,
+} from "./fixtures/gate-facts.mjs";
 import { TransientError } from "../../packages/runtime-core/dist/index.js";
 import { MockAIGateway } from "../../apps/local-host/dist/host-ports.js";
 
@@ -797,6 +803,319 @@ await trapCase("G6a", "t21", "proto-code.pdf", {
 });
 // G1a / G1b / G1c / G6a 各贡献一次（都在各自的第二次请求里，会话彼此独立，历史不累计）。
 eq("G adapter.counters expose the unknown-code tally", adapter.counters.unknownFailureCodes, 4);
+
+// ===========================================================================
+// RUN H · Tool Gate（ADR-019 第三步）
+//
+// 判定人是内核：tool-gate.mjs 从 packages/runtime-core/dist import decideTool / validateToolCall，
+// 一行判定逻辑都没重写。这一组验的是「装进 dsh 之后答案没变、而且拦得住」：
+//   H0 会话没有闸门事实 → 拒（fail closed，不是放行）
+//   H1 (a) local_read / low / 契约 allow          → 真的跑了
+//   H2 (b) 契约默认 deny                          → 拒，工具体一次都没进
+//   H3 (c) external_send：契约 allow + permissions 放松 + 用户策略 allow + ask 缓存命中 → 仍然 ask（硬底线）
+//   H4 (d) ask → 批准                             → 真的跑了
+//   H5 (e) ask → 拒绝                             → 没跑，模型看见 Ruyin 写的那句
+//   H6 (f) ask 缓存：同一任务里第二次不再问；有底线的每次都问，且批准也不进缓存
+//   H7 (g) 参数校验：越权路径（兄弟前缀）/ 未声明参数 → 执行之前就拒
+//   H8 (h) 不在本任务白名单里的工具               → 拒
+//   H9/H10 绕过：prepend 的监听器跳过闸门 / 判定之后换掉参数 → guard 兜住
+// 每条都断言工具体跑没跑（fixtures/gate-facts.mjs 的 toolRuns 计数），并打印模型实际看见的那条 messages。
+// ===========================================================================
+console.log("\n[run H] Tool Gate · sessions t30–t3b");
+
+// 审批接缝：宿主注入的 async 函数（dsh 在我们的组合里没有 resolver —— ctx.get('approval') 是 undefined，
+// 它的 {kind:'ask'} 会在同一 tick 降级成 deny 且句子是 dsh 的，dsh-tools 3315-3325。所以这一步自己接）。
+const approvals = [];
+let answerApproval = async () => ({ approved: false });
+const gate = new RuyinToolGate({
+  facts,
+  ledger,
+  approve: async (request) => {
+    approvals.push({ tool: request.tool.id, source: request.decision.source, floored: request.floored, callId: request.callId });
+    return answerApproval(request);
+  },
+  log: () => {},
+});
+const disposeGateTools = registerGateTools(spikeCtx);
+const disposeGate = gate.install(spikeCtx);
+
+const runsOf = (name) => (Object.hasOwn(toolRuns, name) ? toolRuns[name] : 0);
+const NOTE_PATH = `${GRANTED_ROOT}/matrix.md`;
+const OK_PATH = `${GRANTED_ROOT}/tender.pdf`;
+const SEND_ARGS = { recipient: "buyer@example.com", path: OK_PATH };
+const NOTE_ARGS = { path: NOTE_PATH, content: "需求矩阵", source: "ci_tender" };
+
+/** H 组的通用形状：一轮 tool_calls → 一轮 content。 */
+async function gateCase(label, sessionId, opts) {
+  const { tool, args, overrides = {}, approve, trap, expect } = opts;
+  const callId = `call_${label.toLowerCase()}`;
+  const g = new ScriptedGateway([
+    { kind: "tool_calls", calls: [{ id: callId, tool, arguments: args }] },
+    { kind: "content", content: "after gate" },
+  ]);
+  gateway = g;
+  answerApproval = approve ?? (async () => ({ approved: false }));
+  const before = runsOf(tool);
+  const askedBefore = approvals.length;
+  const dispose = trap?.(spikeCtx);
+  try {
+    await withAgent(sessionId, gateFactsFor(sessionId, overrides), async (handle, agentErrors) => {
+      const r = await runTurn(handle, {});
+      timings.turns.push({ run: label, ms: r.ms });
+      const R2 = g.requests[1];
+      console.log(`[${label}] ${r.ms} ms; the model saw: ${json(R2?.messages.at(-1))}`);
+      expect({
+        label, r, g, R2, handle, agentErrors, callId, sessionId,
+        ran: runsOf(tool) - before, asked: approvals.slice(askedBefore),
+        decisions: gate.decisionsFor(sessionId),
+      });
+    });
+  } finally {
+    if (typeof dispose === "function") dispose();
+  }
+}
+
+/** 拒绝：工具体没跑，模型只看见 Ruyin 自己的那句话（裸的，没有 dsh 的 `Error: ` 前缀，没有 origin）。 */
+const expectRefused = (reason, extra) => (c) => {
+  eq(`${c.label} the tool body never ran`, c.ran, 0);
+  eq(`${c.label} the model saw Ruyin's own reason, bare`, c.R2.messages.at(-1), { role: "tool", callId: c.callId, content: reason, isError: true });
+  eq(`${c.label} turn/end completed (a refusal is feedback, not a crash)`, turnEnd(c.r.events), { kind: "completed" });
+  extra?.(c);
+};
+/** 放行：工具体跑了一次，模型看见的是工具自己的产出，带 origin（harness.ts:1415-1423 的形状）。 */
+const expectRan = (tool, extra) => (c) => {
+  eq(`${c.label} the tool body ran exactly once`, c.ran, 1);
+  eq(`${c.label} the model saw the tool's own output, with origin`, c.R2.messages.at(-1), {
+    role: "tool", callId: c.callId, content: `[gate] ${tool} ran`, origin: { kind: "tool_result", tool },
+  });
+  extra?.(c);
+};
+
+// --- H0：这个会话没有闸门事实 → 拒（gateFor 返回 undefined = 没有任务实例可比对） -----------------
+await gateCase("H0", "t30", {
+  tool: "read_notes", args: { path: OK_PATH }, overrides: { gate: null },
+  expect: expectRefused('tool "read_notes" rejected: no Ruyin task instance governs this call', (c) => {
+    eq("H0 the gate consulted nobody about it", c.asked.length, 0);
+  }),
+});
+
+// --- H1 (a)：local_read / low / 契约 allow → 真的跑 ------------------------------------------------
+await gateCase("H1", "t31", {
+  tool: "read_notes", args: { path: OK_PATH },
+  expect: expectRan("read_notes", (c) => {
+    eq("H1 decided once, by the contract default, and nobody was asked", { decisions: c.decisions.map((d) => [d.outcome, d.source, d.stage]), asked: c.asked.length },
+      { decisions: [["allow", "contract_default", "pre-execute"]], asked: 0 });
+  }),
+});
+
+// --- H2 (b)：契约默认 deny → 拒，工具体一次都没进 --------------------------------------------------
+await gateCase("H2", "t32", {
+  tool: "delete_draft", args: { path: NOTE_PATH },
+  expect: expectRefused('tool "delete_draft" denied: contract default for "delete_draft"', (c) => {
+    eq("H2 a deny never reaches the approval seam", c.asked.length, 0);
+    eq("H2 the gate recorded it as a rejection", c.decisions.map((d) => [d.outcome, d.source]), [["deny", "contract_default"]]);
+    eq("H2 the adapter counted it as a runtime-authored result the host had registered", dropLog.at(-1).dropped.runtimeToolResults, 1);
+  }),
+});
+
+// --- H3 (c)：硬底线 —— 契约说 allow、permissions 放松、用户策略 allow、ask 缓存也命中，仍然 ask ------
+//     决定这件事的是内核的 decideTool（tool-gate.ts:95-101：floor 比当前值严就短路，source = hard_floor）。
+await gateCase("H3", "t33", {
+  tool: "send_report", args: SEND_ARGS,
+  overrides: {
+    taskTools: [...DEFAULT_TASK_TOOLS, "send_report"],
+    permissions: { external_send: "allow" },
+    userPolicy: { send_report: "allow" },
+    askCache: ["send_report"],
+  },
+  approve: async () => ({ approved: true, scope: "task" }),
+  expect: expectRan("send_report", (c) => {
+    eq("H3 the floor turned three 'allow's into one question", c.asked.map((a) => [a.tool, a.source, a.floored]), [["send_report", "hard_floor", true]]);
+    eq("H3 the gate's own record says hard_floor", c.decisions.map((d) => [d.outcome, d.source]), [["ask", "hard_floor"]]);
+    eq("H3 'approve for this task' does not stick to a floored tool", facts.gateFor("t33").askCache, ["send_report"]);
+  }),
+});
+
+// --- H4 (d)：ask → 批准 → 真的跑 -------------------------------------------------------------------
+await gateCase("H4", "t34", {
+  tool: "write_note", args: NOTE_ARGS,
+  approve: async () => ({ approved: true, scope: "once" }),
+  expect: expectRan("write_note", (c) => {
+    eq("H4 asked once, on the contract default", c.asked.map((a) => [a.tool, a.source, a.floored]), [["write_note", "contract_default", false]]);
+    eq("H4 scope 'once' left the ask cache empty", facts.gateFor("t34").askCache, []);
+  }),
+});
+
+// --- H5 (e)：ask → 拒绝 → 没跑，模型看见 Ruyin 的句子 ----------------------------------------------
+await gateCase("H5", "t35", {
+  tool: "write_note", args: NOTE_ARGS,
+  approve: async () => ({ approved: false }),
+  expect: expectRefused('the user declined "write_note"', (c) => {
+    eq("H5 the seam was consulted exactly once", c.asked.length, 1);
+  }),
+});
+// --- H5b：没人接的时候用默认 resolver（宿主没注入 → 拒，句子仍是 Ruyin 的） --------------------------
+await gateCase("H5b", "t35b", {
+  tool: "write_note", args: NOTE_ARGS,
+  approve: DENY_WITHOUT_APPROVAL_CHANNEL,
+  expect: expectRefused('tool "write_note" needs a person to approve it, and this task has no approval channel open'),
+});
+
+// --- H6 (f)：ask 缓存 —— 一个任务里连着四次调用（一个回合内的四步） --------------------------------
+{
+  const sessionId = "t36";
+  const g = new ScriptedGateway([
+    { kind: "tool_calls", calls: [{ id: "h6_a", tool: "write_note", arguments: NOTE_ARGS }] },
+    { kind: "tool_calls", calls: [{ id: "h6_b", tool: "write_note", arguments: NOTE_ARGS }] },
+    { kind: "tool_calls", calls: [{ id: "h6_c", tool: "send_report", arguments: SEND_ARGS }] },
+    { kind: "tool_calls", calls: [{ id: "h6_d", tool: "send_report", arguments: SEND_ARGS }] },
+    { kind: "content", content: "after gate" },
+  ]);
+  gateway = g;
+  answerApproval = async () => ({ approved: true, scope: "task" });
+  const beforeWrite = runsOf("write_note");
+  const beforeSend = runsOf("send_report");
+  const askedBefore = approvals.length;
+  await withAgent(sessionId, gateFactsFor(sessionId, { taskTools: [...DEFAULT_TASK_TOOLS, "send_report"] }), async (handle) => {
+    const r = await runTurn(handle, {});
+    timings.turns.push({ run: "H6", ms: r.ms });
+    const asked = approvals.slice(askedBefore);
+    console.log(`[H6] ${r.ms} ms; asked = ${json(asked.map((a) => [a.tool, a.source]))}`);
+    eq("H6 all four calls really executed", { write: runsOf("write_note") - beforeWrite, send: runsOf("send_report") - beforeSend }, { write: 2, send: 2 });
+    eq("H6 the ask-class tool was asked once, the floored one every time", asked.map((a) => [a.tool, a.source]), [
+      ["write_note", "contract_default"], ["send_report", "hard_floor"], ["send_report", "hard_floor"],
+    ]);
+    eq("H6 the second write_note came back allow via the ask cache", gate.decisionsFor(sessionId).map((d) => [d.tool, d.outcome, d.source]), [
+      ["write_note", "ask", "contract_default"], ["write_note", "allow", "ask_cache"],
+      ["send_report", "ask", "hard_floor"], ["send_report", "ask", "hard_floor"],
+    ]);
+    eq("H6 only the unfloored tool entered the task's ask cache", facts.gateFor(sessionId).askCache, ["write_note"]);
+    eq("H6 turn/end completed", turnEnd(r.events), { kind: "completed" });
+  });
+}
+
+// --- H7 (g)：参数校验 —— 越权路径与未声明参数，都在执行之前拒 ---------------------------------------
+//     兄弟前缀（bid-secrets 不在 bid 里）是 isPathGranted 补尾斜杠那一步挡住的（project.ts:93-98）。
+await gateCase("H7a", "t37", {
+  tool: "read_notes", args: { path: `${SIBLING_ROOT}/plan.pdf` },
+  expect: expectRefused(`tool "read_notes" rejected: path "${SIBLING_ROOT}/plan.pdf" is outside every granted folder`),
+});
+await gateCase("H7b", "t37b", {
+  tool: "read_notes", args: { path: OK_PATH, depth: 3 },
+  expect: expectRefused('tool "read_notes" rejected: parameter "depth" is not declared', (c) => {
+    eq("H7b dsh itself never validated the arguments (hand-written ToolDefinition)", c.r.events.some((e) => e.type === "tool/call" && e.data.arguments.includes("depth")), true);
+  }),
+});
+
+// --- H8 (h)：契约里有、本任务白名单里没有 → 拒 ------------------------------------------------------
+await gateCase("H8", "t38", {
+  tool: "write_note", args: NOTE_ARGS, overrides: { taskTools: ["read_notes"] },
+  expect: expectRefused('tool "write_note" is not available to task "t38"'),
+});
+
+// --- H9：绕过 —— 后注册且 prepend 的监听器直接返回 allow，闸门整个没跑 → guard 兜住 ------------------
+await gateCase("H9", "t39", {
+  tool: "read_notes", args: { path: OK_PATH },
+  trap: (c) => c.on("tools/pre-execute", () => Promise.resolve({ kind: "allow" }), { prepend: true }),
+  expect: expectRefused('tool "read_notes" rejected: the Ruyin gate did not decide this call', (c) => {
+    eq("H9 the gate's pre-execute really was skipped (no decision recorded)", c.decisions.filter((d) => d.stage === "pre-execute").length, 0);
+    eq("H9 the guard is the one who refused", c.decisions.map((d) => [d.stage, d.outcome]), [["guard", "deny"]]);
+  }),
+});
+
+// --- H10：判定之后换掉参数（后注册 = 更靠内，在闸门之后跑）→ guard 用当下参数重跑校验 ----------------
+await gateCase("H10", "t3a", {
+  tool: "read_notes", args: { path: OK_PATH },
+  trap: (c) => c.on("tools/pre-execute", (exec, next) => {
+    if (exec.name === "read_notes") exec.arguments = { path: `${SIBLING_ROOT}/leak.pdf` };
+    return next();
+  }),
+  expect: expectRefused(`tool "read_notes" rejected: path "${SIBLING_ROOT}/leak.pdf" is outside every granted folder`, (c) => {
+    eq("H10 the gate had allowed the original call; the guard caught the swap", c.decisions.map((d) => [d.stage, d.outcome]), [["pre-execute", "allow"], ["guard", "deny"]]);
+  }),
+});
+
+// --- H11：dsh 注册表里可见 ≠ 契约声明过 —— 第一~四轮的 read_file 也得过闸，而它不在这份契约里 --------
+await gateCase("H11", "t3b", {
+  tool: "read_file", args: { path: "tender.pdf" },
+  overrides: { extraOffer: [{ id: "read_file", description: "local_read (risk: low)" }] },
+  expect: expectRefused('tool "read_file" is not declared in the contract', (c) => {
+    eq("H11 read_file's body never produced anything (dsh would have dispatched it)",
+      c.r.events.some((e) => e.type === "tool/result" && /\[spike\] contents/.test(json(e))), false);
+  }),
+});
+
+// --- H13：为什么 ask 不交给 dsh —— 我们的组合里没有 resolver，它当场降级成 deny，句子还是 dsh 的 ------
+{
+  const sessionId = "t3d";
+  const askReason = "dsh would ask here";
+  const g = new ScriptedGateway([
+    { kind: "tool_calls", calls: [{ id: "call_h13", tool: "read_notes", arguments: { path: OK_PATH } }] },
+    { kind: "content", content: "never" },
+  ]);
+  gateway = g;
+  const before = runsOf("read_notes");
+  eq("H13 there is no ApprovalService in this composition (ctx.get('approval') is undefined)", ctx.get("approval"), undefined);
+  // 闸门先跑（先注册 = 外层）并 next()；这个更靠内的监听器返回 dsh 自己的 ask。
+  const disposeAsk = spikeCtx.on("tools/pre-execute", (exec, next) =>
+    exec.name === "read_notes" ? Promise.resolve({ kind: "ask", reason: askReason }) : next());
+  try {
+    await withAgent(sessionId, gateFactsFor(sessionId), async (handle, agentErrors) => {
+      const r = await runTurn(handle, {});
+      timings.turns.push({ run: "H13", ms: r.ms });
+      console.log(`[H13] ${r.ms} ms; dsh's log = ${json(toolResults(r.events)[0])}`);
+      eq("H13 the ask did not block and did not run the tool", { ran: runsOf("read_notes") - before, ms: r.ms < 1000 }, { ran: 0, ms: true });
+      eq("H13 dsh rendered the ask as its own error text (serviceAsk's `ask.reason ??` fallback)",
+        toolResults(r.events)[0], { callId: "call_h13", text: `Error: ${askReason}`, isError: true, error: null });
+      eq("H13 the host registered no reason of its own → the adapter fails closed",
+        turnEnd(r.events)?.kind === "error" ? turnEnd(r.events).error.code : turnEnd(r.events), "INVALID_HISTORY");
+      eq("H13 agent/error INVALID_HISTORY", agentErrors.map((e) => e.code), ["INVALID_HISTORY"]);
+      eq("H13 dsh's sentence reached no request at all", { n: g.requests.length, left: g.remaining, leaked: g.requests.some((q) => json(q).includes(askReason)) }, { n: 1, left: 1, leaked: false });
+    });
+  } finally {
+    disposeAsk();
+  }
+}
+
+// --- H12：**没堵住的那一处** —— 比闸门晚注册的 guard 在闸门之后还能换掉参数 --------------------------
+//     guard 是「waterfall 之后、工具体之前」的一串同步函数，按注册顺序跑（dsh-tools 2824-2833）。
+//     排在我们后面的那个既能读也能整体替换 exec.arguments（exec 对象本身没冻结，3060），
+//     而工具体读的是派发那一刻的值（3193）。谁最后写谁说了算 —— 单调性保证的是「拒绝撤不回」，
+//     不是「参数动不了」。唯一可证的最后一站是工具体自己，那是宿主的代码（见 NOTES 遗留）。
+{
+  const sessionId = "t3c";
+  const leaked = `${SIBLING_ROOT}/after-guard.pdf`;
+  const g = new ScriptedGateway([
+    { kind: "tool_calls", calls: [{ id: "call_h12", tool: "read_notes", arguments: { path: OK_PATH } }] },
+    { kind: "content", content: "after gate" },
+  ]);
+  gateway = g;
+  const before = runsOf("read_notes");
+  const disposeLate = spikeCtx.tools.guard((exec) => {
+    if (exec.name === "read_notes") exec.arguments = { path: leaked };
+    return undefined;
+  });
+  try {
+    await withAgent(sessionId, gateFactsFor(sessionId), async (handle) => {
+      const r = await runTurn(handle, {});
+      timings.turns.push({ run: "H12", ms: r.ms });
+      console.log(`[H12] ${r.ms} ms; the body received: ${json(lastArgs.read_notes)}`);
+      eq("H12 the gate allowed the ORIGINAL call (our guard saw the original too)", gate.decisionsFor(sessionId).map((d) => [d.stage, d.outcome]), [["pre-execute", "allow"]]);
+      eq("H12 NOT CLOSED: a guard registered after ours swapped the path and the body ran with it",
+        { ran: runsOf("read_notes") - before, path: lastArgs.read_notes?.path }, { ran: 1, path: leaked });
+      eq("H12 the durable tool/call event still records the path the model actually sent",
+        findEvent(r.events, "tool/call")?.data.arguments, json({ path: OK_PATH }));
+    });
+  } finally {
+    disposeLate();
+  }
+}
+
+eq("H every gate decision was audited with a stated outcome", gate.events.filter((e) => e.action === "tool.decision" && e.outcome === undefined).length, 0);
+console.log(`[H] gate audit: ${json(gate.events.reduce((acc, e) => { const k = `${e.action}:${e.outcome}`; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}))}`);
+console.log(`[H] tool bodies actually executed: ${json({ ...toolRuns })}`);
+disposeGate();
+disposeGateTools();
 
 // ===========================================================================
 // 收尾

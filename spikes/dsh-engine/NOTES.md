@@ -358,3 +358,75 @@ day-1 读的 `eventsSnapshot` 是私有缓存字段）。
   这是删除不是注入、不违反 ADR-011，但会对能力面隐藏历史，本轮不构造也不修；
   ③ 工具定义自带的 `finalizeContent`（dsh-tools 3063/3089/3276）是工具作者自己的改写，指纹对比会把它误判成 runtime → fail closed，
   本组合的 read_file 没有声明它，接入时若要用得给账本一个"这是工具自己的最终化"的旁路。
+
+## 2026-09-06 · Tool Gate（第三步；`node probe.mjs` 全绿 276 条断言，`node --test *.test.mjs` 103/103）
+
+判定人还是内核。`tool-gate.mjs` 从 `packages/runtime-core/dist/index.js` 原样 import `decideTool` /
+`validateToolCall`（外加 `folderGrants` / `isSkillTool` / `SKILL_TOOLS` / `OUTCOME_MUST_BE_STATED`），
+一行判定逻辑都没重写 —— 重写一遍，"dsh 版闸门与内核闸门是同一个答案"就成了两份代码的巧合。
+
+- **哪个钩子担什么**
+  - `tools/pre-execute`（瀑布）：真正的判定。顺序与 `harness.gateCalls` 逐行对齐（harness.ts:1276-1356）——
+    未知工具 → 不在本任务白名单 → `decideTool` → deny → `validateToolCall` → invalid → allow / ask。
+    校验在问人**之前**（harness.ts:1329-1332）：非法调用不摆到人面前。
+  - `ctx.tools.guard()`（单调，只能拒）：不可绕过的复核，做三件事——① 没有闸门戳记的调用一律拒
+    （= pre-execute 被绕过了）；② 工具名被改过就拒；③ **用当下的 `exec.arguments` 再跑一遍
+    `validateToolCall`**，然后再比参数指纹（合法但不是被判定过的那一次也拒）。
+    戳记是 `WeakMap<exec, …>`：按对象身份记，伪造不出来。
+  - 为什么校验两处都跑：只放 guard 会把顺序颠倒（guard 在审批之后才跑，人会被问一个本来就该拒的调用）；
+    只放 pre-execute 则可被绕过（后注册且 `prepend:true` 的监听器排在前面、不调 `next()`；
+    外层监听器还能 `await next()` 看到 deny 再返回 allow，cordis 317-321/336）。探针 H9 打的就是这一枪。
+- **事实来源**：宿主侧的 `TaskFactsProvider`（`task-facts.mjs` 的 `gateFor` / `factsFor` / `rememberAsk`），
+  不另起存储。字段与内核在 gateCalls 里用的东西一一对应：contract.tools / permissions / 任务白名单 /
+  grants / contextSet / userPolicy / askCache。`gateFor` 返回 undefined = 这个会话没有任务实例可比对 → **拒**（H0）。
+- **硬底线不抄键集**。内核在 harness.ts:745-754 复制了一份 `category === 'external_send'`，两处得同步改。
+  这里改成反过来问 `decideTool`：把每一层都放到最松（default allow + permissions 全 allow + userPolicy allow +
+  askCache 命中），还回不到 allow 的就是有底线的类别（`source === 'hard_floor'`）。底线清单以后长了，这里不用改。
+- **ask 接缝：dsh 在我们的组合里没有 resolver，这是实测的**（H13：`ctx.get('approval')` 是 undefined）。
+  dsh 的 `{kind:'ask'}` 会走 `serviceAsk` 当场降级成 deny，句子取 `ask.reason ?? 'tool "X" requires approval
+  (not yet supported)'`（dsh-tools 3315-3325）—— 不阻塞、不超时、**措辞是 dsh 的**；账本里没有宿主登记过的理由，
+  适配器按第三轮的纪律 fail closed（INVALID_HISTORY），一个字也没进请求。官方 `@deepseek-ai/dsh-user-approval`
+  0.1.2-rc.1 只在 .pnpm 仓里（dsh-tools 的 peer，根目录没链），而且它唯一的"批准"是 `allowed-once`、
+  拒绝句是 dsh 写的（`the user rejected tool "X"`）—— 两条都对不上我们的模型。
+  **所以 ask 由插件自己接**：pre-execute 里 `await` 一个宿主注入的 async resolver
+  （`{approved, scope?: 'once'|'task', reason?}`），默认拒、句子是 Ruyin 的（`DENY_WITHOUT_APPROVAL_CHANNEL`）。
+  批准 → `next()`（H3/H4 工具体真的跑了）；拒绝 → `{kind:'deny'}`，缺省用内核那句 `the user declined "X"`（H5）；
+  resolver 自己抛 → 拒，且不转发它抛出来的话。`scope:'task'` 写进 askCache，**有底线的工具永不进**
+  （H6：write_note 只问一次，send_report 每次都问，批准了也不进缓存）。
+- **措辞纪律没有放松**（ADR-011，第三~四轮）：每一句拒绝都是 Ruyin 自己的（四句与内核 harness.ts:1288/1307/1329/1341
+  一字不差，另三句是 dsh 才可能出现的情形），交给 dsh 之前先 `ledger.noteHostDenial` —— dsh 会渲染成
+  `Error: ${reason}`，适配器只转发账本里宿主登记过的那一句、并且是裸的、没有 origin。登记不了（无会话 / 无 callId）
+  就不登记，那种结果适配器读到照样 INVALID_HISTORY。
+- **审计雏形**：`tool.requested` → `tool.decision`（形状与 harness.ts:1296-1353 相同，参数只记键名不记值），
+  并把 `OUTCOME_MUST_BE_STATED`（audit.ts:55-63）的护栏一起搬过来：结果不定的事件不自报结果就当场抛。
+  哈希链与 `tool.executed` 是第四步（`tools/result`）的事，这一步没做。
+- **C5 能说什么、不能说什么**。内核的 C5 是"恢复后副作用不重复（journal-before-write）"，不是闸门那条；
+  闸门那两条是 C2（同契约默认 + 同用户策略 → 决策一致）与 C7（硬底线任何配置下不可绕过）。
+  - C7 形状：**过了**。H3 把契约 allow + `permissions.external_send` 放松成 allow + 用户策略 allow + askCache 命中
+    四层全放松，仍然 ask，`source = hard_floor`；单测把 C7 的组合又跑了一遍。
+  - C2 形状：**过了**，而且是同义反复意义上的过——判定就是内核那个纯函数，输入同样来自契约事实。
+  - C5 本身：**今天不能声称**。探针没有 journal、没有 store、没有 `recover()`；而且 ask 是在 pre-execute 里
+    `await` 住的（进程死了就没了），内核那边是把整批 `pendingToolCalls` 落盘、转 `waiting_human`、
+    重启后仍可回答。要谈 C5 得先有第六步的 `HarnessDeps` 门面。
+- **没堵住的（H12，有断言为证）**：比闸门**晚注册的 guard**，在闸门的三项复核之后仍然能整体替换
+  `exec.arguments`，工具体拿到的就是被换过的那一份（探针里 `read_notes` 真的收到了 `bid-secrets/...` 的路径）。
+  guard 的单调性保证的是"拒绝撤不回"，不是"参数动不了"（`exec` 对象本身没冻结，只有 arguments 被 deepFreeze，
+  dsh-tools 3060 vs 3193）。唯一能证伪的最后一站是工具体自己——那是宿主的代码，接入时要不要在每个工具体开头
+  再断言一次 `validateToolCall`，是一个待定的取舍（重复一遍校验，且要定"以哪一次为审计口径"）。
+  另注：循环在闸门**之前**就把原参数写进了 `tool/call` 事件（agent-loop 193-195），所以日志与实际执行会不一致——
+  H12 断言了这个不一致本身。
+- **一处与内核不同、但更像是内核的问题**：内核在「一批里只要有一个要问人」时，会把这批里**放行的调用与拒绝的
+  消息一起丢掉**，只把 needsApproval 落盘（harness.ts:1097-1114 对 976-1002），于是 assistant 的 toolCalls 有 id、
+  没有配对的 tool 结果。dsh 是逐个调用派发的，闸门也是逐个判定 + 逐个问，所以每个调用都有自己的结果 ——
+  本轮没有复现内核那个行为（组合里 `maxParallelToolCalls: 1`，也没造多调用的一批）。哪边是对的要 ADR 定。
+- 新文件：`tool-gate.mjs`（插件 + 纯函数 `gateCall` / `isFlooredTool` / `findGateTool`）、
+  `tool-gate.test.mjs`（36 条）、`fixtures/gate-facts.mjs`（六个工具，category/risk/default 与
+  `products/bidproposal/ruyin.product.yaml:129-186` 一一对应，只是改了名——同一棵启动树上还挂着第一~四轮的
+  `read_file`；另加一个合成的 external_send 工具，与 conformance C7 用合成工具的理由相同）。
+  `task-facts.mjs` 扩了 `GateFacts` 与 `gateFor` / `rememberAsk`（askCache 按会话深拷贝：它是会话内会变的状态）。
+- 探针 H 组（真启动树，闸门只在 H 组期间装、跑完注销，A–G 一行没动）：H0 无闸门事实 fail closed /
+  H1 allow 真跑 / H2 契约 deny 不跑 / H3 硬底线 / H4 批准 / H5 拒绝 / H5b 默认无审批通道 / H6 ask 缓存 /
+  H7a 兄弟前缀路径 / H7b 未声明参数 / H8 不在任务白名单 / H9 prepend 绕过 → guard 兜住 /
+  H10 判定后换参数 → guard 兜住 / H11 dsh 注册表里可见但契约没声明（第一~四轮的 read_file）/
+  H12 晚注册 guard 换参数（**没堵住**）/ H13 dsh 自己的 ask 降级。
+- 度量（本次）：boot 161 ms；RSS 结束 95 MB；H 组每例 2–5 ms；全局 session/event 40 个会话 1005 个事件。

@@ -19,11 +19,42 @@
  * @property {Array<{id:string,description?:string}>} tools  与 harness.toolOffers 同形（harness.ts:1189）
  * @property {Array<{name:string,description:string}>=} skills
  * @property {{round:number,failures:Array<{rule:string,reason:string}>}=} revision
+ * @property {GateFacts=} gate  Tool Gate 的输入（第三步）。没有它 = 这个会话不受闸门管辖，闸门 fail closed。
+ */
+
+/**
+ * Tool Gate 要的那几样，全部来自内核在 harness.gateCalls 里已经在用的东西
+ * （harness.ts:1264-1345）——这里只是把「谁来提供」换成宿主侧的 provider，字段一一对应：
+ *
+ *   tools       contract.tools（Tool 记录，含 input_schema —— 契约类型里它是必填：
+ *               「闸门校验不了的工具就是它放不过的工具」，contract-schema/src/types.ts:131）
+ *   permissions contract.permissions（5 个 PermissionValue）
+ *   taskTools   instance.definition.tools —— 任务级白名单，在 decideTool 之前查（harness.ts:1313-1319）
+ *   grants      store.getGrants() 的结果，原样（含连接器授权；folderGrants() 负责筛）
+ *   contextSet  instance.contextSet（ContextItemMeta[]），x-ruyin-ref: context_item 的上限
+ *   userPolicy  工作区用户策略。内核今天没有存储，harness 恒传 undefined（harness.ts:1321-1328）；
+ *               这一层在 decideTool 里是真的，探针用它测「用户放松也压不过硬底线」
+ *   askCache    instance.askCache —— 任务内的「这一轮不用再问」，只在 approve + scope:'task' 时写，
+ *               且硬底线类别的工具永不进（harness.ts:745-754）
+ *
+ * @typedef {object} GateFacts
+ * @property {Array<object>} tools
+ * @property {object} permissions
+ * @property {string[]} taskTools
+ * @property {Array<object>} grants
+ * @property {Array<object>} contextSet
+ * @property {Record<string, 'allow'|'ask'|'deny'>=} userPolicy
+ * @property {string[]} askCache
  */
 
 /**
  * @typedef {object} TaskFactsProvider
  * @property {(sessionId: string) => TaskFacts | undefined} factsFor
+ * @property {(sessionId: string) => GateFacts | undefined} gateFor
+ *   Tool Gate 的输入。返回 undefined = 这个会话没有任务实例可比对，闸门必须拒绝（不是放行）。
+ * @property {(sessionId: string, toolId: string) => boolean} rememberAsk
+ *   把一个工具记进本任务的 ask 缓存（= 内核 approve + scope:'task' 那一步，harness.ts:745-754）。
+ *   调用方负责先把硬底线类别的工具剔掉 —— 内核也是在调用点剔的。
  * @property {(sessionId: string, message: { id: string, content: unknown[] }) => boolean} isHostMessage
  *   这条 user 消息是不是宿主自己发的。dsh 里工具附加的 additionalContexts 可以带任何 MessageSource
  *   （dsh-tools index.d.ts:397/408/436-445）并被拼进下一步，所以"role user"不等于"用户说的"；宿主每次 followup /
@@ -63,8 +94,29 @@ export class MemoryTaskFacts {
 
   /** @param {string} sessionId @param {TaskFacts} facts */
   set(sessionId, facts) {
-    this.#facts.set(sessionId, { ...facts });
+    // gate 要单独复制一份：askCache 是**会话内会变**的状态（approve + scope:'task' 往里写），
+    // 而 fixture 常常是同一个对象喂给多个会话——浅拷贝会让两个任务共用一份缓存。
+    const gate = facts?.gate === undefined ? undefined : { ...facts.gate, askCache: [...(facts.gate.askCache ?? [])] };
+    this.#facts.set(sessionId, { ...facts, ...(gate === undefined ? {} : { gate }) });
     return this;
+  }
+
+  /** @param {string} sessionId @returns {import('./task-facts.mjs').GateFacts | undefined} */
+  gateFor(sessionId) {
+    return this.#facts.get(sessionId)?.gate;
+  }
+
+  /**
+   * 内核的 askCache 写入点（harness.ts:745-754）：只在用户 approve 且 scope 是 'task' 时调用，
+   * 硬底线类别的工具由调用方剔除。返回是否真的新记了一条。
+   * @param {string} sessionId @param {string} toolId
+   */
+  rememberAsk(sessionId, toolId) {
+    const gate = this.#facts.get(sessionId)?.gate;
+    if (gate === undefined) throw new Error(`no Ruyin gate facts for session "${sessionId}"`);
+    if (gate.askCache.includes(toolId)) return false;
+    gate.askCache.push(toolId);
+    return true;
   }
 
   /**
