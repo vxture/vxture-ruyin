@@ -204,7 +204,7 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
 // uvx 形态也真起了一次（TD-042 点名缺的那条）。node 形态过了不代表 Python 半边过了：
 // 随包的 uv.exe、预取的 CPython、缓存够不够解析，是另一条完全不同的链。
 {
-  const line = /[ruyin] uvx self-check: (ok (([^,]+), (d+) tool(s))|no seeded uvx server to try)/.exec(smokeOut);
+  const line = /\[ruyin\] uvx self-check: (ok \(([^,]+), (\d+) tool\(s\)\)|no seeded uvx server to try)/.exec(smokeOut);
   if (!line) {
     console.error("[pack] FAILED: 守护进程没有报 uvx 自检（缺 \"[ruyin] uvx self-check\" 这一行）");
     process.exit(1);
