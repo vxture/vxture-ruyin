@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-09-06",
+  "generatedAt": "2026-09-07",
   "$comment": "技能与工具预置清单（ADR-018 §2.3，owner 2026-09-05 定三档；§7.2 加第四档 acquire-on-demand）。每条来源仓钉死 commit；许可证是硬门槛（none 不允许）。ruyin 构建时按它拉取预置进安装包；Runos 按它注册台账（vxture-foundation/vxture-runos#14）。launch 为本机启动规格（node = 构建时 vendored 随包；uvx = 随包 uv + 随包 wheel 缓存，离线起）。components[] 是随包不带、要用户点一次才获取的载荷，摘要写在这里、随安装包同行 —— 上游若换了字节，校验不过，什么都不落地。人读版：docs/40-implementation/20-tools-skills-catalog-v1.md；预置工具名对照表：docs/40-implementation/40-bundled-tool-names.md。",
   "tiers": {
     "default": "默认启用（随包，不下载任何字节就能起）",
@@ -8,11 +8,12 @@
     "acquire-on-demand": "随包不带，要点一次获取（可从网络，也可从本地文件）",
     "runos-registered": "经 Runos 注册，不进本机（密钥在 Runos 保险库）"
   },
-  "$comment_allowedOrigins": "获取通道只走这份闭合白名单里的 origin。比 registry-client.ts 的「索引自己的 origin」宽一点，理由是 pandoc 与 Chrome for Testing 我们没有再分发权 —— 镜像到自己的主机本身就是再分发。不许出现凭据、鉴权头（客户端零秘密，CLAUDE.md 硬规则）。",
+  "$comment_allowedOrigins": "获取通道只走这份闭合白名单里的 origin。比 registry-client.ts 的「索引自己的 origin」宽一点，理由是 pandoc 与 Chrome for Testing 我们没有再分发权 —— 镜像到自己的主机本身就是再分发。不许出现凭据、鉴权头（客户端零秘密，CLAUDE.md 硬规则）。 storage.googleapis.com 是 Chrome for Testing 真正存字节的地方（2026-09-07 加）：它比前三条宽 —— 那是一个多租户对象存储，桶名之下谁都能放东西。它进名单的理由不是「这个域可信」，而是**白名单从来不是唯一的门**：真正认字节的是每条组件自己钉死的sha256，白名单只负责把请求限制在少数几个地方、并且在发请求之前就限制住。",
   "allowedOrigins": [
     "https://github.com",
     "https://objects.githubusercontent.com",
-    "https://cdn.playwright.dev"
+    "https://cdn.playwright.dev",
+    "https://storage.googleapis.com"
   ],
   "$comment_pythonRuntime": "Python 半边的使能件：机器上没有 uv，侧载来的 wheel 也一样跑不了。uv 与 uv 托管的 CPython 随安装包走，运行时 UV_PYTHON_DOWNLOADS=never + uvx --offline，不留联网回退 —— 有回退，首次运行就可能悄悄偏离钉死的版本。seed 列的包在构建时预取进随包的 uv cache（scripts/release/seed-uv-cache.mjs），由 pack.mjs 断言，不是手写的承诺。",
   "pythonRuntime": {
@@ -50,7 +51,8 @@
         "microsoft.playwright-mcp"
       ],
       "source": {
-        "url": "https://cdn.playwright.dev/builds/cft/153.0.8010.12/win64/chrome-headless-shell-win64.zip"
+        "url": "https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.12/win64/chrome-headless-shell-win64.zip",
+        "note": "直链，不经 cdn.playwright.dev。那个 CDN 只是个跳板：它对这条地址回 307，跳到本条 URL；而获取通道与每周校验器**都不跟跳**（白名单是发请求之前查的一份闭合名单，跟着跳等于绕过它）。于是这条组件从钉上那天起就取不下来 —— 界面上那个「获取」按钮点了必然失败，而没有人点过。2026-09-07 由 components-verify 第一次真跑时抓到。改的是地址，不是内容：直链取回 120,200,717 字节、sha256 7aec872f…6c4c，与本条钉的摘要逐位相同，所以 sha256 一个字符都没动。"
       },
       "sha256": "7aec872f3090e639c4237467624ea863c20fe2878914c93a6556bdbb52aa6c4c",
       "size": 120200717,
