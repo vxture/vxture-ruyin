@@ -25,6 +25,10 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
+import {
+  bundledSkillsDir as bundledSkillsDirOf,
+  bundledToolsDir as bundledToolsDirOf,
+} from "./bundled-layers.js";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import {
@@ -158,13 +162,15 @@ const productsDir = resolve(process.env["RUYIN_PRODUCTS_DIR"] ?? "products");
 // "not wired up" must never look like "working".
 const capabilityBase = process.env["RUYIN_CAPABILITY_BASE"] ?? "";
 
-// 技能登记册的预置层（ADR-018 §2.3）：packaged 在 <resources>/skills（壳给
-// RUYIN_SKILLS_DIR）；开发态是仓内 resources/skills —— 拉过（pnpm skills:pull）才有，
-// 没拉过就是没有预置层，启动日志会说。
-const bundledSkillsDir = process.env["RUYIN_SKILLS_DIR"] ?? resolve("resources/skills");
-// 预置的 MCP 服务器（ADR-018 §2.2）：packaged 在 <resources>/tools（壳给 RUYIN_TOOLS_DIR），
-// 开发态是仓内 resources/tools —— pnpm tools:pull 才有。
-const bundledToolsDir = process.env["RUYIN_TOOLS_DIR"] ?? resolve("resources/tools");
+// 技能登记册与预置 MCP 服务器的预置层（ADR-018 §2.2 / §2.3）：packaged 由壳给出
+// RUYIN_SKILLS_DIR / RUYIN_TOOLS_DIR，开发态是仓内 resources/ —— 拉过
+// （pnpm skills:pull / tools:pull）才有，没拉过就是没有预置层，启动日志会说。
+//
+// 缺省的算法在 bundled-layers.ts 里，且**按模块自身位置算，不按 cwd 算**：
+// 上一版按 cwd 找，于是壳把守护进程当子进程拉起来时两个预置层双双落空，
+// 而那看起来和「还没拉过」一模一样。
+const bundledSkillsDir = bundledSkillsDirOf();
+const bundledToolsDir = bundledToolsDirOf();
 
 /**
  * 目录选择框的中转。事件发出去、请求挂着等 —— 详见 folder-pick.ts 的头注释。
