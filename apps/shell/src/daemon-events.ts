@@ -8,6 +8,7 @@
 export type DaemonEventKind =
   | "task"
   | "pending"
+  | "component"
   | "ui-theme"
   | "app-restart"
   | "app-open-data-dir"

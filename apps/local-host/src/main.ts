@@ -44,6 +44,7 @@ import { CapabilityClient } from "./capability-client.js";
 import { SkillRegistry } from "./skill-registry.js";
 import { refreshDistributedSkills } from "./skill-distribution.js";
 import { ToolRegistryView } from "./tool-registry.js";
+import { ComponentStore, readComponentSpecs } from "./component-store.js";
 import { BundledToolServers } from "./tool-servers.js";
 import { fetchContract } from "./contract-fetch.js";
 import { EventBus } from "./events.js";
@@ -195,9 +196,28 @@ try {
 const localFs = new LocalFsConnector();
 // 内核拿着这同一份表；宿主注册表在运行时往里放进程外连接器（ADR-005 接缝 ④）。
 const connectors = new Map<string, ConnectorPort>([["local-fs", localFs]]);
+/**
+ * 获取通道（ADR-018 §7.2）：随包不带、要用户点一次才落到本机的载荷。组件表跟着
+ * `resources/tools/index.json` 进安装包，摘要写在里面、不经网络。
+ *
+ * **启动路径上不下载任何东西** —— 这里只读清单、只算状态；真的取字节只发生在
+ * 用户点了「获取」之后（`POST /components/:id/acquire`）。check-update-policy.mjs
+ * 钉住这一条：这个文件里不许出现 `acquire`。
+ */
+const componentManifest = readComponentSpecs(resolve(bundledToolsDir, "index.json"), (line) =>
+  console.error(line),
+);
+const componentStore = new ComponentStore({
+  dataDir,
+  components: () => componentManifest.components,
+  allowedOrigins: () => componentManifest.allowedOrigins,
+  // 只说什么变了，不带数值：界面收到再去 GET /components。
+  onChanged: () => events.publish({ kind: "component" }),
+});
 const bundledTools = new BundledToolServers({
   toolsDir: bundledToolsDir,
   dataDir,
+  components: componentStore,
   log: (line) => console.error(line),
 });
 const connectorRegistry = new ConnectorRegistry(dataDir, connectors, {
@@ -326,7 +346,26 @@ const server = createLocalApi({
     hasSkills: () => true,
     connectors: () => connectorRegistry.list(),
     bundledServers: () => bundledTools.list(),
+    // 起不了时说清是哪一种起不了：「未获取」与「未随包」「需要 uv」是三件事。
+    planFor: (id) => bundledTools.plan(id),
+    componentStatus: (id) => {
+      const s = componentStore.status(id);
+      return s
+        ? {
+            id: s.id,
+            state: s.state,
+            downloadBytes: s.downloadBytes,
+            diskBytes: s.diskBytes,
+            license: s.license,
+            origin: s.origin,
+            ...(s.receivedBytes === undefined ? {} : { receivedBytes: s.receivedBytes }),
+            ...(s.totalBytes === undefined ? {} : { totalBytes: s.totalBytes }),
+            ...(s.reason ? { reason: s.reason } : {}),
+          }
+        : undefined;
+    },
   }),
+  components: componentStore,
   ...(capabilityBase ? { refreshDistributedSkills: refreshAllDistributed } : {}),
   uiDir,
   platform,

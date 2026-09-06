@@ -157,7 +157,34 @@ confidential 凭据、替用户换票、调 Atlas 与 Runos 的，是产品自�
 **预置的 MCP 服务器怎么被产品用（2026-09-05，ADR-018 §7.1）**：它们在本机是来源为 `bundled`
 的连接器，用户在「能力平台」启动后，契约里 `provider: connector` 的工具按**同名**接上
 （例如 `browser_navigate`、`search`），项目还要授权那个连接器（ADR-005）。工具名以服务器
-`tools/list` 报的为准；对照表待补（TD-042 / TD-034）。
+运行时的 `tools/list` 报的为准。
+
+### 5.4.1 预置工具名对照表（2026-09-06，TD-034 收口）
+
+下表**由构建生成**：`pnpm tools:pull` 把每个随包的 node 服务器真起一次、`initialize` +
+`tools/list`、停掉，把名字记进 `resources/tools/index.json`，再写回这里和
+[`40-bundled-tool-names.md`](./40-bundled-tool-names.md)（那一份还写了 ⚠️ 标记的含义）。
+CI 在 `packaged-smoke` 里盯着它：pack 刚跑过 pull-tools，随后一句 `git diff --exit-code`，
+**重写完还有 diff 就红**。本地自查 `pnpm lint:tool-names`。别手改这一段。
+
+写契约时照这一列抄名字，一个字不差；`category` 与 `risk` 由契约自己定（R15：连接器工具
+只能是 `query` 或 `external_send`）。**没探到工具名的那几行写的是一句原因，不是空数组** ——
+空数组读起来是「它什么都不暴露」，而那是另一回事。
+
+<!-- BUNDLED-TOOLS:BEGIN -->
+| 服务器（连接器 id） | 档位 | 工具数 | 工具名（契约里照这个写） |
+|---|---|---|---|
+| `microsoft.playwright-mcp` | default | 24 | `browser_click`、`browser_close`、`browser_console_messages`、`browser_drag`、`browser_drop`、`browser_evaluate` ⚠️、`browser_file_upload`、`browser_fill_form`、`browser_find`、`browser_handle_dialog`、`browser_hover`、`browser_navigate`、`browser_navigate_back`、`browser_network_request`、`browser_network_requests`、`browser_press_key`、`browser_resize`、`browser_run_code_unsafe` ⚠️、`browser_select_option`、`browser_snapshot`、`browser_tabs`、`browser_take_screenshot`、`browser_type`、`browser_wait_for` |
+| `haris-musa.excel-mcp-server` | installed-disabled | — | _未探到：本次构建没有 vendored 它（runtime = uvx）_ |
+| `vivekvells.mcp-pandoc` | installed-disabled | — | _未探到：本次构建没有 vendored 它（runtime = uvx）_ |
+| `ihor-sokoliuk.mcp-searxng` | default | 4 | `searxng_instance_info`、`searxng_search_suggestions`、`searxng_web_search`、`web_url_read` |
+| `aas-ee.open-websearch` | default | 6 | `fetchCsdnArticle`、`fetchGithubReadme`、`fetchJuejinArticle`、`fetchLinuxDoArticle`、`fetchWebContent`、`search` |
+| `negokaz.excel-mcp-server` | default | 7 | `excel_copy_sheet`、`excel_create_table`、`excel_describe_sheets`、`excel_format_range`、`excel_read_sheet`、`excel_screen_capture`、`excel_write_to_sheet` |
+<!-- BUNDLED-TOOLS:END -->
+
+需要先获取载荷才能起的服务器，用户在「能力平台」里点一次「获取」（或从本地文件导入）；
+**任务跑到一半不会自己去下载** —— 契约要的工具落在未获取的载荷后面时，`startTask` 在开跑
+前按名拒绝，与缺技能、缺工具走同一条路（ADR-018 §7.2）。
 
 **平台侧前提（2026-09-05 读平台代码核实）**：平台 token-exchange 的 `resolveOboContext` 只接受
 `aud` 等于 caller 自己 client id 的 subject_token；Ruyin 登录得到的用户 token `aud='ruyin'`，

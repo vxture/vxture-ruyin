@@ -64,3 +64,9 @@ Thumbs.db
 # Bundled skill layer, pulled at build time from resources/skill-manifest.json (ADR-018)
 resources/skills/
 resources/tools/
+
+# playwright-mcp writes accessibility snapshots into its cwd. The fix is that
+# nothing runs it with the repo as cwd (pull-tools.mjs probes in a temp dir);
+# this line is the second net, not the fix - an ignored stray directory is
+# still a stray directory.
+.playwright-mcp/

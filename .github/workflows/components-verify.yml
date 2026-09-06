@@ -1,0 +1,53 @@
+name: components-verify
+
+# Weekly re-check of every acquisition-channel component's sha256
+# (ADR-018 section 7.2; TD-042). NOT a required check and deliberately not part
+# of `ci` - it really downloads ~120MB, and a check that costs that much on
+# every commit is a check somebody eventually turns off.
+#
+# Why a periodic re-check has to exist at all: Chrome for Testing publishes NO
+# checksum of its own (`.sha256` / `SHA256SUMS` are 404, known-good-versions
+# only carries urls), so the sha256 pinned in resources/skill-manifest.json is
+# the only nail we have - and upstream deletes old builds. Without this run the
+# pin rots silently until a user clicks Acquire, and what they then see is
+# "upstream no longer has this build" at the worst possible moment.
+#
+# What this actually gives you, stated plainly: a red run in the Actions tab,
+# plus GitHub's own failure email to the person who last touched this workflow
+# on the default branch. Nobody is paged. `schedule` only fires on the default
+# branch, so this starts running once the change is on main - on a branch, use
+# the manual trigger below or `pnpm components:verify` locally.
+
+on:
+  schedule:
+    # Mondays 03:17 UTC. Off the hour on purpose - GitHub delays cron runs that
+    # pile up on :00.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: components-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify pinned component bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No install step: verify-components.mjs is dependency-free by design
+      # (node:crypto + fetch). Nothing is written to disk and nothing is
+      # unpacked - it streams the bytes, hashes them, and drops them.
+      - name: Re-check every pinned component against the manifest
+        run: node scripts/release/verify-components.mjs

@@ -264,3 +264,151 @@ tasks:
 `playwright install chromium`）；契约 `provider: connector` 的工具靠同名接上，预置服务器的
 工具名（`browser_navigate`、`search`…）要产品契约照着声明，还没有一份「预置工具名对照表」
 （TD-034 的那一半）；三个重的按需下载的通道。
+
+### 7.2 获取通道与档位纠正（2026-09-06）
+
+判据只有两条，而它们同时成立：**目标客户里有气隙 / 域受限企业**（预置层存在的全部
+理由，§2.3），而**安装包已经 129 MB**。唯一的解是：能装进包、且没有网络时真有用的
+装进包；装不进的走一条经校验的通道，**而那条通道必须有一种不需要网络的运输方式**。
+
+#### 先纠正三处已经为假的事实
+
+1. **「默认启用 10 条」是假的。** 清单里 `tier: "default"` 有 10 条，而在一台干净的、
+   断网的机器上真能起来的是 **3 条**（三个 vendored 的 node 服务器）：5 条 uvx 形态要
+   本机自己装 uv，2 条（`zcaceres.fetch-mcp`、`modelcontextprotocol.servers`）连启动
+   规格都没有。**这不是降级，是把一个已经为真的事实写进清单** —— 而 Runos 台账
+   （vxture-runos#14）从同一份清单读。现在由 `lint:skill-manifest` 的第 1 条钉住：
+   **档位与「装没装进包」是同一件事**。
+2. **`negokaz.excel-mcp-server` 的「100 MB」不是真重量，是剪枝器漏判。** 它的平台目录
+   叫 `dist/excel-mcp-server_windows_amd64_v1`，与 `pull-tools.mjs` 的规则四处不匹配
+   （父目录门是 `^(build|prebuilds|bin)$`、目录名带包名前缀、带 `_v1` 后缀、词表里没有
+   `windows` / `amd64`）。**没有去放宽那个正则** —— 它会继续漏掉下一个 GoReleaser /
+   napi 形状；改成清单里人评审过的 `vendored.keepOnly` 白名单，加一条构建期体积断言
+   （剪枝后 > 40 MB 即失败，除非显式 `sizeAcknowledged`）。实测剪到 **13.3 MB**，于是
+   它随包了 —— 这是**唯一一条不要 Python、不要网络的离线 xlsx 通路**。
+   同理纠正两个尺寸：`executeautomation` 134 MB → **56.6 MB**，`one-search` 95 MB →
+   **65.3 MB**（原数是剪枝前的）。留着错数，下一个人会照它重新推出错的结论。
+3. **playwright-mcp 的 launchNote 说反了。** 原文「首次用前 `npx playwright install
+   chromium`（~150 MB）」：实测它默认 channel 就是本机已装的 Chrome，`--browser msedge`
+   同样可用，而 Win11 一定有 Edge —— **离线浏览器自动化是零字节就已到手的能力**；而那条
+   命令的真实代价是 311 MB 下载 / 704 MB 磁盘。梯子写在 `tool-servers.ts` 里
+   （chrome → msedge → 用户给的 `BROWSER_EXECUTABLE_PATH` → 已获取的 headless shell），
+   **不指望 playwright 自己**：它的 `findChromiumChannelBestEffort` 两个调用点都在
+   codegen / dashboard，不在 MCP 那条代码路径上。
+
+#### 第四档与 `components[]`
+
+`tiers` 加 **`acquire-on-demand`**（随包不带、要点一次获取）。**这不是推翻 §6 第 3 条
+已定的三档** —— 三档都还在，只是多了一档说明「随包不带」，故按 §7 / §7.1 的体例作为
+实施记录追加，不另立 ADR。若 owner 认为加档就是改判，那该另立一条，这一条不替 owner 定。
+
+组件（载荷）在清单里**单列**而不是挂在服务器上：一份载荷可以解锁多个服务器，挂上去会让
+同一次下载在几行里各报一次，用户没法知道那是一次下载。`redistribution: "download-only"`
+是硬标记 —— 这类不许进安装包、不许镜像到我们自己的主机，**把「许可证是硬门槛」（§2.3）
+写成了一行机器能查的字段**。
+
+#### 两种运输，同一段校验
+
+```
+POST /components/:id/acquire                      → HTTPS，从清单里那个 URL 取
+POST /components/:id/acquire { from: "E:\…" }    → 本地文件 / 目录（U 盘、内网共享）
+POST /components/acquire-from-dir { dir }         → 整个离线目录按 <id>-<version>.zip 配对
+```
+
+第二条是这份设计对气隙机器的真正回答：那台机器点不动下载按钮，但管理员可以把离线包里的
+zip 指给它，**校验和还是随安装包同行的那一条**。
+
+#### 信任论证：没有新开例外，四条现成的纪律各自延长一段
+
+| 对着谁 | 这条通道怎么接上去 |
+|---|---|
+| `registry-client.ts` 的四道校验 | **一条不减，加第五道**：origin（从「索引自己的 origin」放宽成清单里的**闭合白名单** —— pandoc 与 Chrome for Testing 我们没有再分发权，镜像本身就是再分发）、size 上限、字节数相等、sha256 相等，再加**「许可证文件解压后必须存在」**（缺一条即回滚整棵暂存树）。唯一的实现改动是**流式**：那份把整个 body 收进内存的写法，对 120 MB 的下载 / 234 MB 的单文件是错的形状 |
+| 「闭合白名单」这句话本身 | 一份**发请求之前**查的白名单，只有在**没人跟重定向**的时候才是闭合的：`fetch` 缺省的 `redirect: "follow"` 允许跳 20 次，每一跳都可以落到名单外的任意主机 —— 那道检查看起来还在，实际只挡住了第一跳。所以 `redirect: "manual"`，**3xx 一律拒**（清单里那几条是直链，一次都不需要跳；要换地址就改那条有人评审过的 pin）。同一处还查协议：`new URL("http://…").origin` 会和一条写成 http 的白名单项对上，于是字节走明文而回执上照写 `https` —— 运行时要求 `url.protocol === "https:"`，`lint:skill-manifest` 在清单那一层同样拒 http 的 `source.url` 与 http 的 `allowedOrigins` 项 |
+| 「校验过一次」不等于「现在还是那样」 | 落地之后有人会动那棵树：杀毒软件隔离掉 `headless_shell.exe`、用户清盘删了半棵。所以**用时也看一眼**：回执里 `verify` 记下入口 / marker / 许可证正文，`acquiredTree()` 每次判定都查它们还在不在，缺一个就是 `payload-missing`（不是「已获取」）。**不重算整包 sha256** —— 那是 120 MB 的一次磁盘读，而这个判定在每次列出 / 每次 `plan()` / 每次起服务器时都要跑一遍。**判定只有这一处**：`pathOf` 与 `status` 各判各的，就一定有一天说不到一块去（上一版正是如此：回执截断时界面说「失败」，而启动路径照样把那棵树交给 playwright） |
+| TD-012（没有签名根） | **不需要新例外，也不需要 `RUYIN_ALLOW_UNSIGNED_*` 那类开关。** 与产品包那条路声称的是同一件事，区别只在**摘要从哪来**：那条路的 sha256 来自一份经 TLS 取回的 index.json（TD-037 明说清单本身可能被换）；这条路的 sha256 **写在仓里、随安装包同行、评审时有人看过、不经网络**。上游换了字节就校验不过，失败模式是「用不了」而不是「被换掉」。残余照实说：安装包本身未签名（TD-001 standing），所以信任地板与 ruyin 其余部分**同高，不更高**，回执里 `signed: false` 照写 |
+| TD-036 / ADR-005（不接受任意来源） | 这条通道**不接受任意来源**：只接受仓里那份清单按 sha256 钉死的那几串字节，来源限于闭合白名单，解压走 `pkg.ts` 那套护栏（护栏函数**导出复用，不复制** —— 复制出来的两份会各自漂移） |
+| TD-021 的更新策略护栏 | **扩 `check-update-policy.mjs` 而不是新起一份**（「自动下载不许悄悄回来」这个决定留在一处）。机器可查的那几条：`main.ts` / `tool-executor.ts` / `harness.ts` 里不许调 `acquire`；每一种失败状态都要在 `settings.tsx` 里被渲染；设置页不许出现写死的组件 URL；按钮附近必须显示体积字段；下载必须写着 `redirect: "manual"` 且必须查 `url.protocol` —— 后两条钉的是**沉默失效**：跟着跳和不查协议，都不会报任何错，只是那道白名单不再挡什么 |
+
+#### 「等会儿再试」是一个断言，不是一句客套
+
+失败折叠一次，用户就分不清；**可重试与否折叠一次，用户会一直重试一件永远不会成的事。**
+404 / 410 说明上游把这个构建删了（Chrome for Testing 明确会删旧版本）—— 那是**永久**的，
+该说的是「清单里那条 pin 没了」。所以状态与错误码都分开：
+
+| 发生了什么 | state | HTTP | code | `retryable` |
+|---|---|---|---|---|
+| 网络错误 / 5xx / 408 / 429 | `unreachable` | 503 | `COMPONENT_UNREACHABLE` | true |
+| 404 / 410（上游删了这个构建） | `gone` | 410 | `COMPONENT_SOURCE_GONE` | **false** |
+| 长度 / sha256 不符，或盘上那棵树按另一条摘要装的 | `mismatch` | 409 | `COMPONENT_BYTES_MISMATCH` | false |
+| 协议 / origin / 重定向被拒 | `refused-origin` | 400 | `COMPONENT_SOURCE_REFUSED` | false |
+
+（通则 X-1：`retryable` 必填 —— 缺了它，调用方拿到的每一个错误都得靠猜。）
+
+`payload-missing`（回执在、载荷被杀毒隔离或清盘删了）**不在这张表里**：它是 `status`
+报的状态，不是 `acquire` 的失败 —— 载荷不在了的时候 `acquire` 会当作「没获取过」重新
+取一遍（自愈），永远抛不出这个状态。**表里只放真抛得出来的**：加一个永不触发的码，
+消费方会照着写一条永不触发的分支（`check-api-shape.mjs` 的原话）。
+
+#### 绝不下载的三种时机
+
+启动时；刷新清单时；**以及任务需要某个工具时**。最后一条最要紧：契约要的工具若落在未获取
+的载荷后面，`startTask` 在开跑前按名拒绝（与缺技能、缺工具同一条既有路径，§7）。
+**模型的一次工具调用永远不能触发下载。** 反面教材是实测到的：`executeautomation` 的
+`dist/toolHandler.js` 在启动失败时 spawn `npx playwright install` —— 一次模型工具调用引发
+311 MB 无人值守下载。这也是那个包被剔出清单的头一条理由（**是行为问题，不是体积问题**）。
+
+#### v1 不做断点续传
+
+失败或中断就删暂存、把原因说清楚、用户再点一次。**不是疏漏**：续传会引入「续上来的那段
+前缀从没被校验过」的信任问题，而最大的一件也就 120 MB，重来比多一套信任面便宜。这一句同时
+写在 `component-store.ts` 的头注释里，否则下一个人会当成疏漏补上。
+
+#### 落了什么
+
+| 层 | 落地 |
+|---|---|
+| 清单 | 第四档 `acquire-on-demand`；`allowedOrigins`、`pythonRuntime`、`components[]` 三个顶层字段；`launch.requiresComponent` / `offline.cacheSeeded` / `browserLadder`；`vendored.keepOnly` / `sizeAcknowledged`。`lint:skill-manifest` 加 9 条字段规则（不联网、不判断），并有自己的反向验证测试（`pnpm test:guardrails`） |
+| 守护进程 | `component-store.ts`：两种运输、**只走 https 且不跟重定向**、流式下载 + 边写边算摘要、`pkg.ts` 护栏复用的**流式解压**（上限按组件的 `unpackedBytes` 给 + 硬天花板）、许可证核对、`.ruyin-component.json` 回执（含 `verify`，用时按它查载荷还在不在）+ 同盘 rename 原子落地、`NOTICES.md` 汇总、**「装好了没有」收在 `acquiredTree()` 一处**（`pathOf` / `isAcquired` / `status` / `NOTICES` 全走它）、失败各说各的（11 种非成功态，逐一有自己的措辞与拒绝码）（永久与可重试分开）、取消。路由 `GET /components`、`POST /components/:id/acquire|cancel`、`POST /components/acquire-from-dir`、`DELETE /components/:id`，失败按种类映射到各自的 HTTP 状态与错误码；事件总线加 `component`（只说什么变了、不带数值，节流约每秒一次） |
+| 启动计划 | `tool-servers.ts`：解析顺序补全（随包 → 已获取 → **「未获取：需下载 N MB」**，与「这一版没有 vendored」「没有随包的 uv」三件事分开说）；uvx 离线启动契约（随包 uv.exe 绝对路径 + `--offline` + `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` / `UV_PYTHON_DOWNLOADS=never`，**不留联网回退**）；浏览器梯子 |
+| 界面 | `ToolView.status` 从 4 个扩到 6 个（加 `needs-acquisition` / `acquiring`），加 `component`（体积 / 许可证 / 来源主机 / 进度）与 `toolsUnprobed`。**体积、许可证、来源主机都在按钮左边** —— 点之前就看得见。按钮旁给「从本地文件导入」。照 TD-037 的先例：**能列不能装的时候把话写在界面上，不要把按钮藏掉** |
+| 连接器进程 | 每个 MCP 服务器都拿到一个自己的工作目录（`<系统临时目录>/ruyin-connector-work/<id>`）。不给 cwd 就是继承守护进程的 cwd —— playwright-mcp 一起来就往那儿写 `.playwright-mcp/` 快照，实测在仓库根留下过四个未跟踪文件；而装好的机器上那个目录可能是 Program Files。**刻意不放数据目录下**：Windows 上进程的 cwd 会锁住目录连同上级，而数据目录是可以搬家的 |
+| 对照表 | `pull-tools.mjs` 起每个 vendored 完的 node 服务器、`initialize` + `tools/list`、停掉；工具名记进 `resources/tools/index.json`，生成 `40-implementation/40-bundled-tool-names.md` 与接入指南 §5.4.1 那一段，`pnpm lint:tool-names` 比对（过期就红 —— **生成物里不写构建日期**：写了，这份文档就会从提交的第二天起对每一次无关提交判过期，而一个每天红一次的必需检查等于教人忽略它；渲染单列在 `tool-name-doc.mjs` 里，就是为了能被测）。探测本身在一个临时工作目录里跑。本机实测 **41 个工具名**（playwright-mcp 24、mcp-searxng 4、open-websearch 6、negokaz 7）。⚠️ 标了两个能跑任意代码的（`browser_run_code_unsafe`、`browser_evaluate`）：**照登，不藏** —— 藏起来只会让下一个人以为自己看漏了；文档同一处写明挡住它们的是 schema 里 `category` 的闭合枚举，**不是任何一条 R 规则**（TD-005 的机制更正） |
+| 定期核对 | `pnpm components:verify` 只读地把每条 pin 的字节流回来算一次摘要（不落盘、不解压、同一份白名单、同样不跟跳）。**由 `.github/workflows/components-verify.yml` 每周一 03:17 UTC 跑**，另有手动触发。为什么非有不可：Chrome for Testing 不发布任何校验和，清单里那一条是唯一的钉子，而上游会删旧构建。照实记两条：GitHub 的 `schedule` 只在 main 上触发；失败的样子是 Actions 里一条红的定时任务加一封 GitHub 的邮件，**没有人会被呼叫** |
+
+#### 没做、以及为什么（照实记，TD-042 保留为 open）
+
+- **`components[]` 里现在只有一条**（`browser.chromium-headless-shell`，sha256 实测取回并
+  验过）。设计里另外三条（markitdown 的 wheel 包、pandoc、open-websearch 的 node 包）**没有
+  写进清单**：它们的 sha256 要么得由 CI 造包时算出（前两者中的 wheel/node 包），要么得先取
+  一次上游记下来（pandoc 不发布任何校验和文件）。**写占位符会把 `lint:skill-manifest` 变成
+  摆设**，所以宁可让这三条留在 `installed-disabled` 并在 `launchNote` 里说清缺什么。
+  于是 `open-websearch` 也**没有**挪出安装包（挪走它是唯一一处不损失离线诚实度的减重，但
+  没有可获取的替代之前挪走等于让它消失）。
+- **Python 半边没有真的进安装包。** 启动契约（`uvxPlan`）与预取脚本（`seed-uv-cache.mjs`）
+  都写了，但 uv / CPython / 预取好的 wheel 缓存这一次没有加进 `electron-builder.yml`，也没有
+  在 CI 里跑过。所以 `haris-musa.excel-mcp-server` 记为 `installed-disabled` 而不是 `default`
+  —— 档位与「装没装进包」是同一件事，这一条自己也要守。转正顺序：跑通预取 → 进
+  electron-builder → `packaged-smoke` 真起一次 uvx 形态 → 才改 tier。
+- **`packaged-smoke` 没有加「每个 default 档的 `plan()` 都 ok」这条断言**，也没有覆盖 uvx
+  形态 —— 前者要在打包产物里跑，本轮没有打过包。
+- **离线侧载包**（`Ruyin-Offline-Tools-<version>.zip`）与 `build-components.mjs` 没做：
+  它要先有 `redistributable` 的组件，而现在一条都没有。`acquire-from-dir` 那一半已经在了。
+- **执行后的默认档是 4 条**（playwright-mcp、mcp-searxng、open-websearch、negokaz），全部是
+  vendored 的 node 服务器。**条数从名义 10 掉到 4：这 4 条都随包、不下载任何字节，其中 3 条开箱即起，
+  第 4 条（mcp-searxng）随包但要先配 `SEARXNG_URL`（它指向企业自托管实例，那个地址
+  只有用户知道）。「随包」与「开箱即起」是两个数，合成一个就是「预置 10 个」那个错
+  的小一号版本 —— 守卫与界面现在都分开报。**
+
+#### 六条策略：owner 已定（2026-09-06）
+
+判断阶段把这六条列为「owner 的策略题」，各自实现了一个可逆的默认值。**owner 同意全部
+六条推荐**，因此它们不再是默认值，是决定：
+
+| # | 决定 | 理由 / 代价 |
+|---|---|---|
+| 1 | **随包 uv 引导件**（`uv.exe` + `uvx.exe` + uv 托管的 CPython，约 37 MiB 压缩） | 它是**使能件**：机器上没有 uv，连侧载来的 wheel 都跑不了，uvx 形态在气隙机器上永远是死的。不要就从 `electron-builder.yml` 的 `files` 里摘掉 |
+| 2 | **markitdown 不进安装包**，走离线侧载 / 按需获取 | 它是气隙机器上唯一的 PDF/pptx/docx → Markdown 通路，但要 113 MiB，其中约 76 MB 是死重（speech_recognition 要 ffmpeg 而我们不带、onnxruntime 经 magika 进来）。方向可逆：以后要进包改一行构建配置；发出去一个 240 MB 的安装包再想瘦回来做不到 |
+| 3 | **Ruyin 不主动下浏览器** | 与 updates.ts 的先例同形（owner 2026-09-02：检查更新但不下载）。而且实测 playwright-mcp 用本机已装的 Chrome / Edge 就能跑，**离线浏览器自动化是零字节就已到手的能力**；headless shell 那条只是梯子的最后一级 |
+| 4 | **pandoc 只允许按需下载**（`redistribution: "download-only"`），永不进安装包、永不镜像到我们自己的主机，许可证正文与 source offer 随组件落盘 | 它是 GPL-2.0-or-later，而本仓有意以 all-rights-reserved 分发、不带 LICENSE 文件。按需下载把「放进闭源安装包算不算分发」这个问题绕开，但没免除随件带许可证的义务 |
+| 5 | **docling 降为 `installed-disabled`**、`launch: null`、原因照实写 | 它钉死的 3.2.0 默认装的是一个**远端 docling-serve 的客户端**，本地一页都不转 —— 与「数据不出域」是反的。能本地转的形态 1.014 GiB（torch 481 MB、cv2 113 MB，闭包里还有要编译工具链的 sdist）。代价：默认档少一条 |
+| 6 | **第四档 `acquire-on-demand` 作为实施记录追加**，不另立 ADR | §6 第 3 条的三档没有被推翻，只是多了一档说明「随包不带、要点一次」。§7 / §7.1 已有这个体例 |

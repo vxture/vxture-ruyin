@@ -36,6 +36,7 @@ import { LocalToolExecutor } from "./tool-executor.js";
 import { loadProducts } from "./products.js";
 import { ProductRegistry } from "./product-registry.js";
 import { createLocalApi, type LocalApiDeps } from "./server.js";
+import { ComponentError } from "./component-store.js";
 import { TaskRunner } from "./task-runner.js";
 import { SkillRegistry } from "./skill-registry.js";
 import { ToolRegistryView } from "./tool-registry.js";
@@ -1261,5 +1262,142 @@ test("bundled tool servers: /connectors lists them, activate starts, deactivate 
     await connectors.stopAll();
     closeRig(rig);
     rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+// ────────────────── 获取通道（ADR-018 §7.2）：/components ──────────────────
+
+test("components: 这套装配没有获取通道时如实回 503 —— 空列表会被读成「一件可获取的都没有」", async () => {
+  const rig = await startServer();
+  try {
+    const res = await fetch(`${rig.base}/components`, { headers: rig.headers });
+    assert.equal(res.status, 503);
+    assert.equal(((await res.json()) as { code: string }).code, "COMPONENTS_NOT_AVAILABLE");
+  } finally {
+    closeRig(rig);
+  }
+});
+
+test("components: 列出 / 获取 / 取消 / 移除，失败按种类分开报（unreachable 才是可重试的那一种）", async () => {
+  const calls: string[] = [];
+  let failWith: ComponentError | null = null;
+  const row = {
+    id: "browser.shell",
+    kind: "browser",
+    version: "1.0.0",
+    state: "not-acquired",
+    downloadBytes: 120_200_717,
+    diskBytes: 283_200_000,
+    license: "BSD-3-Clause",
+    origin: "cdn.playwright.dev",
+    redistribution: "download-only",
+    unlocks: ["microsoft.playwright-mcp"],
+  };
+  const rig = await startServer({
+    components: {
+      list: () => [row],
+      status: (id) => (id === row.id ? row : undefined),
+      acquire: async (id, opts) => {
+        calls.push(`acquire:${id}:${opts?.from ?? ""}`);
+        if (failWith) throw failWith;
+        return { ...row, state: "acquired" };
+      },
+      acquireFromDir: async (dir) => {
+        calls.push(`dir:${dir}`);
+        return { acquired: [row.id], skipped: [] };
+      },
+      cancel: (id) => {
+        calls.push(`cancel:${id}`);
+        return true;
+      },
+      remove: (id) => id === row.id,
+    },
+  });
+  try {
+    const list = (await (await fetch(`${rig.base}/components`, { headers: rig.headers })).json()) as {
+      items: Array<{ id: string; downloadBytes: number; license: string; origin: string }>;
+    };
+    // 体积 / 许可证 / 来源主机随列表一起给：界面要在按钮左边显示它们。
+    assert.equal(list.items[0]!.downloadBytes, 120_200_717);
+    assert.equal(list.items[0]!.license, "BSD-3-Clause");
+    assert.equal(list.items[0]!.origin, "cdn.playwright.dev");
+
+    const ok = await fetch(`${rig.base}/components/${row.id}/acquire`, { method: "POST", headers: rig.json, body: "{}" });
+    assert.equal(ok.status, 200);
+
+    // 本地文件那条路（气隙机器）：同一个端点，多一个 from。
+    await fetch(`${rig.base}/components/${row.id}/acquire`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ from: "E:/offline/x.zip" }),
+    });
+
+    // 网络到不了：503 + retryable，且 state 原样带给界面。
+    failWith = new ComponentError("unreachable", "取不到 cdn.playwright.dev");
+    const down = await fetch(`${rig.base}/components/${row.id}/acquire`, { method: "POST", headers: rig.json, body: "{}" });
+    assert.equal(down.status, 503);
+    const downBody = (await down.json()) as { code: string; retryable: boolean; state: string };
+    assert.equal(downBody.code, "COMPONENT_UNREACHABLE");
+    assert.equal(downBody.retryable, true);
+    assert.equal(downBody.state, "unreachable");
+
+    // 上游删了这个构建：**永久**。折进 unreachable 会让界面说「等会儿再试」，而
+    // 重试一百次还是 404 —— 该动的是清单里那条 pin。
+    failWith = new ComponentError("gone", "cdn.playwright.dev 上已经没有这个构建了（HTTP 404）—— pin 需要更新");
+    const gone = await fetch(`${rig.base}/components/${row.id}/acquire`, { method: "POST", headers: rig.json, body: "{}" });
+    assert.equal(gone.status, 410);
+    const goneBody = (await gone.json()) as { code: string; retryable: boolean; state: string };
+    assert.equal(goneBody.code, "COMPONENT_SOURCE_GONE");
+    assert.equal(goneBody.retryable, false, "「等会儿再试」对一个已经被删掉的构建是一句假话");
+    assert.equal(goneBody.state, "gone");
+
+    // 摘要不符：**不可重试** —— 再点一次还是同一串字节，说「可以重试」只会让人空转。
+    failWith = new ComponentError("mismatch", "sha256 不符 —— 字节已丢弃");
+    const bad = await fetch(`${rig.base}/components/${row.id}/acquire`, { method: "POST", headers: rig.json, body: "{}" });
+    assert.equal(bad.status, 409);
+    const badBody = (await bad.json()) as { code: string; retryable: boolean; state: string };
+    assert.equal(badBody.code, "COMPONENT_BYTES_MISMATCH");
+    assert.equal(badBody.retryable, false);
+    assert.equal(badBody.state, "mismatch");
+
+    // 映射表里没有的状态走默认分支。**表里不放 acquire 抛不出来的状态** ——
+    // 加一个永不触发的码，消费方会照着写一条永不触发的分支（api-shape 守卫的原话）。
+    failWith = new ComponentError("payload-missing", "回执在，载荷不在了");
+    const other = await fetch(`${rig.base}/components/${row.id}/acquire`, { method: "POST", headers: rig.json, body: "{}" });
+    assert.equal(other.status, 400);
+    assert.equal(((await other.json()) as { code: string }).code, "COMPONENT_ACQUIRE_FAILED");
+    failWith = null;
+
+    const cancelled = await fetch(`${rig.base}/components/${row.id}/cancel`, { method: "POST", headers: rig.json });
+    assert.deepEqual(await cancelled.json(), { cancelled: true });
+
+    const fromDir = await fetch(`${rig.base}/components/acquire-from-dir`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ dir: "E:/offline" }),
+    });
+    assert.deepEqual(await fromDir.json(), { acquired: [row.id], skipped: [] });
+    const noDir = await fetch(`${rig.base}/components/acquire-from-dir`, { method: "POST", headers: rig.json, body: "{}" });
+    assert.equal(noDir.status, 400);
+    assert.equal(((await noDir.json()) as { code: string }).code, "COMPONENT_SOURCE_INVALID");
+
+    const removed = await fetch(`${rig.base}/components/${row.id}`, { method: "DELETE", headers: rig.headers });
+    assert.equal(removed.status, 200);
+    const missing = await fetch(`${rig.base}/components/nope`, { method: "DELETE", headers: rig.headers });
+    assert.equal(missing.status, 404);
+    assert.equal(((await missing.json()) as { code: string }).code, "COMPONENT_NOT_FOUND");
+
+    assert.deepEqual(calls, [
+      `acquire:${row.id}:`,
+      `acquire:${row.id}:E:/offline/x.zip`,
+      `acquire:${row.id}:`,
+      `acquire:${row.id}:`,
+      `acquire:${row.id}:`,
+      `acquire:${row.id}:`,
+      `cancel:${row.id}`,
+      "dir:E:/offline",
+    ]);
+  } finally {
+    closeRig(rig);
   }
 });

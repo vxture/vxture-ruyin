@@ -13,10 +13,18 @@
  */
 
 import { SKILL_TOOLS } from "@vxture/ruyin-core";
+import type { ComponentState } from "./component-store.js";
 import type { BundledServer } from "./tool-servers.js";
 
 export type ToolKind = "builtin" | "connector" | "mcp-server";
-export type ToolStatus = "available" | "unavailable" | "registered" | "runos";
+/**
+ * `needs-acquisition` / `acquiring` 是 2026-09-06 加的两种（ADR-018 §7.2）。
+ * 在此之前，一条「起不来是因为缺一件要下载的载荷」的行**一个可点的东西都没有**：
+ * 按钮由 `launchable` 门控，而这类服务器只设 `detail`、不设 `launchable`，于是只
+ * 剩一个中性的「已登记」徽标。照 TD-037 定下的先例：**能列不能装的时候把话写在
+ * 界面上，不要把按钮藏掉。**
+ */
+export type ToolStatus = "available" | "unavailable" | "needs-acquisition" | "acquiring" | "registered" | "runos";
 
 export interface ToolView {
   id: string;
@@ -27,10 +35,33 @@ export interface ToolView {
   detail?: string;
   license?: string;
   tier?: string;
-  /** mcp-server / connector：它暴露（或清单说它有）的工具名。 */
+  /**
+   * mcp-server / connector：它暴露（或清单说它有）的工具名。
+   * **停着的服务器也有** —— 名字来自构建时探过一次的目录（resources/tools/index.json），
+   * 所以用户在下载之前就看得见这台机器将要多出哪些工具（TD-034 的那一半）。
+   */
   tools?: string[];
+  /** 目录里为什么没有工具名（起不来就探不到）。**绝不用空数组冒充「它什么都不暴露」。** */
+  toolsUnprobed?: string;
   /** mcp-server：有本机启动规格（能启动 / 能停），还是只登记。 */
   launchable?: boolean;
+  /**
+   * 起它要先获取的那件载荷。体积、许可证、来源主机都在这里 —— 界面把它们放在
+   * 按钮左边，**点之前就看得见要下多少**。地址不在这里：地址只在守护进程手上。
+   */
+  component?: {
+    id: string;
+    state: ComponentState;
+    downloadBytes: number;
+    diskBytes: number;
+    license: string;
+    origin: string;
+    /** 正在取时的进度；别的状态没有。 */
+    receivedBytes?: number;
+    totalBytes?: number;
+    /** 失败时那句话，按 ComponentState 分类，不折叠成「失败」。 */
+    reason?: string;
+  };
 }
 
 /** 内建四个 —— 与 tool-executor.ts 的 IMPLEMENTED 同一份名单，缺一个就是漂移。 */
@@ -46,6 +77,10 @@ export interface ToolRegistrySources {
   >;
   /** 预置的 MCP 服务器定义（tools/index.json）；缺省 = 没有预置工具层。 */
   bundledServers?: () => BundledServer[];
+  /** 这台机器上现在能不能起它 —— 起不了时说清是哪一种起不了。 */
+  planFor?: (id: string) => { ok: boolean; reason?: string; needsComponent?: string };
+  /** 获取通道的组件此刻的样子（体积 / 许可证 / 来源 / 进度）。 */
+  componentStatus?: (id: string) => ToolView["component"] | undefined;
 }
 
 export class ToolRegistryView {
@@ -92,6 +127,11 @@ export class ToolRegistryView {
       const view: ToolView = { id: s.id, kind: "mcp-server", source: s.id, status: "registered" };
       if (s.license) view.license = s.license;
       if (s.tier) view.tier = s.tier;
+      // 目录来的工具名：**停着的、甚至还没获取的服务器也列出来**。
+      // 在此之前 view.tools 只在 live 分支里赋值，于是停着的服务器一个名字都不显示 ——
+      // 而契约作者要照着这些名字写 provider: connector 的工具声明（TD-034）。
+      if (s.tools && s.tools.length > 0) view.tools = s.tools;
+      else if (s.toolsUnprobed) view.toolsUnprobed = s.toolsUnprobed;
       const live = byId.get(s.id);
       if (viaRunos) {
         view.status = "runos";
@@ -106,10 +146,22 @@ export class ToolRegistryView {
         view.detail = running
           ? `运行中（${s.launch.runtime}）${s.launch.note ? "；" + s.launch.note : ""}`
           : (live.bundled?.blocked ?? live.health.detail ?? "未启用");
-        view.tools = live.tools;
+        // 运行中的以它自己报的为准：目录是构建时的一张快照，运行时的 tools/list 才是权威。
+        if (live.tools.length > 0) view.tools = live.tools;
       } else {
         view.launchable = true;
         view.detail = `可启动（${s.launch.runtime}）${s.launch.note ? "；" + s.launch.note : ""}`;
+      }
+      // 起不来是因为差一件可获取的载荷：这不是「不可用」，是「还没获取」——
+      // 一个用户点一下就能改变的事实，所以给它自己的状态和自己的按钮。
+      const plan = this.sources.planFor?.(s.id);
+      if (plan && !plan.ok && plan.needsComponent && view.status !== "available") {
+        const component = this.sources.componentStatus?.(plan.needsComponent);
+        if (component) {
+          view.component = component;
+          view.status = component.state === "acquiring" ? "acquiring" : "needs-acquisition";
+          view.detail = plan.reason ?? view.detail;
+        }
       }
       out.push(view);
     }

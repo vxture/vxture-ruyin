@@ -29,6 +29,7 @@ import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import { apiError, REJECTION } from "./errors.js";
 import type { ToolProvider } from "@vxture/ruyin-contract-schema";
+import { ComponentError } from "./component-store.js";
 import { ConnectorBundledError, ConnectorInstallRefusedError } from "./connector-registry.js";
 import { RegistryError, downloadPackage, fetchRegistryIndex } from "./registry-client.js";
 import { join as joinPath } from "node:path";
@@ -68,6 +69,16 @@ export interface ConnectorRegistryLike {
   healthOf(id: string): Promise<unknown>;
 }
 
+/** 获取通道；实现见 component-store.ts。server.ts 只用这五个动作。 */
+export interface ComponentStoreLike {
+  list(): unknown[];
+  status(id: string): unknown | undefined;
+  acquire(id: string, opts?: { from?: string }): Promise<unknown>;
+  acquireFromDir(dir: string): Promise<unknown>;
+  cancel(id: string): boolean;
+  remove(id: string): boolean;
+}
+
 /** 服务端只用登记册的这几个口；完整类型在 skill-registry.ts。 */
 export interface SkillRegistryLike {
   list(projectId?: string): SkillListing;
@@ -98,6 +109,11 @@ export interface LocalApiDeps {
   skills?: SkillRegistryLike;
   /** 工具登记册的只读视图（能力平台里「工具」那一半）。 */
   tools?: { list(): Promise<unknown[]> };
+  /**
+   * 获取通道（ADR-018 §7.2）。缺省 = 这套装配没有，`/components` 如实回答 503 ——
+   * 空列表会被读成「一件可获取的都没有」，那是另一回事。
+   */
+  components?: ComponentStoreLike;
   /**
    * 刷新产品分发层：逐个已装产品问它的能力面要技能目录。要能力面，未配置时
    * 缺省 —— `POST /skills/refresh` 那时只重扫本机，并说清没有分发来源。
@@ -223,6 +239,29 @@ function activeWorkspace(deps: LocalApiDeps): string | undefined {
   const id = deps.platform?.session().workspace?.id;
   return id && id.length > 0 ? id : undefined;
 }
+
+/**
+ * 获取失败 → HTTP 状态 + 错误码 + `retryable`（通则 X-1：**`retryable` 必填**，
+ * 因为调用方拿到错误得知道要不要再点一次）。
+ *
+ * 分刀的依据只有一条：**再点一次会不会有不同的结果。**
+ *
+ * - `unreachable`（网络错误 / 5xx / 408 / 429）—— 会。503 + retryable。
+ * - `gone`（404 / 410）—— **不会**。上游把这个构建删了，重试一百次还是 404；
+ *   要做的是更新清单里那条 pin。所以是 410 + 一个自己的码，不是「服务暂时不可用」。
+ * - `mismatch`（摘要 / 长度不符，或盘上那棵树是按另一条摘要装的）—— 不会：
+ *   再点一次还是同一串字节。这一种要说响。
+ * - 其余（磁盘不够、路径太长、许可证缺失、白名单拒绝…）—— 都是要用户先改点什么。
+ */
+const ACQUIRE_FAILURE: Record<string, { status: number; code: string; retryable: boolean }> = {
+  unreachable: { status: 503, code: "COMPONENT_UNREACHABLE", retryable: true },
+  gone: { status: 410, code: "COMPONENT_SOURCE_GONE", retryable: false },
+  mismatch: { status: 409, code: "COMPONENT_BYTES_MISMATCH", retryable: false },
+  "refused-origin": { status: 400, code: "COMPONENT_SOURCE_REFUSED", retryable: false },
+  "no-space": { status: 507, code: "COMPONENT_NO_SPACE", retryable: false },
+  cancelled: { status: 409, code: "COMPONENT_ACQUIRE_CANCELLED", retryable: false },
+};
+const ACQUIRE_FAILURE_DEFAULT = { status: 400, code: "COMPONENT_ACQUIRE_FAILED", retryable: false };
 
 const STATIC_MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -887,6 +926,68 @@ async function handle(
     }
     send(res, 200, { items: await deps.tools.list() });
     return;
+  }
+
+  // --- 获取通道（ADR-018 §7.2）：随包不带、用户点一次才落到本机的载荷 ---
+  //
+  // **只有这几条路会下载**。启动路径、清单刷新、模型与任务路径都不许触发获取
+  // （check-update-policy.mjs 钉住那三处）—— 模型的一次工具调用永远不能引发下载。
+  if (segments[0] === "components") {
+    if (!deps.components) {
+      send(res, 503, apiError("COMPONENTS_NOT_AVAILABLE", "这套装配没有获取通道"));
+      return;
+    }
+    if (method === "GET" && segments.length === 1) {
+      send(res, 200, { items: deps.components.list() });
+      return;
+    }
+    // POST /components/acquire-from-dir —— 一个离线目录整体导入（气隙机器那条路）。
+    if (method === "POST" && segments.length === 2 && segments[1] === "acquire-from-dir") {
+      const body = await readJson(req);
+      const dir = String(body["dir"] ?? "");
+      if (!dir) {
+        send(res, 400, apiError("COMPONENT_SOURCE_INVALID", "要给一个目录路径", { field: "dir" }));
+        return;
+      }
+      send(res, 200, await deps.components.acquireFromDir(dir));
+      return;
+    }
+    // POST /components/:id/acquire —— body 里给了 from 就走本地文件，否则走 HTTPS。
+    // 两条路的校验与落地完全一样，只有取字节那一步不同。
+    if (method === "POST" && segments.length === 3 && segments[2] === "acquire") {
+      const body = await readJson(req);
+      const from = typeof body["from"] === "string" && body["from"] ? String(body["from"]) : undefined;
+      try {
+        send(res, 200, await deps.components.acquire(segments[1]!, from ? { from } : {}));
+      } catch (cause) {
+        // 失败各说各的：把 state 原样带给界面，它按种类分别措辞。折叠成一句
+        // 「获取失败」，用户就分不清「网络到不了」与「字节被换了」——
+        // 后者是要说响的一种。**而 `retryable` 分的是另一刀**：只有真会因为再点
+        // 一次而变的才算可重试。404 说「等会儿再试」是一句假话（那个构建上游已经
+        // 删了），摘要不符同样 —— 再点一次还是同一串字节。
+        const state = cause instanceof ComponentError ? cause.state : "failed";
+        const message = cause instanceof Error ? cause.message : String(cause);
+        const mapped = ACQUIRE_FAILURE[state] ?? ACQUIRE_FAILURE_DEFAULT;
+        send(res, mapped.status, {
+          ...apiError(mapped.code, message, { retryable: mapped.retryable }),
+          state,
+        });
+      }
+      return;
+    }
+    // POST /components/:id/cancel —— 取消一次进行中的获取。没在跑不是错误。
+    if (method === "POST" && segments.length === 3 && segments[2] === "cancel") {
+      send(res, 200, { cancelled: deps.components.cancel(segments[1]!) });
+      return;
+    }
+    if (method === "DELETE" && segments.length === 2) {
+      if (!deps.components.remove(segments[1]!)) {
+        send(res, 404, apiError("COMPONENT_NOT_FOUND", `「${segments[1]}」没有获取过`));
+        return;
+      }
+      send(res, 200, { removed: segments[1] });
+      return;
+    }
   }
 
   // GET /products - 受管资产视图：已装 + 启用态 + 订阅可用性（§18.5）

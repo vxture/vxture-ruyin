@@ -37,6 +37,7 @@ import {
   type SkillLayer,
   type SkillListing,
   type SkillView,
+  type ComponentState,
   type ToolView,
   type DataDirCheck,
   type SessionInfo,
@@ -1209,9 +1210,56 @@ const TIER_LABEL: Record<string, string> = {
 const TOOL_STATUS: Record<ToolView["status"], { label: string; tone: "success" | "warning" | "neutral" }> = {
   available: { label: "可用", tone: "success" },
   unavailable: { label: "不可用", tone: "warning" },
+  /** 用户点一下就能改变的事实 —— 所以它有自己的徽标和自己的按钮，不是「不可用」。 */
+  "needs-acquisition": { label: "未获取", tone: "warning" },
+  acquiring: { label: "获取中", tone: "neutral" },
   registered: { label: "已登记", tone: "neutral" },
   runos: { label: "经 Runos", tone: "neutral" },
 };
+/**
+ * 获取失败**各说各的**（ADR-018 §7.2）。折叠成一句「获取失败」，用户就分不清
+ * 「网络到不了」（等会儿再试）与「字节和清单对不上」（这一种是要说响的）。
+ */
+const COMPONENT_STATE: Record<ComponentState, string> = {
+  acquired: "已获取",
+  "not-acquired": "未获取",
+  acquiring: "获取中",
+  unreachable: "网络到不了 —— 也可以从本地文件导入",
+  // 「上游已经删了这个构建」不是「等会儿再试」：再点一次还是 404，要动的是清单。
+  gone: "上游已经没有这一版了 —— 重试没有用，要等一版更新过清单的 Ruyin",
+  "payload-missing": "装过，但文件不在了（杀毒隔离 / 清盘）—— 移除后重新获取",
+  mismatch: "取到的字节与清单里那条摘要不符，已丢弃",
+  "no-space": "磁盘不够",
+  "too-large": "比清单说的大",
+  "license-missing": "解压后缺许可证文件，已回滚",
+  "refused-origin": "来源不在允许的名单里，请求没有发出",
+  "path-too-long": "落盘路径太长（Windows MAX_PATH）",
+  cancelled: "已取消",
+  failed: "获取失败",
+};
+
+function mb(n: number): string {
+  return `${(n / 1048576).toFixed(1)} MB`;
+}
+
+/**
+ * 「工具」块顶上那句常驻事实。数的是**能不能起**，不是清单上有多少条 ——
+ * 「预置 10 个」而其中 7 个在干净机器上起不来，是上一版清单犯过的错。
+ */
+function bundledSummary(tools: ToolView[]): string {
+  const servers = tools.filter((t) => t.kind === "mcp-server");
+  const bundled = servers.filter((t) => t.launchable && !t.component);
+  // `launchable` 只说「有启动规格」，不说「此刻起得来」——差一个环境变量、差一个
+  // 外部程序的也在里面。把它们算进「不下载就能起」，就是上一版「预置 10 个」那个
+  // 错的小一号版本：数字对不上用户点下去看到的东西。
+  const blocked = bundled.filter((t) => t.status !== "available" && t.status !== "registered").length;
+  const needs = servers.filter((t) => t.component && t.component.state !== "acquired").length;
+  return (
+    `预置 ${bundled.length} 个，随安装包而来、不下载任何字节` +
+    (blocked > 0 ? `（其中 ${blocked} 个还要先配置才能起）` : "") +
+    (needs > 0 ? `；另有 ${needs} 个需要获取（可联网，也可从本地文件导入）。` : "。")
+  );
+}
 const TOOL_KIND: Record<ToolView["kind"], string> = {
   builtin: "内建",
   connector: "连接器",
@@ -1289,6 +1337,46 @@ function SkillsSection({ api }: { api: Api }) {
     } finally {
       setStarting(null);
     }
+  };
+  /**
+   * 获取一件载荷。**只有这里会下载** —— 启动时不下、刷新时不下、任务要用某个工具
+   * 时也不下（模型的一次工具调用永远不能触发下载，ADR-018 §7.2）。
+   *
+   * `from` 是气隙机器那条路：管理员把离线包里的 zip 指给它，校验和还是随安装包
+   * 同行的那一条。
+   */
+  const [acquiring, setAcquiring] = useState<string | null>(null);
+  const acquire = async (componentId: string, from?: string) => {
+    setFailed(null);
+    setAcquiring(componentId);
+    let message: string | null = null;
+    try {
+      await api.acquireComponent(componentId, from);
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    setAcquiring(null);
+    await reload();
+    // **在 reload 之后再放这句话。** reload 成功时会清掉 failed（那是「这一次列表拉
+    // 到了」的一部分），先设就会被它抹掉 —— 一次失败的获取于是变得无声无息，而
+    // 「悄悄没成功」正是这条通道最不该有的失败方式。
+    if (message) setFailed(message);
+  };
+  const cancelAcquire = async (componentId: string) => {
+    let message: string | null = null;
+    try {
+      await api.cancelComponent(componentId);
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    await reload();
+    if (message) setFailed(message);
+  };
+  /** 从本地文件 / 目录导入：壳弹系统目录框，界面只把路径转给守护进程。 */
+  const importFromDisk = async (componentId: string) => {
+    const picked = await api.pickFolder();
+    if (!picked.path) return;
+    await acquire(componentId, picked.path);
   };
 
   return (
@@ -1375,38 +1463,86 @@ function SkillsSection({ api }: { api: Api }) {
         ) : tools.length === 0 ? (
           <p className="set-note">没有工具登记册。</p>
         ) : (
-          <ul className="row-list" aria-label="工具">
-            {tools.map((t) => (
-              <li key={`${t.kind}:${t.id}`} className="row-item">
-                <code className="row-main" title={t.detail ?? ""}>
-                  {t.id}
-                </code>
-                <span className="row-tag">{TOOL_KIND[t.kind]}</span>
-                {(t.license || t.tier) && (
-                  <span className="text-body-sm text-muted-foreground">
-                    {[t.license, t.tier ? (TIER_LABEL[t.tier] ?? t.tier) : undefined].filter(Boolean).join(" · ")}
-                  </span>
-                )}
-                {t.tools && t.tools.length > 0 && (
-                  <span className="text-body-sm text-muted-foreground mono">{`工具：${t.tools.join("、")}`}</span>
-                )}
-                {t.launchable && t.status !== "available" && t.detail && (
-                  <span className="text-body-sm text-muted-foreground">{t.detail}</span>
-                )}
-                <StatusBadge tone={TOOL_STATUS[t.status].tone}>{TOOL_STATUS[t.status].label}</StatusBadge>
-                {t.launchable && (
-                  <Button
-                    variant={t.status === "available" ? "ghost" : "outline"}
-                    size="sm"
-                    disabled={starting === t.id}
-                    onClick={() => void launch(t, t.status !== "available")}
-                  >
-                    {starting === t.id ? "…" : t.status === "available" ? "停止" : "启动"}
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <>
+            {/* 常驻的一句事实：随包的与要获取的各多少。用户不必点开每一行去数。 */}
+            <p className="set-note">{bundledSummary(tools)}</p>
+            <ul className="row-list" aria-label="工具">
+              {tools.map((t) => (
+                <li key={`${t.kind}:${t.id}`} className="row-item">
+                  <code className="row-main" title={t.detail ?? ""}>
+                    {t.id}
+                  </code>
+                  <span className="row-tag">{TOOL_KIND[t.kind]}</span>
+                  {(t.license || t.tier) && (
+                    <span className="text-body-sm text-muted-foreground">
+                      {[t.license, t.tier ? (TIER_LABEL[t.tier] ?? t.tier) : undefined].filter(Boolean).join(" · ")}
+                    </span>
+                  )}
+                  {/* 工具名来自构建时探过的那一次：**停着的、还没获取的行也显示** ——
+                      用户在下载之前就看得见这台机器将要多出哪些工具（TD-034）。 */}
+                  {t.tools && t.tools.length > 0 && (
+                    <span className="text-body-sm text-muted-foreground mono">{`工具：${t.tools.join("、")}`}</span>
+                  )}
+                  {!t.tools && t.toolsUnprobed && (
+                    <span className="text-body-sm text-muted-foreground">{`工具名未探到：${t.toolsUnprobed}`}</span>
+                  )}
+                  {/* 有载荷那一行时不再重复 detail：守护进程那句话里已经带了同样的
+                      体积，两处并排显示同一个数字会让人以为是两笔下载。 */}
+                  {t.launchable && t.status !== "available" && t.detail && !t.component && (
+                    <span className="text-body-sm text-muted-foreground">{t.detail}</span>
+                  )}
+                  {/* 体积、许可证、来源主机都在按钮**左边** —— 点之前就看得见要下多少。
+                      地址不在这里：它只在守护进程手上，从随包清单读出来。 */}
+                  {t.component && (
+                    <span className="text-body-sm text-muted-foreground">
+                      {t.component.state === "acquiring"
+                        ? `${mb(t.component.receivedBytes ?? 0)} / ${mb(t.component.totalBytes ?? t.component.downloadBytes)}`
+                        : `${COMPONENT_STATE[t.component.state]} · 需下载 ${mb(t.component.downloadBytes)}（占盘 ${mb(
+                            t.component.diskBytes,
+                          )}）· ${t.component.license} · 来自 ${t.component.origin}`}
+                      {t.component.reason ? ` —— ${t.component.reason}` : ""}
+                    </span>
+                  )}
+                  <StatusBadge tone={TOOL_STATUS[t.status].tone}>{TOOL_STATUS[t.status].label}</StatusBadge>
+                  {t.component && t.component.state === "acquiring" ? (
+                    <Button variant="ghost" size="sm" onClick={() => void cancelAcquire(t.component!.id)}>
+                      取消
+                    </Button>
+                  ) : t.component ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={acquiring === t.component.id}
+                        onClick={() => void acquire(t.component!.id)}
+                      >
+                        {acquiring === t.component.id ? "获取中…" : "获取"}
+                      </Button>
+                      {/* 气隙机器点不动上面那个按钮，但管理员可以把离线包指给它。 */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={acquiring === t.component.id}
+                        onClick={() => void importFromDisk(t.component!.id)}
+                      >
+                        从本地文件导入
+                      </Button>
+                    </>
+                  ) : null}
+                  {t.launchable && !t.component && (
+                    <Button
+                      variant={t.status === "available" ? "ghost" : "outline"}
+                      size="sm"
+                      disabled={starting === t.id}
+                      onClick={() => void launch(t, t.status !== "available")}
+                    >
+                      {starting === t.id ? "…" : t.status === "available" ? "停止" : "启动"}
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </SettingsBlock>
     </>

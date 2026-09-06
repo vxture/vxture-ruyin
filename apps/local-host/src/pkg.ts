@@ -47,8 +47,11 @@ export type PackageContents = Map<string, Buffer>;
  * 条目名合法性：包内相对路径，禁止穿越与绝对路径。zip 规范用正斜杠；反斜杠在
  * Windows 上会被当作分隔符，因此一并拒绝，而不是"规范化后再看"——规范化是
  * 路径穿越漏洞最常见的藏身处。
+ *
+ * **导出给 component-store.ts 复用，不许复制一份过去**：复制出来的护栏会各自
+ * 漂移，而两份里晚改的那一份漂到哪里没人会发现 —— 它不出错的时候什么都不说。
  */
-function assertSafeEntryName(name: string): void {
+export function assertSafeEntryName(name: string): void {
   if (name.length === 0 || name.length > 512) {
     throw new PackageError(`illegal entry name length: ${name.slice(0, 64)}`);
   }

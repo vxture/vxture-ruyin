@@ -1,12 +1,67 @@
 {
   "version": 1,
   "generatedAt": "2026-09-05",
-  "$comment": "技能与工具预置清单（ADR-018 §2.3，owner 2026-09-05 定三档）。每条来源仓钉死 commit；许可证是硬门槛（none 不允许）。ruyin 构建时按它拉取预置进安装包；Runos 按它注册台账（vxture-foundation/vxture-runos#14）。launch 为本机启动规格（node = 构建时 vendored 随包；uvx = 需本机 uv），2026-09-05 逐条核过包名 / 版本 / bin。人读版：docs/40-implementation/20-tools-skills-catalog-v1.md。",
+  "$comment": "技能与工具预置清单（ADR-018 §2.3，owner 2026-09-05 定三档；§7.2 加第四档 acquire-on-demand）。每条来源仓钉死 commit；许可证是硬门槛（none 不允许）。ruyin 构建时按它拉取预置进安装包；Runos 按它注册台账（vxture-foundation/vxture-runos#14）。launch 为本机启动规格（node = 构建时 vendored 随包；uvx = 随包 uv + 随包 wheel 缓存，离线起）。components[] 是随包不带、要用户点一次才获取的载荷，摘要写在这里、随安装包同行 —— 上游若换了字节，校验不过，什么都不落地。人读版：docs/40-implementation/20-tools-skills-catalog-v1.md；预置工具名对照表：docs/40-implementation/40-bundled-tool-names.md。",
   "tiers": {
-    "default": "默认启用",
+    "default": "默认启用（随包，不下载任何字节就能起）",
     "installed-disabled": "装而不启用",
+    "acquire-on-demand": "随包不带，要点一次获取（可从网络，也可从本地文件）",
     "runos-registered": "经 Runos 注册，不进本机（密钥在 Runos 保险库）"
   },
+  "$comment_allowedOrigins": "获取通道只走这份闭合白名单里的 origin。比 registry-client.ts 的「索引自己的 origin」宽一点，理由是 pandoc 与 Chrome for Testing 我们没有再分发权 —— 镜像到自己的主机本身就是再分发。不许出现凭据、鉴权头（客户端零秘密，CLAUDE.md 硬规则）。",
+  "allowedOrigins": [
+    "https://github.com",
+    "https://objects.githubusercontent.com",
+    "https://cdn.playwright.dev"
+  ],
+  "$comment_pythonRuntime": "Python 半边的使能件：机器上没有 uv，侧载来的 wheel 也一样跑不了。uv 与 uv 托管的 CPython 随安装包走，运行时 UV_PYTHON_DOWNLOADS=never + uvx --offline，不留联网回退 —— 有回退，首次运行就可能悄悄偏离钉死的版本。seed 列的包在构建时预取进随包的 uv cache（scripts/release/seed-uv-cache.mjs），由 pack.mjs 断言，不是手写的承诺。",
+  "pythonRuntime": {
+    "uv": {
+      "version": "0.12.10",
+      "license": "MIT OR Apache-2.0",
+      "licenseSource": "0.12.10 tag 上 LICENSE-MIT 与 LICENSE-APACHE 并存（2026-09-06 核）",
+      "upstream": "https://github.com/astral-sh/uv/releases/download/0.12.10/uv-x86_64-pc-windows-msvc.zip",
+      "note": "uvx.exe 只是壳，离开 uv.exe 跑不了 —— 两个都装进包"
+    },
+    "cpython": {
+      "version": "3.13.15",
+      "via": "uv python install 3.13"
+    },
+    "seed": [
+      "haris-musa.excel-mcp-server"
+    ]
+  },
+  "$comment_components": "获取通道的载荷。组件单列而不是挂在服务器上：一份载荷可以解锁多个服务器，挂上去会让同一次下载在几行里各报一次，用户没法知道那是一次下载。redistribution: download-only 是硬标记 —— 这类不许进安装包、不许镜像到我们自己的主机（把「许可证是硬门槛」写成一行机器能查的字段）。sha256 必须是真的取回来算过的那一条；没有真摘要的载荷不许写进这里（写占位符等于把守卫变成摆设）。",
+  "components": [
+    {
+      "id": "browser.chromium-headless-shell",
+      "kind": "browser",
+      "version": "153.0.8010.12",
+      "revision": 1243,
+      "unlocks": [
+        "microsoft.playwright-mcp"
+      ],
+      "source": {
+        "url": "https://cdn.playwright.dev/builds/cft/153.0.8010.12/win64/chrome-headless-shell-win64.zip"
+      },
+      "sha256": "7aec872f3090e639c4237467624ea863c20fe2878914c93a6556bdbb52aa6c4c",
+      "size": 120200717,
+      "unpackedBytes": 283200000,
+      "install": {
+        "kind": "zip",
+        "into": "chromium_headless_shell-1243",
+        "expect": "chrome-headless-shell-win64/chrome-headless-shell.exe",
+        "marker": "INSTALLATION_COMPLETE"
+      },
+      "license": "BSD-3-Clause + Chromium 第三方致谢",
+      "licenseSource": "包内 LICENSE.headless_shell，2,300,816 B（2026-09-06 读过）",
+      "licenseFile": [
+        "chrome-headless-shell-win64/LICENSE.headless_shell"
+      ],
+      "redistribution": "download-only",
+      "note": "只有本机既无 Chrome 也无 Edge 时才需要 —— playwright-mcp 默认 channel 就是本机已装的 Chrome，--browser msedge 同样可用，Win11 一定有 Edge。Chrome for Testing 二进制无公开再分发授权，所以永不进包、永不镜像；也永不取完整 chrome-win64（205,123,748 B / 431.9 MB，压缩包内 308 个条目零个许可证文件）。上游会删旧构建，而 Chrome for Testing 不发布任何校验和（.sha256 / SHA256SUMS 一律 404）—— 我们记的这一条是唯一的钉子，由 .github/workflows/components-verify.yml 每周一核对一次（GitHub 的 schedule 只在 main 上触发；本地随时 pnpm components:verify）。"
+    }
+  ],
   "skills": [
     {
       "id": "opensensenova.sensenova-skills",
@@ -422,7 +477,11 @@
         "args": [
           "--headless"
         ],
-        "note": "需要 Chromium：首次用前 npx playwright install chromium（不随包，~150 MB）"
+        "browserLadder": true,
+        "note": "浏览器按梯子找：本机 Chrome → Edge（--browser msedge）→ 用户指定的可执行路径（BROWSER_EXECUTABLE_PATH）→ 已获取的 chromium-headless-shell 组件。默认 channel 就是本机已装的 Chrome，Win11 一定有 Edge，所以离线浏览器自动化零字节就已到手 —— 上一版这条写「首次用前 npx playwright install chromium（~150 MB）」，说反了：那条命令实测是 311 MB 下载 / 704 MB 磁盘（完整 chromium + headless shell + ffmpeg + winldd），而且根本不是起它的前提。"
+      },
+      "vendored": {
+        "bundled": true
       },
       "note": "~70 个 browser_* 工具"
     },
@@ -435,17 +494,12 @@
       "license": "MIT",
       "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
       "stars": 178253,
-      "tier": "default",
+      "tier": "installed-disabled",
       "subpath": "packages/markitdown-mcp",
       "needsKey": false,
-      "launch": {
-        "runtime": "uvx",
-        "package": "markitdown-mcp",
-        "version": "0.0.1a4",
-        "bin": "markitdown-mcp",
-        "args": []
-      },
-      "note": "Office/PDF/图片 → Markdown，官方 MCP 包"
+      "launch": null,
+      "note": "Office/PDF/图片 → Markdown，官方 MCP 包 —— 气隙机器上唯一的离线 PDF/pptx/docx → Markdown 通路",
+      "launchNote": "闭包 113.38 MiB 下载 / 298,474,271 B 磁盘，太重不进安装包（其中约 76 MB 是死重：43 MB speech_recognition 而我们不带 ffmpeg、33 MB onnxruntime 经非可选依赖 magika）。该走 acquire-on-demand，但那要求 components[] 里有一条**真取回来算过**的 sha256，而造那个 wheel 包是 CI 的事（scripts/release/build-components.mjs）—— 摘要没有之前不写进清单，写占位符等于把守卫变成摆设。TD-042。"
     },
     {
       "id": "docling-project.docling-mcp",
@@ -456,17 +510,12 @@
       "license": "MIT",
       "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
       "stars": 732,
-      "tier": "default",
+      "tier": "installed-disabled",
       "subpath": null,
       "needsKey": false,
-      "launch": {
-        "runtime": "uvx",
-        "package": "docling-mcp",
-        "version": "3.2.0",
-        "bin": "docling-mcp-server",
-        "args": []
-      },
-      "note": "版式感知的文档解析"
+      "launch": null,
+      "note": "版式感知的文档解析",
+      "launchNote": "降档（2026-09-06）：钉住的 3.2.0 默认装的是 docling-slim[service-client] —— 一个**远端 docling-serve 的客户端**，本地一页都不转，与「数据面留在本机」结构性相反。能本地转的 [local] 档是 1.014 GiB（torch 481 MB、cv2 113 MB，闭包里还有一个只有 sdist、要编译工具链的包），两档都不该进安装包。上一版把它记为 tier: default，是清单上一个已经为假的事实。"
     },
     {
       "id": "haris-musa.excel-mcp-server",
@@ -477,7 +526,7 @@
       "license": "MIT",
       "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
       "stars": 4156,
-      "tier": "default",
+      "tier": "installed-disabled",
       "subpath": null,
       "needsKey": false,
       "launch": {
@@ -487,9 +536,13 @@
         "bin": "excel-mcp-server",
         "args": [
           "stdio"
-        ]
+        ],
+        "offline": {
+          "cacheSeeded": true
+        }
       },
-      "note": "xlsx 读写：公式、格式、图表、透视"
+      "note": "xlsx 读写：公式、格式、图表、透视。wheel 在构建时预取进随包的 uv cache，运行时 --offline 起，一个字节都不下载",
+      "launchNote": "启动契约已经落地（tool-servers.ts：随包 uv.exe 的绝对路径 + --offline + UV_CACHE_DIR / UV_PYTHON_INSTALL_DIR / UV_PYTHON_DOWNLOADS=never，不留联网回退），预取脚本也在（scripts/release/seed-uv-cache.mjs）。**但 uv、CPython 与预取好的 wheel 缓存这一次没有真的装进安装包**，所以一台干净机器上它此刻还起不来 —— 因此记为 installed-disabled 而不是 default。等这三样进了 electron-builder 且 packaged-smoke 真起过一次 uvx 形态，改这一行的 tier 即可（lint:skill-manifest 会顺带要求 offline.cacheSeeded 与 pythonRuntime.seed 对上）。TD-042。"
     },
     {
       "id": "vivekvells.mcp-pandoc",
@@ -500,7 +553,7 @@
       "license": "MIT",
       "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
       "stars": 579,
-      "tier": "default",
+      "tier": "installed-disabled",
       "subpath": null,
       "needsKey": false,
       "launch": {
@@ -510,9 +563,10 @@
         "bin": "mcp-pandoc",
         "args": [],
         "requiresBin": "pandoc",
-        "note": "还要本机有 pandoc"
+        "note": "还要本机 PATH 上有 pandoc.exe（自己装的就用自己的）"
       },
-      "note": "pandoc 转换；docx/pptx 离线生成缺口先走它"
+      "note": "pandoc 转换；docx/pptx 离线生成缺口先走它",
+      "launchNote": "本机自己装了 pandoc 就能起（requiresBin 探测 PATH）。我们**不**提供 pandoc 载荷：pandoc.exe 233,626,888 B 且是 GPL-2.0-or-later —— 放进闭源安装包就是分发，所以它只能是 redistribution: download-only 的组件，而那要求一条真取回来算过的 sha256（pandoc 的 GitHub release 不发布任何校验和文件，得自己取一次记下来）。摘要没有之前不写进 components[]。TD-042。"
     },
     {
       "id": "nickclyde.duckduckgo-mcp-server",
@@ -523,17 +577,12 @@
       "license": "MIT",
       "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
       "stars": 1455,
-      "tier": "default",
+      "tier": "installed-disabled",
       "subpath": null,
       "needsKey": false,
-      "launch": {
-        "runtime": "uvx",
-        "package": "duckduckgo-mcp-server",
-        "version": "0.7.0",
-        "bin": "duckduckgo-mcp-server",
-        "args": []
-      },
-      "note": "无密钥搜索"
+      "launch": null,
+      "note": "无密钥搜索",
+      "launchNote": "降档（2026-09-06）：闭包 47.46 MiB Python，而搜索这条路已被 open-websearch（6 个公网工具）与 mcp-searxng（企业自托管实例）覆盖两遍；气隙机器上它本就无用。不进随包的 uv cache（seed 只留真正离线可用的那两条）。"
     },
     {
       "id": "ihor-sokoliuk.mcp-searxng",
@@ -558,7 +607,10 @@
         ],
         "note": "要指向一个 SearXNG 实例（SEARXNG_URL）"
       },
-      "note": "自托管 SearXNG，企业内可控"
+      "vendored": {
+        "bundled": true
+      },
+      "note": "自托管 SearXNG，企业内可控 —— **这一条不许挪出安装包**：它指向的是企业自己托管的实例，正是气隙 / 域受限客户唯一能用的那个搜索"
     },
     {
       "id": "aas-ee.open-websearch",
@@ -579,7 +631,10 @@
         "bin": "build/index.js",
         "args": []
       },
-      "note": "多引擎，无密钥"
+      "vendored": {
+        "bundled": true
+      },
+      "note": "多引擎，无密钥。6 个工具全是公网调用，气隙机器上随包与不随包完全等价 —— 它是唯一一处挪出体积而不损失任何离线诚实度的地方，等 CI 能造出带真摘要的 node-bundle 组件后再挪（TD-042）"
     },
     {
       "id": "zcaceres.fetch-mcp",
@@ -590,12 +645,12 @@
       "license": "MIT",
       "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
       "stars": 821,
-      "tier": "default",
+      "tier": "installed-disabled",
       "subpath": null,
       "needsKey": false,
       "launch": null,
       "note": "HTTP 抓取",
-      "launchNote": "npm 上的 fetch-mcp 归属未核实（与仓库作者不一定同一人），暂不启动"
+      "launchNote": "npm 上的 fetch-mcp 归属未核实（与仓库作者不一定同一人），暂不启动。降档（2026-09-06）：它连启动规格都没有，记成「默认启用」是清单上一个为假的事实 —— 档位从此与「装没装进包」是同一件事（lint:skill-manifest 第 1 条）"
     },
     {
       "id": "modelcontextprotocol.servers",
@@ -606,12 +661,12 @@
       "license": "MIT OR Apache-2.0",
       "licenseSource": "根 LICENSE（2026-09-05 核）：项目处于 MIT → Apache-2.0 过渡期，两者皆宽松；src/filesystem package.json 写 SEE LICENSE IN LICENSE",
       "stars": 90088,
-      "tier": "default",
+      "tier": "installed-disabled",
       "subpath": "src/filesystem",
       "needsKey": false,
       "launch": null,
       "note": "官方参考实现（仓库级许可证 NOASSERTION，逐包核对后再进）",
-      "launchNote": "官方参考实现；filesystem 服务器要以允许目录作参数，且 Ruyin 已有自己的文件工具 —— 暂不启动"
+      "launchNote": "官方参考实现；filesystem 服务器要以允许目录作参数，且 Ruyin 已有自己的文件工具 —— 暂不启动。降档（2026-09-06）：同 fetch-mcp，没有启动规格就不该记为默认启用"
     },
     {
       "id": "executeautomation.mcp-playwright",
@@ -627,7 +682,7 @@
       "needsKey": false,
       "launch": null,
       "note": "Playwright 备选",
-      "launchNote": "vendored 后 134 MB（自带 playwright），不随包；第二批按需下载"
+      "launchNote": "剔除（2026-09-06），理由是行为不是体积：启动失败时它自己 spawn('npx', ['playwright','install',…])（dist/toolHandler.js）—— 一次模型工具调用就能引发 311 MB 无人值守下载。获取通道结构上不给这种可能（绝不在任务/模型路径上下载），所以这个包留不得。顺带纠正尺寸：剪枝后 **56.6 MB**，不是上一版写的 134 MB（那是剪枝前的数；pull-tools.mjs 报的一直是剪枝后的 dirSize）—— 其中 46.4 MB 是 mcp-evals（上游把评测台错列进 dependencies）、27.1 MB 是 OpenTelemetry。留着错数，下一个人会照它重新推出错的结论。功能上它与已随包的 playwright-mcp 是同一件事（33 工具 vs 24），且无 channel 支持。"
     },
     {
       "id": "opendatalab.mineru-document-explorer",
@@ -670,12 +725,24 @@
       "license": "MIT",
       "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
       "stars": 1021,
-      "tier": "installed-disabled",
+      "tier": "default",
       "subpath": null,
       "needsKey": false,
-      "launch": null,
-      "note": "xlsx 读写备选",
-      "launchNote": "vendored 后 100 MB（launcher 附各平台二进制），不随包；第二批按需下载"
+      "launch": {
+        "runtime": "node",
+        "package": "@negokaz/excel-mcp-server",
+        "version": "0.12.0",
+        "bin": "dist/launcher.js",
+        "args": []
+      },
+      "vendored": {
+        "bundled": true,
+        "keepOnly": [
+          "dist/excel-mcp-server_windows_amd64_v1"
+        ],
+        "keepOnlyWhy": "上一版把它记成「vendored 后 100 MB」并据此不随包 —— 那不是真重量，是**剪枝器漏判**。它的平台目录叫 dist/excel-mcp-server_windows_amd64_v1，与 pull-tools.mjs 的剪枝规则四处不匹配：父目录是 dist 而门是 ^(build|prebuilds|bin)$；目录名带包名前缀；带 _v1 后缀；PLATFORM_DIR 词表里根本没有 windows / amd64。放宽那个正则会继续漏掉下一个 GoReleaser / napi 形状，所以改成人评审过的显式白名单 + 一条构建期体积断言。剪到只剩 win32-x64 后实测 13.3 MB / 压缩 4.9 MiB。"
+      },
+      "note": "xlsx 读写：**唯一一条不要 Python、不要网络的离线 xlsx 通路**（haris-musa 那条要随包的 uv + wheel 缓存）"
     },
     {
       "id": "sbroenne.mcp-server-excel",
@@ -755,7 +822,7 @@
       "needsKey": false,
       "launch": null,
       "note": "搜索 + 抓取（部分需密钥）",
-      "launchNote": "vendored 后 95 MB（自带浏览器驱动），不随包；第二批按需下载"
+      "launchNote": "剔除（2026-09-06）。尺寸先纠正：剪枝后 **65.3 MB**，不是上一版写的 95 MB（同 executeautomation，那是剪枝前的数）。理由不是体积：非密钥的那一半与 open-websearch 重复，而需密钥的那一半按 ADR-018 §2.6 永不进本机（清单自己把 tavily-ai.tavily-mcp 记为 runos-registered）—— 于是 23.2 MB 的 @tavily/core → js-tiktoken rank 表（占 36%）是注定跑不通的代码路径，且它是 dist/index.js 的顶层 import，剪不掉。"
     },
     {
       "id": "tavily-ai.tavily-mcp",

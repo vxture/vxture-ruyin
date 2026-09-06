@@ -271,7 +271,7 @@ test("bundled: listed as stashed until enabled; activate really starts it, lists
   assert.equal(fake.bundled?.runtime, "node");
   // uvx 的在这台机器上起不了：原因写在 blocked 里，不是「未启用」。
   const py = list.find((c) => c.id === "py.only");
-  assert.match(py?.bundled?.blocked ?? "", /需要本机有 uv/);
+  assert.match(py?.bundled?.blocked ?? "", /没有随包的 uv/);
   assert.match(py?.health.detail ?? "", /uv/);
 
   const view = await registry.activate("fake.server");
@@ -290,7 +290,7 @@ test("bundled: listed as stashed until enabled; activate really starts it, lists
   assert.equal(bundled.isEnabled("fake.server"), false);
 
   await assert.rejects(registry.remove("fake.server"), (e: unknown) => e instanceof ConnectorBundledError);
-  await assert.rejects(registry.activate("py.only"), /需要本机有 uv/);
+  await assert.rejects(registry.activate("py.only"), /没有随包的 uv/);
   await registry.stopAll();
   rmSync(dataDir, { recursive: true, force: true });
 });
@@ -314,4 +314,35 @@ test("bundled: an enabled server comes up at load; a user connector can be deact
   await assert.rejects(user.registry.deactivate("nope"), /not installed/);
   await user.registry.stopAll();
   rmSync(user.dataDir, { recursive: true, force: true });
+});
+
+/**
+ * 连接器进程**不许把仓库 / 应用目录当工作目录**。
+ *
+ * 起因是实测到的：playwright-mcp 每访问一页就往 cwd 下的 `.playwright-mcp/` 写一份
+ * .yml 快照 —— 一次探测在仓库根留下了四个未跟踪文件。不给 cwd 就是继承守护进程的
+ * cwd，而那是「应用是从哪个目录被启动的」：CI 里是仓库根，装好的机器上可能是
+ * Program Files（多半写不进去）。
+ */
+test("connector: 子进程的工作目录是临时目录，不是守护进程的 cwd", async () => {
+  const { registry, dataDir } = fresh();
+  const before = process.cwd();
+  // 一个只做一件事的假服务器：往自己的 cwd 里写一个标记，然后就退出（握手会失败，
+  // 那不影响这条断言 —— 要看的是它在哪儿写的）。
+  const script = join(dataDir, "marker-server.cjs");
+  writeFileSync(script, "require('node:fs').writeFileSync('ruyin-cwd-marker.txt', process.cwd());\n");
+
+  const probe = await registry.probe({ id: "cwd-probe", command: process.execPath, args: [script] });
+  assert.equal(probe.ok, false, "它根本不握手，本来就连不上");
+
+  assert.equal(existsSync(join(before, "ruyin-cwd-marker.txt")), false, "子进程不许往仓库 / 应用目录里写");
+  const work = join(tmpdir(), "ruyin-connector-work", "cwd-probe");
+  const marker = join(work, "ruyin-cwd-marker.txt");
+  assert.ok(existsSync(marker), `工作目录应当是 ${work}`);
+  assert.equal(readFileSync(marker, "utf8"), work);
+  // 而且它**不在数据目录下**：Windows 上进程的 cwd 会锁住那个目录连同上级，
+  // 而数据目录是可以搬家的。
+  assert.equal(work.startsWith(dataDir), false);
+  rmSync(work, { recursive: true, force: true });
+  rmSync(dataDir, { recursive: true, force: true });
 });

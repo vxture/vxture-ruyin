@@ -17,7 +17,9 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+
+import type { ComponentStore } from "./component-store.js";
 
 export interface LaunchSpec {
   runtime: "node" | "uvx";
@@ -28,8 +30,20 @@ export interface LaunchSpec {
   args?: string[];
   /** 启动前必须给的环境变量（例如 SEARXNG_URL）；值由用户在启用时给，不是密钥。 */
   requiresEnv?: string[];
-  /** 还要本机有的外部程序（例如 pandoc）。 */
+  /**
+   * 还要本机有的外部程序（例如 pandoc）。**PATH 探测**：本机自己装了就不必获取。
+   * 与 requiresComponent 并存，探测优先。
+   */
   requiresBin?: string;
+  /**
+   * 起它之前必须先获取的载荷（ADR-018 §7.2）。与 requiresBin 的分工：那一条是
+   * 「本机有没有」，这一条是「获取界面拿来给按钮的那一条」。
+   */
+  requiresComponent?: string[];
+  /** 这个包的 wheel 已在构建时预取进随包的 uv cache（pack.mjs 断言，不是手写的承诺）。 */
+  offline?: { cacheSeeded?: boolean };
+  /** 走浏览器梯子（chrome → msedge → 用户指定 → 已获取的 headless shell）。 */
+  browserLadder?: boolean;
   note?: string;
 }
 
@@ -44,6 +58,13 @@ export interface BundledServer {
   launchNote?: string;
   vendored?: { dir: string; package: string; entry: string; bytes?: number; licenseFile?: string | null };
   vendorError?: string;
+  /** 构建时真起过一次、`tools/list` 报出来的工具名（预置工具名对照表，TD-034）。 */
+  tools?: string[];
+  /** 探不到的原因。**绝不写成空数组** —— 空数组读起来是「它什么都不暴露」。 */
+  toolsUnprobed?: string;
+  /** 构建时服务器自报的 `{name, version}`。 */
+  serverInfo?: { name?: string; version?: string };
+  toolsProbedAt?: string;
 }
 
 export interface ToolsIndex {
@@ -53,7 +74,16 @@ export interface ToolsIndex {
 
 export type LaunchPlan =
   | { ok: true; command: string; args: string[]; env: Record<string, string> }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      /**
+       * 起不了是因为差一件可获取的载荷 —— 界面按这个给「获取」按钮。
+       * **不带地址**：地址只能来自守护进程刚从清单读出的那一份
+       * （check-update-policy.mjs 钉住「设置页不许出现写死的组件 URL」）。
+       */
+      needsComponent?: string;
+    };
 
 interface State {
   enabled: string[];
@@ -70,7 +100,39 @@ export interface BundledToolServersOptions {
   hasUvx?: () => boolean;
   /** 本机有没有某个外部程序；缺省 `<bin> --version`。 */
   hasBin?: (bin: string) => boolean;
+  /** 获取通道（ADR-018 §7.2）。缺省 = 这套装配没有，需要载荷的一律如实报「未获取」。 */
+  components?: ComponentStore;
+  /**
+   * 本机装着的浏览器（梯子的头两级）。缺省按 Windows 的固定安装位置找。
+   * playwright 自己的 findChromiumChannelBestEffort **不在 MCP 那条代码路径上**
+   * （两个调用点都在 codegen / dashboard），所以这条梯子必须我们写。
+   */
+  findBrowser?: (channel: "chrome" | "msedge") => boolean;
   log?: (line: string) => void;
+}
+
+/** Windows 上 Chrome / Edge 的固定安装位置。Win11 一定有 Edge。 */
+const BROWSER_PATHS: Record<"chrome" | "msedge", string[]> = {
+  chrome: [
+    "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe",
+    "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe",
+    "%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe",
+  ],
+  msedge: [
+    "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe",
+    "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe",
+  ],
+};
+
+function browserInstalled(channel: "chrome" | "msedge"): boolean {
+  return BROWSER_PATHS[channel].some((p) => {
+    const expanded = p.replace(/%([^%]+)%/g, (_, name: string) => process.env[name] ?? "");
+    return !expanded.includes("%") && expanded.length > 0 && existsSync(expanded);
+  });
+}
+
+function mb(n: number): string {
+  return `${(n / 1048576).toFixed(1)} MB`;
 }
 
 function probeBin(bin: string, args: string[] = ["--version"]): boolean {
@@ -154,34 +216,132 @@ export class BundledToolServers {
     if (launch.requiresBin && !(this.options.hasBin ?? probeBin)(launch.requiresBin)) {
       return { ok: false, reason: `需要本机有 ${launch.requiresBin}` };
     }
+    // 必需的载荷：**「未获取」与「未随包」「需要 uv」是三件不同的事**，各说各的。
+    // 上一版对这几条一律回「未随包 vendored（构建时没拉取）」—— 那句话对用户不成立，
+    // 他没有构建过任何东西。
+    for (const id of launch.requiresComponent ?? []) {
+      if (!this.options.components?.isAcquired(id)) {
+        const status = this.options.components?.status(id);
+        const size = status ? `需下载 ${mb(status.downloadBytes)}（占盘 ${mb(status.diskBytes)}）` : "载荷不在本次构建的清单里";
+        // 「从来没取过」和「取过、文件后来不见了」不是同一句话：后者用户会记得自己
+        // 装过，一句「未获取」会让他以为是产品把它弄丢了之外还在骗他。
+        const lead = status?.state === "payload-missing" ? "载荷不在了" : "未获取";
+        const why = status && status.state !== "not-acquired" && status.reason ? `（${status.reason}）` : "";
+        return {
+          ok: false,
+          reason: `${lead}：${size}${why} —— 在「能力平台」里点「获取」，或从本地文件导入`,
+          needsComponent: id,
+        };
+      }
+    }
     if (launch.runtime === "node") {
       const dir = this.toolsDir;
       if (!dir || !server.vendored) {
-        return { ok: false, reason: server.vendorError ? `构建时未装进包：${server.vendorError}` : "未随包 vendored（构建时没拉取）" };
+        return { ok: false, reason: server.vendorError ? `构建时未装进包：${server.vendorError}` : "这一版安装包里没有它（构建时没有 vendored）" };
       }
       const entry = resolve(dir, server.vendored.dir, server.vendored.entry);
       if (!existsSync(entry)) return { ok: false, reason: `入口不存在：${entry}` };
+      const extra = launch.browserLadder ? this.browserArgs(userEnv) : { ok: true as const, args: [] };
+      if (!extra.ok) return extra;
       return {
         ok: true,
         command: this.options.execPath ?? process.execPath,
-        args: [entry, ...(launch.args ?? [])],
+        args: [entry, ...(launch.args ?? []), ...extra.args],
         // Electron 的可执行文件带这个变量就是一个纯 Node；真 Node 下它没有作用。
         env: { ELECTRON_RUN_AS_NODE: "1", ...userEnv },
       };
     }
-    if (launch.runtime === "uvx") {
+    if (launch.runtime === "uvx") return this.uvxPlan(launch, userEnv);
+    return { ok: false, reason: `不认识的 runtime "${String((launch as { runtime: string }).runtime)}"` };
+  }
+
+  /**
+   * uvx 的启动契约（ADR-018 §7.2）。三件事一起定死，少一件随包了缓存也照样联网：
+   *
+   *   - 用**随包的 uv.exe 绝对路径**，不用 PATH 上的 uvx（`probeBin("uvx")` 只看
+   *     PATH，找不到随包的那一个）；
+   *   - `--offline`，**不留联网回退** —— 有回退，首次运行就可能悄悄偏离钉死的版本，
+   *     而它成功的时候什么都不会说。冷缓存 + `--offline` 的失败是干净的
+   *     （"Packages were unavailable because the network was disabled"），可诊断；
+   *   - `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` 指向随包的那两份，
+   *     `UV_PYTHON_DOWNLOADS=never`。
+   */
+  private uvxPlan(launch: LaunchSpec, userEnv: Record<string, string>): LaunchPlan {
+    const bundled = this.uvHome();
+    const uvExe = bundled ? join(bundled, process.platform === "win32" ? "uv.exe" : "uv") : undefined;
+    // 随包的没有就退回 PATH 上的 uv：那是开发机的情形，**不是**联网回退 ——
+    // `--offline` 与钉死的 `包==版本` 两条都还在，缓存冷了照样干净地失败。
+    if (!uvExe) {
       if (this.uvxKnown === undefined) this.uvxKnown = (this.options.hasUvx ?? (() => probeBin("uvx")))();
       if (!this.uvxKnown) {
-        return { ok: false, reason: "需要本机有 uv（https://docs.astral.sh/uv/），uvx 不在 PATH 里" };
+        return {
+          ok: false,
+          reason:
+            "这一版安装包里没有随包的 uv，PATH 上也没有 —— Python 形态的服务器起不来。" +
+            "（随包 uv + CPython + 预取好的 wheel 缓存是 TD-042 未完的那一步）",
+        };
       }
-      return {
-        ok: true,
-        command: "uvx",
-        args: ["--from", `${launch.package}==${launch.version}`, launch.bin ?? launch.package, ...(launch.args ?? [])],
-        env: userEnv,
-      };
     }
-    return { ok: false, reason: `不认识的 runtime "${String((launch as { runtime: string }).runtime)}"` };
+    const cache = bundled ? join(bundled, "cache") : undefined;
+    const python = bundled ? join(bundled, "python") : undefined;
+    return {
+      ok: true,
+      command: uvExe ?? "uvx",
+      args: [
+        ...(uvExe ? ["tool", "run"] : []),
+        "--offline",
+        "--from",
+        `${launch.package}==${launch.version}`,
+        launch.bin ?? launch.package,
+        ...(launch.args ?? []),
+      ],
+      env: {
+        ...(cache ? { UV_CACHE_DIR: cache } : {}),
+        ...(python ? { UV_PYTHON_INSTALL_DIR: python } : {}),
+        // 缺什么就失败，绝不自己去下一个 Python 解释器。
+        UV_PYTHON_DOWNLOADS: "never",
+        UV_NO_PROGRESS: "1",
+        ...userEnv,
+      },
+    };
+  }
+
+  /** 随包的 uv 在哪（`<resources>/uv`）。没有就是这一版没装进来。 */
+  private uvHome(): string | undefined {
+    const dir = this.options.toolsDir;
+    if (!dir) return undefined;
+    const home = join(dirname(resolve(dir)), "uv");
+    return existsSync(join(home, process.platform === "win32" ? "uv.exe" : "uv")) ? home : undefined;
+  }
+
+  /**
+   * 浏览器梯子：chrome → msedge → 用户指定的可执行路径 → 已获取的 headless shell。
+   *
+   * 实测 playwright-mcp 的默认 channel 就是本机已装的 Chrome，`--browser msedge`
+   * 同样可用，而 Win11 一定有 Edge —— **离线浏览器自动化是零字节就已到手的能力**。
+   * 所以这里的默认答案是「什么都不加」，而不是「去下 311 MB」。
+   */
+  private browserArgs(userEnv: Record<string, string>): { ok: true; args: string[] } | { ok: false; reason: string; needsComponent?: string } {
+    const has = this.options.findBrowser ?? browserInstalled;
+    if (has("chrome")) return { ok: true, args: [] };
+    if (has("msedge")) return { ok: true, args: ["--browser", "msedge"] };
+    const given = userEnv["BROWSER_EXECUTABLE_PATH"];
+    if (given && existsSync(given)) return { ok: true, args: ["--executable-path", given] };
+    for (const c of this.options.components?.list() ?? []) {
+      if (c.kind !== "browser" || c.state !== "acquired") continue;
+      const exe = this.options.components?.pathOf(c.id);
+      const spec = this.options.components?.spec(c.id);
+      if (exe && spec?.install.expect) return { ok: true, args: ["--executable-path", join(exe, spec.install.expect)] };
+    }
+    const shell = (this.options.components?.list() ?? []).find((c) => c.kind === "browser");
+    return {
+      ok: false,
+      reason: shell
+        ? `本机既没有 Chrome 也没有 Edge。给一个浏览器的路径（环境变量 BROWSER_EXECUTABLE_PATH），` +
+          `或获取 ${shell.id}：需下载 ${mb(shell.downloadBytes)}（占盘 ${mb(shell.diskBytes)}，${shell.license}）`
+        : "本机既没有 Chrome 也没有 Edge，也没有可获取的浏览器载荷。给一个浏览器的路径（环境变量 BROWSER_EXECUTABLE_PATH）",
+      ...(shell ? { needsComponent: shell.id } : {}),
+    };
   }
 
   /** 让下次读索引重新读（构建脚本重跑之后）。 */

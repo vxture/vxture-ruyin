@@ -134,6 +134,15 @@ jobs:
       - name: Skill manifest guardrail (licence + pinned commit + tiers)
         run: node scripts/guardrails/check-skill-manifest.mjs
 
+      # 守卫和被守的东西一起改，是最容易出的一种事故：清单加一个字段，守卫顺手
+      # 放宽一条规则，两边都「通过」，而那条规则从此再也不会拦住任何东西。这一组
+      # 用例每个都是一份只坏了一处的清单，断言守卫真的拒绝它。
+      # 同一组里还有发布脚本那几支：工具名对照表的生成必须是**确定的** —— 它把
+      # 构建日期写进正文的那一版，让 packaged-smoke 里的 `git diff --exit-code`
+      # 从提交的第二天起对每一次无关提交变红。
+      - name: Guardrail self-tests (each new rule really refuses what it claims to)
+        run: node --test "scripts/guardrails/*.test.mjs" "scripts/release/*.test.mjs"
+
       # W5 版本策略（owner 定：手工版本 + 守卫）：包内容改了、版本号没动，发布
       # 流水线会因「已发过」跳过它而全绿 —— 消费方拿到的还是旧包。
       - name: Package version guardrail (content changed => version bumped)
@@ -327,3 +336,14 @@ jobs:
         run: node scripts/release/pack.mjs
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      # 预置工具名对照表（TD-034 / TD-042）：契约作者照它写 provider: connector 的
+      # 工具声明，所以过期的对照表比没有更糟 —— 照着一个不存在的工具名写的契约，会在
+      # 任务启动前被按名拒绝，而作者手里那份文档说它存在。
+      #
+      # **这条检查只能待在这个 job 里**：resources/tools/ 整目录是 .gitignore 的构建
+      # 产物，static-checks 那边没有 index.json 可比。pack.mjs 刚跑过 pull-tools，
+      # 而 pull-tools 会把对照表重写一遍 —— 于是「重写完还有 diff」就等于「有人改了
+      # 工具，却没把重生成的文档一起提交」。
+      - name: Bundled tool-name table is not stale (pull-tools just rewrote it)
+        run: git diff --exit-code -- docs/40-implementation/40-bundled-tool-names.md docs/40-implementation/10-product-integration-guide.md

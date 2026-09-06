@@ -169,6 +169,8 @@ export interface ProjectExport {
 export type RuntimeEvent =
   | { kind: "task"; projectId: string; taskInstance: string }
   | { kind: "pending" }
+  /** 获取通道的某个组件动了；界面据此重取 GET /components（事件不带进度数值）。 */
+  | { kind: "component" }
   /** 界面主题变了；壳据此重画窗口按钮（见 chrome-theme.ts）。 */
   | { kind: "ui-theme" }
   | { kind: "app-restart" }
@@ -328,14 +330,79 @@ export interface ToolView {
   id: string;
   kind: "builtin" | "connector" | "mcp-server";
   source: string;
-  /** registered = 预置清单登记了但本机还起不来（TD-042）；runos = 经 Runos 注册，本机不装。 */
-  status: "available" | "unavailable" | "registered" | "runos";
+  /**
+   * registered = 预置清单登记了但本机还起不来（TD-042）；runos = 经 Runos 注册，
+   * 本机不装；needs-acquisition = 差一件要下载的载荷，用户点一下就能改变
+   * （ADR-018 §7.2）；acquiring = 正在取。
+   */
+  status: "available" | "unavailable" | "needs-acquisition" | "acquiring" | "registered" | "runos";
   detail?: string;
   license?: string;
   tier?: string;
+  /** 它暴露（或构建时探到、清单说它有）的工具名 —— 停着的行也显示。 */
   tools?: string[];
+  /** 目录里为什么没有工具名。空数组会被读成「它什么都不暴露」，所以宁可给一句话。 */
+  toolsUnprobed?: string;
   /** mcp-server：有本机启动规格（能启动 / 能停），还是只登记。 */
   launchable?: boolean;
+  /** 起它要先获取的那件载荷：体积 / 许可证 / 来源主机 / 进度。**地址不在这里。** */
+  component?: {
+    id: string;
+    state: ComponentState;
+    downloadBytes: number;
+    diskBytes: number;
+    license: string;
+    origin: string;
+    receivedBytes?: number;
+    totalBytes?: number;
+    reason?: string;
+  };
+}
+
+/**
+ * 获取通道里一件载荷此刻的样子。源头：apps/local-host/src/component-store.ts。
+ * **失败各说各的** —— 折叠成一句「获取失败」，用户就分不清「网络到不了」与
+ * 「字节被换了」，而后者是要说响的一种。
+ */
+export type ComponentState =
+  | "acquired"
+  | "not-acquired"
+  | "acquiring"
+  | "unreachable"
+  | "gone"
+  | "payload-missing"
+  | "mismatch"
+  | "no-space"
+  | "too-large"
+  | "license-missing"
+  | "refused-origin"
+  | "path-too-long"
+  | "cancelled"
+  | "failed";
+
+export interface ComponentStatus {
+  id: string;
+  kind: string;
+  version: string;
+  state: ComponentState;
+  /** 要下多少字节 —— 界面把它放在按钮左边，点之前就看得见。 */
+  downloadBytes: number;
+  /** 装完占多少盘。 */
+  diskBytes: number;
+  license: string;
+  /** 从哪个主机来。 */
+  origin: string;
+  redistribution: "redistributable" | "download-only";
+  /** 这份载荷解锁了哪些服务器。 */
+  unlocks: string[];
+  receivedBytes?: number;
+  totalBytes?: number;
+  reason?: string;
+  acquiredAt?: string;
+  transport?: "https" | "local";
+  path?: string;
+  sourceOffer?: string;
+  note?: string;
 }
 
 export interface Binding {
@@ -696,6 +763,17 @@ export class Api {
   refreshSkills = () => this.call<SkillListing & { distributed: unknown }>("/skills/refresh", "POST");
   /** 工具登记册：内建 + 连接器暴露的 + 预置清单登记的 MCP 服务器。 */
   tools = () => this.call<{ items: ToolView[] }>("/tools");
+  /** 获取通道（ADR-018 §7.2）：随包不带、点一次才落到本机的载荷。 */
+  components = () => this.call<{ items: ComponentStatus[] }>("/components");
+  /**
+   * 取一件载荷。**地址不在界面手上** —— 守护进程从随包清单里读，界面只给 id；
+   * `from` 给了就从本地文件 / 目录导入（气隙机器那条路），校验完全一样。
+   */
+  acquireComponent = (id: string, from?: string) =>
+    this.call<ComponentStatus>(`/components/${encodeURIComponent(id)}/acquire`, "POST", from ? { from } : {});
+  cancelComponent = (id: string) =>
+    this.call<{ cancelled: boolean }>(`/components/${encodeURIComponent(id)}/cancel`, "POST");
+  removeComponent = (id: string) => this.call<{ removed: string }>(`/components/${encodeURIComponent(id)}`, "DELETE");
   installConnector = (input: {
     id: string;
     command: string;
