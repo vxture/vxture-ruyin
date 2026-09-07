@@ -147,6 +147,23 @@ void test("ProjectPanel: shows a loading placeholder before the first load resol
   expect(screen.getByText("加载中……")).toBeInTheDocument();
 });
 
+void test("任务：排队中的显示位置，且**不改写任务状态**（TD-045）", async () => {
+  const api = fakeApi({
+    taskInstances: vi.fn().mockResolvedValue([
+      taskInstance({ id: "t1", state: "executing", running: true }),
+      taskInstance({ id: "t2", state: "created", queued: true, queuePosition: 2 }),
+    ]),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="tasks" />);
+
+  // 位置要在：不报位置就等于不告诉用户「还要多久」，而那是他此刻唯一想知道的。
+  expect(await screen.findByText("排队中 · 第 2")).toBeInTheDocument();
+
+  // **状态徽标仍是 created**。排队是宿主此刻的调度情况，不是任务状态 —— 把状态
+  // 改写成「排队中」会让状态机的记录与界面对不上（十个状态里没有这一个）。
+  expect(screen.getByText("created")).toBeInTheDocument();
+});
+
 void test("ProjectPanel: the summary strip reports phase, task counts, resources, and audit/chain status", async () => {
   const api = fakeApi({
     taskInstances: vi.fn().mockResolvedValue([

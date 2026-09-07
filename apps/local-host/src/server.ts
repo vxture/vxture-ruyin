@@ -87,6 +87,30 @@ export interface SkillRegistryLike {
   refresh(): void;
 }
 
+/**
+ * 给任务记录补上**此刻这台宿主**的调度情况（TD-045）。
+ *
+ * `running` / `queued` / `queuePosition` **不来自记录、也不落库** —— 它们是这
+ * 个进程此刻的排队情况（见 task-queue.ts 的头注释：队列不持久化，所以持久化下来
+ * 的排队状态在下次启动时会是一句谎）。
+ *
+ * 列表与单条走同一个投影：此前只有单条带 `running`，于是同一个任务在列表里和在
+ * 详情里显示得不一样。
+ */
+function withRunState(
+  task: { id: string },
+  deps: Pick<LocalApiDeps, "tasks">,
+): Record<string, unknown> {
+  const queued = deps.tasks.isQueued(task.id);
+  return {
+    ...task,
+    running: deps.tasks.isRunning(task.id),
+    queued,
+    // 不排队时不发这个字段：发一个 0 会让界面去判断「0 是第几位」。
+    ...(queued ? { queuePosition: deps.tasks.queuePosition(task.id) } : {}),
+  };
+}
+
 export interface LocalApiDeps {
   runtime: ProjectRuntime;
   /** 受管产品资产（安装 / 启用 / 订阅可用性，30-contract-schema §18）。 */
@@ -1366,7 +1390,8 @@ async function handle(
 
     // GET /projects/:id/tasks - task instances
     if (method === "GET" && segments.length === 3 && segments[2] === "tasks") {
-      send(res, 200, await deps.runtime.listTaskInstances(projectId));
+      const list = await deps.runtime.listTaskInstances(projectId);
+      send(res, 200, list.map((t) => withRunState(t, deps)));
       return;
     }
 
@@ -1445,7 +1470,7 @@ async function handle(
         });
         return;
       }
-      send(res, 200, { ...found, running: deps.tasks.isRunning(found.id) });
+      send(res, 200, withRunState(found, deps));
       return;
     }
 

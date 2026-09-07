@@ -10,6 +10,12 @@
  *
  * 用法：pnpm dev:ui —— 它会打印一个带令牌的地址，浏览器打开即可。
  * 前置：先 pnpm -r build（它读的是各包的 dist）。
+ *
+ * 两个可选环境变量，都只为**看清与时序有关的界面**：
+ *   RUYIN_CAPABILITY_BASE       接一个真的能力面（不给就是瞬间返回的 mock）
+ *   RUYIN_MAX_CONCURRENT_TASKS  同时驱动几个任务（TD-045；缺省 3）
+ * 例：起一个每回合几秒的本地假能力面，再把上限压到 1，排队就看得见了 ——
+ * 用 mock 看排队，看到的会是「没有排队」，而那不是因为上限生效，是没人排。
  */
 import { existsSync, mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -22,6 +28,7 @@ const { ProjectRuntime } = await import(`${ROOT}/packages/runtime-core/dist/inde
 const { parseContract } = await import(`${ROOT}/packages/contract-schema/dist/index.js`);
 const { SqliteStoragePort } = await import(`${ROOT}/apps/local-host/dist/storage.js`);
 const { KeyManager } = await import(`${ROOT}/apps/local-host/dist/keys.js`);
+const { CapabilityClient } = await import(`${ROOT}/apps/local-host/dist/capability-client.js`);
 const { MockAIGateway, nodeClock, nodeCrypto, nodeId } = await import(
   `${ROOT}/apps/local-host/dist/host-ports.js`
 );
@@ -95,12 +102,28 @@ const skillRegistry = new SkillRegistry({
   dataDir,
   log: (l) => console.error(l),
 });
+/**
+ * 观察台的网关：缺省仍是 MockAIGateway，**给了 `RUYIN_CAPABILITY_BASE` 就用真的
+ * 客户端**。
+ *
+ * 为什么加这一条：这个观察台存在的理由是「让界面真的能被看见和量」，而它此前只能
+ * 接瞬间返回的 mock —— 于是**任何与时序有关的界面都看不见**：任务在跑的样子、排队
+ * 的样子、等人那一刻的样子，全在同一帧里过去了。用它去看排队，看到的会是「没有
+ * 排队」，而那不是因为上限生效，是因为根本没人排。
+ *
+ * 只是把已有的 CapabilityClient 接上，不改它；观察台仍然只在本机、只用桩身份。
+ */
+const capabilityBase = process.env.RUYIN_CAPABILITY_BASE ?? "";
+const gateway = capabilityBase
+  ? new CapabilityClient({ baseUrl: capabilityBase })
+  : new MockAIGateway();
+
 const runtime = new ProjectRuntime({
   storage,
   clock: nodeClock,
   id: nodeId,
   crypto: nodeCrypto,
-  gateway: new MockAIGateway(),
+  gateway,
   connectors: connectorLookup,
   ranker: new FtsRanker(storage),
   tools: executor,
@@ -192,9 +215,9 @@ const server = createLocalApi({
     dataDir,
     productsDir: `${repo}/products`,
     keyProtection: "dpapi",
-    // 观察台跑的就是 MockAIGateway，所以照实说 mock —— 首页产品卡的「未接通」
+    // 照实说用的是哪一个：不配 base 时仍是 mock，首页产品卡的「未接通」
     // （TD-033）在这里就能看见，而不是只在装机后才第一次出现。
-    capabilitySurface: "mock",
+    capabilitySurface: capabilityBase ? "configured" : "mock",
     startedAt: new Date().toISOString(),
     get dataDirPending() {
       return harnessLocation.pending;
