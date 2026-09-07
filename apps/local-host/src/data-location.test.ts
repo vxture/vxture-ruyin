@@ -8,6 +8,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import type { HostEnvironment } from "./system-dirs.js";
 import {
   applyPendingMove,
   checkTarget,
@@ -43,6 +44,36 @@ function seed(dir: string): void {
   mkdirSync(join(dir, "chromium", "Cache"), { recursive: true });
   writeFileSync(join(dir, "chromium", "Cache", "blob"), "x".repeat(4096));
 }
+
+void test("checkTarget: 系统目录当场拒，**而且拒在可写探测之前** —— 那些地方多半是写得进去的", () => {
+  const src = mkdtempSync(join(tmp(), "ruyin-src-"));
+  // 用一个自造的环境把「目标正好是应用安装目录」这条规则打开：真机上那是
+  // Program Files，而测试机上不能往那儿写 —— 用 execPath 指到一个真实存在、
+  // 真的可写的临时目录，才问得出「可写也照样拒」这句话。
+  const appDir = mkdtempSync(join(tmp(), "ruyin-app-"));
+  const host: HostEnvironment = {
+    platform: process.platform,
+    env: process.env,
+    execPath: join(appDir, "Ruyin.exe"),
+  };
+  const target = join(appDir, "data");
+  const result = checkTarget(src, target, host);
+  assert.equal(result.ok, false);
+  assert.match(result.reason ?? "", /卸载会把数据一起删掉/);
+  // **没留下探针文件**：拒绝发生在写探测之前，所以那个目录该是干净的。
+  assert.deepEqual(readdirSync(appDir), [], "拒绝不该在目标目录里留下任何东西");
+  rmSync(src, { recursive: true, force: true });
+  rmSync(appDir, { recursive: true, force: true });
+});
+
+void test("checkTarget: 普通目标不受清单影响 —— 清单是黑名单，不是白名单", () => {
+  const src = mkdtempSync(join(tmp(), "ruyin-src-"));
+  const dst = join(tmp(), `ruyin-dst-${Date.now()}`);
+  const result = checkTarget(src, dst);
+  assert.equal(result.ok, true, result.reason ?? "");
+  rmSync(src, { recursive: true, force: true });
+  rmSync(dst, { recursive: true, force: true });
+});
 
 void test("checkTarget: 拦住那些不该搬的目标，并且说得清为什么", async () => {
   const src = tmp();

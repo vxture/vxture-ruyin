@@ -19,7 +19,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { checkTarget } from "./data-location.js";
 import test from "node:test";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
@@ -960,6 +961,66 @@ void test("HTTP GET /updates/check 只作答，不安装；已无 gate 字段", 
     assert.ok(["current", "available", "unreachable"].includes(String(body["status"])));
   } finally {
     closeRig(rig);
+  }
+});
+
+/**
+ * 系统目录拒绝清单走完整条路（TD-039）。
+ *
+ * 上一条用例把 `dataMove` 整个换成了桩，钉的是**路由行为**。这一条相反：接真的
+ * `checkTarget`，问的是「界面点下去时，那句拒绝到底出不出得来」—— 中间任何一处
+ * 没接上，前面那些单元用例全绿而用户照样能把数据目录设进系统目录。
+ */
+void test("HTTP /system/data-dir：系统目录被真的 checkTarget 拒掉，两个入口都拒", async () => {
+  const src = mkdtempSync(join(tmpdir(), "ruyin-dd-src-"));
+  const appDir = mkdtempSync(join(tmpdir(), "ruyin-dd-app-"));
+  let pending: string | undefined;
+  // execPath 指到一个真实存在、真的可写的临时目录：这样问出来的是「可写也照样
+  // 拒」，而不是「反正写不进去」。
+  const host = {
+    platform: process.platform,
+    env: process.env,
+    execPath: join(appDir, "Ruyin.exe"),
+  };
+  const rig = await startServer({
+    dataMove: {
+      check: (target: string) => checkTarget(src, target, host),
+      request: (target: string) => {
+        pending = target;
+      },
+      cancel: () => {
+        pending = undefined;
+      },
+    },
+  });
+  try {
+    const post = (path: string, body: unknown) =>
+      fetch(`${rig.base}${path}`, { method: "POST", headers: rig.json, body: JSON.stringify(body) });
+    const target = join(appDir, "data");
+
+    const checked = await post("/system/data-dir/check", { target });
+    assert.equal(checked.status, 200);
+    const body = (await checked.json()) as { ok: boolean; reason?: string };
+    assert.equal(body.ok, false);
+    assert.match(body.reason ?? "", /卸载会把数据一起删掉/);
+
+    // 写意图那个入口也要拒 —— 界面那次校验可以被绕过（直接 POST），而排上队的
+    // 搬家会在下一次启动时才失败，那时用户已经忘了自己做过什么。
+    const queued = await post("/system/data-dir", { target });
+    assert.equal(queued.status, 400);
+    assert.equal(((await queued.json()) as { code: string }).code, "DATA_DIR_UNUSABLE");
+    assert.equal(pending, undefined, "被拒的目标一个字都不该排上队");
+
+    // 普通目标照常能排队 —— 清单是黑名单，不是白名单。
+    const fine = join(tmpdir(), `ruyin-dd-ok-${Date.now()}`);
+    const okRes = await post("/system/data-dir", { target: fine });
+    assert.equal(okRes.status, 202);
+    assert.equal(pending, resolve(fine));
+    rmSync(fine, { recursive: true, force: true });
+  } finally {
+    closeRig(rig);
+    rmSync(src, { recursive: true, force: true });
+    rmSync(appDir, { recursive: true, force: true });
   }
 });
 

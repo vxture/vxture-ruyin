@@ -40,6 +40,7 @@ import { createReadStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { currentHost, systemDirRefusal, type HostEnvironment } from "./system-dirs.js";
 
 /** 搬家时**不带走**的东西：缓存，删了自己会长回来。 */
 const SKIP = new Set(["chromium"]);
@@ -167,7 +168,11 @@ function freeSpace(dir: string): number | undefined {
  * 用户按下确认之前先问这一句，搬家真的开始之前再问一次：中间隔着一次重启，
  * 世界可能已经变了。
  */
-export function checkTarget(from: string, to: string): CheckResult {
+export function checkTarget(
+  from: string,
+  to: string,
+  host: HostEnvironment = currentHost(),
+): CheckResult {
   if (!to.trim()) return { ok: false, reason: "还没填目标目录。" };
   if (!isAbsolute(to)) {
     return { ok: false, reason: "要写完整路径（例如 D:\\RuyinData），不是相对路径。" };
@@ -175,6 +180,18 @@ export function checkTarget(from: string, to: string): CheckResult {
   const src = resolve(from);
   const dst = resolve(to);
   if (src === dst) return { ok: false, reason: "目标就是当前目录，不用搬。" };
+
+  // 系统目录拒绝清单（TD-039）。位置有两条讲究：
+  //
+  // **排在可写探测之前** —— 这些地方多数是写得进去的：`C:\Windows\Temp` 可写、
+  // 空间充足、同卷，探测一路绿灯，然后数据躺在一个下次系统清理会扫掉的地方。
+  //
+  // **也排在下面两条包含关系之前** —— 目标是 `D:\` 而数据目录恰好也在 D 盘时，
+  // 两边都成立，而「别把数据目录设成盘符根」比「那等于搬进它自己的上级」更能
+  // 告诉用户下一步该做什么。先说更根本的那个理由。
+  const systemDir = systemDirRefusal(dst, host);
+  if (systemDir) return { ok: false, reason: systemDir };
+
   if (contains(src, dst)) {
     return { ok: false, reason: "目标在当前数据目录里面 —— 那等于把数据搬进它自己。" };
   }

@@ -49,6 +49,7 @@ import { createLocalApi } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
 import { contextBudgetFromEnv } from "./context-budget-config.js";
 import { resourceLimitsFromEnv } from "./resource-limits.js";
+import { currentHost, systemDirRefusal } from "./system-dirs.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { ConnectorRegistry } from "./connector-registry.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
@@ -610,6 +611,13 @@ if (capabilityBase) {
 server.listen(port, "127.0.0.1", () => {
   console.log(`[ruyin] local runtime ${VERSION}`);
   console.log(`[ruyin] data dir: ${dataDir}`);
+  // 已经在用的数据目录落在系统位置上（手改过指针、或者早于这份清单就设好了）：
+  // **说一句，但不拦着起**。拒绝启动的话，应用会变成一个既打不开、也没法在界面
+  // 里把目录改回来的东西 —— 而改目录的界面正在它里面。
+  {
+    const bad = systemDirRefusal(dataDir, currentHost());
+    if (bad) console.error(`[ruyin] 数据目录在一个不该放数据的位置：${bad}`);
+  }
   // 上面 `capabilityBase` 处的注释写着「不接就说不接，『没接上』绝不能看起来像
   // 『在工作』」—— **而在这一行加上之前，守护进程一个字都没说过**。注释承诺了一
   // 个不存在的保障，这比没有注释更糟：它让人以为这道口子被看住了。
