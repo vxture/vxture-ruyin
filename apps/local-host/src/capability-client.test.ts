@@ -231,3 +231,43 @@ test("resolver: a verdict is read as a field, not parsed out of prose", async ()
     },
   );
 });
+
+/**
+ * 技能目录必须真的发出去（ADR-018 §2.4）。
+ *
+ * 2026-09-07 写接入说明时发现的：内核会把 `skills` 填进请求，而这个客户端**没有
+ * 把它放进 body** —— 于是提供方拿到的是一个 `use_skill` 工具（内核确实在 tools 里
+ * 放了它），却不知道有哪些技能可取，只能瞎猜名字。
+ *
+ * 这种坏法看不出来：工具在、调用发得出去、每次都取不到东西。所以钉一条 ——
+ * 断言的是**body 里那个字段**，不是「内核填了没有」。
+ */
+test("resolver: 技能目录随请求发出；没有技能时不发这个字段", async () => {
+  await withServer(
+    (_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ kind: "content", content: "ok" }));
+    },
+    async (base, seen) => {
+      const client = new CapabilityClient({ baseUrl: base });
+      await client.turn({
+        ...request(),
+        skills: [
+          { name: "officecli-docx", description: "写 Word" },
+          { name: "sn-deep-research", description: "深度调研" },
+        ],
+      });
+      const withSkills = JSON.parse(seen.body ?? "{}") as Record<string, unknown>;
+      assert.deepEqual(withSkills["skills"], [
+        { name: "officecli-docx", description: "写 Word" },
+        { name: "sn-deep-research", description: "深度调研" },
+      ]);
+
+      // 没有技能时不发这个字段 —— 一个空数组会让提供方以为「问过了，一个都没有」，
+      // 而实际是这台机器上根本没有这一层。
+      await client.turn(request());
+      const without = JSON.parse(seen.body ?? "{}") as Record<string, unknown>;
+      assert.ok(!("skills" in without));
+    },
+  );
+});
