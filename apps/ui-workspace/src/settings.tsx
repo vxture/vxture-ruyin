@@ -963,6 +963,23 @@ function DataDirMoveDialog({
         </DialogHeader>
 
         <div className="move-dlg">
+{/* 云同步那条**排在最前、用警示样式**（TD-051，owner 2026-09-07）。
+              位置与样式都是有意的：拦截只认得出常见的那几家（OneDrive、坚果云、
+              Dropbox…），而挂成虚拟盘符的那些认不出来 —— **认不出来的拦不住**。
+              所以第一位的是提醒，拦截是补网，不是反过来。
+              放在「选择目录…」之前：选完再拒也拦得住，但那时用户已经打开过文件
+              选择框、挑了一个他觉得很合理的位置。 */}
+          <p className="set-callout set-callout--warning">
+            <Icon name="warning" size="sm" />
+            <span>
+              <strong>不要选云同步盘目录</strong>（OneDrive、坚果云、Dropbox、百度网盘、
+              iCloud、Google 云端硬盘…）。同步客户端会在数据库正被使用时改动它的文件，
+              那会让整个加密库读不出来；而且它会把你的数据整份上传到云端。
+              常见的几家会被自动拒绝，<strong>但挂成盘符的那些认不出来</strong> ——
+              请你自己确认这个位置不在任何同步盘里。
+            </span>
+          </p>
+
           <FactRow label="当前" value={current} mono />
           <FactRow
             label="搬到"
@@ -995,14 +1012,6 @@ function DataDirMoveDialog({
             按下之后应用会<strong>关闭并重新打开</strong>，期间会显示搬移进度。源目录在
             核对通过之前一直是权威 —— 中途失败就照旧从原处启动，数据不会丢。数据按当前
             Windows 用户加密，所以不要选别的用户的目录或移动磁盘。
-          </p>
-          {/* 云同步那条要**在选之前**就说（TD-051）。选完再拒也拦得住，但那时用户
-              已经打开过文件选择框、挑了一个他觉得很合理的位置 —— 而 OneDrive 或
-              坚果云下面正是多数人放文件的地方。事先说一句，他就不会走到那一步。 */}
-          <p className="set-note">
-            <strong>不要选云同步目录</strong>（OneDrive、坚果云、Dropbox、百度网盘…）。
-            同步客户端会在数据库正被使用时改动它的文件，那会让整个加密库读不出来；
-            而且它会把你的数据整份上传到云端。选到了会被拒绝。
           </p>
           {failed && <p className="set-note">{failed}</p>}
         </div>

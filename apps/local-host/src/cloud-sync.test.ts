@@ -12,7 +12,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cloudSyncRefusal, realProbe, type CloudProbe } from "./cloud-sync.js";
+import {
+  cloudIntakeRefusal,
+  cloudSyncHit,
+  cloudSyncRefusal,
+  cloudWriteRefusal,
+  realProbe,
+  type CloudProbe,
+} from "./cloud-sync.js";
 import type { HostEnvironment } from "./system-dirs.js";
 
 /** 什么都不在、什么都读不到 —— 只留名字那一道。 */
@@ -135,4 +142,50 @@ void test("普通目录一律放行 —— 这是黑名单，不是白名单", (
 void test("realProbe：读得到的读，读不到的说读不到，不抛", () => {
   assert.equal(realProbe.exists("C:\\一定不存在的路径\\x"), false);
   assert.equal(realProbe.readText("C:\\一定不存在的路径\\x.json"), undefined);
+});
+
+/**
+ * 三处的措辞（TD-051 第二轮：owner 定「导出和收原件也一起拦」）。
+ *
+ * 同一个探测器，**三句不同的话** —— 三处拒绝的理由并不相同，共用一句会让其中两处
+ * 的解释是错的，而一句解释错了的拒绝比没有解释更让人无从下手。
+ */
+void test("三处措辞：都点名服务，但给的理由各是各的", () => {
+  const target = "C:\\Users\\amy\\OneDrive\\x";
+  const dataDir = cloudSyncRefusal(target, win(), noProbe)!;
+  const write = cloudWriteRefusal(target, win(), noProbe)!;
+  const intake = cloudIntakeRefusal(target, win(), noProbe)!;
+
+  for (const msg of [dataDir, write, intake]) {
+    assert.match(msg, /OneDrive/, "三句都要点名是哪一家");
+    assert.match(msg, /路径里有/, "三句都要说怎么认出来的");
+  }
+
+  // 数据目录：独有的那条理由是「活的数据库会被改坏」。
+  assert.match(dataDir, /数据库正被使用时/);
+  assert.match(dataDir, /加密库读不出来/);
+
+  // 导出：**没有**数据库那条 —— 写的是一份成品文件，写完就不再动它。
+  assert.doesNotMatch(write, /数据库/);
+  assert.match(write, /成果不能直接写进/);
+  assert.match(write, /由你自己把文件挪过去/, "要给出还能怎么办");
+
+  // 收原件：理由完全是另一件事 —— 占位存根，而不是「数据出本机」。
+  assert.doesNotMatch(intake, /上传/);
+  assert.match(intake, /占位存根/);
+  assert.match(intake, /空壳/);
+  assert.match(intake, /先把文件复制到一个不被同步的本地目录/, "要给出还能怎么办");
+});
+
+void test("三处都不拦普通目录 —— 拦的是同一批位置，不是各拦各的", () => {
+  for (const fn of [cloudSyncRefusal, cloudWriteRefusal, cloudIntakeRefusal]) {
+    assert.equal(fn("D:\\work\\out.docx", win(), noProbe), undefined);
+  }
+});
+
+void test("cloudSyncHit 只回事实，不回措辞", () => {
+  const hit = cloudSyncHit("D:\\百度网盘\\x", win(), noProbe);
+  assert.equal(hit?.service, "百度网盘");
+  assert.match(hit?.how ?? "", /路径里有/);
+  assert.equal(cloudSyncHit("D:\\work", win(), noProbe), undefined);
 });

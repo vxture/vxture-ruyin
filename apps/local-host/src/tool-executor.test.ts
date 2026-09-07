@@ -15,6 +15,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -346,4 +347,36 @@ void test("导出 PDF：接上之后落盘，并把目录没页码这件事一�
   // 送给壳的确实是渲染好的 HTML，不是 Markdown 原文。
   assert.match(seenHtml, /<h1 id="方案">方案<\/h1>/);
   assert.match(r.content, /页码/);
+});
+
+/**
+ * 两处新的拦截真的接上了（TD-051 第二轮）。
+ *
+ * `cloud-sync.test.ts` 只证明探测与措辞对。这两条证明**它们真的在那条路上** ——
+ * 探测器再对，没接进去也等于没有，而那种坏法和好的长得一模一样。
+ */
+void test("导出落盘：写进云同步目录被拒，普通目录照常写（TD-051）", () => {
+  const executor = new LocalToolExecutor();
+  const cloud = mkdtempSync(join(tmpdir(), "ruyin-w-"));
+  mkdirSync(join(cloud, "OneDrive"), { recursive: true });
+  const plain = mkdtempSync(join(tmpdir(), "ruyin-w-ok-"));
+  const grants: FolderGrant[] = [
+    { id: "g1", path: cloud, mode: "readwrite", createdAt: "2026-09-07T00:00:00.000Z" },
+    { id: "g2", path: plain, mode: "readwrite", createdAt: "2026-09-07T00:00:00.000Z" },
+  ];
+  const bytes = Buffer.from("成果", "utf8");
+
+  const refused = executor.writeArtifact(join(cloud, "OneDrive", "标书.md"), bytes, grants);
+  assert.equal(refused.isError, true);
+  assert.match(refused.content, /OneDrive/);
+  assert.match(refused.content, /成果不能直接写进/);
+  // **被拒的没写下去** —— 一个「报了错但文件已经在那儿」的拒绝等于没拒。
+  assert.equal(existsSync(join(cloud, "OneDrive", "标书.md")), false);
+
+  const ok = executor.writeArtifact(join(plain, "标书.md"), bytes, grants);
+  assert.notEqual(ok.isError, true);
+  assert.equal(existsSync(join(plain, "标书.md")), true);
+
+  rmSync(cloud, { recursive: true, force: true });
+  rmSync(plain, { recursive: true, force: true });
 });

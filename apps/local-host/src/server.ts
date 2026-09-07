@@ -8,6 +8,8 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type { PermissionValue } from "@vxture/ruyin-contract-schema";
 import type { StoredFile } from "./file-store.js";
+import { cloudIntakeRefusal } from "./cloud-sync.js";
+import { currentHost } from "./system-dirs.js";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import {
@@ -1495,6 +1497,22 @@ async function handle(
               `"${from}" 不在这个项目已授权的目录里 —— 先授权它所在的文件夹，再收进来`,
             ),
           );
+          return;
+        }
+        // 云同步目录（TD-051，owner 2026-09-07 定：收原件也一起拦）。
+        //
+        // 这一条与「导出」的理由不同，值得写下来 —— 收原件是**读**，读一份云盘里
+        // 的文件本身并不会把数据送出去。真正的问题是收进来的可能**不是文件**：
+        // 「文件按需」这类功能会在本地留一个占位存根，内容还在云上；读它拿到的
+        // 可能是零字节或一段存根，而文件区会把它照单收下、算好哈希、告诉用户
+        // 「收好了」。
+        //
+        // **那正是这个功能最不能出的错**：它存在的全部理由是「半年后还查得到」，
+        // 而一次静默收下存根，要到半年后他去取原件时才发现 —— 那时他自己那份
+        // 大概也没了。收下存根和收下真文件，在界面上长得一模一样。
+        const cloud = cloudIntakeRefusal(from, currentHost());
+        if (cloud) {
+          send(res, 400, apiError("FILE_IN_CLOUD_SYNC", cloud));
           return;
         }
         const added = await deps.files.add(projectId, from);

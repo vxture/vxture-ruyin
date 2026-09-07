@@ -21,6 +21,8 @@ import {
 } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, extname, join } from "node:path";
+import { cloudWriteRefusal } from "./cloud-sync.js";
+import { currentHost } from "./system-dirs.js";
 import { isPathGranted } from "@vxture/ruyin-core";
 import type { ToolProvider } from "@vxture/ruyin-contract-schema";
 import {
@@ -202,6 +204,17 @@ export class LocalToolExecutor implements ToolExecutorPort {
   ): ToolExecutionResult {
     const denied = guard(path, grants, "readwrite");
     if (denied) return denied;
+    // 云同步目录（TD-051，owner 2026-09-07 定：导出也一起拦）。
+    //
+    // **这里是运行时往用户自己的位置写东西的唯一出口** —— 导出项目记录、
+    // `export_result`、`write_document`、壳排的 PDF，全走这一条。放在这里，
+    // 「成果不会被悄悄传上云」这句话才对所有出口成立，而不是只对其中一个。
+    //
+    // 与数据目录那一条的理由不完全相同：这里不涉及「活的数据库被改坏」（写的是
+    // 一份成品文件，写完就不再动它），剩下的是**数据出本机**那一条 —— 而它足够。
+    // 用户要的是一份标书，不是把一份标书连同它的依据传给一个第三方网盘。
+    const cloud = cloudWriteRefusal(path, currentHost());
+    if (cloud) return { content: cloud, isError: true };
     if (bytes.byteLength > MAX_WRITE_BYTES) {
       return {
         content: `refusing to write ${bytes.byteLength} bytes; the limit is ${MAX_WRITE_BYTES}`,

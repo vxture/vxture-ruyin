@@ -815,6 +815,47 @@ void test("HTTP /projects/:id/files：授权目录里的能收，别处的一律
 });
 
 /**
+ * 收原件也拦云同步目录（TD-051 第二轮）。
+ *
+ * 这一处的理由与导出不同：收原件是**读**，读云盘里的文件不会把数据送出去。问题
+ * 是收进来的可能只是一个占位存根 —— 而那种失败在界面上和成功长得一模一样，要到
+ * 半年后用户去取原件时才发现。
+ */
+void test("HTTP /projects/:id/files：云同步目录里的原件收不进来，且理由说的是占位存根", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  const granted = mkdtempSync(join(tmpdir(), "ruyin-cloudsrc-"));
+  const cloudDir = join(granted, "OneDrive");
+  mkdirSync(cloudDir, { recursive: true });
+  try {
+    const pid = await projectIn(rig, "wsp_x");
+    const inCloud = join(cloudDir, "招标文件.md");
+    writeFileSync(inCloud, "内容");
+    const plain = join(granted, "本地的.md");
+    writeFileSync(plain, "内容");
+
+    const post = (path: string, payload: unknown) =>
+      fetch(`${rig.base}${path}`, { method: "POST", headers: rig.json, body: JSON.stringify(payload) });
+    await post(`/projects/${pid}/grants`, { path: granted });
+
+    const refused = await post(`/projects/${pid}/files`, { path: inCloud });
+    assert.equal(refused.status, 400);
+    const body = (await refused.json()) as { code: string; message: string };
+    assert.equal(body.code, "FILE_IN_CLOUD_SYNC");
+    assert.match(body.message, /OneDrive/);
+    assert.match(body.message, /占位存根/, "理由说的是存根，不是「数据会上传」");
+    assert.match(body.message, /先把文件复制到一个不被同步的本地目录/, "要给出还能怎么办");
+
+    // 同一个授权目录里、不在云同步路径上的那份照常收得进来 —— 拦的是位置，
+    // 不是「这个项目不许收文件」。
+    const ok = await post(`/projects/${pid}/files`, { path: plain });
+    assert.equal(ok.status, 201);
+  } finally {
+    closeRig(rig);
+    rmSync(granted, { recursive: true, force: true });
+  }
+});
+
+/**
  * 同一份内容两个名字：删掉一个，另一个还要读得出来。
  *
  * 这条不测的话，去重就是个陷阱 —— 内容寻址让两条登记指向同一份密文，而删登记
