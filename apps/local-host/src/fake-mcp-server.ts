@@ -9,6 +9,8 @@
  *   --ask-client          send the client a request (sampling) and expect -32601
  *   --pages N             paginate resources/list into N pages
  *   --no-tools            answer tools/list with an empty list
+ *   --flood-stdout        写一大段**不带换行**的 stdout（客户端要在上限处收摊，TD-046）
+ *   --huge-tool-result    tools/call 回一个特别大的结果（连接器要截断并明说，TD-046）
  *
  * Excluded from coverage (package.json): it runs in a child process, where
  * the coverage collector cannot see it.
@@ -73,6 +75,13 @@ lines.on("line", (line) => {
         },
       });
       if (argv.has("--exit-after-init")) setTimeout(() => process.exit(0), 20);
+      // 一大段没有换行的垃圾：按行读的那一侧会把它整段攒在内存里，攒完才发现
+      // 它不是 JSON。客户端要在上限处停下来（TD-046）。
+      if (argv.has("--flood-stdout")) {
+        setTimeout(() => {
+          for (let i = 0; i < 40; i++) process.stdout.write("x".repeat(64 * 1024));
+        }, 10);
+      }
       if (argv.has("--ask-client")) {
         write({ jsonrpc: "2.0", id: 9001, method: "sampling/createMessage", params: {} });
       }
@@ -95,6 +104,9 @@ lines.on("line", (line) => {
                   description: "按名称查客户",
                   inputSchema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
                 },
+                ...(argv.has("--huge-tool-result")
+                  ? [{ name: "huge", description: "回一个特别大的结果（测上限用）" }]
+                  : []),
                 {
                   name: "update_account",
                   description: "写回客户备注",
@@ -107,7 +119,13 @@ lines.on("line", (line) => {
     case "tools/call": {
       const name = String(msg.params?.["name"]);
       const args = (msg.params?.["arguments"] ?? {}) as Record<string, unknown>;
-      if (name === "lookup_account") {
+      if (name === "huge") {
+        write({
+          jsonrpc: "2.0",
+          id: msg.id,
+          result: { content: [{ type: "text", text: "y".repeat(400_000) }] },
+        });
+      } else if (name === "lookup_account") {
         write({
           jsonrpc: "2.0",
           id: msg.id,

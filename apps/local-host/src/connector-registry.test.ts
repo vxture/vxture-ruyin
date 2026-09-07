@@ -12,6 +12,7 @@ import {
   ConnectorRegistry,
 } from "./connector-registry.js";
 import { BundledToolServers } from "./tool-servers.js";
+import { DEFAULT_RESOURCE_LIMITS } from "./resource-limits.js";
 import { mkdirSync } from "node:fs";
 
 const FAKE = fileURLToPath(new URL("./fake-mcp-server.js", import.meta.url));
@@ -344,5 +345,46 @@ test("connector: 子进程的工作目录是临时目录，不是守护进程的
   // 而数据目录是可以搬家的。
   assert.equal(work.startsWith(dataDir), false);
   rmSync(work, { recursive: true, force: true });
+  rmSync(dataDir, { recursive: true, force: true });
+});
+
+/**
+ * 同时运行的工具服务器数上限（TD-046）。
+ *
+ * 每一个都是一个完整的解释器进程 —— 而这是用户自己的电脑，不是可以随手扩容的
+ * 服务器。判据里那半句「说得出是谁超的」在这里落地：错误信息里必须有名字。
+ */
+test("上限：工具服务器起到上限就不再起，**并说出正占着的是谁**", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-conn-limit-"));
+  const lookup = new Map<string, ConnectorPort>();
+  const registry = new ConnectorRegistry(dataDir, lookup, {
+    allowUnsigned: true,
+    timeoutMs: 5000,
+    limits: { ...DEFAULT_RESOURCE_LIMITS, maxToolServers: 2 },
+  });
+  await registry.install({ id: "one", command: process.execPath, args: [FAKE], source: "lan" });
+  await registry.install({ id: "two", command: process.execPath, args: [FAKE], source: "lan" });
+  assert.deepEqual(registry.runningServers, ["one", "two"]);
+
+  let message = "";
+  try {
+    await registry.install({ id: "three", command: process.execPath, args: [FAKE], source: "lan" });
+  } catch (cause) {
+    message = cause instanceof Error ? cause.message : String(cause);
+  }
+  assert.match(message, /上限 2/);
+  assert.match(message, /one/, "要说出是谁占着 ——「已达上限」不告诉用户该停哪一个");
+  assert.match(message, /two/);
+  // 被拒的那个不该在内核名单里留下半个 —— 任务拿到一个起不来的连接器，比拿不到更糟。
+  assert.equal(lookup.has("three"), false);
+  assert.equal(registry.runningServers.length, 2);
+
+  // 停掉一个，名额就该回来。
+  await registry.deactivate("one");
+  assert.deepEqual(registry.runningServers, ["two"]);
+  await registry.install({ id: "three", command: process.execPath, args: [FAKE], source: "lan" });
+  assert.deepEqual(registry.runningServers.sort(), ["three", "two"]);
+
+  await registry.stopAll();
   rmSync(dataDir, { recursive: true, force: true });
 });

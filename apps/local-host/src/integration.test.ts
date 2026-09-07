@@ -471,7 +471,8 @@ test("selection over real files: grant -> bind (indexes) -> gate -> complete", a
       binding,
       new LocalFsConnector(),
     );
-    assert.equal(indexed, 2);
+    assert.equal(indexed.indexed, 2);
+    assert.equal(indexed.skipped, 0, "没超上限就不该报跳过");
 
     // Selection path: no inputs. tender_document is high sensitivity =>
     // context_confirm gate BEFORE any capability invocation.
@@ -527,7 +528,7 @@ test("daemon serves the built workspace ui with traversal guard", async () => {
       new LocalToolExecutor().writeArtifact(p, b, g),
     supportsTool: (t: string) => new LocalToolExecutor().supports(t),
     systemInfo: testSystemInfo,
-    reindex: async () => 0,
+    reindex: async () => ({ indexed: 0, skipped: 0 }),
     uiDir,
   });
   try {
@@ -691,7 +692,7 @@ test("归属：未登录不能新建项目；老项目可导入当前工作区",
       new LocalToolExecutor().writeArtifact(p, b, g),
     supportsTool: (t: string) => new LocalToolExecutor().supports(t),
     systemInfo: testSystemInfo,
-    reindex: async () => 0,
+    reindex: async () => ({ indexed: 0, skipped: 0 }),
   };
 
   // 未登录：没有工作区，新建被拒。
@@ -783,7 +784,7 @@ test("导出：落进授权目录、留下审计、未授权目录一律拒绝",
     supportsTool: (t: string) => new LocalToolExecutor().supports(t),
     systemInfo: testSystemInfo,
     platform: signedInTo("wsp_test"),
-    reindex: async () => 0,
+    reindex: async () => ({ indexed: 0, skipped: 0 }),
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -874,7 +875,7 @@ test("任务列表：跑不了的标出来，标了的确实启动不了，没�
     supportsTool: (t: string) => executor.supports(t),
     systemInfo: testSystemInfo,
     platform: signedInTo("wsp_test"),
-    reindex: async () => 0,
+    reindex: async () => ({ indexed: 0, skipped: 0 }),
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -949,7 +950,7 @@ test("事件流：任务一动，订阅者就收到，而且只说什么变了",
     supportsTool: (t: string) => executor.supports(t),
     systemInfo: testSystemInfo,
     platform: signedInTo("wsp_test"),
-    reindex: async () => 0,
+    reindex: async () => ({ indexed: 0, skipped: 0 }),
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -1047,7 +1048,7 @@ test("安装包：字节直接 POST，回来的形状就是界面声明的那个
       executor.writeArtifact(p, b, g),
     supportsTool: (t: string) => executor.supports(t),
     systemInfo: testSystemInfo,
-    reindex: async () => 0,
+    reindex: async () => ({ indexed: 0, skipped: 0 }),
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -1131,7 +1132,7 @@ test("工作区边界：别的工作区的项目，凭 id 也打不开", async (
       executor.writeArtifact(p, b, g),
     supportsTool: (t: string) => executor.supports(t),
     systemInfo: testSystemInfo,
-    reindex: async () => 0,
+    reindex: async () => ({ indexed: 0, skipped: 0 }),
   };
   const server = createLocalApi({ ...deps, platform: signedInTo("wsp_test") });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
@@ -1235,7 +1236,7 @@ test("导出：待导入的项目未登录时也导不走", async () => {
       executor.writeArtifact(p, b, g),
     supportsTool: (t: string) => executor.supports(t),
     systemInfo: testSystemInfo,
-    reindex: async () => 0,
+    reindex: async () => ({ indexed: 0, skipped: 0 }),
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

@@ -17,6 +17,14 @@
  *   RUYIN_REGISTRY_BASE      static product registry base (default: products dir on dl)
  *   RUYIN_CAPABILITY_BASE    business-product capability surface (unset = mock);
  *                            also the source for contract fetch (ADR-012)
+ *
+ * 本机资源上限（TD-046）。都是猜出来的起点，所以都能改；非正整数一律回落到缺省，
+ * 没有「不限」的写法 —— 这几条护的是用户自己的电脑：
+ *   RUYIN_MAX_TOOL_SERVERS   同时几个工具服务器子进程（缺省 6）
+ *   RUYIN_MAX_SERVER_LINE_KB 一条 JSON-RPC 消息多大（缺省 8192，即 8 MB）
+ *   RUYIN_MAX_TOOL_RESULT_KB 一次工具结果多大（缺省 1024，即 1 MB）
+ *   RUYIN_MAX_INDEX_ITEMS    一次索引读几条（缺省 5000）
+ *   RUYIN_MAX_INDEX_MB       一次索引读多少字节（缺省 256）
  */
 
 import { randomBytes } from "node:crypto";
@@ -40,6 +48,7 @@ import {
 import { createLocalApi } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
 import { contextBudgetFromEnv } from "./context-budget-config.js";
+import { resourceLimitsFromEnv } from "./resource-limits.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { ConnectorRegistry } from "./connector-registry.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
@@ -227,12 +236,16 @@ const bundledTools = new BundledToolServers({
   components: componentStore,
   log: (line) => console.error(line),
 });
+const resourceLimits = resourceLimitsFromEnv();
+
 const connectorRegistry = new ConnectorRegistry(dataDir, connectors, {
   // 与包的先例同一姿态：签名信任锚（TD-012）就位前生产拒装，开发显式放行。
   allowUnsigned: process.env["RUYIN_ALLOW_UNSIGNED_CONNECTORS"] === "1",
   log: (line) => console.error(line),
   // 预置的 MCP 服务器就是来源为 bundled 的连接器：起进程、列工具、接 Tool Gate 都走同一条路。
   bundled: bundledTools,
+  // 本机资源上限（TD-046）：同时几个子进程、一条消息多大、一次工具结果多大。
+  limits: resourceLimits.limits,
 });
 process.on("exit", () => {
   // 子进程不该活得比守护进程久。同步 kill 就够：exit 里等不了 promise。
@@ -347,7 +360,7 @@ const server = createLocalApi({
     // 按绑定记的连接器取，不再钉死 local-fs（ADR-005 接缝 ②）。
     const connector = connectors.get(binding.connector);
     if (!connector) throw new Error(`connector "${binding.connector}" is not available`);
-    return reindexBinding(storage, projectId, binding, connector);
+    return reindexBinding(storage, projectId, binding, connector, resourceLimits.limits);
   },
   connectors: connectorRegistry,
   // 能力平台（ADR-018）：技能四层清单 + 工具登记册视图；分发层刷新要能力面。
@@ -610,6 +623,10 @@ server.listen(port, "127.0.0.1", () => {
   );
   // 改了预算就要能看见它生效了 —— 一个不说话的旋钮，拧了和没拧长得一样。
   console.log(`[ruyin] ${contextBudget.note}`);
+  // 只在被改动过的时候说 —— 缺省值天天打一行，读日志的人会学会忽略它。
+  if (resourceLimits.notes.length > 0) {
+    console.log(`[ruyin] 资源上限（已改）：${resourceLimits.notes.join("；")}`);
+  }
   {
     const installed = [...connectors.keys()].filter((id) => id !== "local-fs");
     console.log(

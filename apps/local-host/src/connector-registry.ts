@@ -24,6 +24,11 @@ import type { ConnectorHealth, ConnectorPort, ContextSource } from "@vxture/ruyi
 import { McpConnector, type ConnectorToolOutcome } from "./connector-mcp.js";
 import type { ConnectorToolSource } from "./tool-executor.js";
 import type { BundledToolServers } from "./tool-servers.js";
+import {
+  DEFAULT_RESOURCE_LIMITS,
+  overLimitMessage,
+  type ResourceLimits,
+} from "./resource-limits.js";
 
 export const CONNECTORS_FILE = "connectors.json";
 
@@ -101,6 +106,8 @@ export class ConnectorRegistry implements ConnectorToolSource {
       timeoutMs?: number;
       /** 预置的 MCP 服务器（随包）；缺省 = 这套装配没有预置工具层。 */
       bundled?: BundledToolServers;
+      /** 本机资源上限（TD-046）；缺省见 resource-limits.ts。 */
+      limits?: ResourceLimits;
     },
   ) {
     this.manifestPath = join(dataDir, CONNECTORS_FILE);
@@ -294,7 +301,10 @@ export class ConnectorRegistry implements ConnectorToolSource {
         // 一个 vendored 的 node 服务器），而 playwright-mcp 一起来就往 cwd 里写。
         cwd: this.workDirFor(input.id || "probe"),
       },
-      this.options.timeoutMs !== undefined ? { timeoutMs: this.options.timeoutMs } : {},
+      {
+        ...(this.options.timeoutMs !== undefined ? { timeoutMs: this.options.timeoutMs } : {}),
+        limits: this.options.limits ?? DEFAULT_RESOURCE_LIMITS,
+      },
     );
     try {
       await connector.start();
@@ -491,11 +501,31 @@ export class ConnectorRegistry implements ConnectorToolSource {
     this.live.clear();
   }
 
+  /**
+   * 现在有几个工具服务器子进程活着，以及它们是谁。
+   *
+   * 报**名字**而不只是数量：判据里那句「超限时说得出是谁超的」落在这里 ——
+   * 「已达上限 6」对用户等于没说，他要知道是哪六个占着才能去停一个。
+   */
+  get runningServers(): string[] {
+    return [...this.live.keys()];
+  }
+
   private async bringUp(spec: InstalledConnector): Promise<void> {
     const { id, command, args, env } = spec;
+    // 上限（TD-046）。每个工具服务器都是一个完整的解释器进程，而这是用户自己
+    // 的电脑 —— 不是可以随手扩容的服务器。已经在跑的那个再启用一次不算新占
+    // 名额（activate 会走到这里，但它复用同一个 id）。
+    const max = this.options.limits?.maxToolServers ?? DEFAULT_RESOURCE_LIMITS.maxToolServers;
+    if (!this.live.has(id) && this.live.size >= max) {
+      throw new Error(overLimitMessage("同时运行的工具服务器", max, this.runningServers));
+    }
     const connector = new McpConnector(
       { id, command, args, ...(env ? { env } : {}), cwd: this.workDirFor(id) },
-      this.options.timeoutMs !== undefined ? { timeoutMs: this.options.timeoutMs } : {},
+      {
+        ...(this.options.timeoutMs !== undefined ? { timeoutMs: this.options.timeoutMs } : {}),
+        limits: this.options.limits ?? DEFAULT_RESOURCE_LIMITS,
+      },
     );
     // Registered before start so a failed start still leaves a name the UI
     // and the kernel can report on ("unavailable", not "unknown connector").

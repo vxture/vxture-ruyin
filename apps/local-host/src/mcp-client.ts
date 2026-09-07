@@ -23,7 +23,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { createInterface } from "node:readline";
+import { DEFAULT_RESOURCE_LIMITS } from "./resource-limits.js";
 
 /** The protocol revision this client negotiates. */
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -105,6 +105,9 @@ export class McpStdioClient {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   private stderrTail = "";
+  /** stdout 上还没凑齐一行的部分，以及它的字节数（上限见 onStdout）。 */
+  private buffer = "";
+  private bufferBytes = 0;
   private exited: string | undefined;
   private info: McpServerInfo | undefined;
 
@@ -113,6 +116,8 @@ export class McpStdioClient {
     private readonly options: {
       timeoutMs?: number;
       clientInfo?: { name: string; version: string };
+      /** 一条 JSON-RPC 消息的字节上限（TD-046）；缺省见 resource-limits.ts。 */
+      maxLineBytes?: number;
     } = {},
   ) {}
 
@@ -152,8 +157,8 @@ export class McpStdioClient {
       // Keep a bounded tail for diagnostics; a chatty server must not grow memory.
       this.stderrTail = (this.stderrTail + chunk).slice(-4000);
     });
-    const lines = createInterface({ input: child.stdout!, crlfDelay: Infinity });
-    lines.on("line", (line) => this.onLine(line));
+    child.stdout!.setEncoding("utf8");
+    child.stdout!.on("data", (chunk: string) => this.onStdout(chunk));
 
     const info = (await this.request("initialize", {
       protocolVersion: MCP_PROTOCOL_VERSION,
@@ -259,6 +264,45 @@ export class McpStdioClient {
     // One message per line, and a message must not contain a raw newline -
     // JSON.stringify never emits one.
     this.child?.stdin?.write(JSON.stringify(message) + "\n");
+  }
+
+  /**
+   * 按行切 stdout，**并给「一行」设上限**（TD-046）。
+   *
+   * 之前这里用 `readline.createInterface`，它对一行的长度没有任何限制：一个吐出
+   * 一行一 GB 的服务器（或者一个把二进制往 stdout 里写、于是永远等不到换行的坏
+   * 服务器），会让这一侧把那一 GB 原样攒在内存里，攒完才发现它不是 JSON。
+   * **那是用户自己的电脑** —— 守护进程被一个工具服务器撑爆，他看到的是整个应用
+   * 没了，而原因在一个他不知道存在的子进程里。
+   *
+   * 超限就把这个服务器停掉并说明原因，而不是丢掉这一行继续读：一条被截断的
+   * JSON-RPC 消息之后，流里剩下的半截会被当成新的一行去解析 —— 那之后收到的
+   * 每一条都是垃圾，而它们看起来只是「这个服务器有点怪」。
+   *
+   * 字节数是**增量**算的：每块加上、每切出一行减去。整块重算会让一条合法的大
+   * 消息在拼接过程中被反复扫描，那是 O(n²)。
+   */
+  private onStdout(chunk: string): void {
+    this.buffer += chunk;
+    this.bufferBytes += Buffer.byteLength(chunk, "utf8");
+    for (;;) {
+      const at = this.buffer.indexOf("\n");
+      if (at < 0) break;
+      const line = this.buffer.slice(0, at);
+      this.buffer = this.buffer.slice(at + 1);
+      this.bufferBytes -= Buffer.byteLength(line, "utf8") + 1;
+      this.onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
+    }
+    const max = this.options.maxLineBytes ?? DEFAULT_RESOURCE_LIMITS.maxServerLineBytes;
+    if (this.bufferBytes > max) {
+      const reason =
+        `server wrote more than ${max} bytes without a newline ` +
+        `(${this.bufferBytes} buffered) - stopping it`;
+      this.buffer = "";
+      this.bufferBytes = 0;
+      this.teardown(reason);
+      this.child?.kill();
+    }
   }
 
   private onLine(line: string): void {
