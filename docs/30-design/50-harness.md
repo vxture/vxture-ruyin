@@ -218,6 +218,14 @@ checkpoint:
 | verification_review | `kind: human` 的验证规则（§7） | 结果 + 自动验证报告 |
 | result_acceptance | 任务最终成果接受 | Business Result（03 §18 全字段） |
 
+> **实现只有三种，且这是被有意接受的状态（2026-09-07，owner；TD-047 standing）。**
+> 有发射点的是 `context_confirm` / `tool_ask` / `verification_review`；
+> `transmission_confirm` / `state_transition` / `result_acceptance` **没有发射点，
+> 也不打算补**。理由在 `packages/runtime-core/src/harness.ts` 的 `CheckpointKind`
+> 上：**一个永远发不出的 kind，只会让界面多一条永不执行的分支，让读代码的人以为
+> 它被处理了。** 上表保留六种是因为它记的是**语义空间**（哪些时刻在原理上需要人
+> 点头），不是实现清单 —— 这条注在这里，是为了别让它被当成后者。
+
 ## 6.3 语义
 
 - **阻塞**：Checkpoint 挂起当前步骤，任务进入 waiting_human
