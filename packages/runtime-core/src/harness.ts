@@ -42,6 +42,7 @@ import {
   RUNTIME_ACTOR,
 } from "./audit.js";
 import { TransientError } from "./ports.js";
+import { selectWithinBudget, type RankedType } from "./context-budget.js";
 import { LOCAL_FS, bindingRevoked, folderGrants, isFolderGrant, isPathGranted } from "./project.js";
 import { decideTool, validateToolCall } from "./tool-gate.js";
 import {
@@ -299,6 +300,11 @@ export interface HarnessDeps {
    * persisted flag on its next write.
    */
   isCancelled?: ((taskInstanceId: string) => boolean) | undefined;
+  /**
+   * 上下文预算（字节，近似）。缺省 `DEFAULT_CONTEXT_BUDGET_BYTES`；<= 0 视为不限。
+   * **由宿主传入** —— 内核不读环境变量。
+   */
+  contextBudgetBytes?: number | undefined;
 }
 
 export class HarnessError extends Error {}
@@ -316,7 +322,23 @@ const TERMINAL_STATES: ReadonlySet<TaskInstanceState> = new Set([
 const MAX_TRANSIENT_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 500;
 
+/**
+ * 每类最多取几条。**预算之外的第二道闸**：一个类型下有两百份小文件时，即使它们
+ * 加起来放得进预算，也不该把两百份都塞进去 —— 那不是「充分」，是刷屏。
+ */
 const MAX_ITEMS_PER_TYPE = 3;
+
+/**
+ * 上下文预算的缺省值（字节，**近似 token**，为什么是字节见 `context-budget.ts`）。
+ *
+ * 800 KB 大致对应二十万 token 量级的窗口，且留了余量给提示词与多轮累积。
+ * **它同样是个起点，不是量出来的**：真正该对齐的是模型窗口，而窗口大小由能力面
+ * 那侧决定 —— 契约里没有这个字段，能力面协议也不回它，本地此刻问不到。
+ *
+ * 宿主可以覆盖（`RuntimePorts.contextBudgetBytes`）。内核自己**不读环境变量**：
+ * 内核是宿主无关的（ADR-008），云端那一侧没有这个进程的环境。
+ */
+const DEFAULT_CONTEXT_BUDGET_BYTES = 800 * 1024;
 
 /**
  * Runtime turn ceiling per capability (50-harness section 4: the loop is
@@ -800,7 +822,10 @@ export class Harness {
     const artifacts = jsonArray<ProjectArtifact>(await store.getArtifacts());
     const empty: string[] = [];
 
-    const selected: ContextItemMeta[] = [];
+    // 先把每个类型的候选排好序，**再统一按预算裁**（TD-044）。分两步的原因是
+    // 预算是跨类型的一件事：边遍历边定去留，就只能按类型内的条数裁 —— 那正是
+    // 此前那版 `slice(0, 3)` 的做法，而三条备忘录与三份百页标书在它眼里一样。
+    const rankedTypes: RankedType[] = [];
     for (const type of definition.input_types) {
       const binding = bindings.find((b) => b.type === type);
       let candidates: ContextItemMeta[] = [];
@@ -852,8 +877,25 @@ export class Harness {
         : [...candidates].sort((a, b) =>
             b.modifiedAt.localeCompare(a.modifiedAt),
           );
-      selected.push(...ranked.slice(0, MAX_ITEMS_PER_TYPE));
+      rankedTypes.push({ type, required: requiredIds.has(type), ranked });
     }
+
+    // 同一份文件可能同时落在两个类型下（本项目的产出，又恰好在某个绑定目录里）。
+    // **去重要在裁预算之前做**：留到之后的话，一条重复的条目会先吃掉预算、再被
+    // 删掉 —— 预算白花，而且看不出来花在哪。按 input_types 的先后保留第一次
+    // 出现的那个类型。
+    const seenRefs = new Set<string>();
+    for (const t of rankedTypes) {
+      t.ranked = t.ranked.filter((item) =>
+        seenRefs.has(item.ref) ? false : (seenRefs.add(item.ref), true),
+      );
+    }
+
+    const budget = selectWithinBudget(rankedTypes, {
+      budgetBytes: this.deps.contextBudgetBytes ?? DEFAULT_CONTEXT_BUDGET_BYTES,
+      maxPerType: MAX_ITEMS_PER_TYPE,
+    });
+    const selected = budget.selected;
     // 声明了输入、却一份都没拿到 —— 这个任务达不成它的目标。
     //
     // 每个类型单看都是 `required: false`，所以逐个检查一个都不会响；而合起来
@@ -868,14 +910,7 @@ export class Harness {
           `bind a folder for them, or run the task that produces them first`,
       };
     }
-    // 同一份文件可能同时落在两个类型下（本项目的产出，又恰好在某个绑定目录
-    // 里）。同样的字节送两遍，成本翻倍而信息没多 —— 按 input_types 的先后保留
-    // 第一次出现的那个类型。
-    const byRef = new Map<string, ContextItemMeta>();
-    for (const item of selected) {
-      if (!byRef.has(item.ref)) byRef.set(item.ref, item);
-    }
-    return { ok: true, items: [...byRef.values()] };
+    return { ok: true, items: selected };
   }
 
   private async executePhase(

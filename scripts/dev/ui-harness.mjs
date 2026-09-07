@@ -14,6 +14,8 @@
  * 两个可选环境变量，都只为**看清与时序有关的界面**：
  *   RUYIN_CAPABILITY_BASE       接一个真的能力面（不给就是瞬间返回的 mock）
  *   RUYIN_MAX_CONCURRENT_TASKS  同时驱动几个任务（TD-045；缺省 3）
+ *   RUYIN_CONTEXT_BUDGET_KB     一个任务能带走多少上下文（TD-044；缺省 800，
+ *                               要不限得明写 unlimited）
  * 例：起一个每回合几秒的本地假能力面，再把上限压到 1，排队就看得见了 ——
  * 用 mock 看排队，看到的会是「没有排队」，而那不是因为上限生效，是没人排。
  */
@@ -38,6 +40,9 @@ const { checkTarget, readLocation, writeLocation } = await import(
   `${ROOT}/apps/local-host/dist/data-location.js`
 );
 const { TaskRunner } = await import(`${ROOT}/apps/local-host/dist/task-runner.js`);
+const { contextBudgetFromEnv } = await import(
+  `${ROOT}/apps/local-host/dist/context-budget-config.js`
+);
 const { LocalFsConnector } = await import(`${ROOT}/apps/local-host/dist/connector-fs.js`);
 const { FtsRanker, reindexBinding, searchContext } = await import(
   `${ROOT}/apps/local-host/dist/fts.js`
@@ -114,6 +119,7 @@ const skillRegistry = new SkillRegistry({
  * 只是把已有的 CapabilityClient 接上，不改它；观察台仍然只在本机、只用桩身份。
  */
 const capabilityBase = process.env.RUYIN_CAPABILITY_BASE ?? "";
+const contextBudget = contextBudgetFromEnv();
 const gateway = capabilityBase
   ? new CapabilityClient({ baseUrl: capabilityBase })
   : new MockAIGateway();
@@ -128,6 +134,8 @@ const runtime = new ProjectRuntime({
   ranker: new FtsRanker(storage),
   tools: executor,
   skills: skillRegistry,
+  // 上下文预算（TD-044）：调小它能在观察台上直接看见选进去的条目变少。
+  contextBudgetBytes: contextBudget.bytes,
 });
 
 const names = ["某储能电站 EPC 投标", "城市轨道信号系统投标", "数据中心机电总包投标"];
