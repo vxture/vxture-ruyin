@@ -92,3 +92,27 @@ export function tdTable(rows) {
     "",
   ].join("\n");
 }
+
+/**
+ * 在假仓库里做一次提交（可选打 tag）。
+ *
+ * 给 check-package-versions 那半「拿基线比对内容」用 —— 它 `git show` 基线那一刻的
+ * package.json、`git diff` 到 HEAD 的改动，没有真提交就一条都走不到。
+ *
+ * 提交身份用 `-c` 传：CI 上的 runner 没有全局 user.name / user.email，不带它
+ * `git commit` 会直接失败，而失败的样子是「测试超时」而不是「缺配置」。
+ */
+export function commitAll(root, message, tag) {
+  const id = [
+    "-c", "user.name=fixture",
+    "-c", "user.email=fixture@example.com",
+    "-c", "commit.gpgsign=false",
+  ];
+  spawnSync("git", ["add", "-A"], { cwd: root });
+  const res = spawnSync("git", [...id, "commit", "-q", "-m", message], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (res.status !== 0) throw new Error(`fixture commit failed: ${res.stdout}${res.stderr}`);
+  if (tag) spawnSync("git", ["tag", tag], { cwd: root });
+}
