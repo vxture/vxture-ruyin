@@ -738,6 +738,18 @@ void test("Settings/存储位置: 两个动作都在数据目录那一行上，�
   expect(screen.getByRole("button", { name: /选择目录/ })).toBeInTheDocument();
   // 没选目录之前，会关掉应用的那个按钮是关着的。
   expect(screen.getByRole("button", { name: "重启并搬移" })).toBeDisabled();
+  // 云同步那句要**在选之前**就在弹窗里（TD-051）：选完再拒也拦得住，但那时用户
+  // 已经打开过文件选择框、挑了一个他觉得很合理的位置。
+  const dialog = screen.getByRole("dialog");
+  expect(dialog.textContent).toContain("不要选云同步盘目录");
+  expect(dialog.textContent).toContain("OneDrive");
+  // **认不出来的拦不住，所以这句必须在**：拦截只认得出常见的几家，挂成盘符的
+  // 那些认不出来。提醒是第一位的，拦截是补网 —— 少了这句，用户会以为「没被拒
+  // 就是安全的」。
+  expect(dialog.textContent).toContain("认不出来");
+  // 这两段是**渲染出去的正文**。JSX 不解析 Markdown，写 ** 用户就会看见两个星号
+  // —— 这条曾经真的漏出去过（2026-09-07 在浏览器里看到的），所以钉一条。
+  expect(dialog.textContent).not.toContain("**");
   restore();
 });
 

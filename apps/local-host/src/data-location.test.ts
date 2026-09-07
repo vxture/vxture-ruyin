@@ -66,6 +66,20 @@ void test("checkTarget: 系统目录当场拒，**而且拒在可写探测之前
   rmSync(appDir, { recursive: true, force: true });
 });
 
+void test("checkTarget: 云同步目录当场拒（TD-051）—— 而它恰恰是可写、空间够、同卷的", () => {
+  const src = mkdtempSync(join(tmp(), "ruyin-src-"));
+  // 造一个真实存在、真的可写的「同步目录」：名字命中清单里的 Dropbox。
+  const synced = join(tmp(), `Dropbox-${Date.now()}`);
+  mkdirSync(join(synced, "Dropbox"), { recursive: true });
+  const target = join(synced, "Dropbox", "RuyinData");
+  const result = checkTarget(src, target);
+  assert.equal(result.ok, false);
+  assert.match(result.reason ?? "", /Dropbox/);
+  assert.match(result.reason ?? "", /不被同步的本地目录/);
+  rmSync(src, { recursive: true, force: true });
+  rmSync(synced, { recursive: true, force: true });
+});
+
 void test("checkTarget: 普通目标不受清单影响 —— 清单是黑名单，不是白名单", () => {
   const src = mkdtempSync(join(tmp(), "ruyin-src-"));
   const dst = join(tmp(), `ruyin-dst-${Date.now()}`);
