@@ -46,6 +46,7 @@ import {
   type TaskDef,
   type TaskInstance,
   type ToolPolicyRow,
+  type ProjectFile,
   type ProjectView,
 } from "./api";
 import { verifyChain } from "./chain";
@@ -536,6 +537,141 @@ function StateStepper({
 
 /* ---------------- Context ---------------- */
 
+/** 字节数说人话。文件区里最大的那些是 GB 级的，全用 KB 说没人读得下去。 */
+function humanBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+/**
+ * 项目文件区（TD-041）。
+ *
+ * 和上面的「文件授权」「类型绑定」放在同一页，但讲的是**相反的一件事**：授权与
+ * 绑定是「指着你自己的位置去读」，收进项目是「复制一份进来，从此与你那份无关」。
+ * 两者挨着摆，用户才看得出该用哪一个 —— 分到两个页面去，他会以为它们是一回事。
+ */
+function ProjectFilesSection({
+  api,
+  projectId,
+  grants,
+}: {
+  api: Api;
+  projectId: string;
+  grants: Grant[];
+}) {
+  const [files, setFiles] = useState<ProjectFile[] | null>(null);
+  const [path, setPath] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const reload = useCallback(() => {
+    void api
+      .files(projectId)
+      .then((r) => setFiles(r.items))
+      .catch(() => setFiles(null));
+  }, [api, projectId]);
+  useEffect(reload, [reload]);
+
+  const folders = grants.filter((g): g is FolderGrant => !isConnectorGrant(g));
+
+  const add = (): void => {
+    setNotice("");
+    void api
+      .addFile(projectId, path)
+      .then(() => {
+        setPath("");
+        reload();
+      })
+      .catch((cause: unknown) => {
+        // 未授权的路径会被守护进程拒（FILE_NOT_GRANTED）。**把原话给用户** ——
+        // 它说清了下一步是「先授权那个文件夹」。
+        const body = (cause as { body?: { message?: string } })?.body;
+        setNotice(body?.message ?? "收不进来");
+      });
+  };
+
+  const download = (file: ProjectFile): void => {
+    setNotice("");
+    void api
+      .fileBytes(projectId, file.id)
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.name;
+        a.click();
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => setNotice(`取不回 ${file.name}`));
+  };
+
+  return (
+    <>
+      <SectionHeader level={2} title="项目文件 · Files" icon="archive" />
+      <p className="hint">
+        {/* 这是渲染出去的正文，不是注释 —— 别在这儿用 Markdown 的星号，JSX
+            不解析它，用户会看见两个星号。要加重就用 <strong>。 */}
+        收进来的原件复制一份进本项目，和项目库<strong>同一把钥匙加密</strong>。你把自己
+        那份挪走或删掉，这一份仍然在 —— 成果的依据不会因此断掉。只能从已授权的文件夹里收。
+      </p>
+      {notice && (
+        <p className="hint" role="alert">
+          {notice}
+        </p>
+      )}
+      {files && files.length === 0 && (
+        <EmptyState
+          icon="archive"
+          title="还没有收进任何原件"
+          description="参考资料默认是从你自己的位置读的；要让依据长期可查，把原件收进来。"
+        />
+      )}
+      {files && files.length > 0 && (
+        <ul className="row-list" aria-label="项目文件">
+          {files.map((f) => (
+            <li key={f.id} className="row-item">
+              <code className="row-main">{f.name}</code>
+              <span className="row-tag">{humanBytes(f.bytes)}</span>
+              {/* 来源只是记录，那个路径现在可能已经不在了 —— 所以不做成链接。 */}
+              {f.sourceRef && (
+                <span className="row-tag" title={f.sourceRef}>
+                  收自本机
+                </span>
+              )}
+              <Button variant="outline" onClick={() => download(f)}>
+                取回
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  void api.removeFile(projectId, f.id).then(reload);
+                }}
+              >
+                移出
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="row">
+        <Input
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          placeholder={
+            folders.length > 0
+              ? `已授权文件夹里的文件（例如 ${folders[0]!.path}\\招标文件.pdf）`
+              : "先在上面授权一个文件夹，再从里面收文件"
+          }
+        />
+        <Button disabled={!path || folders.length === 0} onClick={add}>
+          收进项目
+        </Button>
+      </div>
+    </>
+  );
+}
+
 /** 三个权限值给人看的说法。`allow` 不写成「允许」——「直接执行」才说清了没人会被问。 */
 const PERMISSION_LABEL: Record<"allow" | "ask" | "deny", string> = {
   allow: "直接执行",
@@ -779,6 +915,8 @@ function ContextTab({
           )}
         </>
       )}
+
+      <ProjectFilesSection api={api} projectId={projectId} grants={grants} />
 
       <ToolPolicySection api={api} projectId={projectId} />
 

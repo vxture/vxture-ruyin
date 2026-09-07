@@ -19,8 +19,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { checkTarget } from "./data-location.js";
+import { mediaTypeOf } from "./file-store.js";
 import test from "node:test";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
@@ -109,6 +110,39 @@ async function startServer(
     supportsTool: (t) => executor.supports(t),
     systemInfo: testSystemInfo,
     reindex: (pid, b) => reindexBinding(storage, pid, b, lookup.get(b.connector)!),
+    // 文件区（TD-041）。测试装配接的是**真的**存储与加密 —— 这一段的价值全在
+    // 「磁盘上到底存了什么」，换成桩就什么都没测到。
+    files: {
+      list: (pid: string) => storage.openHostStore(pid)?.listFiles() ?? [],
+      get: (pid: string, fileId: string) => storage.openHostStore(pid)?.getFile(fileId),
+      add: async (pid: string, path: string) => {
+        const store = storage.openHostStore(pid)!;
+        const area = storage.openFileStore(pid)!;
+        const { hash, bytes } = await area.put(path);
+        const record = {
+          id: nodeId.newId("file"),
+          hash,
+          name: basename(path),
+          bytes,
+          mediaType: mediaTypeOf(path),
+          addedAt: nodeClock.now(),
+          sourceRef: path,
+        };
+        store.addFile(record);
+        return record;
+      },
+      read: async (pid: string, fileId: string) => {
+        const record = storage.openHostStore(pid)!.getFile(fileId)!;
+        return storage.openFileStore(pid)!.read(record.hash);
+      },
+      remove: (pid: string, fileId: string) => {
+        const store = storage.openHostStore(pid)!;
+        const area = storage.openFileStore(pid)!;
+        const gone = store.removeFile(fileId);
+        if (gone.removed && gone.hash && !gone.stillReferenced) area.remove(gone.hash);
+        return gone.removed;
+      },
+    },
     connectors: new ConnectorRegistry(dataDir, new Map(), { allowUnsigned: false }),
     ...overrides,
   });
@@ -701,6 +735,116 @@ void test("HTTP GET/POST /projects/:id/grants", async () => {
   } finally {
     closeRig(rig);
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 项目文件区走 HTTP（TD-041）。
+ *
+ * 最要紧的一条是**授权**：收进项目意味着复制一份进数据目录，而运行时只读用户
+ * 显式授权过的目录。少了那一道，一个 POST 就能让守护进程读走机器上任意一个
+ * 文件 —— 而这条路由本身长得和一个正常的功能一模一样。
+ */
+void test("HTTP /projects/:id/files：授权目录里的能收，别处的一律拒；收完取得回、删得掉", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  const granted = mkdtempSync(join(tmpdir(), "ruyin-files-ok-"));
+  const outside = mkdtempSync(join(tmpdir(), "ruyin-files-no-"));
+  try {
+    const pid = await projectIn(rig, "wsp_x");
+    const body = Buffer.from("智慧水务项目招标：技术要求 37 条。", "utf8");
+    const inside = join(granted, "招标文件.md");
+    writeFileSync(inside, body);
+    const elsewhere = join(outside, "别人的文件.md");
+    writeFileSync(elsewhere, "不该被读到");
+
+    const post = (path: string, payload: unknown) =>
+      fetch(`${rig.base}${path}`, { method: "POST", headers: rig.json, body: JSON.stringify(payload) });
+
+    // ① 没授权就不能收 —— 而且要说清为什么、下一步做什么。
+    const refused = await post(`/projects/${pid}/files`, { path: elsewhere });
+    assert.equal(refused.status, 400);
+    const refusedBody = (await refused.json()) as { code: string; message: string };
+    assert.equal(refusedBody.code, "FILE_NOT_GRANTED");
+    assert.match(refusedBody.message, /先授权/);
+
+    // ② 授权之后收得进来。
+    await post(`/projects/${pid}/grants`, { path: granted });
+    const added = await post(`/projects/${pid}/files`, { path: inside });
+    assert.equal(added.status, 201);
+    const record = (await added.json()) as { id: string; name: string; bytes: number; hash: string };
+    assert.equal(record.name, "招标文件.md");
+    assert.equal(record.bytes, body.byteLength);
+    assert.match(record.hash, /^[0-9a-f]{64}$/);
+
+    // ③ 列得出来。
+    const listed = (await (
+      await fetch(`${rig.base}/projects/${pid}/files`, { headers: rig.headers })
+    ).json()) as { items: Array<{ id: string }> };
+    assert.deepEqual(listed.items.map((f) => f.id), [record.id]);
+
+    // ④ 取回来的是原样的字节 —— 这才是整件事的用途。
+    const got = await fetch(`${rig.base}/projects/${pid}/files/${record.id}`, { headers: rig.headers });
+    assert.equal(got.status, 200);
+    assert.deepEqual(Buffer.from(await got.arrayBuffer()), body);
+    // 名字里有中文，走 RFC 5987 那一份而不是裸的 filename=。
+    assert.match(got.headers.get("content-disposition") ?? "", /filename\*=UTF-8''/);
+
+    // ⑤ **用户自己那份删了，项目里这份还在** —— 这是文件区存在的全部理由。
+    rmSync(inside, { force: true });
+    const afterSourceGone = await fetch(`${rig.base}/projects/${pid}/files/${record.id}`, { headers: rig.headers });
+    assert.equal(afterSourceGone.status, 200);
+    assert.deepEqual(Buffer.from(await afterSourceGone.arrayBuffer()), body);
+
+    // ⑥ 删得掉，删完就真的没了。
+    const removed = await fetch(`${rig.base}/projects/${pid}/files/${record.id}`, {
+      method: "DELETE",
+      headers: rig.headers,
+    });
+    assert.equal(removed.status, 200);
+    const empty = (await (
+      await fetch(`${rig.base}/projects/${pid}/files`, { headers: rig.headers })
+    ).json()) as { items: unknown[] };
+    assert.deepEqual(empty.items, []);
+    const gone = await fetch(`${rig.base}/projects/${pid}/files/${record.id}`, { headers: rig.headers });
+    assert.equal(gone.status, 404);
+  } finally {
+    closeRig(rig);
+    rmSync(granted, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 同一份内容两个名字：删掉一个，另一个还要读得出来。
+ *
+ * 这条不测的话，去重就是个陷阱 —— 内容寻址让两条登记指向同一份密文，而删登记
+ * 时顺手删密文，会让另一条登记指向一个不存在的文件。**症状要到用户去取原件时
+ * 才出现**，那时他早就把自己那份删了。
+ */
+void test("HTTP 文件区：同样的字节两个名字，删掉一个，另一个照样取得回", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  const granted = mkdtempSync(join(tmpdir(), "ruyin-files-dup-"));
+  try {
+    const pid = await projectIn(rig, "wsp_x");
+    const body = Buffer.from("一模一样的字节");
+    writeFileSync(join(granted, "招标文件.pdf"), body);
+    writeFileSync(join(granted, "甲方发来的最终版.pdf"), body);
+    const post = (path: string, payload: unknown) =>
+      fetch(`${rig.base}${path}`, { method: "POST", headers: rig.json, body: JSON.stringify(payload) });
+    await post(`/projects/${pid}/grants`, { path: granted });
+
+    const a = (await (await post(`/projects/${pid}/files`, { path: join(granted, "招标文件.pdf") })).json()) as { id: string; hash: string };
+    const b = (await (await post(`/projects/${pid}/files`, { path: join(granted, "甲方发来的最终版.pdf") })).json()) as { id: string; hash: string };
+    assert.equal(a.hash, b.hash, "内容一样就该是同一个 hash");
+    assert.notEqual(a.id, b.id, "两个名字是两条登记");
+
+    await fetch(`${rig.base}/projects/${pid}/files/${a.id}`, { method: "DELETE", headers: rig.headers });
+    const still = await fetch(`${rig.base}/projects/${pid}/files/${b.id}`, { headers: rig.headers });
+    assert.equal(still.status, 200, "删掉一个名字不该让另一个名字变成断掉的记录");
+    assert.deepEqual(Buffer.from(await still.arrayBuffer()), body);
+  } finally {
+    closeRig(rig);
+    rmSync(granted, { recursive: true, force: true });
   }
 });
 

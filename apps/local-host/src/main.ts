@@ -30,7 +30,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
 import {
@@ -50,6 +50,7 @@ import { TaskRunner } from "./task-runner.js";
 import { contextBudgetFromEnv } from "./context-budget-config.js";
 import { resourceLimitsFromEnv } from "./resource-limits.js";
 import { currentHost, systemDirRefusal } from "./system-dirs.js";
+import { mediaTypeOf } from "./file-store.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { ConnectorRegistry } from "./connector-registry.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
@@ -351,12 +352,59 @@ const tasks = new TaskRunner(runtime, cancelledTasks, events);
 // 用户点「安装更新」后的意图，壳轮询取走（TD-021）。只在内存里：这是一次点击，
 // 不是一条设置——守护进程重启后它该消失。
 
+/**
+ * 项目的文件区（TD-041）：登记在项目库里，密文在 `<project>/files/` 下，
+ * 用的是**和库同一把项目密钥**（§7.3）。
+ *
+ * 收进来的路径由路由那一侧对着目录授权校验过 —— 这里不再重复判断，但也不能
+ * 假设：这个对象只被那一条路由用，换了调用方要连授权一起想。
+ */
+const fileArea = {
+  list: (projectId: string) => storage.openHostStore(projectId)?.listFiles() ?? [],
+  get: (projectId: string, fileId: string) => storage.openHostStore(projectId)?.getFile(fileId),
+  add: async (projectId: string, path: string) => {
+    const store = storage.openHostStore(projectId);
+    const files = storage.openFileStore(projectId);
+    if (!store || !files) throw new Error(`项目不存在：${projectId}`);
+    const { hash, bytes } = await files.put(path);
+    const record = {
+      id: nodeId.newId("file"),
+      hash,
+      name: basename(path),
+      bytes,
+      mediaType: mediaTypeOf(path),
+      addedAt: nodeClock.now(),
+      sourceRef: resolve(path),
+    };
+    store.addFile(record);
+    return record;
+  },
+  read: async (projectId: string, fileId: string) => {
+    const store = storage.openHostStore(projectId);
+    const files = storage.openFileStore(projectId);
+    const record = store?.getFile(fileId);
+    if (!store || !files || !record) throw new Error(`文件不存在：${fileId}`);
+    return files.read(record.hash);
+  },
+  remove: (projectId: string, fileId: string) => {
+    const store = storage.openHostStore(projectId);
+    const files = storage.openFileStore(projectId);
+    if (!store || !files) return false;
+    const gone = store.removeFile(fileId);
+    // **只有没人再指着它才删密文**：同一份内容可以有两条登记（同样的字节，
+    // 两个名字），删掉一个名字不该让另一个名字指向一个不存在的文件。
+    if (gone.removed && gone.hash && !gone.stillReferenced) files.remove(gone.hash);
+    return gone.removed;
+  },
+};
+
 const server = createLocalApi({
   runtime,
   registry,
   tasks,
   token,
   version: VERSION,
+  files: fileArea,
   reindex: (projectId, binding) => {
     // 按绑定记的连接器取，不再钉死 local-fs（ADR-005 接缝 ②）。
     const connector = connectors.get(binding.connector);

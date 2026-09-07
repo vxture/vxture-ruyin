@@ -232,6 +232,26 @@ const WRAPPER_CASES: WrapperCase[] = [
     body: { connector: "crm" },
   },
   { name: "connectors", call: (api) => api.connectors(), method: "GET", path: "/connectors" },
+  // 项目文件区（TD-041）
+  {
+    name: "files",
+    call: (api) => api.files("prj_1"),
+    method: "GET",
+    path: "/projects/prj_1/files",
+  },
+  {
+    name: "addFile",
+    call: (api) => api.addFile("prj_1", "C:/work/招标文件.pdf"),
+    method: "POST",
+    path: "/projects/prj_1/files",
+    body: { path: "C:/work/招标文件.pdf" },
+  },
+  {
+    name: "removeFile",
+    call: (api) => api.removeFile("prj_1", "file_1"),
+    method: "DELETE",
+    path: "/projects/prj_1/files/file_1",
+  },
   // 工具权限（TD-050）
   {
     name: "toolPolicy",
@@ -644,4 +664,35 @@ void test("auditView: a legacy event with no task_instance omits taskId rather t
     payload: {},
   };
   expect("taskId" in auditView(legacy)).toBe(false);
+});
+
+/**
+ * 取回原件（TD-041）。**它不走 `call()`**，所以上面那张表覆盖不到它 —— 它自己
+ * 拼请求、自己判状态码，那两件事都得单独问一遍。
+ */
+void test("fileBytes: 带上会话令牌，把响应当字节而不是 JSON", async () => {
+  const blob = new Blob(["原件字节"]);
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    blob: () => Promise.resolve(blob),
+  });
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
+  const api = new Api("tok");
+  expect(await api.fileBytes("prj_1", "file_1")).toBe(blob);
+  expect(fetchMock).toHaveBeenCalledWith("/projects/prj_1/files/file_1", {
+    headers: { authorization: "Bearer tok" },
+  });
+});
+
+void test("fileBytes: 失败时抛 ApiError，带着守护进程的原话 —— 不把错误页当成文件交出去", async () => {
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    ok: false,
+    status: 404,
+    json: () => Promise.resolve({ code: "FILE_NOT_FOUND", message: "文件不存在：file_x" }),
+  }) as unknown as typeof fetch;
+  const api = new Api("tok");
+  await expect(api.fileBytes("prj_1", "file_x")).rejects.toMatchObject({
+    status: 404,
+    body: { code: "FILE_NOT_FOUND" },
+  });
 });

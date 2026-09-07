@@ -7,6 +7,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type { PermissionValue } from "@vxture/ruyin-contract-schema";
+import type { StoredFile } from "./file-store.js";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import {
@@ -20,6 +21,7 @@ import {
   type FolderGrant,
   type ProjectRuntime,
   folderGrants,
+  isPathGranted,
 } from "@vxture/ruyin-core";
 import { DEV_UI_HTML } from "./dev-ui.js";
 import type { ProductRegistry } from "./product-registry.js";
@@ -131,6 +133,18 @@ export interface LocalApiDeps {
     projectId: string,
     binding: Binding,
   ) => Promise<{ indexed: number; skipped: number; stoppedBy?: "items" | "bytes" }>;
+  /**
+   * 项目的文件区（TD-041）。缺省不接 —— 没有它时那几条路由整段不存在，而不是
+   * 存在但每次都答「暂不可用」：一条答不了的路由和一条不存在的路由，在调用方
+   * 那里应该是两回事。
+   */
+  files?: {
+    list: (projectId: string) => StoredFile[];
+    get: (projectId: string, fileId: string) => StoredFile | undefined;
+    add: (projectId: string, path: string) => Promise<StoredFile>;
+    read: (projectId: string, fileId: string) => Promise<Buffer>;
+    remove: (projectId: string, fileId: string) => boolean;
+  };
   /**
    * 宿主的连接器注册表（ADR-005 通路二）。缺省 = 这套装配没有进程外连接器，
    * `/connectors` 如实回答「没有」，而不是空列表冒充「一个都没装」。
@@ -1444,6 +1458,75 @@ async function handle(
           body["mode"] === "readwrite" ? "readwrite" : "read",
         );
         send(res, 201, grant);
+        return;
+      }
+    }
+
+    /**
+     * 项目的文件区（TD-041）。
+     *
+     * GET    /projects/:id/files            列出收进来的原件
+     * POST   /projects/:id/files  { path }  从**已授权目录**里收一份进来
+     * GET    /projects/:id/files/:fileId    取回原件（解密后按字节发出）
+     * DELETE /projects/:id/files/:fileId    删掉一条登记（没人再指着它才删密文）
+     *
+     * 收进来走的是**服务端读本地路径**，不是浏览器上传：一份 2 GB 的标书没必要
+     * 先读进渲染进程、再经 HTTP 送回同一台机器上的守护进程。代价是这条路只能收
+     * 本机的文件 —— 而这正是它的用途。
+     */
+    if (segments.length === 3 && segments[2] === "files" && deps.files) {
+      if (method === "GET") {
+        send(res, 200, { items: deps.files.list(projectId) });
+        return;
+      }
+      if (method === "POST") {
+        const body = await readJson(req);
+        const from = String(body["path"] ?? "");
+        const grants = await deps.runtime.listGrants(projectId);
+        // **授权是这一步的前提**：收进项目意味着复制一份进数据目录，而运行时
+        // 只读用户显式授权过的目录（04 §4.3）。少了这一条，一个 POST 就能让
+        // 守护进程读走机器上任意一个文件。
+        if (!from || !isPathGranted(from, grants)) {
+          send(
+            res,
+            400,
+            apiError(
+              "FILE_NOT_GRANTED",
+              `"${from}" 不在这个项目已授权的目录里 —— 先授权它所在的文件夹，再收进来`,
+            ),
+          );
+          return;
+        }
+        const added = await deps.files.add(projectId, from);
+        send(res, 201, added);
+        return;
+      }
+    }
+    if (segments.length === 4 && segments[2] === "files" && deps.files) {
+      const fileId = segments[3]!;
+      if (method === "GET") {
+        const found = deps.files.get(projectId, fileId);
+        if (!found) {
+          send(res, 404, apiError("FILE_NOT_FOUND", `文件不存在：${fileId}`));
+          return;
+        }
+        const bytes = await deps.files.read(projectId, fileId);
+        res.writeHead(200, {
+          "content-type": found.mediaType,
+          "content-length": String(bytes.byteLength),
+          // 名字里可能有中文与空格，走 RFC 5987 那一份，别只写裸的 filename=。
+          "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(found.name)}`,
+        });
+        res.end(bytes);
+        return;
+      }
+      if (method === "DELETE") {
+        const gone = deps.files.remove(projectId, fileId);
+        if (!gone) {
+          send(res, 404, apiError("FILE_NOT_FOUND", `文件不存在：${fileId}`));
+          return;
+        }
+        send(res, 200, { removed: fileId });
         return;
       }
     }
