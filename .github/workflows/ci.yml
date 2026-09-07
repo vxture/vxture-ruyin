@@ -140,8 +140,13 @@ jobs:
       # 同一组里还有发布脚本那几支：工具名对照表的生成必须是**确定的** —— 它把
       # 构建日期写进正文的那一版，让 packaged-smoke 里的 `git diff --exit-code`
       # 从提交的第二天起对每一次无关提交变红。
+      # 同一组里还有观察台那支：`scripts/dev/ui-harness.mjs` 是唯一一处按装机态把
+      # 真组件拼起来的地方，改动频繁，却一个用例都没有 —— 2026-09-07 它在 rebase
+      # 解冲突时被拼坏过（少一个 `);`），而 `pnpm test` 全程是绿的。这里跑到的是
+      # 它的 `node --check`（零依赖，不用装、不用构建）；真启动那一支要 dist，
+      # 在 build job 里，缺产物时它在这儿明确跳过并说明。
       - name: Guardrail self-tests (each new rule really refuses what it claims to)
-        run: node --test "scripts/guardrails/*.test.mjs" "scripts/release/*.test.mjs"
+        run: node --test "scripts/guardrails/*.test.mjs" "scripts/release/*.test.mjs" "scripts/dev/*.test.mjs"
 
       # W5 版本策略（owner 定：手工版本 + 守卫）：包内容改了、版本号没动，发布
       # 流水线会因「已发过」跳过它而全绿 —— 消费方拿到的还是旧包。
@@ -240,6 +245,22 @@ jobs:
         run: pnpm type-check:all
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      # 开发观察台（`pnpm dev:ui`）真起一次。**只能待在这个 job 里**：它读的是各包
+      # 的 dist，上一步刚构建出来。
+      #
+      # 它是唯一一处把真的 SqliteStoragePort / ProjectRuntime / ConnectorRegistry /
+      # LocalToolExecutor 按装机态拼起来的地方，也因此每加一件东西都要动它 ——
+      # 2026-09-07 一轮里改了四次，其中一次在 rebase 解冲突时被拼坏，文件语法就是
+      # 错的，而 test-coverage 全程绿着，因为没有任何用例碰它。
+      #
+      # `RUYIN_REQUIRE_HARNESS_SMOKE=1` 把「缺构建产物就跳过」翻成失败：这里 dist
+      # 一定在，所以跳过只可能意味着构建产物不对 —— 而一条跳过在 CI 的汇总里和一条
+      # 通过长得一模一样，那正是这支用例要治的病。
+      - name: Dev UI harness actually boots (pnpm dev:ui)
+        run: pnpm test:ui-harness
+        env:
+          RUYIN_REQUIRE_HARNESS_SMOKE: "1"
 
   # -- Test coverage (required check) -----------------------------------------
   # Runs recursive `test` across the workspace. Coverage is measured and

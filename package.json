@@ -30,7 +30,8 @@
     "tools:pull": "node scripts/release/pull-tools.mjs",
     "tools:names": "node scripts/release/pull-tools.mjs --docs-only",
     "lint:tool-names": "node scripts/release/pull-tools.mjs --docs-only --check",
-    "test:guardrails": "node --test \"scripts/guardrails/*.test.mjs\" \"scripts/release/*.test.mjs\"",
+    "test:guardrails": "node --test \"scripts/guardrails/*.test.mjs\" \"scripts/release/*.test.mjs\" \"scripts/dev/*.test.mjs\"",
+    "test:ui-harness": "node --test scripts/dev/ui-harness.test.mjs",
     "uv:seed": "node scripts/release/seed-uv-cache.mjs",
     "components:verify": "node scripts/release/verify-components.mjs"
   }

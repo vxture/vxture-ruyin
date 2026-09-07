@@ -11,6 +11,11 @@
  * 用法：pnpm dev:ui —— 它会打印一个带令牌的地址，浏览器打开即可。
  * 前置：先 pnpm -r build（它读的是各包的 dist）。
  *
+ * **改这个文件之后跑一次 `pnpm test:ui-harness`**（构建之后）。这里是唯一一处把真
+ * 组件按装机态拼起来的地方，于是每加一件东西都要动它 —— 而它坏掉时 `pnpm test`
+ * 照样全绿（`scripts/` 不是 workspace 包）。旁边的 ui-harness.test.mjs 就为这件事：
+ * 只钉「能不能起来」，不钉这里的任何逻辑（TD-054）。
+ *
  * 两个可选环境变量，都只为**看清与时序有关的界面**：
  *   RUYIN_CAPABILITY_BASE       接一个真的能力面（不给就是瞬间返回的 mock）
  *   RUYIN_MAX_CONCURRENT_TASKS  同时驱动几个任务（TD-045；缺省 3）
@@ -279,6 +284,11 @@ const server = createLocalApi({
   },
 });
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`[uiharness] http://127.0.0.1:${PORT}/?token=${TOKEN}`);
+  // 端口取自**真的监听结果**，不是那个请求值：PORT=0 时两者不一样，而这一行就是
+  // 观察台对外的全部接口 —— 人照它开浏览器，烟测照它发请求。印一个没在听的端口，
+  // 和印一个对的长得一模一样。
+  const bound = server.address();
+  const port = typeof bound === "object" && bound !== null ? bound.port : PORT;
+  console.log(`[uiharness] http://127.0.0.1:${port}/?token=${TOKEN}`);
   console.log(`[uiharness] project=${first}`);
 });
