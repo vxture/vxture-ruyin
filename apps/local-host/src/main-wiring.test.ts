@@ -227,20 +227,36 @@ void test("装配线：文件区路由真的挂上了（没接上就是 404，�
 /**
  * 换数据目录那条路上的两道检查都接上了（TD-039 系统目录 / TD-051 云同步）。
  *
+ * **路径必须在两个平台上都是绝对路径。** 第一版这里写死了 `C:\Windows\Temp\...`
+ * 和 `C:\Users\amy\OneDrive\...`：在 Windows 上跑得好好的，到 CI（ubuntu）上
+ * `isAbsolute()` 一律为 false，于是 `checkTarget` 在最前面就用「要写完整路径」
+ * 挡下了 —— 两道检查**根本没被走到**，而用例照样是「拒了」，只是拒的理由完全不同。
+ * 断言写的是理由，所以 CI 抓住了；断言若只写 `ok === false`，这条用例会在 CI 上
+ * 一直绿着，却什么都没测。
+ *
+ * 现在两个目标都从真实的绝对路径拼出来：
+ * - 系统目录那条走「应用自己的安装目录」（`process.execPath` 的上一级），两个
+ *   平台上都成立，也不需要那台机器真有 `C:\Windows`。
+ * - 云同步那条走临时目录下的 `OneDrive/`，命中的是名字那一道。
+ *
  * **行为断言**：两者都走 `checkTarget`，而 `checkTarget` 是经 `dataMove.check`
  * 接进路由的。任何一处没接，这里回的就是 `ok: true`。
  */
 void test("装配线：系统目录与云同步两道检查都接到了换目录那条路", async () => {
   const d = await startDaemon();
+  const appDir = resolve(process.execPath, "..");
+  const cloudish = join(tmpdir(), `OneDrive`, `ruyin-wiring-${Date.now()}`);
   try {
     for (const [target, expect] of [
-      ["C:\\Windows\\Temp\\RuyinData", /Windows 系统目录|系统目录/],
-      ["C:\\Users\\amy\\OneDrive\\RuyinData", /OneDrive/],
+      [join(appDir, `ruyin-wiring-sys-${Date.now()}`), /卸载会把数据一起删掉/],
+      [cloudish, /OneDrive/],
     ] as const) {
       const res = await d.post("/system/data-dir/check", { target });
       assert.equal(res.status, 200);
       const body = (await res.json()) as { ok: boolean; reason?: string };
       assert.equal(body.ok, false, `${target} 应该被拒 —— ok:true 说明那道检查没接上`);
+      // 比对**理由**而不只是 ok：拒了但拒的是别的原因（比如路径不合法），
+      // 等于这道检查没被走到，而那种绿是假的。
       assert.match(body.reason ?? "", expect);
     }
     // 正常目录照样放行 —— 拦的是位置，不是「换目录这件事被关掉了」。
