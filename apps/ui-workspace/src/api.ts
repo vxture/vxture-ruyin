@@ -235,6 +235,13 @@ export interface TaskInstance {
   id: string;
   taskId: string;
   state: string;
+  /**
+   * 此刻这台宿主的调度情况（TD-045）—— **不是任务状态**，不进状态机。
+   * 守护进程一重启队列就没了，所以这两项永远来自当前进程，不来自记录。
+   */
+  running?: boolean;
+  queued?: boolean;
+  queuePosition?: number;
   /** Confirmation queue, oldest first; undecided entries are still waiting. */
   checkpoints: Checkpoint[];
   contextSet?: ContextItemMeta[];

@@ -904,7 +904,16 @@ function InstanceCard({ instance }: { instance: TaskInstance }) {
           <b>{instance.taskId}</b>{" "}
           <StatusBadge tone={stateTone(instance.state)}>
             {instance.state}
-          </StatusBadge>
+          </StatusBadge>{" "}
+          {/* 排队是**宿主此刻的调度情况**，不是任务状态，所以它是状态徽标旁边
+              另一枚，而不是把状态改写成「排队中」—— 那个任务的状态确实还是
+              created / suspended，改写会让状态机的记录与界面对不上。
+              不显示位置就等于不告诉用户「还要多久」，而那正是他此刻唯一想知道的。 */}
+          {instance.queued && (
+            <StatusBadge tone="neutral">
+              {instance.queuePosition ? `排队中 · 第 ${instance.queuePosition}` : "排队中"}
+            </StatusBadge>
+          )}
         </span>
         <span className="text-body-sm text-muted-foreground">
           {instance.updatedAt}
