@@ -87,6 +87,11 @@ export class CapabilityClient implements AIGatewayPort {
           context: request.context,
           messages: request.messages,
           tools: request.tools,
+          // 技能目录（ADR-018 §2.4）：名字与一句话，不是正文。**必须转发** ——
+          // 内核在 tools 里放了 `use_skill`，而目录不过去的话，提供方拿到的是一个
+          // 「可以取技能正文」的工具，却不知道有哪些技能可取，只能瞎猜名字。
+          // 那种坏法看不出来：工具在、调用能发、每次都取不到。
+          ...(request.skills?.length ? { skills: request.skills } : {}),
           ...(request.revision ? { revision: request.revision } : {}),
         }),
       });
