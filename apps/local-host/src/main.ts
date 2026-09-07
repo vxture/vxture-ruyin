@@ -51,6 +51,7 @@ import { contextBudgetFromEnv } from "./context-budget-config.js";
 import { resourceLimitsFromEnv } from "./resource-limits.js";
 import { currentHost, systemDirRefusal } from "./system-dirs.js";
 import { mediaTypeOf } from "./file-store.js";
+import { cloudSyncRefusal } from "./cloud-sync.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { ConnectorRegistry } from "./connector-registry.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
@@ -663,7 +664,9 @@ server.listen(port, "127.0.0.1", () => {
   // **说一句，但不拦着起**。拒绝启动的话，应用会变成一个既打不开、也没法在界面
   // 里把目录改回来的东西 —— 而改目录的界面正在它里面。
   {
-    const bad = systemDirRefusal(dataDir, currentHost());
+    const host = currentHost();
+    // 云同步那条也一起问：一个已经在同步目录里跑着的装机态，用户更需要知道。
+    const bad = systemDirRefusal(dataDir, host) ?? cloudSyncRefusal(dataDir, host);
     if (bad) console.error(`[ruyin] 数据目录在一个不该放数据的位置：${bad}`);
   }
   // 上面 `capabilityBase` 处的注释写着「不接就说不接，『没接上』绝不能看起来像

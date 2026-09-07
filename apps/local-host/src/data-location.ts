@@ -41,6 +41,7 @@ import { pipeline } from "node:stream/promises";
 import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { currentHost, systemDirRefusal, type HostEnvironment } from "./system-dirs.js";
+import { cloudSyncRefusal } from "./cloud-sync.js";
 
 /** 搬家时**不带走**的东西：缓存，删了自己会长回来。 */
 const SKIP = new Set(["chromium"]);
@@ -191,6 +192,12 @@ export function checkTarget(
   // 告诉用户下一步该做什么。先说更根本的那个理由。
   const systemDir = systemDirRefusal(dst, host);
   if (systemDir) return { ok: false, reason: systemDir };
+
+  // 云同步目录（TD-051，owner 2026-09-07 定：拦截）。同样排在可写探测之前 ——
+  // 一个 OneDrive 文件夹当然是可写的，问题不在写不写得进去，在于同步客户端会在
+  // 数据库正被使用时改动它的文件，以及它会把这些数据整份传上云。
+  const cloud = cloudSyncRefusal(dst, host);
+  if (cloud) return { ok: false, reason: cloud };
 
   if (contains(src, dst)) {
     return { ok: false, reason: "目标在当前数据目录里面 —— 那等于把数据搬进它自己。" };
