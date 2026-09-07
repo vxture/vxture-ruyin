@@ -10,19 +10,61 @@
 
 import type { Binding, ConnectorPort, ContextItemMeta, RankerPort } from "@vxture/ruyin-core";
 import type { SqliteStoragePort } from "./storage.js";
+import { DEFAULT_RESOURCE_LIMITS, type ResourceLimits } from "./resource-limits.js";
 
-/** Rebuild the index rows for one binding's type from connector content. */
+/**
+ * 一次索引重建的结果。
+ *
+ * 从 `number` 换成一个对象，是因为**跳过了什么必须说得出来**（TD-046 的判据）。
+ * 只回一个条数时，「一万份文件里索引了五千份」和「这里就只有五千份」返回的是
+ * 同一个数字 —— 而这两件事对用户完全不同：前者意味着他搜不到的东西其实在那儿。
+ */
+export interface ReindexOutcome {
+  indexed: number;
+  /** 因为超上限没读的条数；0 = 全都读了。 */
+  skipped: number;
+  /** 读进来的字节数（近似：以连接器给的 `bytes` 计）。 */
+  bytes: number;
+  /** 哪条上限先到；没超就是 undefined。 */
+  stoppedBy?: "items" | "bytes";
+}
+
+/**
+ * Rebuild the index rows for one binding's type from connector content.
+ *
+ * **有上限**（TD-046）：这个函数把每一条的完整内容读进内存再一次性写库。绑一个
+ * 装着几万份文件、或者几个 GB 文本的目录 —— 一个真实的共享盘就长这样 —— 会让
+ * 守护进程把它们同时攒在内存里。那是用户自己的电脑，而这件事发生在他点「绑定
+ * 目录」之后的几秒内，他不会把卡顿和那次点击联系起来。
+ *
+ * 条目数与字节数**两条都要**：一万份便签和十份光盘镜像是两种超法，只管一条就
+ * 会漏掉另一种。
+ */
 export async function reindexBinding(
   storage: SqliteStoragePort,
   projectId: string,
   binding: Binding,
   connector: ConnectorPort,
-): Promise<number> {
+  limits: Pick<ResourceLimits, "maxIndexItems" | "maxIndexBytes"> = DEFAULT_RESOURCE_LIMITS,
+): Promise<ReindexOutcome> {
   const store = storage.openHostStore(projectId);
   if (!store) throw new Error(`workspace "${projectId}" not found`);
   const metas = await connector.discover(binding);
   const rows = [];
+  let bytes = 0;
+  let stoppedBy: "items" | "bytes" | undefined;
   for (const meta of metas) {
+    if (rows.length >= limits.maxIndexItems) {
+      stoppedBy = "items";
+      break;
+    }
+    // **读之前**先看字节数：读完再判断，那一条已经在内存里了 —— 而正是那一条
+    // 可能是最大的那份。连接器给的 `bytes` 是元数据，不必先把文件读出来。
+    if (bytes + Math.max(0, meta.bytes) > limits.maxIndexBytes) {
+      stoppedBy = "bytes";
+      break;
+    }
+    bytes += Math.max(0, meta.bytes);
     const item = await connector.read(meta);
     // Only text has words to match. Non-text items stay in the index by name
     // so they remain findable and selectable - dropping them would quietly
@@ -36,7 +78,12 @@ export async function reindexBinding(
     });
   }
   store.replaceIndexForType(binding.type, rows);
-  return rows.length;
+  return {
+    indexed: rows.length,
+    skipped: metas.length - rows.length,
+    bytes,
+    ...(stoppedBy ? { stoppedBy } : {}),
+  };
 }
 
 /** Escape user text into a safe OR-of-phrases FTS5 MATCH expression. */

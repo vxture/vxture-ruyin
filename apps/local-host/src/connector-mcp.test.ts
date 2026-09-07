@@ -11,6 +11,7 @@ import test from "node:test";
 import type { Binding } from "@vxture/ruyin-core";
 import { McpConnector } from "./connector-mcp.js";
 import { McpError, McpStdioClient } from "./mcp-client.js";
+import { DEFAULT_RESOURCE_LIMITS } from "./resource-limits.js";
 
 const FAKE = fileURLToPath(new URL("./fake-mcp-server.js", import.meta.url));
 
@@ -193,4 +194,58 @@ test("connector: a read after the server died is unavailable, not a thrown task 
   assert.match(item.content.kind === "unavailable" ? item.content.reason : "", /server exited/);
   // Discovery with no server at all has nothing to attach an answer to: it throws.
   await assert.rejects(connector.discover(bindingFor("crm://")), /server exited/);
+});
+
+/**
+ * 本机资源上限（TD-046）。
+ *
+ * 两条都用**真的子进程真的管道**测，理由与这个文件里其余用例一样：这两处坏起来
+ * 的样子是「内存涨上去」和「一次调用变得很贵」，两样在被 mock 的传输上都看不见。
+ */
+
+test("上限：服务器往 stdout 里灌一大段不带换行的东西，客户端在上限处收摊而不是把它攒完", async () => {
+  const client = new McpStdioClient(spec("--flood-stdout"), {
+    timeoutMs: 5000,
+    // 64 KB：假服务器要灌 2.5 MB，所以这一定会撞上。
+    maxLineBytes: 64 * 1024,
+  });
+  await client.start();
+  // 灌是在 initialize 之后 10ms 开始的；等它撞线。
+  for (let i = 0; i < 100 && client.running; i++) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.equal(client.running, false, "撞上上限就该把这个服务器停掉");
+  // 之后每一个请求都要**立刻拒绝并说明原因**，而不是挂到超时 —— 一个被撑爆的
+  // 连接后面跟着的每一条都是垃圾，等 15 秒再说「没回话」是在误导。
+  await assert.rejects(client.ping(), (e: unknown) => {
+    assert.ok(e instanceof McpError);
+    assert.match(e.message, /without a newline/);
+    return true;
+  });
+  await client.stop();
+});
+
+test("上限：一个特别大的工具结果被截断，**并明说截了多少** —— 不能悄悄给半份", async () => {
+  const connector = new McpConnector(
+    { id: "crm", ...spec("--huge-tool-result") },
+    { timeoutMs: 5000, limits: { ...DEFAULT_RESOURCE_LIMITS, maxToolResultBytes: 1000 } },
+  );
+  await connector.start();
+  const out = await connector.callTool("huge", {});
+  assert.ok(
+    Buffer.byteLength(out.content, "utf8") < 1500,
+    "超出的部分要真的没了，不是只在末尾加一句话",
+  );
+  assert.match(out.content, /已在 1000 字节处截断/);
+  assert.match(out.content, /400000 字节/, "要说出原本有多大 —— 否则用户不知道漏了多少");
+  assert.match(out.content, /crm/, "要说出是哪个连接器的哪个工具");
+  await connector.stop();
+});
+
+test("没超上限的，一个字节都不动", async () => {
+  const connector = new McpConnector({ id: "crm", ...spec() }, { timeoutMs: 5000 });
+  await connector.start();
+  const out = await connector.callTool("lookup_account", { q: "acme" });
+  assert.doesNotMatch(out.content, /截断/);
+  await connector.stop();
 });

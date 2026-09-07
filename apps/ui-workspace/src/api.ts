@@ -743,7 +743,11 @@ export class Api {
     root: string,
     via?: { connector: string; source: string },
   ) =>
-    this.call<Binding & { indexed: number }>(
+    // `skipped` / `stoppedBy` 只在索引撞上本机上限时才有（TD-046）：一次绑定
+    // 索引了多少、又因为超限漏了多少，用户得知道 —— 漏掉的那些他之后搜不到。
+    this.call<
+      Binding & { indexed: number; skipped?: number; stoppedBy?: "items" | "bytes" }
+    >(
       `/projects/${id}/bindings`,
       "POST",
       via ? { type, root, connector: via.connector, source: via.source } : { type, root },

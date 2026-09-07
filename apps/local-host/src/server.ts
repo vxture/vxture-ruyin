@@ -120,7 +120,15 @@ export interface LocalApiDeps {
   token: string;
   version: string;
   /** Rebuild the FTS index rows for one binding; returns indexed count. */
-  reindex: (projectId: string, binding: Binding) => Promise<number>;
+  /**
+   * 建索引。返回**索引了几条**，以及超上限时跳过了几条（TD-046）——
+   * 只回一个条数的话，「一万份里索引了五千份」和「这里就只有五千份」是同一个
+   * 数字，而后者用户不需要知道，前者他必须知道：他搜不到的东西其实在那儿。
+   */
+  reindex: (
+    projectId: string,
+    binding: Binding,
+  ) => Promise<{ indexed: number; skipped: number; stoppedBy?: "items" | "bytes" }>;
   /**
    * 宿主的连接器注册表（ADR-005 通路二）。缺省 = 这套装配没有进程外连接器，
    * `/connectors` 如实回答「没有」，而不是空列表冒充「一个都没装」。
@@ -1449,8 +1457,16 @@ async function handle(
             : {}),
         });
         // Index the newly bound content right away (04 section 5.1).
-        const indexed = await deps.reindex(projectId, binding);
-        send(res, 201, { ...binding, indexed });
+        const outcome = await deps.reindex(projectId, binding);
+        // `indexed` 保持数字不变（界面在读它）；跳过了才多一个字段 —— 没超限的
+        // 常态下这一层什么都没变。
+        send(res, 201, {
+          ...binding,
+          indexed: outcome.indexed,
+          ...(outcome.skipped > 0
+            ? { skipped: outcome.skipped, stoppedBy: outcome.stoppedBy }
+            : {}),
+        });
         return;
       }
     }

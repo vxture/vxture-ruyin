@@ -24,6 +24,7 @@ import type {
   ContextItemMeta,
 } from "@vxture/ruyin-core";
 import { McpStdioClient, type McpResource, type McpServerSpec } from "./mcp-client.js";
+import { DEFAULT_RESOURCE_LIMITS, type ResourceLimits } from "./resource-limits.js";
 
 /** Mirrors local-fs: what one text item may bring into a turn. */
 const MAX_CONTENT_BYTES = 256_000;
@@ -66,11 +67,15 @@ export class McpConnector implements ConnectorPort {
   private readonly client: McpStdioClient;
   private toolNames: string[] = [];
 
-  constructor(spec: McpConnectorSpec, options: { timeoutMs?: number } = {}) {
+  constructor(
+    spec: McpConnectorSpec,
+    private readonly options: { timeoutMs?: number; limits?: ResourceLimits } = {},
+  ) {
     this.id = spec.id;
     const { id: _id, ...server } = spec;
     this.client = new McpStdioClient(server, {
-      ...options,
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      maxLineBytes: (options.limits ?? DEFAULT_RESOURCE_LIMITS).maxServerLineBytes,
       clientInfo: { name: "ruyin", version: "0.1.0" },
     });
   }
@@ -108,8 +113,24 @@ export class McpConnector implements ConnectorPort {
     const parts = result.content.map((p) =>
       p.type === "text" && typeof p.text === "string" ? p.text : `[${p.type} content omitted]`,
     );
+    const joined = parts.join("\n");
+    // 上限（TD-046）。工具返回的内容原样进本轮消息 —— 一个把整个目录树、整张
+    // 数据库表倒出来的工具，会把这一堆同时压在内存与这次调用的成本上，而这两样
+    // 用户都不会预先知道。
+    //
+    // 这里**截断并明说截了**，与内建 read 工具的口径一致（那里是
+    // `[truncated at N bytes of M]`）。和上下文条目不一样：上下文是用户点名要
+    // 带上的资料，截断它会让引用指向半句话，所以那边裁的是整条（TD-044）；
+    // 工具结果是这一轮现生成的，宁可给一段带说明的，也不该把整轮废掉。
+    const max = (this.options.limits ?? DEFAULT_RESOURCE_LIMITS).maxToolResultBytes;
+    const bytes = Buffer.byteLength(joined, "utf8");
+    const content =
+      bytes > max
+        ? `${Buffer.from(joined, "utf8").subarray(0, max).toString("utf8")}\n\n` +
+          `[连接器 "${this.id}" 的 ${name} 返回 ${bytes} 字节，已在 ${max} 字节处截断]`
+        : joined;
     return {
-      content: parts.join("\n"),
+      content,
       ...(result.isError ? { isError: true } : {}),
     };
   }

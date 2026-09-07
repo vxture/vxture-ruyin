@@ -16,6 +16,8 @@
  *   RUYIN_MAX_CONCURRENT_TASKS  同时驱动几个任务（TD-045；缺省 3）
  *   RUYIN_CONTEXT_BUDGET_KB     一个任务能带走多少上下文（TD-044；缺省 800，
  *                               要不限得明写 unlimited）
+ *   RUYIN_MAX_TOOL_SERVERS      同时几个工具服务器子进程（TD-046；缺省 6）
+ *   RUYIN_MAX_INDEX_ITEMS       一次索引读几条（TD-046；缺省 5000）
  * 例：起一个每回合几秒的本地假能力面，再把上限压到 1，排队就看得见了 ——
  * 用 mock 看排队，看到的会是「没有排队」，而那不是因为上限生效，是没人排。
  */
@@ -42,6 +44,9 @@ const { checkTarget, readLocation, writeLocation } = await import(
 const { TaskRunner } = await import(`${ROOT}/apps/local-host/dist/task-runner.js`);
 const { contextBudgetFromEnv } = await import(
   `${ROOT}/apps/local-host/dist/context-budget-config.js`
+);
+const { resourceLimitsFromEnv } = await import(
+  `${ROOT}/apps/local-host/dist/resource-limits.js`
 );
 const { LocalFsConnector } = await import(`${ROOT}/apps/local-host/dist/connector-fs.js`);
 const { FtsRanker, reindexBinding, searchContext } = await import(
@@ -80,10 +85,13 @@ const bundledTools = new BundledToolServers({
   dataDir,
   log: (l) => console.error(l),
 });
+const resourceLimits = resourceLimitsFromEnv();
 const connectorRegistry = new ConnectorRegistry(dataDir, connectorLookup, {
   allowUnsigned: true,
   log: (l) => console.error(l),
   bundled: bundledTools,
+  // 本机资源上限（TD-046）：调小 RUYIN_MAX_TOOL_SERVERS 能在观察台上看见拒绝的措辞。
+  limits: resourceLimits.limits,
 });
 const executor = new LocalToolExecutor((pid, q, scope, limit) =>
   searchContext(storage, pid, q, scope, limit),
@@ -149,7 +157,7 @@ const binding = await runtime.setBinding(first, {
   type: "tender_document",
   root: join(work, "招标"),
 });
-await reindexBinding(storage, first, binding, new LocalFsConnector());
+await reindexBinding(storage, first, binding, new LocalFsConnector(), resourceLimits.limits);
 // 跑一个任务，好让项目面板上有真实内容（会停在人工检查点）。
 const harness = await runtime.createHarness(first);
 const created = await harness.startTask("analyze_tender");
@@ -185,7 +193,8 @@ const server = createLocalApi({
   supportsTool: (t) => executor.supports(t),
   uiDir: `${repo}/apps/ui-workspace/dist`,
   platform,
-  reindex: (pid, b) => reindexBinding(storage, pid, b, connectorLookup.get(b.connector)),
+  reindex: (pid, b) =>
+    reindexBinding(storage, pid, b, connectorLookup.get(b.connector), resourceLimits.limits),
   connectors: connectorRegistry,
   skills: skillRegistry,
   tools: new ToolRegistryView({
