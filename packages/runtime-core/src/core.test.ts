@@ -1234,6 +1234,32 @@ test("selection pipeline: declining the context stops the task", async () => {
   assert.deepEqual(declined.capabilityOutputs, {});
 });
 
+/**
+ * 预算真的走到了选择那一步（TD-044）。
+ *
+ * `context-budget.test.ts` 只证明那段纯逻辑对；这一条证明**宿主传进来的那个数
+ * 确实到得了 harness** —— 端口加了字段却没接上线的话，纯逻辑再对也不生效，而
+ * 那种坏法和好的长得一模一样（选择照常，只是从没受过预算约束）。
+ */
+test("上下文预算：宿主把预算调小，选进去的条目跟着变少", async () => {
+  const { ports, runtime, connector } = makeSelectionFixture();
+  // 两份招标文件：2048 + 1024 字节。预算只装得下靠前那一份。
+  ports.contextBudgetBytes = 2500;
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  await bindTender(runtime, connector, meta.id);
+
+  const harness = await runtime.createHarness(meta.id);
+  const instance = await runTask(harness, "analyze_tender");
+  assert.equal(
+    instance.contextSet?.length,
+    1,
+    "同样的绑定，不设预算时是 2 条（见上一条用例）",
+  );
+  // 留下的是排位靠前的那一条，而且**字节数原样**——裁的是条目，没有截断谁。
+  assert.equal(instance.contextSet?.[0]?.id, "itm_tender_v2");
+  assert.equal(instance.contextSet?.[0]?.bytes, 2048);
+});
+
 test("discoverContext previews bound items; empty without a binding", async () => {
   const { runtime, connector } = makeSelectionFixture();
   const meta = await runtime.createProject(bidContract, "ws", "wsp_test");

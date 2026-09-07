@@ -418,6 +418,7 @@ export class ProjectRuntime {
       tools: this.ports.tools,
       skills: this.ports.skills,
       isCancelled: this.ports.isCancelled,
+      contextBudgetBytes: this.ports.contextBudgetBytes,
     });
   }
 

@@ -50,6 +50,13 @@ export type {
   ProjectExport,
   RuyinExportPredicate,
 } from "./export.js";
+export { selectWithinBudget } from "./context-budget.js";
+export type {
+  BudgetOptions,
+  BudgetResult,
+  DroppedItem,
+  RankedType,
+} from "./context-budget.js";
 export { decideTool, validateToolCall } from "./tool-gate.js";
 export {
   READ_SKILL_RESOURCE,

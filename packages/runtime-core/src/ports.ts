@@ -665,4 +665,12 @@ export interface RuntimePorts {
   skills?: SkillsPort;
   /** True once the user has asked this task to stop (see HarnessDeps). */
   isCancelled?: (taskInstanceId: string) => boolean;
+  /**
+   * 一个任务一次能带走多少上下文（字节，**近似 token**；TD-044）。
+   *
+   * 放在这里而不是内核里读环境变量：内核宿主无关（ADR-008），而这个数该由宿主
+   * 定 —— 桌面看用户机器与订阅档位，云端看集群与模型窗口，两边不会是同一个值。
+   * 不传就用内核缺省；<= 0 表示不限。
+   */
+  contextBudgetBytes?: number;
 }

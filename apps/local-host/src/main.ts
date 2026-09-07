@@ -39,6 +39,7 @@ import {
 } from "./product-registry.js";
 import { createLocalApi } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
+import { contextBudgetFromEnv } from "./context-budget-config.js";
 import { LocalFsConnector } from "./connector-fs.js";
 import { ConnectorRegistry } from "./connector-registry.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
@@ -280,6 +281,8 @@ async function refreshAllDistributed(): Promise<unknown[]> {
   return outcomes;
 }
 
+const contextBudget = contextBudgetFromEnv();
+
 const runtime = new ProjectRuntime({
   storage,
   clock: nodeClock,
@@ -298,6 +301,8 @@ const runtime = new ProjectRuntime({
   tools: toolExecutor,
   skills: skillRegistry,
   isCancelled: (id) => cancelledTasks.has(id),
+  // 上下文预算（TD-044）。宿主给数，内核不读环境变量。
+  contextBudgetBytes: contextBudget.bytes,
 });
 
 const defaultUiDir = resolve(
@@ -603,6 +608,8 @@ server.listen(port, "127.0.0.1", () => {
       ? `[ruyin] capability surface: ${capabilityBase}`
       : "[ruyin] capability surface: NOT configured - tasks will return mock output",
   );
+  // 改了预算就要能看见它生效了 —— 一个不说话的旋钮，拧了和没拧长得一样。
+  console.log(`[ruyin] ${contextBudget.note}`);
   {
     const installed = [...connectors.keys()].filter((id) => id !== "local-fs");
     console.log(
