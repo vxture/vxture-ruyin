@@ -12,7 +12,7 @@
  */
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectPanel } from "./workspace";
 import {
@@ -23,6 +23,7 @@ import {
   type ProjectView,
   type TaskDef,
   type TaskInstance,
+  type ToolPolicyRow,
 } from "./api";
 
 vi.mock("./chain", () => ({
@@ -131,6 +132,10 @@ function fakeApi(over: Partial<Api> = {}): Api {
     contextItems: vi.fn().mockResolvedValue([]),
     connectors: vi.fn().mockResolvedValue({ items: [] }),
     addConnectorGrant: vi.fn().mockResolvedValue({}),
+    // 缺省空表：工具权限那一段在没有条目时整段不渲染，于是既有的上下文页用例
+    // 一个都不用改（TD-050）。要测它的用例自己覆盖这一条。
+    toolPolicy: vi.fn().mockResolvedValue({ items: [] }),
+    setToolPolicy: vi.fn().mockResolvedValue({ items: [] }),
     ...over,
   } as unknown as Api;
 }
@@ -486,6 +491,95 @@ void test("ProjectPanel/Context: no grants shows the empty state", async () => {
   const api = fakeApi();
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);
   expect(await screen.findByText("尚未授权任何文件夹")).toBeInTheDocument();
+});
+
+/**
+ * 工具权限（TD-050）。
+ *
+ * 界面这一侧要守两条：**说得出这一行现在是谁说了算**（一个只显示结果的开关回答
+ * 不了「我明明设过」），以及**底线之下的放宽被拒时把原话给用户**（那句话写清了
+ * 为什么不行、还能改到哪儿；一句「操作失败」在这里等于没说）。
+ */
+const policyRow = (over: Partial<ToolPolicyRow> = {}): ToolPolicyRow => ({
+  tool: "read_file",
+  category: "local_read",
+  effective: "allow",
+  source: "contract_default",
+  contractDefault: "allow",
+  ...over,
+});
+
+void test("ProjectPanel/Context: 工具权限列出生效值与「谁说了算」，底线那条标出来", async () => {
+  const api = fakeApi({
+    toolPolicy: vi.fn().mockResolvedValue({
+      items: [
+        policyRow(),
+        policyRow({
+          tool: "send_email",
+          category: "external_send",
+          effective: "ask",
+          source: "hard_floor",
+          contractDefault: "allow",
+          floor: "ask",
+        }),
+        policyRow({ tool: "write_document", effective: "deny", source: "user_policy", userPolicy: "deny" }),
+      ],
+    }),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  const list = await screen.findByLabelText("工具权限");
+  const rows = within(list).getAllByRole("listitem");
+  expect(rows).toHaveLength(3);
+  expect(within(rows[1]!).getByText("底线")).toBeInTheDocument();
+  expect(within(rows[1]!).getByText("底线 每次问我")).toBeInTheDocument();
+  // 用户自己设过的那一行要说是「你设的」—— 否则他分不清自己有没有改成。
+  expect(within(rows[2]!).getByText("你设的")).toBeInTheDocument();
+  expect(within(rows[0]!).getByText("产品默认")).toBeInTheDocument();
+});
+
+void test("ProjectPanel/Context: 改一条会发 PUT，选空则清掉（回到产品默认）", async () => {
+  const setToolPolicy = vi.fn().mockResolvedValue({ items: [policyRow({ userPolicy: "deny", effective: "deny", source: "user_policy" })] });
+  const api = fakeApi({
+    toolPolicy: vi.fn().mockResolvedValue({ items: [policyRow()] }),
+    setToolPolicy,
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  const select = await screen.findByLabelText("read_file 的权限");
+  fireEvent.change(select, { target: { value: "deny" } });
+  await waitFor(() => expect(setToolPolicy).toHaveBeenCalledWith("prj_1", "read_file", "deny"));
+
+  fireEvent.change(await screen.findByLabelText("read_file 的权限"), { target: { value: "" } });
+  // 清掉发的是 null，**不是**默认此刻的那个值：契约会升级，钉死的记录不会跟着变。
+  await waitFor(() => expect(setToolPolicy).toHaveBeenCalledWith("prj_1", "read_file", null));
+});
+
+void test("ProjectPanel/Context: 底线之下的放宽被拒时，把守护进程的原话给用户", async () => {
+  const api = fakeApi({
+    toolPolicy: vi.fn().mockResolvedValue({
+      items: [policyRow({ tool: "send_email", category: "external_send", effective: "ask", source: "hard_floor", floor: "ask" })],
+    }),
+    setToolPolicy: vi.fn().mockRejectedValue({
+      body: { code: "POLICY_DENIED", message: '工具 "send_email" 属于 external_send，它的底线是「ask」，不能放宽' },
+    }),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  fireEvent.change(await screen.findByLabelText("send_email 的权限"), { target: { value: "allow" } });
+  expect(await screen.findByRole("alert")).toHaveTextContent("不能放宽");
+});
+
+void test("ProjectPanel/Context: 契约里没有工具时，这一段整段不出现 —— 不解释一件用户没有的东西", async () => {
+  const api = fakeApi({ toolPolicy: vi.fn().mockResolvedValue({ items: [] }) });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  await screen.findByText("类型绑定 · Bindings");
+  expect(screen.queryByLabelText("工具权限")).not.toBeInTheDocument();
+});
+
+void test("ProjectPanel/Context: 问不到工具权限时这一段不出现，其余的照常 —— 不把整页拖垮", async () => {
+  const api = fakeApi({ toolPolicy: vi.fn().mockRejectedValue(new Error("503")) });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  // 上下文页的其余部分要照常渲染：一个问不到的分段不该让用户连授权都改不了。
+  await screen.findByText("类型绑定 · Bindings");
+  expect(screen.queryByLabelText("工具权限")).not.toBeInTheDocument();
 });
 
 void test("ProjectPanel/Context: binding a type+root calls api.setBinding and clears only the root input", async () => {

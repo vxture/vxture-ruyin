@@ -253,6 +253,25 @@ export interface TaskInstance {
   updatedAt: string;
 }
 
+/**
+ * 一个工具此刻**实际生效**的权限，以及它是谁说了算（TD-050）。
+ *
+ * 三层合成的结果，不是「用户设过什么」的清单：用户真正的问题是「这个工具现在
+ * 到底能不能动我的文件」，而那个答案要把硬底线、他自己的设定、契约默认合起来
+ * 才有。`source` 说的就是这三者里哪一个说了算。
+ */
+export interface ToolPolicyRow {
+  tool: string;
+  category: string;
+  effective: "allow" | "ask" | "deny";
+  source: "hard_floor" | "user_policy" | "contract_default" | "ask_cache";
+  /** 用户自己设的那一条；没设过就没有 —— 与「设成了和默认一样的值」不同。 */
+  userPolicy?: "allow" | "ask" | "deny";
+  contractDefault: "allow" | "ask" | "deny";
+  /** 有底线的类别，用户只能收紧到这里为止，放不宽。 */
+  floor?: "allow" | "ask" | "deny";
+}
+
 export interface FolderGrant {
   id: string;
   path: string;
@@ -752,6 +771,15 @@ export class Api {
       "POST",
       via ? { type, root, connector: via.connector, source: via.source } : { type, root },
     );
+  /** 本项目每个工具此刻生效的权限（TD-050）。 */
+  toolPolicy = (id: string) =>
+    this.call<{ items: ToolPolicyRow[] }>(`/projects/${id}/tool-policy`);
+  /** 设一条；`null` = 清掉它，回到契约默认。 */
+  setToolPolicy = (id: string, tool: string, value: "allow" | "ask" | "deny" | null) =>
+    this.call<{ items: ToolPolicyRow[] }>(`/projects/${id}/tool-policy`, "PUT", {
+      tool,
+      value,
+    });
   registry = () => this.call<RegistryCatalog>("/registry");
   installFromRegistry = (id: string, version: string) =>
     this.call<InstalledPackage & { from: "registry" }>("/registry/install", "POST", { id, version });

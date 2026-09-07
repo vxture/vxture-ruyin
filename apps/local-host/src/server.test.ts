@@ -703,6 +703,88 @@ void test("HTTP GET/POST /projects/:id/grants", async () => {
   }
 });
 
+/**
+ * 工具权限（TD-050）走 HTTP 这一遍。
+ *
+ * 这里用**真的契约**（bidproposal），不是编一个 —— 「底线之下不能放宽」这条要
+ * 对着真正会装进机器的那份契约成立才算数。
+ */
+void test("HTTP GET/PUT /projects/:id/tool-policy：改得了、留得下，且底线之下的放宽被 POLICY_DENIED 拒", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const pid = await projectIn(rig, "wsp_x");
+    type Row = {
+      tool: string;
+      effective: string;
+      source: string;
+      userPolicy?: string;
+      contractDefault: string;
+      floor?: string;
+    };
+    const read = async (): Promise<Row[]> =>
+      (
+        (await (
+          await fetch(`${rig.base}/projects/${pid}/tool-policy`, { headers: rig.headers })
+        ).json()) as { items: Row[] }
+      ).items;
+
+    const before = await read();
+    assert.ok(before.length > 0, "这份契约声明了工具");
+    // 一开始一条用户设定都没有 —— 这正是 TD-050 之前的**全部**状态。
+    assert.ok(before.every((r) => r.userPolicy === undefined));
+    assert.ok(before.every((r) => r.source !== "user_policy"));
+
+    const target = before.find((r) => !r.floor)!;
+    const put = await fetch(`${rig.base}/projects/${pid}/tool-policy`, {
+      method: "PUT",
+      headers: rig.json,
+      body: JSON.stringify({ tool: target.tool, value: "deny" }),
+    });
+    assert.equal(put.status, 200);
+    const after = ((await put.json()) as { items: Row[] }).items.find((r) => r.tool === target.tool)!;
+    assert.equal(after.effective, "deny");
+    assert.equal(after.source, "user_policy");
+    // 留得下：重新 GET 一次还在（这一整条债就是「改了也不留」）。
+    assert.equal((await read()).find((r) => r.tool === target.tool)!.userPolicy, "deny");
+
+    // 清掉：回到契约默认，且 userPolicy 这一条真的没了。
+    await fetch(`${rig.base}/projects/${pid}/tool-policy`, {
+      method: "PUT",
+      headers: rig.json,
+      body: JSON.stringify({ tool: target.tool, value: null }),
+    });
+    const cleared = (await read()).find((r) => r.tool === target.tool)!;
+    assert.equal(cleared.userPolicy, undefined);
+    assert.equal(cleared.source, "contract_default");
+
+    // 底线之下的放宽走 HTTP 是什么样：**这份契约里没有 external_send 工具**，
+    // 所以这条在这里跑不起来 —— 内核那一侧用一个自造契约把它测了
+    // （core.test.ts「底线之下的放宽被拒」）。这里如实写下为什么不在这测，
+    // 而不是留一个 `if (有底线的)` 的空壳：那种写法**没跑和跑过了长得一样**。
+    assert.ok(
+      before.every((r) => !r.floor),
+      "bidproposal 没有带底线的工具；哪天有了，这里要补上 403 那一段",
+    );
+    // 请求写错的两种，**不能报成 POLICY_DENIED**：一个拼错工具名的人会去找
+    // 一个并不存在的策略。
+    for (const bad of [
+      { tool: "no_such_tool", value: "deny" },
+      { tool: target.tool, value: "maybe" },
+    ]) {
+      const res = await fetch(`${rig.base}/projects/${pid}/tool-policy`, {
+        method: "PUT",
+        headers: rig.json,
+        body: JSON.stringify(bad),
+      });
+      assert.equal(res.status, 400, `${bad.tool}=${bad.value} 该是 400`);
+      assert.equal(((await res.json()) as { code: string }).code, "POLICY_INVALID");
+    }
+
+  } finally {
+    closeRig(rig);
+  }
+});
+
 void test("HTTP POST /projects/:id/bindings: an ungranted root is BINDING_INVALID, a granted one succeeds and indexes", async () => {
   const rig = await startServer({ platform: signedInTo("wsp_x") });
   const dir = mkdtempSync(join(tmpdir(), "ruyin-bind-"));

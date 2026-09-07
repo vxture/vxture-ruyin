@@ -618,6 +618,12 @@ export interface ProjectStore {
 
   putGrants(grantsJson: string): Promise<void>;
   getGrants(): Promise<string | undefined>;
+  /**
+   * 用户对工具的策略（TD-050）。**与授权同层、跟着项目走** —— 一个项目里的放宽
+   * 不该跟到下一个碰真实客户资料的项目里去。
+   */
+  putToolPolicy(policyJson: string): Promise<void>;
+  getToolPolicy(): Promise<string | undefined>;
   putBindings(bindingsJson: string): Promise<void>;
   getBindings(): Promise<string | undefined>;
   /** 本项目已产出的成果登记（`sources: [project]` 的上下文由它兑现）。 */

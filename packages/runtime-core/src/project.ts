@@ -10,6 +10,7 @@
 
 import {
   validateContract,
+  type PermissionValue,
   type RuyinContract,
   type ValidationError,
 } from "@vxture/ruyin-contract-schema";
@@ -19,6 +20,14 @@ import {
   RUNTIME_ACTOR,
 } from "./audit.js";
 import { buildProjectExport, type ProjectExport } from "./export.js";
+import { decideTool, HARD_FLOOR, type GateSource } from "./tool-gate.js";
+import {
+  ToolPolicyError,
+  parseToolPolicy,
+  policyRefusal,
+  withPolicy,
+  type ToolPolicy,
+} from "./tool-policy.js";
 import {
   Harness,
   interruptedResumePoint,
@@ -252,6 +261,84 @@ export class ProjectRuntime {
   async listGrants(id: string): Promise<Grant[]> {
     const { store } = await this.load(id);
     return parseJsonArray<Grant>(await store.getGrants());
+  }
+
+  // -- 用户对工具的策略（TD-050，与授权同层） -------------------------------
+
+  /**
+   * 本项目每个工具**此刻实际生效的**权限，以及它是谁说了算。
+   *
+   * 返回的是 `decideTool()` 的答案，不是策略表本身：一个只列「用户设过什么」的
+   * 界面回答不了用户真正的问题 —— 「这个工具现在到底能不能动我的文件」。三层
+   * 合成的结果，连同 `source`（hard_floor / user_policy / contract_default），
+   * 一起给出去。
+   */
+  async listToolPolicy(id: string): Promise<
+    Array<{
+      tool: string;
+      category: string;
+      effective: PermissionValue;
+      source: GateSource;
+      /** 用户自己设的那一条；没设过就没有 —— 与「设成了和默认一样的值」不同。 */
+      userPolicy?: PermissionValue;
+      contractDefault: PermissionValue;
+      /** 有底线的类别，用户策略只能收紧到这里为止。 */
+      floor?: PermissionValue;
+    }>
+  > {
+    const { store, contract } = await this.load(id);
+    const policy = parseToolPolicy(await store.getToolPolicy());
+    return contract.tools.map((tool) => {
+      const userPolicy = policy[tool.id];
+      const decision = decideTool({
+        tool,
+        permissions: contract.permissions,
+        userPolicy,
+      });
+      const bare = decideTool({ tool, permissions: contract.permissions });
+      const floor = HARD_FLOOR[tool.category];
+      return {
+        tool: tool.id,
+        category: tool.category,
+        effective: decision.value,
+        source: decision.source,
+        ...(userPolicy !== undefined ? { userPolicy } : {}),
+        contractDefault: bare.value,
+        ...(floor ? { floor } : {}),
+      };
+    });
+  }
+
+  /**
+   * 设一条策略，或传 `undefined` 清掉它（回到契约默认）。
+   *
+   * **底线之下的放宽当场拒绝**，不是存下来再在读的时候忽略：一条永远不会生效
+   * 的记录会让用户以为他关掉了那道确认，而每次仍然被问 —— 那比拒绝他更糟，
+   * 因为他不知道自己没改成。
+   */
+  async setToolPolicy(
+    id: string,
+    toolId: string,
+    value: PermissionValue | undefined,
+  ): Promise<ToolPolicy> {
+    const { store, contract } = await this.load(id);
+    const tool = contract.tools.find((t) => t.id === toolId);
+    if (!tool) {
+      throw new ToolPolicyError(`工具 "${toolId}" 不在这个产品的契约里`, "unknown_tool");
+    }
+    if (value !== undefined) {
+      const refusal = policyRefusal(tool, value);
+      if (refusal) throw new ToolPolicyError(refusal.message, refusal.kind);
+    }
+    const next = withPolicy(parseToolPolicy(await store.getToolPolicy()), toolId, value);
+    await store.putToolPolicy(JSON.stringify(next));
+    // 权限的每一次改动都要留痕：审计要答的问题里有「当时它为什么被允许」。
+    await this.audit(store, id, "policy.changed", "user", {
+      tool: toolId,
+      value: value ?? null,
+      action: value === undefined ? "cleared" : "set",
+    });
+    return next;
   }
 
   async addGrant(

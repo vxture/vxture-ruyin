@@ -45,6 +45,7 @@ import { TransientError } from "./ports.js";
 import { selectWithinBudget, type RankedType } from "./context-budget.js";
 import { LOCAL_FS, bindingRevoked, folderGrants, isFolderGrant, isPathGranted } from "./project.js";
 import { decideTool, validateToolCall } from "./tool-gate.js";
+import { parseToolPolicy } from "./tool-policy.js";
 import {
   SKILL_TOOLS,
   USE_SKILL,
@@ -1311,6 +1312,9 @@ export class Harness {
     const refusalMessages: TurnMessage[] = [];
     // 工具校验的是路径参数，看的是目录授权；连接器授权与它无关。
     const grants = folderGrants(jsonArray<Grant>(await this.deps.store.getGrants()));
+    // 每一轮重读：用户可能在任务等人那一刻去把某个工具的策略改了 —— 而他改了
+    // 之后接着点「批准」，期待的正是新策略生效。
+    const userPolicy = parseToolPolicy(await this.deps.store.getToolPolicy());
     const askCache = new Set(instance.askCache ?? []);
 
     for (const call of calls) {
@@ -1356,9 +1360,9 @@ export class Harness {
       const decision = decideTool({
         tool,
         permissions: this.deps.contract.permissions,
-        // Workspace-level user policy has no store yet; the layer exists in
-        // decideTool and is exercised by its unit tests.
-        userPolicy: undefined,
+        // 用户策略（TD-050）。**跟着项目走**，与授权同层 —— 一个项目里的放宽不该
+        // 跟到下一个项目里去。此前这里恒为 undefined，三层合成中间那层永远是空的。
+        userPolicy: userPolicy[tool.id],
         askCache,
       });
       if (decision.value === "deny") {

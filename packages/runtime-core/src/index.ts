@@ -59,6 +59,14 @@ export type {
 } from "./context-budget.js";
 export { decideTool, validateToolCall } from "./tool-gate.js";
 export {
+  HARD_FLOOR,
+  ToolPolicyError,
+  parseToolPolicy,
+  policyRefusal,
+  withPolicy,
+} from "./tool-policy.js";
+export type { ToolPolicy } from "./tool-policy.js";
+export {
   READ_SKILL_RESOURCE,
   SKILL_TOOLS,
   USE_SKILL,

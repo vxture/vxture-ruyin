@@ -35,6 +35,7 @@ class MemoryProjectStore implements ProjectStore {
   }
 
   private grants: string | undefined;
+  private toolPolicy: string | undefined;
   private bindings: string | undefined;
   private artifacts: string | undefined;
   async putGrants(grantsJson: string): Promise<void> {
@@ -42,6 +43,12 @@ class MemoryProjectStore implements ProjectStore {
   }
   async getGrants(): Promise<string | undefined> {
     return this.grants;
+  }
+  async putToolPolicy(policyJson: string): Promise<void> {
+    this.toolPolicy = policyJson;
+  }
+  async getToolPolicy(): Promise<string | undefined> {
+    return this.toolPolicy;
   }
   async putBindings(bindingsJson: string): Promise<void> {
     this.bindings = bindingsJson;
