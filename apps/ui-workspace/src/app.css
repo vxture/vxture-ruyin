@@ -578,6 +578,28 @@ body {
 .sel-audit { max-width: 260px; width: 100%; }
 .sel-lang { max-width: 200px; width: 100%; }
 
+/* ---------- 原生 select 的下拉列表：必须自带底色 ----------
+   `<option>` 的背景默认是**透明**的，而展开的那张列表由**系统**绘制，不是页面。
+   于是在暗色模式下会出现这一幕：文字从 select 那里继承到近白色
+   （`text-foreground`），而列表的底色跟的是 Windows 的应用主题 —— 系统是浅色时
+   就是白底白字，一个字都看不见（owner 2026-09-07 在「能力平台 → 技能 → 全部来源」
+   上报的）。
+
+   为什么 select 自己的背景救不了它：那是一个**带透明度**的颜色
+   （`dark:bg-input/30`），透明背景给不了列表一个实底，系统照样用自己的。
+
+   为什么 `color-scheme: dark` 也救不了：根上确实是 dark，但 Windows 上这张列表
+   是 OS 级菜单，跟的是系统主题而不是页面的 color-scheme。
+
+   所以只有一条路：给 option 一个**实色**底与前景。写在这里而不是某一个页面上 ——
+   全应用的每一个 `<select>` 都是同一个 NativeSelect，同一个毛病；只修用户报的
+   那一个，剩下的仍然看不见。 */
+select option,
+select optgroup {
+  background-color: var(--color-card);
+  color: var(--color-foreground);
+}
+
 /* ---------- settings ---------- */
 /* （.settings / .settings-nav / .settings-content 已随页内那根竖直导航一并
    删除：设置有了自己的框架，分区在侧栏里。留着这些规则，下一个人会以为页面
