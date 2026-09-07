@@ -272,6 +272,24 @@ export interface ToolPolicyRow {
   floor?: "allow" | "ask" | "deny";
 }
 
+/**
+ * 收进项目的一份原件（TD-041）。
+ *
+ * 与「绑定目录」不是一回事：绑定是**指着用户自己的位置去读**，他把文件挪走
+ * 那条路就断了；收进来是复制一份进加密的数据目录，从此与他自己那份无关。
+ */
+export interface ProjectFile {
+  id: string;
+  /** 明文的 sha256。同样的字节收两次只占一份磁盘。 */
+  hash: string;
+  name: string;
+  bytes: number;
+  mediaType: string;
+  addedAt: string;
+  /** 当初从哪儿收的。**只是记录** —— 那个路径现在可能已经不存在了。 */
+  sourceRef?: string;
+}
+
 export interface FolderGrant {
   id: string;
   path: string;
@@ -780,6 +798,24 @@ export class Api {
       tool,
       value,
     });
+  /** 项目收进来的原件（TD-041）。 */
+  files = (id: string) => this.call<{ items: ProjectFile[] }>(`/projects/${id}/files`);
+  /** 从**已授权目录**里收一份进来；未授权的路径由守护进程拒绝。 */
+  addFile = (id: string, path: string) =>
+    this.call<ProjectFile>(`/projects/${id}/files`, "POST", { path });
+  removeFile = (id: string, fileId: string) =>
+    this.call<{ removed: string }>(`/projects/${id}/files/${fileId}`, "DELETE");
+  /**
+   * 取回原件的字节。**不走 call()**：那一条把响应当 JSON 解析，而这里是文件。
+   * 也不能用裸的 <a href>：本机 API 每个请求都要带会话令牌。
+   */
+  fileBytes = async (id: string, fileId: string): Promise<Blob> => {
+    const res = await fetch(`/projects/${id}/files/${fileId}`, {
+      headers: { authorization: `Bearer ${this.token}` },
+    });
+    if (!res.ok) throw new ApiError(res.status, (await res.json()) as ApiError["body"]);
+    return res.blob();
+  };
   registry = () => this.call<RegistryCatalog>("/registry");
   installFromRegistry = (id: string, version: string) =>
     this.call<InstalledPackage & { from: "registry" }>("/registry/install", "POST", { id, version });

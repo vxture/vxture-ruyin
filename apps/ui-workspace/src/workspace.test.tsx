@@ -24,6 +24,7 @@ import {
   type TaskDef,
   type TaskInstance,
   type ToolPolicyRow,
+  type ProjectFile,
 } from "./api";
 
 vi.mock("./chain", () => ({
@@ -134,6 +135,11 @@ function fakeApi(over: Partial<Api> = {}): Api {
     addConnectorGrant: vi.fn().mockResolvedValue({}),
     // 缺省空表：工具权限那一段在没有条目时整段不渲染，于是既有的上下文页用例
     // 一个都不用改（TD-050）。要测它的用例自己覆盖这一条。
+    // 文件区（TD-041）：缺省空表，这一段在没有条目时只画一个空状态，既有用例不受影响。
+    files: vi.fn().mockResolvedValue({ items: [] }),
+    addFile: vi.fn().mockResolvedValue({}),
+    removeFile: vi.fn().mockResolvedValue({}),
+    fileBytes: vi.fn().mockResolvedValue(new Blob(["x"])),
     toolPolicy: vi.fn().mockResolvedValue({ items: [] }),
     setToolPolicy: vi.fn().mockResolvedValue({ items: [] }),
     ...over,
@@ -491,6 +497,140 @@ void test("ProjectPanel/Context: no grants shows the empty state", async () => {
   const api = fakeApi();
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);
   expect(await screen.findByText("尚未授权任何文件夹")).toBeInTheDocument();
+});
+
+/**
+ * 项目文件区（TD-041）。
+ *
+ * 界面这一侧要守的两条：**没授权文件夹时收不进来**（而且要说得出下一步），以及
+ * **未授权路径被守护进程拒时把原话给用户** —— 一句「收不进来」会让他反复试同一
+ * 个路径。
+ */
+const projectFile = (over: Partial<ProjectFile> = {}): ProjectFile => ({
+  id: "file_1",
+  hash: "a".repeat(64),
+  name: "招标文件.pdf",
+  bytes: 2_400_000,
+  mediaType: "application/pdf",
+  addedAt: "2026-09-07T00:00:00.000Z",
+  sourceRef: "C:/work/招标文件.pdf",
+  ...over,
+});
+
+void test("ProjectPanel/Context: 文件区列出收进来的原件，字节数说人话", async () => {
+  const api = fakeApi({
+    files: vi.fn().mockResolvedValue({
+      items: [projectFile(), projectFile({ id: "file_2", name: "小备忘.md", bytes: 800 })],
+    }),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  const list = await screen.findByLabelText("项目文件");
+  const rows = within(list).getAllByRole("listitem");
+  expect(rows).toHaveLength(2);
+  expect(within(rows[0]!).getByText("2.3 MB")).toBeInTheDocument();
+  expect(within(rows[1]!).getByText("800 B")).toBeInTheDocument();
+});
+
+void test("ProjectPanel/Context: GB 级的文件用 GB 说 —— 全用 KB 说没人读得下去", async () => {
+  const api = fakeApi({
+    files: vi.fn().mockResolvedValue({
+      items: [projectFile({ name: "全套图纸.zip", bytes: 3_221_225_472 })],
+    }),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  const list = await screen.findByLabelText("项目文件");
+  expect(within(list).getByText("3.00 GB")).toBeInTheDocument();
+});
+
+void test("ProjectPanel/Context: 一个文件夹都没授权时收不进来 —— 输入框直说下一步", async () => {
+  const api = fakeApi({ grants: vi.fn().mockResolvedValue([]) });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  const input = await screen.findByPlaceholderText(/先在上面授权一个文件夹/);
+  fireEvent.change(input, { target: { value: "C:/whatever.pdf" } });
+  // 按钮仍然是禁用的：没有授权目录，收进来这件事根本不成立。
+  expect(screen.getByRole("button", { name: "收进项目" })).toBeDisabled();
+});
+
+void test("ProjectPanel/Context: 收一份进来会调 addFile，成功后清空输入并重新拉列表", async () => {
+  const addFile = vi.fn().mockResolvedValue(projectFile());
+  const files = vi.fn().mockResolvedValue({ items: [] });
+  const api = fakeApi({
+    grants: vi.fn().mockResolvedValue([
+      { id: "g1", path: "C:/work", mode: "read", createdAt: "2026-09-07T00:00:00.000Z" },
+    ]),
+    files,
+    addFile,
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  const input = await screen.findByPlaceholderText(/已授权文件夹里的文件/);
+  fireEvent.change(input, { target: { value: "C:/work/招标文件.pdf" } });
+  fireEvent.click(screen.getByRole("button", { name: "收进项目" }));
+  await waitFor(() => expect(addFile).toHaveBeenCalledWith("prj_1", "C:/work/招标文件.pdf"));
+  await waitFor(() => expect((input as HTMLInputElement).value).toBe(""));
+  // 收完要重新拉一次 —— 否则用户点完什么都没发生，只能自己刷新。
+  await waitFor(() => expect(files.mock.calls.length).toBeGreaterThan(1));
+});
+
+void test("ProjectPanel/Context: 未授权路径被拒时，把守护进程的原话给用户", async () => {
+  const api = fakeApi({
+    grants: vi.fn().mockResolvedValue([
+      { id: "g1", path: "C:/work", mode: "read", createdAt: "2026-09-07T00:00:00.000Z" },
+    ]),
+    addFile: vi.fn().mockRejectedValue({
+      body: { code: "FILE_NOT_GRANTED", message: '"D:/别处.pdf" 不在这个项目已授权的目录里 —— 先授权它所在的文件夹，再收进来' },
+    }),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  const input = await screen.findByPlaceholderText(/已授权文件夹里的文件/);
+  fireEvent.change(input, { target: { value: "D:/别处.pdf" } });
+  fireEvent.click(screen.getByRole("button", { name: "收进项目" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("先授权它所在的文件夹");
+});
+
+void test("ProjectPanel/Context: 移出会调 removeFile 并重新拉列表", async () => {
+  const removeFile = vi.fn().mockResolvedValue({ removed: "file_1" });
+  const files = vi.fn().mockResolvedValue({ items: [projectFile()] });
+  const api = fakeApi({ files, removeFile });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  await screen.findByLabelText("项目文件");
+  fireEvent.click(screen.getByRole("button", { name: "移出" }));
+  await waitFor(() => expect(removeFile).toHaveBeenCalledWith("prj_1", "file_1"));
+  await waitFor(() => expect(files.mock.calls.length).toBeGreaterThan(1));
+});
+
+void test("ProjectPanel/Context: 取回会拿字节而不是拼一个裸链接 —— 本机 API 每个请求都要带令牌", async () => {
+  const fileBytes = vi.fn().mockResolvedValue(new Blob(["原件字节"]));
+  const api = fakeApi({ files: vi.fn().mockResolvedValue({ items: [projectFile()] }), fileBytes });
+  const createUrl = vi.fn().mockReturnValue("blob:x");
+  const revokeUrl = vi.fn();
+  vi.stubGlobal("URL", { ...URL, createObjectURL: createUrl, revokeObjectURL: revokeUrl });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  await screen.findByLabelText("项目文件");
+  fireEvent.click(screen.getByRole("button", { name: "取回" }));
+  await waitFor(() => expect(fileBytes).toHaveBeenCalledWith("prj_1", "file_1"));
+  await waitFor(() => expect(createUrl).toHaveBeenCalled());
+  // 用完要放掉，否则每点一次就漏一个对象 URL。
+  await waitFor(() => expect(revokeUrl).toHaveBeenCalledWith("blob:x"));
+  vi.unstubAllGlobals();
+});
+
+void test("ProjectPanel/Context: 取不回来时说出来，不装作点了没反应", async () => {
+  const api = fakeApi({
+    files: vi.fn().mockResolvedValue({ items: [projectFile()] }),
+    fileBytes: vi.fn().mockRejectedValue(new Error("500")),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  await screen.findByLabelText("项目文件");
+  fireEvent.click(screen.getByRole("button", { name: "取回" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("取不回");
+});
+
+void test("ProjectPanel/Context: 问不到文件区时整段不出现，其余照常", async () => {
+  const api = fakeApi({ files: vi.fn().mockRejectedValue(new Error("503")) });
+  render(<ProjectPanel api={api} id="prj_1" tab="context" />);
+  await screen.findByText("类型绑定 · Bindings");
+  expect(screen.queryByLabelText("项目文件")).not.toBeInTheDocument();
+  expect(screen.queryByText("还没有收进任何原件")).not.toBeInTheDocument();
 });
 
 /**

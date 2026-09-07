@@ -14,6 +14,7 @@ import { mkdirSync, existsSync, readdirSync, renameSync, rmSync } from "node:fs"
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { KeyManager } from "./keys.js";
+import { ProjectFileStore, type StoredFile } from "./file-store.js";
 import type {
   AuditEvent,
   JournalEntry,
@@ -86,6 +87,18 @@ CREATE TABLE IF NOT EXISTS journal (
   data          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_journal_task ON journal (task_instance);
+CREATE TABLE IF NOT EXISTS files (
+  id         TEXT PRIMARY KEY,
+  hash       TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  bytes      INTEGER NOT NULL,
+  media_type TEXT NOT NULL,
+  added_at   TEXT NOT NULL,
+  source_ref TEXT
+);
+-- 引用计数靠这个索引数出来：同一份内容可以有两条登记（招标文件.pdf 与
+-- 甲方发来的最终版.pdf 字节一样），删掉最后一条时那份密文才真的删。
+CREATE INDEX IF NOT EXISTS idx_files_hash ON files (hash);
 CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5(
   item_id UNINDEXED,
   type UNINDEXED,
@@ -199,6 +212,64 @@ export class SqliteProjectStore implements ProjectStore {
   }
   async getArtifacts(): Promise<string | undefined> {
     return this.kvGet("artifacts");
+  }
+
+// --- 文件区的登记（TD-041）。密文在磁盘上，这里只存「有哪些、叫什么」------
+
+  listFiles(): StoredFile[] {
+    const rows = this.db
+      .prepare(
+        "SELECT id, hash, name, bytes, media_type, added_at, source_ref FROM files ORDER BY added_at DESC, id",
+      )
+      .all() as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      id: String(r["id"]),
+      hash: String(r["hash"]),
+      name: String(r["name"]),
+      bytes: Number(r["bytes"]),
+      mediaType: String(r["media_type"]),
+      addedAt: String(r["added_at"]),
+      ...(r["source_ref"] ? { sourceRef: String(r["source_ref"]) } : {}),
+    }));
+  }
+
+  getFile(id: string): StoredFile | undefined {
+    return this.listFiles().find((f) => f.id === id);
+  }
+
+  addFile(file: StoredFile): void {
+    this.db
+      .prepare(
+        "INSERT INTO files (id, hash, name, bytes, media_type, added_at, source_ref) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        file.id,
+        file.hash,
+        file.name,
+        file.bytes,
+        file.mediaType,
+        file.addedAt,
+        file.sourceRef ?? null,
+      );
+  }
+
+  /**
+   * 删掉一条登记，并回答**这份内容还有没有别的登记指着它**。
+   *
+   * 这个返回值不是可有可无的：调用方据它决定要不要删磁盘上的密文。少了它，
+   * 删掉一个名字会让指向同一份内容的另一个名字变成一条断掉的记录 —— 而那要到
+   * 用户去取原件时才发现。
+   */
+  removeFile(id: string): { removed: boolean; hash?: string; stillReferenced: boolean } {
+    const row = this.db.prepare("SELECT hash FROM files WHERE id = ?").get(id) as
+      | { hash: string }
+      | undefined;
+    if (!row) return { removed: false, stillReferenced: false };
+    this.db.prepare("DELETE FROM files WHERE id = ?").run(id);
+    const rest = this.db
+      .prepare("SELECT COUNT(*) AS n FROM files WHERE hash = ?")
+      .get(row.hash) as { n: number };
+    return { removed: true, hash: row.hash, stillReferenced: rest.n > 0 };
   }
 
   // -- FTS index (host-specific surface, 04 section 5.1) --------------------
@@ -428,6 +499,20 @@ export class SqliteStoragePort implements StoragePort {
       return undefined;
     }
     return this.openDb(projectId);
+  }
+
+  /**
+   * 这个项目的文件区（TD-041）。**用的是和 `project.db` 同一把项目密钥**
+   * （§7.3「同密钥体系加密」）—— 另起一把钥匙就等于多一处要备份、要搬家、要
+   * 在换机器时对上的东西，而它保护的是同一批数据。
+   *
+   * 项目不存在时返回 undefined：文件区不能先于项目库存在，否则会出现一个装着
+   * 密文、却没有任何登记指着它们的目录。
+   */
+  openFileStore(projectId: string): ProjectFileStore | undefined {
+    const dir = this.projectDir(projectId);
+    if (!existsSync(join(dir, PROJECT_DB))) return undefined;
+    return new ProjectFileStore(dir, this.keys.workspaceKeyHex(dir));
   }
 
   /** Host-side access to the concrete store (FTS index surface). */

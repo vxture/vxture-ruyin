@@ -24,7 +24,7 @@
 import { existsSync, mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const ROOT = pathToFileURL(repoRoot).toString().replace(/\/$/, "");
@@ -42,6 +42,7 @@ const { checkTarget, readLocation, writeLocation } = await import(
   `${ROOT}/apps/local-host/dist/data-location.js`
 );
 const { TaskRunner } = await import(`${ROOT}/apps/local-host/dist/task-runner.js`);
+const { mediaTypeOf } = await import(`${ROOT}/apps/local-host/dist/file-store.js`);
 const { contextBudgetFromEnv } = await import(
   `${ROOT}/apps/local-host/dist/context-budget-config.js`
 );
@@ -193,6 +194,39 @@ const server = createLocalApi({
   supportsTool: (t) => executor.supports(t),
   uiDir: `${repo}/apps/ui-workspace/dist`,
   platform,
+  // 项目文件区（TD-041）。观察台接的是**真的**存储与加密 —— 这一段的价值全在
+  // 「磁盘上到底存了什么」，接个桩就只能看见界面画得对不对。
+  files: {
+    list: (pid) => storage.openHostStore(pid)?.listFiles() ?? [],
+    get: (pid, fileId) => storage.openHostStore(pid)?.getFile(fileId),
+    add: async (pid, path) => {
+      const store = storage.openHostStore(pid);
+      const area = storage.openFileStore(pid);
+      const { hash, bytes } = await area.put(path);
+      const record = {
+        id: nodeId.newId("file"),
+        hash,
+        name: basename(path),
+        bytes,
+        mediaType: mediaTypeOf(path),
+        addedAt: nodeClock.now(),
+        sourceRef: path,
+      };
+      store.addFile(record);
+      return record;
+    },
+    read: async (pid, fileId) => {
+      const record = storage.openHostStore(pid).getFile(fileId);
+      return storage.openFileStore(pid).read(record.hash);
+    },
+    remove: (pid, fileId) => {
+      const store = storage.openHostStore(pid);
+      const area = storage.openFileStore(pid);
+      const gone = store.removeFile(fileId);
+      if (gone.removed && gone.hash && !gone.stillReferenced) area.remove(gone.hash);
+      return gone.removed;
+    },
+  },
   reindex: (pid, b) =>
     reindexBinding(storage, pid, b, connectorLookup.get(b.connector), resourceLimits.limits),
   connectors: connectorRegistry,
