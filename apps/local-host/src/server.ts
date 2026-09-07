@@ -6,11 +6,13 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import type { PermissionValue } from "@vxture/ruyin-contract-schema";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import {
   ContractInvalidError,
   HarnessError,
+  ToolPolicyError,
   unrunnableTools,
   NeedsHumanConfirmationError,
   ProjectNotFoundError,
@@ -359,6 +361,15 @@ function errorStatus(cause: unknown): { status: number; body: unknown } {
   if (cause instanceof NeedsHumanConfirmationError) {
     // X-1 词表：这是一条出路，不是一个错误 —— 引导去确认，别当失败展示。
     return { status: 409, body: apiError(REJECTION.APPROVAL_REQUIRED, cause.message) };
+  }
+  // 底线之下的放宽是一次**策略拒绝**：请求本身没毛病，是规则不让 —— X-1 词表
+  // 里的 POLICY_DENIED 就是为这种情况准备的，message 写清了能改到哪儿为止。
+  // 另外两种（工具名不在契约里、值不是权限值）是**请求写错了**，报成
+  // POLICY_DENIED 会让一个拼错工具名的人去找一个并不存在的策略。
+  if (cause instanceof ToolPolicyError) {
+    return cause.kind === "floor"
+      ? { status: 403, body: apiError(REJECTION.POLICY_DENIED, cause.message) }
+      : { status: 400, body: apiError("POLICY_INVALID", cause.message) };
   }
   if (cause instanceof HarnessError) {
     return { status: 400, body: apiError("TASK_REJECTED", cause.message) };
@@ -1433,6 +1444,36 @@ async function handle(
           body["mode"] === "readwrite" ? "readwrite" : "read",
         );
         send(res, 201, grant);
+        return;
+      }
+    }
+
+    /**
+     * GET/PUT /projects/:id/tool-policy  { tool, value }
+     *
+     * 用户对工具的策略（TD-050），**跟着项目走**。GET 回的是每个工具此刻实际
+     * 生效的权限与它是谁说了算 —— 一个只列「用户设过什么」的界面回答不了用户
+     * 真正的问题：这个工具现在到底能不能动我的文件。
+     *
+     * `value: null` = 清掉这一条，回到契约默认（与「设成默认当前的那个值」不是
+     * 一回事：契约会升级，而一条钉死的记录不会跟着变）。
+     */
+    if (segments.length === 3 && segments[2] === "tool-policy") {
+      if (method === "GET") {
+        send(res, 200, { items: await deps.runtime.listToolPolicy(projectId) });
+        return;
+      }
+      if (method === "PUT") {
+        const body = await readJson(req);
+        const raw = body["value"];
+        await deps.runtime.setToolPolicy(
+          projectId,
+          String(body["tool"] ?? ""),
+          raw === null || raw === undefined ? undefined : (raw as PermissionValue),
+        );
+        // 回整张表而不是那一条：改一条会让别的行的「谁说了算」跟着变，界面拿
+        // 一条回去会把其余的画错。
+        send(res, 200, { items: await deps.runtime.listToolPolicy(projectId) });
         return;
       }
     }

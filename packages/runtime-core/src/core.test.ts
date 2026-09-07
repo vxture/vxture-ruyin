@@ -30,6 +30,7 @@ import {
   pendingCheckpoint,
   decideTool,
   validateToolCall,
+  ToolPolicyError,
   TransientError,
   NoWorkspaceError,
   AlreadyAttributedError,
@@ -960,6 +961,159 @@ test("harness: an ask-class tool suspends on tool_ask, then runs on approval", a
   assert.deepEqual(executed, ["write_document"]);
   assert.equal(done.state, "waiting_human"); // now the verification review
   assert.equal(pendingCheckpoint(done)?.kind, "verification_review");
+});
+
+/**
+ * 用户策略真的走到了闸门（TD-050）。
+ *
+ * `tool-policy.test.ts` 只证明那几段纯逻辑对。这三条证明**存下来的那张表确实到
+ * 得了 decideTool** —— 端口加了字段、界面能点，而闸门那一行仍然传 `undefined`
+ * 的话，纯逻辑再对也不生效，且那种坏法和好的长得一模一样（每次照常问，看起来
+ * 就像用户没设过）。
+ */
+test("用户策略：设成 allow，那个原本要问的工具直接跑了", async () => {
+  const ports = makePorts();
+  const executed: string[] = [];
+  ports.tools = {
+    supports: () => true,
+    execute: async (req) => {
+      executed.push(req.tool);
+      return { content: "written" };
+    },
+  };
+  let asked = false;
+  ports.gateway = {
+    turn: async () => {
+      if (!asked) {
+        asked = true;
+        return {
+          kind: "tool_calls" as const,
+          calls: [
+            { id: "c1", tool: "write_document", arguments: { path: "C:/work/out.md", content: "hi" } },
+          ],
+        };
+      }
+      return { kind: "content" as const, content: "done" };
+    },
+  };
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  await runtime.addGrant(meta.id, "C:/work", "readwrite");
+  await runtime.setToolPolicy(meta.id, "write_document", "allow");
+
+  const done = await runTask(await runtime.createHarness(meta.id), "analyze_tender", {
+    tender_document: {},
+  });
+  // 上一条用例里同一个工具会停在 tool_ask；这里没停，直接执行了。
+  assert.deepEqual(executed, ["write_document"]);
+  assert.equal(pendingCheckpoint(done)?.kind, "verification_review", "不该停在 tool_ask");
+});
+
+test("用户策略：设成 deny，工具被拒且一次都没执行 —— 拒绝理由说得出是谁定的", async () => {
+  const ports = makePorts();
+  const executed: string[] = [];
+  ports.tools = {
+    supports: () => true,
+    execute: async (req) => {
+      executed.push(req.tool);
+      return { content: "written" };
+    },
+  };
+  let asked = false;
+  ports.gateway = {
+    turn: async (req) => {
+      if (!asked) {
+        asked = true;
+        return {
+          kind: "tool_calls" as const,
+          calls: [
+            { id: "c1", tool: "write_document", arguments: { path: "C:/work/out.md", content: "hi" } },
+          ],
+        };
+      }
+      const refusal = req.messages.find((m) => m.role === "tool" && m.isError === true);
+      return {
+        kind: "content" as const,
+        content: refusal && "content" in refusal ? refusal.content : "no refusal seen",
+      };
+    },
+  };
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  await runtime.addGrant(meta.id, "C:/work", "readwrite");
+  await runtime.setToolPolicy(meta.id, "write_document", "deny");
+
+  const done = await runTask(await runtime.createHarness(meta.id), "analyze_tender", {
+    tender_document: {},
+  });
+  assert.deepEqual(executed, [], "禁了就是一次都不跑");
+  // 提供方要看得见这是**用户策略**拒的（而不是契约或底线），才好改计划。
+  const seen = Object.values(done.capabilityOutputs).join(" | ");
+  assert.match(seen, /user policy/);
+});
+
+test("用户策略：**每个项目各自的** —— 一个项目里的放宽不跟到另一个项目去", async () => {
+  const ports = makePorts();
+  const runtime = new ProjectRuntime(ports);
+  const loose = await runtime.createProject(bidContract, "宽松的那个", "wsp_test");
+  const strict = await runtime.createProject(bidContract, "另一个", "wsp_test");
+  await runtime.setToolPolicy(loose.id, "write_document", "allow");
+
+  const rowOf = async (id: string) =>
+    (await runtime.listToolPolicy(id)).find((r) => r.tool === "write_document")!;
+  assert.equal((await rowOf(loose.id)).effective, "allow");
+  assert.equal((await rowOf(loose.id)).source, "user_policy");
+  // 另一个项目一个字都没变 —— 否则一个低风险项目里的放宽会悄悄跟到碰真实
+  // 客户资料的那个项目里去。
+  const other = await rowOf(strict.id);
+  assert.equal(other.userPolicy, undefined);
+  assert.equal(other.source, "contract_default");
+});
+
+test("用户策略：底线之下的放宽被拒，且拒绝之后库里没留下那条记录", async () => {
+  const ports = makePorts();
+  const runtime = new ProjectRuntime(ports);
+  // **自己造一个带底线的工具**：样例契约里一个 external_send 都没有，照着它写
+  // `if (有底线的) {...}` 的话，这段断言一次都不会跑 —— 而没跑和跑过了长得一样。
+  const base = bidContract as RuyinContract;
+  const withSend = {
+    ...base,
+    tools: [
+      ...base.tools,
+      {
+        id: "send_email",
+        category: "external_send",
+        risk: "high",
+        // 契约里写不成 allow —— R7 在契约层就把它挡住了。**于是用户策略这一层
+        // 是仅剩的、还能试着放宽它的地方**，这条用例问的正是那里。
+        default: "ask",
+        input_schema: {
+          type: "object",
+          properties: { to: { type: "string" } },
+          required: ["to"],
+        },
+      },
+    ],
+  };
+  const meta = await runtime.createProject(withSend, "ws", "wsp_test");
+
+  const before = (await runtime.listToolPolicy(meta.id)).find((r) => r.tool === "send_email")!;
+  assert.equal(before.effective, "ask");
+  assert.equal(before.floor, "ask", "这一类有底线，界面要标出来");
+
+  await assert.rejects(
+    runtime.setToolPolicy(meta.id, "send_email", "allow"),
+    (e: unknown) => e instanceof ToolPolicyError && /底线/.test(e.message),
+  );
+  const after = (await runtime.listToolPolicy(meta.id)).find((r) => r.tool === "send_email")!;
+  assert.equal(after.userPolicy, undefined, "被拒的那条不该留在库里");
+  assert.equal(after.effective, "ask");
+
+  // 往严的方向可以，而且立刻生效。
+  await runtime.setToolPolicy(meta.id, "send_email", "deny");
+  const denied = (await runtime.listToolPolicy(meta.id)).find((r) => r.tool === "send_email")!;
+  assert.equal(denied.effective, "deny");
+  assert.equal(denied.source, "user_policy");
 });
 
 test("harness: a refused tool reports back instead of failing the task", async () => {

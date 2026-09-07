@@ -182,6 +182,12 @@ export class SqliteProjectStore implements ProjectStore {
   async getGrants(): Promise<string | undefined> {
     return this.kvGet("grants");
   }
+  async putToolPolicy(policyJson: string): Promise<void> {
+    this.kvPut("tool-policy", policyJson);
+  }
+  async getToolPolicy(): Promise<string | undefined> {
+    return this.kvGet("tool-policy");
+  }
   async putBindings(bindingsJson: string): Promise<void> {
     this.kvPut("bindings", bindingsJson);
   }

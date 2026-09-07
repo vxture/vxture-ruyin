@@ -45,7 +45,7 @@ function stricter(a: PermissionValue, b: PermissionValue): PermissionValue {
  * what makes them floors. Sending data outward cannot be taken back, so it
  * never happens without a person saying so.
  */
-const HARD_FLOOR: Partial<Record<ToolCategory, PermissionValue>> = {
+export const HARD_FLOOR: Partial<Record<ToolCategory, PermissionValue>> = {
   external_send: "ask",
 };
 

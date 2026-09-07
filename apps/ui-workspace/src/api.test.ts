@@ -232,6 +232,29 @@ const WRAPPER_CASES: WrapperCase[] = [
     body: { connector: "crm" },
   },
   { name: "connectors", call: (api) => api.connectors(), method: "GET", path: "/connectors" },
+  // 工具权限（TD-050）
+  {
+    name: "toolPolicy",
+    call: (api) => api.toolPolicy("prj_1"),
+    method: "GET",
+    path: "/projects/prj_1/tool-policy",
+  },
+  {
+    name: "setToolPolicy",
+    call: (api) => api.setToolPolicy("prj_1", "read_file", "deny"),
+    method: "PUT",
+    path: "/projects/prj_1/tool-policy",
+    body: { tool: "read_file", value: "deny" },
+  },
+  {
+    // 清掉发的是 null，不是省掉这个字段：省掉的话守护进程读不出「清掉」这个意思。
+    name: "setToolPolicy(clear)",
+    call: (api) => api.setToolPolicy("prj_1", "read_file", null),
+    method: "PUT",
+    path: "/projects/prj_1/tool-policy",
+    body: { tool: "read_file", value: null },
+  },
+
   // 能力平台（ADR-018）
   { name: "skills", call: (api) => api.skills(), method: "GET", path: "/skills" },
   { name: "skills(project)", call: (api) => api.skills("prj_1"), method: "GET", path: "/skills?project=prj_1" },

@@ -45,6 +45,7 @@ import {
   type ProjectExport,
   type TaskDef,
   type TaskInstance,
+  type ToolPolicyRow,
   type ProjectView,
 } from "./api";
 import { verifyChain } from "./chain";
@@ -535,6 +536,112 @@ function StateStepper({
 
 /* ---------------- Context ---------------- */
 
+/** 三个权限值给人看的说法。`allow` 不写成「允许」——「直接执行」才说清了没人会被问。 */
+const PERMISSION_LABEL: Record<"allow" | "ask" | "deny", string> = {
+  allow: "直接执行",
+  ask: "每次问我",
+  deny: "禁止",
+};
+
+/** 这一行现在是谁说了算。**要说得出来**：一个只显示结果的开关无法回答「我明明设过」。 */
+const SOURCE_LABEL: Record<ToolPolicyRow["source"], string> = {
+  hard_floor: "底线",
+  user_policy: "你设的",
+  contract_default: "产品默认",
+  ask_cache: "本次任务内已批准",
+};
+
+/**
+ * 工具权限（TD-050）。
+ *
+ * 放在「上下文」这一页而不是另开一个 tab：它和文件授权、连接器授权是同一件事的
+ * 三个面 —— **这个项目允许运行时碰什么**。分到别处去，用户就得在两个地方回答同
+ * 一个问题。
+ *
+ * 每一行显示的是**此刻实际生效的**权限，不是用户设过什么：三层合成之后的答案才
+ * 是他真正要问的（这个工具现在到底能不能动我的文件），而「谁说了算」那一列让他
+ * 看得出为什么。
+ */
+function ToolPolicySection({
+  api,
+  projectId,
+}: {
+  api: Api;
+  projectId: string;
+}) {
+  const [rows, setRows] = useState<ToolPolicyRow[] | null>(null);
+  /** 被拒的那句话照原样显示 —— 它写清了能改到哪儿为止。 */
+  const [refusal, setRefusal] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .toolPolicy(projectId)
+      .then((r) => alive && setRows(r.items))
+      .catch(() => alive && setRows(null));
+    return () => {
+      alive = false;
+    };
+  }, [api, projectId]);
+
+  if (!rows || rows.length === 0) return null;
+
+  const change = (tool: string, raw: string): void => {
+    setRefusal("");
+    const value = raw === "" ? null : (raw as "allow" | "ask" | "deny");
+    void api
+      .setToolPolicy(projectId, tool, value)
+      .then((r) => setRows(r.items))
+      .catch((cause: unknown) => {
+        // 底线之下的放宽会被拒（POLICY_DENIED）。**把原话给用户** —— 它说明了
+        // 为什么不行、以及还能改到哪儿。一句「操作失败」在这里等于没说。
+        const body = (cause as { body?: { message?: string } })?.body;
+        setRefusal(body?.message ?? "改不了这一条");
+      });
+  };
+
+  return (
+    <>
+      <SectionHeader level={2} title="工具权限 · Tool policy" icon="shield-check" />
+      <p className="hint">
+        只对这个项目生效。收紧随时可以；带「底线」标记的那几条不能放宽 ——
+        数据发出去收不回来，所以每次都要有人点头。
+      </p>
+      {refusal && (
+        <p className="hint" role="alert">
+          {refusal}
+        </p>
+      )}
+      <ul className="row-list" aria-label="工具权限">
+        {rows.map((row) => (
+          <li key={row.tool} className="row-item">
+            {/* **不要给这里加 title**：title 会顶掉 `<code>` 的无障碍名，于是读屏
+                读出来的是类别而不是工具名 —— 而这一行讲的就是这个工具。类别单独
+                一个标签，它也确实要露出来：有没有底线是按类别定的。 */}
+            <code className="row-main">{row.tool}</code>
+            <span className="row-tag">{row.category}</span>
+            <span className="row-tag">{SOURCE_LABEL[row.source]}</span>
+            {row.floor && <span className="row-tag">底线 {PERMISSION_LABEL[row.floor]}</span>}
+            <NativeSelect
+              aria-label={`${row.tool} 的权限`}
+              value={row.userPolicy ?? ""}
+              onChange={(e) => change(row.tool, e.target.value)}
+              wrapperClassName="sel-narrow"
+            >
+              {/* 空选项 = 交给产品默认。与「设成默认此刻的那个值」不是一回事：
+                  契约会升级，而一条钉死的记录不会跟着变。 */}
+              <option value="">跟随产品默认（{PERMISSION_LABEL[row.contractDefault]}）</option>
+              <option value="allow">直接执行</option>
+              <option value="ask">每次问我</option>
+              <option value="deny">禁止</option>
+            </NativeSelect>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
 function ContextTab({
   api,
   projectId,
@@ -672,6 +779,8 @@ function ContextTab({
           )}
         </>
       )}
+
+      <ToolPolicySection api={api} projectId={projectId} />
 
       <SectionHeader level={2} title="类型绑定 · Bindings" icon="plugs-connected" />
       {bindings.map((b) => (
