@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { refreshDistributedSkills, relativeOf } from "./skill-distribution.js";
+import { pruneVerdict, refreshDistributedSkills, relativeOf } from "./skill-distribution.js";
 
 function skillMd(name: string, description: string): string {
   return `---\nname: ${name}\ndescription: ${description}\n---\n# ${name}\n`;
@@ -138,4 +138,59 @@ test("relativeOf: Runos skill:// URIs and plain relative paths; anything else is
   assert.equal(relativeOf("skill://vxture.x/1.0.0/references/a.md"), "references/a.md");
   assert.equal(relativeOf("references/a.md"), "references/a.md");
   assert.equal(relativeOf("https://evil/x.md"), undefined);
+});
+
+// --- 删除前的自我保护（pruneVerdict）---------------------------------------
+// 删除是**本仓自己的行为**：rmSync 跑在用户机器上、删用户的文件，而决定删什么的
+// 目录来自产品的云端能力面 —— 一个本仓不控制、每个产品各自实现的上游。这几条钉
+// 住的是「不把删除权无条件交出去」，与任何具体产品无关。
+
+test("prune: 目录空了而本地有 —— 一条不删，并说清为什么", () => {
+  const v = pruneVerdict(["a", "b", "c"], new Set());
+  assert.deepEqual(v.prune, []);
+  assert.deepEqual(v.heldBack?.names, ["a", "b", "c"]);
+  assert.match(v.heldBack?.reason ?? "", /目录一条都没有/);
+});
+
+test("prune: 一次要删掉本地大多数 —— 一条不删", () => {
+  // 本地 6 条，目录里只剩 1 条：要删 5 条。
+  const v = pruneVerdict(["a", "b", "c", "d", "e", "f"], new Set(["a"]));
+  assert.deepEqual(v.prune, []);
+  assert.equal(v.heldBack?.names.length, 5);
+  assert.match(v.heldBack?.reason ?? "", /6 条里的 5 条/);
+});
+
+test("prune: 正常的增删照常删 —— 保护不是「永不删」", () => {
+  const v = pruneVerdict(["a", "b", "c", "d", "e", "f"], new Set(["a", "b", "c", "d", "e"]));
+  assert.deepEqual(v.prune, ["f"]);
+  assert.equal(v.heldBack, undefined);
+});
+
+test("prune: 本地样本太小时不套比例 —— 两条删一条是再正常不过的事", () => {
+  const v = pruneVerdict(["a", "b"], new Set(["a"]));
+  assert.deepEqual(v.prune, ["b"]);
+  assert.equal(v.heldBack, undefined);
+});
+
+test("prune: 没有要删的就什么都不说", () => {
+  const v = pruneVerdict(["a", "b"], new Set(["a", "b", "c"]));
+  assert.deepEqual(v.prune, []);
+  assert.equal(v.heldBack, undefined);
+});
+
+test("refresh: 能力面返回一份空目录时，本地那份不会被删掉", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-prune-"));
+  const s = surface();
+  const first = await refreshDistributedSkills(cfg(s), "bidproposal", dir);
+  assert.equal(first.fetched.length, 2);
+
+  // 同一个能力面，下一轮突然一条都不分发了 —— 产品真撤空了，还是它那边出了问题？
+  // 分不出来，那就不删。
+  s.catalogue = [];
+  const second = await refreshDistributedSkills(cfg(s), "bidproposal", dir);
+  assert.deepEqual(second.removed, []);
+  assert.equal(second.heldBack?.names.length, 2);
+  assert.equal(existsSync(join(dir, "tender-style", "SKILL.md")), true);
+  assert.equal(existsSync(join(dir, "excel-workflow", "SKILL.md")), true);
+  rmSync(dir, { recursive: true, force: true });
 });
