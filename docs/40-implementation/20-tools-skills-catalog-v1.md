@@ -88,7 +88,7 @@ CLI 得作为**工具**接进来（MCP 包装或子进程，过 Tool Gate），�
 
 | 来源 | 许可证 | ★ | 说明 |
 |---|---|---|---|
-| xberg-io/xberg（`plugin/skills/xberg`） | MIT | 9.3k | 101+ 格式抽文本 / 表格 / 元数据（Rust 核心） |
+| ~~xberg-io/xberg（`plugin/skills/xberg`）~~ | ⚠️ 冲突 | 9.3k | **2026-09-09 撤下**：仓库级 LICENSE 是 MIT，而 `plugin/skills/xberg/SKILL.md` 的前言写 `license: Elastic-2.0`（source-available）。同一批字节两个说法，取限制性的那个。原因记在清单的 `refused` 段；要收回来先拿到上游澄清 |
 | Fokkyp/SoftwareCopyright-Skill | MIT | 5.2k | 读本地项目，**生成全套 .docx 申请材料** —— docx 模板生成的现成范例（中文） |
 | the-shy123456/thesis-docx | MIT | 455 | 论文 docx |
 | nexu-io/codex-slides | MIT | 869 | 幻灯片工作室 |
@@ -181,7 +181,7 @@ Connector 注册、保险库注入），本机只装「密钥 = 否」的几个�
 
 | 业务 | 技能（知道怎么做） | 工具（真的去做） |
 |---|---|---|
-| 文档读取 | SenseNova 读取族、xberg、openai/pdf | markitdown-mcp、docling-mcp、MinerU、filesystem |
+| 文档读取 | SenseNova 读取族、openai/pdf | markitdown-mcp、docling-mcp、MinerU、filesystem |
 | 文档解析分析 | SenseNova 分析 / 统计族、sandbase `document-parser`、`sn-da-large-file-analysis` | docling-mcp、excel-mcp-server（读） |
 | 文档编辑 / 生成（含表格、docx 模板） | OfficeCLI docx / xlsx / word-form、SoftwareCopyright-Skill（模板范例）、SenseNova 导出 / 样式族 | excel-mcp-server、mcp-pandoc、word-mcp-live、（fork）Word-MCP |
 | 浏览器操作 | openai/playwright*、lackeyjb、browser-act | **playwright-mcp** |
@@ -192,7 +192,7 @@ Connector 注册、保险库注入），本机只装「密钥 = 否」的几个�
 
 | 档 | 内容 | 数量（约） |
 |---|---|---|
-| **默认启用** | SenseNova 76、OfficeCLI 技能 12、openai 7、anthropics Apache 13、Agent-Reach、last30days、browser-search、xberg、translate-book、lackeyjb；工具：playwright-mcp、markitdown-mcp、docling-mcp、excel-mcp-server、mcp-pandoc、duckduckgo、searxng、open-webSearch、fetch、filesystem | 技能 ~115 · 工具 10 |
+| **默认启用** | SenseNova 76、OfficeCLI 技能 12、openai 7、anthropics Apache 13、Agent-Reach、last30days、browser-search、translate-book、lackeyjb；工具：playwright-mcp、markitdown-mcp、docling-mcp、excel-mcp-server、mcp-pandoc、duckduckgo、searxng、open-webSearch、fetch、filesystem | 技能 ~115 · 工具 10 |
 | **装而不启用** | sandbase 99（多需密钥）、sanjay 24、microsoft、LambdaTest、MinerU、negokaz、word-mcp-live、harness-anything、one-search、anysearch | 技能 ~150 · 工具 6 |
 | **经 Runos 注册（不进本机）** | tavily、exa、brave、firecrawl、bing、jina、apify、serpapi —— 作为 Connector 注册进 Runos，密钥在其保险库；本机技能清单里只留一条「由产品经能力面提供」的说明 | 工具 8 |
 

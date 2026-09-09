@@ -35,7 +35,21 @@ function baseline() {
     version: 1,
     tiers: { default: "", "installed-disabled": "", "acquire-on-demand": "", "runos-registered": "" },
     allowedOrigins: ["https://cdn.example.com"],
-    pythonRuntime: { uv: { version: "0.12.10" }, seed: ["x.uvx-server"] },
+    // uv 是随包的可执行文件，守卫对它的要求和对按需组件一样严（钉死 + 校验）。
+    // 这里写全，是因为**它以前写不全也照样通过** —— 汇报夹在这段之前，push 进去
+    // 的每一条都没人读（2026-09-09 修）。
+    pythonRuntime: {
+      uv: {
+        version: "0.12.10",
+        upstream: "https://example.com/uv.zip",
+        sha256: "b".repeat(64),
+        size: 10,
+        license: "MIT OR Apache-2.0",
+        licenseSource: "tag 上并存的两份 LICENSE",
+        licenseFiles: ["LICENSE-MIT", "LICENSE-APACHE"],
+      },
+      seed: ["x.uvx-server"],
+    },
     skills: [],
     components: [
       {
@@ -214,6 +228,71 @@ test("工具目录里有重复的名字", () => {
   const m = baseline();
   m.servers[0].tools = ["a", "a"];
   assert.match(run(m).out, /重复的工具名/);
+});
+
+// --- refused（查过了、不能收的来源）------------------------------------
+// 这一段是 2026-09-09 xberg-io/xberg 的直接产物：它以 default 档随包默认启用，
+// 而仓库级 LICENSE（MIT）与技能自己的前言（Elastic-2.0）说的不是一回事。撤下容易，
+// 难的是不让它明天被同一个理由重新加回来。
+
+test("refused 条目没写理由 —— 那和把它删掉是同一件事", () => {
+  const m = baseline();
+  m.refused = [{ id: "a.b", repo: "https://github.com/a/b", reason: "短", verifiedAt: "2026-09-09" }];
+  assert.match(run(m).out, /缺 reason/);
+});
+
+test("refused 条目没写核实日期", () => {
+  const m = baseline();
+  m.refused = [{ id: "a.b", repo: "https://github.com/a/b", reason: "许可证两个说法，取限制性的那个" }];
+  assert.match(run(m).out, /verifiedAt 要是 YYYY-MM-DD/);
+});
+
+test("被拒的来源又出现在 skills 里 —— 撤下之后被人加了回来", () => {
+  const m = baseline();
+  m.skills = [
+    {
+      id: "a.b",
+      kind: "skill-source",
+      repo: "https://github.com/a/b",
+      commit: "b".repeat(40),
+      license: "MIT",
+      licenseSource: "仓库级 LICENSE",
+      tier: "default",
+    },
+  ];
+  m.refused = [{ id: "a.b", repo: "https://github.com/a/b", reason: "许可证两个说法，取限制性的那个", verifiedAt: "2026-09-09" }];
+  assert.match(run(m).out, /又出现在 skills \/ servers 里/);
+});
+
+test("refused 的 commit 给了就要钉死", () => {
+  const m = baseline();
+  m.refused = [{ id: "a.b", repo: "https://github.com/a/b", reason: "许可证两个说法，取限制性的那个", verifiedAt: "2026-09-09", commit: "main" }];
+  assert.match(run(m).out, /commit 给了就要是 40 位十六进制/);
+});
+
+test("干净的 refused 段不该拦住任何东西", () => {
+  const m = baseline();
+  m.refused = [
+    {
+      id: "a.b",
+      repo: "https://github.com/a/b",
+      commit: "b".repeat(40),
+      reason: "许可证两个说法，取限制性的那个",
+      verifiedAt: "2026-09-09",
+    },
+  ];
+  assert.equal(run(m).code, 0);
+});
+
+// 这一条守的是守卫自己的结构：汇报必须在**所有**规则之后。它此前夹在组件段与
+// pythonRuntime 段之间，于是随包 uv 的每一条校验都是死信 —— 检查在跑，结论没人读。
+// 把汇报挪到末尾之后，这条用例才第一次能失败（2026-09-09）。
+test("随包 uv 没钉哈希 —— pythonRuntime 段的结论必须真的被报出来", () => {
+  const m = baseline();
+  m.pythonRuntime.uv.sha256 = "not-a-hash";
+  const r = run(m);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /sha256 不是/);
 });
 
 test("仓里那份真清单必须自洽", () => {

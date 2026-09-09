@@ -10,6 +10,12 @@
  * LICENSE 优先，否则仓库级的落在来源目录下）。不合格的**警告并跳过**，写进索引
  * 的 skipped 里 —— 不让一份坏技能拖垮整个预置层，也不让它悄悄消失。
  *
+ * 许可证走**两读**（skill-license.mjs）：清单那一级的声明、技能前言里的 `license:`、
+ * 技能自己带的许可证正文，任意两处说法冲突就不落盘，并让整个 run 以非零退出。
+ * 这一条与「坏前言警告并跳过」不同 —— 前言坏是质量问题，许可证冲突是分发权问题，
+ * 跳过一条还继续构建，等于让人有机会不看它（2026-09-09，xberg-io/xberg：仓库级
+ * LICENSE 记 MIT、技能前言写 Elastic-2.0，它曾以 default 档随包默认启用）。
+ *
  * 经 Runos 注册那一档（runos-registered）不拉：密钥在 Runos 保险库，本机不装。
  * MCP 服务器定义原样抄进 index.json（servers），供工具登记册展示；它们的本机
  * 启动规格还没定（TD-042）。
@@ -37,6 +43,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { licenseVerdict } from "./skill-license.mjs";
 
 const repoRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const manifestPath = join(repoRoot, "resources", "skill-manifest.json");
@@ -75,7 +82,7 @@ function checkout(source, work) {
   git(work, "checkout", "-q", "FETCH_HEAD");
 }
 
-/** include 是清单里的目录 glob（`skills/**`、`plugin/skills/xberg`、`**`）→ sparse 模式。 */
+/** include 是清单里的目录 glob（`skills/**`、`plugin/skills/officecli`、`**`）→ sparse 模式。 */
 function includeToSparse(glob) {
   if (glob === "**" || glob === "**/*") return "/*";
   const dir = glob.replace(/\/\*\*$/, "").replace(/\/\*$/, "");
@@ -129,10 +136,12 @@ function frontMatter(text) {
   };
   const name = pick("name");
   const description = pick("description");
+  // 可选字段（agentskills.io）。原值带出去，SPDX 与否由 skill-license 判。
+  const license = pick("license");
   if (!name || !NAME_RE.test(name) || name.length > 64) return { ok: false, reason: `bad name ${JSON.stringify(name)}` };
   if (!description) return { ok: false, reason: "no description" };
   if (description.length > 1024) return { ok: false, reason: "description > 1024" };
-  return { ok: true, name, description };
+  return { ok: true, name, description, ...(license !== undefined ? { license } : {}) };
 }
 
 /**
@@ -147,6 +156,8 @@ const SKILL_DIRS = new Set(["scripts", "references", "assets"]);
  */
 const MAX_FILE_BYTES = 1024 * 1024;
 const dropped = [];
+/** 许可证判定拦下的技能。有一条就够让整个 run 失败 —— 见头注释。 */
+const licenseFailures = [];
 const JUNK_DIRS = new Set([".git", "node_modules", "__pycache__", ".venv", "venv", ".pytest_cache"]);
 function isSkillContent(root, p) {
   const rel = relative(root, p);
@@ -252,10 +263,21 @@ for (const source of sources) {
         index.skipped.push({ source: source.id, path: rel, reason: `duplicate name "${fm.name}" within source` });
         continue;
       }
+      // 两读在**落盘之前**。判完再拷，坏字节就一次都没进过 resources/。
+      const own = findLicense(dir);
+      const verdict = licenseVerdict({
+        declared: source.license,
+        ...(fm.license !== undefined ? { frontMatter: fm.license } : {}),
+        ...(own ? { licenseText: readFileSync(own, "utf8") } : {}),
+      });
+      if (!verdict.ok) {
+        index.skipped.push({ source: source.id, path: rel, reason: `许可证：${verdict.reason}` });
+        licenseFailures.push({ source: source.id, path: rel, name: fm.name, reason: verdict.reason });
+        continue;
+      }
       dropped.length = 0;
       cpSync(dir, dest, { recursive: true, filter: (p) => isSkillContent(dir, p) });
       const droppedHere = dropped.map((d) => ({ ...d }));
-      const own = findLicense(dir);
       const hasScripts = existsSync(join(dir, "scripts"));
       index.skills.push({
         source: source.id,
@@ -263,7 +285,10 @@ for (const source of sources) {
         description: fm.description,
         dir: `${source.id}/${fm.name}`,
         tier: source.tier,
-        license: source.license,
+        license: verdict.license,
+        // 读了哪几处才得出这个结论 —— 「仓库级说 MIT」和「三处都说 MIT」不是一件事。
+        licenseReads: verdict.reads,
+        ...(verdict.note ? { licenseNote: verdict.note } : {}),
         licenseFile: own ? `${source.id}/${fm.name}/${basename(own)}` : repoLicense ? `${source.id}/LICENSE` : null,
         hasScripts,
         bytes: dirSize(dest),
@@ -305,6 +330,16 @@ for (const s of index.skills.filter((x) => x.warning)) console.log(`[pull-skills
 for (const s of index.skills.filter((x) => x.dropped)) {
   console.log(`[pull-skills]   dropped ${s.dropped.length} file(s) > ${MAX_FILE_BYTES / 1024 / 1024} MB from ${s.source}/${s.name}: ${s.dropped.map((d) => d.path).join(", ")}`);
 }
+// 许可证冲突不是「跳过一条继续走」的那类问题：不落盘只保证坏字节没进包，
+// 非零退出才保证有人看见它。要让构建重新变绿，唯一的路是在清单里把这条来源撤下
+// 或改正 —— 那正是 xberg 走过的路（refused 段留着原因）。
+if (licenseFailures.length) {
+  console.error(`[pull-skills] ${licenseFailures.length} skill(s) refused on licence grounds - nothing was written for them:`);
+  for (const f of licenseFailures) console.error(`[pull-skills]   ${f.source}/${f.name} (${f.path}): ${f.reason}`);
+  console.error("[pull-skills] fix the manifest (withdraw the source, or record it under `refused`) and re-run");
+  process.exit(1);
+}
+
 if (failures) {
   console.error(`[pull-skills] ${failures} source(s) failed`);
   process.exit(1);

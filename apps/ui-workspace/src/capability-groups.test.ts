@@ -62,7 +62,9 @@ describe("classifyCapability", () => {
   });
 
   it("认不出来就是「其他」，不猜一个看起来很像的", () => {
-    expect(classifyCapability({ name: "xberg", description: "" })).toBe("other");
+    // 刻意用一个不存在的名字：这条测的是分类器对陌生输入的态度，拿真实技能名当
+    // 样例，技能一撤下这里就变成了一句考古（原先写的是 xberg，2026-09-09 已撤下）。
+    expect(classifyCapability({ name: "quokka", description: "" })).toBe("other");
     expect(classifyCapability({ name: "", description: "" })).toBe("other");
   });
 
