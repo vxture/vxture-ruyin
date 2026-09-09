@@ -191,7 +191,7 @@ tasks:
       - 需求条目必须可回溯到招标原文
     capabilities: [requirement_analysis]
     tools: [read_file, write_document]
-    skills: [xberg]                              # 101+ 格式抽文本 / 表格（预置层，xberg-io.xberg）
+    skills: [pdf]                                # 招标文件抽文本 / 表格（预置层，openai.skills）
     verification:
       - { id: source_traceability, kind: automated }
       - { id: matrix_review,       kind: human }

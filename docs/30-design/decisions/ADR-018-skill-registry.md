@@ -4,6 +4,9 @@
   v1 被 owner 否掉两处：不该自己造技能，数量应至少上百。v2 按 owner 七条意见重写；
   v2.1 记入已定的三条（§6）；v2.2 按 ADR-020 修正三处：技能来源加「产品分发」层、
   第三方密钥归 Runos 保险库、脚本的 Runos Executor 出路只登记。
+  **v2.3（2026-09-09）**：许可证判定改为逐技能两读，撤下 `xberg-io/xberg`（§7.3）。
+  **v2.4（2026-09-09）**：预置台账权威归 Runos，本仓的同步是**构建时物化**，运行时
+  永不依赖 Runos 可达（§7.4）。
 - 日期：2026-09-05
 - 相关：ADR-006（skill 归 Ruyin，建在 Harness 上）、ADR-002（循环归 Harness）、
   ADR-005（本地连接器 = MCP）、ADR-009（能力面中转）、ADR-011（框架边界）、
@@ -244,9 +247,10 @@ tasks:
    起不来；工具登记册把它们列为「已登记」而不是「可用」。收口在 **TD-042**（与 TD-034
    一起：起得来之后接 Tool Gate）。
 
-样例契约（`products/bidproposal`）已声明技能（`xberg`、`officecli-docx`、
-`officecli-word-form`，都在预置层 default 档）：安装包里预置层随包而来；开发机要先
-`pnpm skills:pull`，否则任务启动前按名拒绝 —— 测试装配与观察台用 `MemorySkills` /
+样例契约（`products/bidproposal`）已声明技能（`pdf`、`officecli-docx`、
+`officecli-word-form`，都在预置层 default 档；2026-09-09 前第一条是 `xberg`，随该
+来源撤下换成 `openai/skills` 的 `pdf` —— 见 §7.3 与清单的 `refused` 段）：安装包
+里预置层随包而来；开发机要先 `pnpm skills:pull`，否则任务启动前按名拒绝 —— 测试装配与观察台用 `MemorySkills` /
 桩目录应答。没做、记着：任务详情里技能调用的专属行（§2.8 第 4 条）；用户层目录监视
 （现在是按需重扫，2 秒缓存）。
 
@@ -412,3 +416,126 @@ zip 指给它，**校验和还是随安装包同行的那一条**。
 | 4 | **pandoc 只允许按需下载**（`redistribution: "download-only"`），永不进安装包、永不镜像到我们自己的主机，许可证正文与 source offer 随组件落盘 | 它是 GPL-2.0-or-later，而本仓有意以 all-rights-reserved 分发、不带 LICENSE 文件。按需下载把「放进闭源安装包算不算分发」这个问题绕开，但没免除随件带许可证的义务 |
 | 5 | **docling 降为 `installed-disabled`**、`launch: null`、原因照实写 | 它钉死的 3.2.0 默认装的是一个**远端 docling-serve 的客户端**，本地一页都不转 —— 与「数据不出域」是反的。能本地转的形态 1.014 GiB（torch 481 MB、cv2 113 MB，闭包里还有要编译工具链的 sdist）。代价：默认档少一条 |
 | 6 | **第四档 `acquire-on-demand` 作为实施记录追加**，不另立 ADR | §6 第 3 条的三档没有被推翻，只是多了一档说明「随包不带、要点一次」。§7 / §7.1 已有这个体例 |
+
+### 7.3 许可证判定改为逐技能两读；撤下 xberg（2026-09-09）
+
+清单原先只读**仓库级** `LICENSE`（`licenseSource` 一水儿写着「仓库级 LICENSE
+（GitHub API license.spdx_id）」）。那一读不管辖技能自己的声明，于是有了这条：
+
+**`xberg-io/xberg` 在钉死的 `d98f848` 上，仓库级 LICENSE 是 MIT，而
+`plugin/skills/xberg/SKILL.md` 的前言写 `license: Elastic-2.0`** —— source-available，
+不是宽松许可。同一批字节两个说法，管辖的是限制性的那个。它此前是 `tier: default`，
+**已经打进安装包并默认启用**。Runos 侧独立判出同一结论（vxture/vxture-ruyin#201 §d）。
+
+反过来的例子同样存在：`anthropics/skills` 仓库级是 Apache-2.0，而 `docx` / `pdf` /
+`pptx` / `xlsx` 四条自带的 `LICENSE.txt` 是「All rights reserved」的专有条款 ——
+清单 v1 已正确排除这四条，但**只读仓库级本来会把它们收进来**，排除对是靠人评审，
+不是靠规则。
+
+#### 现在读三处，任意两处冲突就失败关闭
+
+判定抽在 `scripts/release/skill-license.mjs`（纯函数，可单测），`pull-skills` 在
+**落盘之前**调用它：判完再拷，坏字节一次都没进过 `resources/`。三读是：清单那一级
+的声明、技能前言里的 `license:`、技能自己带的许可证文件正文。白名单制 —— 宽松许可
+之外一律拒，copyleft 与 source-available 都在拒的一侧。
+
+两条刻意的保守取舍，都是被真数据逼出来的：
+
+- **前言里认不出是 SPDX 的值不当作声明。** `anthropics/skills` 的 11 条写的是
+  `license: Complete terms in LICENSE.txt` —— 一句散文，是指向文件的指针，不是第二
+  个说法。当成声明比对会把 11 条合规技能全部误杀。
+- **正文认不出来的不判定。** 只认少数几种确定的形态（MIT 与 ISC 的正文开头几乎
+  一样，就不猜），认不出的记一条 note 交给人看，不拿它去否定别处的说法。
+
+对已拉下的 233 条真字节跑了一遍：**232 条通过、11 条带 note（正是上面那 11 条散文
+前言）、被拦的只有 xberg**。零误杀。
+
+#### 失败关闭是整个 run 失败，不是跳过一条
+
+`pull-skills` 原有的口径是「不合格警告并跳过，不让一份坏技能拖垮整个预置层」——
+那对前言格式是对的。许可证不一样：**前言坏是质量问题，许可证冲突是分发权问题。**
+跳过一条继续构建，等于给了人一个不看它的机会。所以许可证冲突既不落盘、也让整个
+run 非零退出；要让构建重新变绿，唯一的路是在清单里把这条来源撤下或改正。
+
+#### 撤下不等于删掉
+
+xberg 从 `skills[]` 移到清单新增的 `refused` 段，连原因、钉死的 commit 与核实日期
+一起留着。理由很实在：「不在清单里」和「查过了、不能收」在字节上长得一模一样 ——
+没有这一段，下一个人会把这条 9.3k 星的技能重新加一遍。`lint:skill-manifest` 钉住
+`refused` 里的 id 不许同时出现在 `skills` / `servers` 里。
+
+连带改动：样例契约 `products/bidproposal` 的 `analyze_tender` 原声明 `xberg`，换成
+`openai/skills` 的 `pdf`（同为预置层 default 档，Apache-2.0，逐技能 `LICENSE.txt`
+核过）。
+
+#### 顺带修掉的一处
+
+`check-skill-manifest.mjs` 的错误汇报此前夹在组件段与 `pythonRuntime` 段之间，于是
+**随包 uv 的每一条校验都是死信** —— 检查在跑，`errors.push` 也在跑，只是没人读它。
+汇报移到全部规则之后。证据是它一移过去，守卫自测里那份「干净的清单」立刻不干净了：
+baseline 的 `pythonRuntime.uv` 从来没写全过 sha256 / size / licenseFiles，而它一直
+「通过」。补了一条用例钉住这个顺序。
+
+### 7.4 预置层的来源换到 Runos，但取字节的时机是构建时（owner 2026-09-09）
+
+Runos 侧已定（其 ADR-019）：**预置供给台账归 Runos 拥有**——`deploy/preset/sources.json`
+人工策展、`ledger.json` 由它生成、经普通管理面 API 注册进环境，288 条真实 Agent
+Skills。原先的方向（Runos 按本仓 `resources/skill-manifest.json` 构建）作废，联络单
+vxture/vxture-ruyin#201。
+
+**本仓接受这个方向。** 台账放在某一个消费方手里，其它消费方就只能各自复制一份 ——
+这条理由成立，而且与 ADR-020 §1.1「Runos 是能力的台账与网关，Ruyin 是能力的执行
+环境」是同一句话的两半。
+
+#### 口径三句，写死
+
+1. **Runos 是预置台账的权威**：收哪些来源、钉哪个 commit、逐条许可证怎么判，以它为准。
+2. **本仓的同步是构建时物化**：CI 取字节 → `resources/skills` → `extraResources` 打进
+   安装包。装出来的安装包形态一个字不变。
+3. **运行时永不依赖 Runos 可达。** 四层来源里没有任何一层是「用的时候才去网上取」：
+   预置层随包在本地；产品分发层按 `content_digest` 落盘，能力面拉不到时本地那份照用
+   （`skill-distribution.ts` 的 `unreachable`）；用户层与项目层本来就在本地。
+
+#### 第 3 句为什么必须单独写一句
+
+**「在线维护台账」和「在线获取技能」是两件事。** 混起来会同时踩两个坑，而且两个坑
+都不是新的：
+
+- **气隙 / 域受限客户用不了。** 那是预置层存在的全部理由（§2.3），不是一个可以让位
+  的次要目标。
+- **客户端结构上够不到 Runos。** 零密钥 public client，不直连，中间隔着产品自己的
+  云端服务（ADR-001 / ADR-009 / ADR-020 §5）。
+
+ADR-020 §7 的备选表里「把本机登记册整个换成 Runos 目录的镜像」被否掉，理由写的就是
+「离线必须可用」。本节不是推翻它，是给出它的精确版：**换的是取字节的地方，不是取
+字节的时机。**
+
+#### 这条不与「不直连」冲突 —— CI 不是客户端
+
+构建时在 CI 里持有 Runos 的 S2S 凭证，不违反客户端零秘密。那条规则约束的是**发出去
+的客户端**（CLAUDE.md：shipped client contains ZERO secrets）。同理，ADR-001 / 009
+的「不直连」说的是运行时的桌面进程，不是构建流水线。
+
+代价照实记两条：**本仓的构建从「只依赖 GitHub」变成「还依赖 Runos 生产环境可用」**；
+**需要 Runos 给本仓 CI 一个 S2S 身份** —— 后者是 Runos 侧动作，不是本仓能自决的。
+
+#### 换源之前要先解决的两个缺口
+
+不是反对，是次序问题 —— 这两条不解决就换，等于静默换掉一批预置内容：
+
+1. **`scripts/` 缺口。** Runos 的 `fetch` 明确不带 `scripts`（#201 §c：Skill 声明
+   scripts 就必须声明对 Executor 的 required 依赖，且打包形态等 plugin ingest），台账
+   里记了 `upstreamScripts` 计数，288 条中 64 条有。而本仓现在从上游直接拉的是整个
+   技能目录：`pull-skills` 的最近一次全量是 **232 条里 56 条带 `scripts/` 随包**。本地
+   暂不执行（TD-005），但沙箱落地后要跑的就是它们。换源会让这 56 条的「手」从安装包
+   里消失，而这不是缓存能补的 —— Runos 那边就没有。
+2. **条数差没查清。** 本仓 **232 条 / 22 源**（撤下 xberg 后，§7.3）对 Runos **288 条 /
+   22 源**。差从哪来（`include` 路径范围？逐仓纳入口径？）没查清就同步，会把一批内容
+   悄悄换掉而没人看见。对账口径按 Runos 的提醒：**台账数减去被运维方撤下的**，不要
+   断言两者相等（其可发现面实测是 287）。
+
+#### 时点
+
+Runos 的三个 PR（其 #15 / #16 / #17，加上补枚举与 `filter` 的 #18）**尚未合入、尚未
+seed 进生产**，生产台账当前仍是 2 条。在那之前，本仓的 `resources/skill-manifest.json`
+仍是预置层的唯一事实；同步的实现方式待上述两个缺口有答复后再定，本节只定口径。

@@ -131,6 +131,21 @@ ADR-008 留下「能力目录放 Runos 更干净，前提是先解决 Ruyin 怎�
 | 3 | `scripts/` 的 Runos Executor 出路**只登记不启用**（仅适用于不带业务数据的脚本） | TD-005 选项表 |
 | 4 | **bid 产品的云端能力面是 Runos 的第一个消费者**（Runos ADR-014 的「baseline-only」条件随之失效） | 产品接入指南 §5.4；对 Runos 的告知走 GitHub Issue（`liaison` 标签，开在 vxture-runos 上）—— 待 owner 点头再开；平台侧前提（OBO subject_token 受众 + bid 登记）：vxture-platform/vxture-platform#198；bid 能力面仓 https://github.com/vxture/vx-agent-bidproposal（原 vx-agent-bid，2026-09-05 随产品码改名）|
 
+### 6.1 追加（owner，2026-09-09）：预置台账权威归 Runos，取字节的时机是构建时
+
+Runos 侧已定（其 ADR-019）预置供给台账归它拥有（288 条），原先「Runos 按 ruyin 的
+清单构建」方向作废（联络单 vxture/vxture-ruyin#201）。本仓接受，并把口径写死为三句：
+**Runos 是台账的权威；本仓的同步是构建时物化（CI → `resources/skills` → 安装包）；
+运行时永不依赖 Runos 可达。**
+
+这不改本 ADR §5 的任何一条。**「不直连」说的是运行时的桌面进程，不是构建流水线** ——
+CI 里持 S2S 凭证与「shipped client contains ZERO secrets」不冲突。§7 备选表里「把本机
+登记册整个换成 Runos 目录的镜像」仍然不取，理由（离线必须可用）也没变：换的是取字节
+的地方，不是取字节的时机。
+
+换源前置的两个缺口（`fetch` 不带 `scripts`；232 对 288 的条数差）与详细代价记在
+ADR-018 §7.4，不在此重复。
+
 ## 7. 备选方案
 
 | 方案 | 为什么不取 |

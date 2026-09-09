@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generatedAt": "2026-09-07",
-  "$comment": "技能与工具预置清单（ADR-018 §2.3，owner 2026-09-05 定三档；§7.2 加第四档 acquire-on-demand）。每条来源仓钉死 commit；许可证是硬门槛（none 不允许）。ruyin 构建时按它拉取预置进安装包；Runos 按它注册台账（vxture-foundation/vxture-runos#14）。launch 为本机启动规格（node = 构建时 vendored 随包；uvx = 随包 uv + 随包 wheel 缓存，离线起）。components[] 是随包不带、要用户点一次才获取的载荷，摘要写在这里、随安装包同行 —— 上游若换了字节，校验不过，什么都不落地。人读版：docs/40-implementation/20-tools-skills-catalog-v1.md；预置工具名对照表：docs/40-implementation/40-bundled-tool-names.md。",
+  "$comment": "技能与工具预置清单（ADR-018 §2.3，owner 2026-09-05 定三档；§7.2 加第四档 acquire-on-demand）。每条来源仓钉死 commit；许可证是硬门槛（none 不允许）。ruyin 构建时按它拉取预置进安装包。**「Runos 按它注册台账」已不再成立**（owner 2026-09-09 定方向反转，Runos ADR-019 / vxture/vxture-ruyin#201）：预置台账归 Runos 自己策展，ruyin 侧改为检索同步 —— 怎么同步待定，在那之前这份清单仍是本仓预置层的唯一事实。许可证判定见 scripts/release/skill-license.mjs（逐技能两读）与 refused 段。launch 为本机启动规格（node = 构建时 vendored 随包；uvx = 随包 uv + 随包 wheel 缓存，离线起）。components[] 是随包不带、要用户点一次才获取的载荷，摘要写在这里、随安装包同行 —— 上游若换了字节，校验不过，什么都不落地。人读版：docs/40-implementation/20-tools-skills-catalog-v1.md；预置工具名对照表：docs/40-implementation/40-bundled-tool-names.md。",
   "tiers": {
     "default": "默认启用（随包，不下载任何字节就能起）",
     "installed-disabled": "装而不启用",
@@ -202,22 +202,6 @@
         "**"
       ],
       "note": "SearXNG 搜索 + 浏览，无需密钥"
-    },
-    {
-      "id": "xberg-io.xberg",
-      "kind": "skill-source",
-      "format": "agent-skills",
-      "repo": "https://github.com/xberg-io/xberg",
-      "ref": "main",
-      "commit": "d98f848f51e26c26814ae0d38954acb8a4626be9",
-      "license": "MIT",
-      "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
-      "stars": 9267,
-      "tier": "default",
-      "include": [
-        "plugin/skills/xberg"
-      ],
-      "note": "101+ 格式抽文本/表格/元数据"
     },
     {
       "id": "deusyu.translate-book",
@@ -463,6 +447,18 @@
         "skills/writing-plans"
       ],
       "note": "写技能用"
+    }
+  ],
+  "$comment_refused": "从清单里拿掉、且不许再加回来的来源。写在这里是因为「不在清单里」和「查过了、不能收」在字节上长得一模一样 —— 没有这一段，下一个人会把同一条重新加一遍。每条要说清是哪一读判出来的（仓库级 LICENSE / 技能自己的声明），以及核实日期。守卫 check-skill-manifest 钉住：refused 里的 id 不许同时出现在 skills / servers 里。",
+  "refused": [
+    {
+      "id": "xberg-io.xberg",
+      "kind": "skill-source",
+      "repo": "https://github.com/xberg-io/xberg",
+      "commit": "d98f848f51e26c26814ae0d38954acb8a4626be9",
+      "reason": "同一批字节上两个许可证说法：仓库级 LICENSE 是 MIT，而 plugin/skills/xberg/SKILL.md 的前言写 license: Elastic-2.0（source-available，不是宽松许可）。管辖的是限制性的那个，失败关闭。",
+      "verifiedAt": "2026-09-09",
+      "note": "此前记为 MIT、tier default（随包默认启用）—— 只读了仓库级那一读。Runos 侧独立判出同一结论（vxture/vxture-ruyin#201 §d）。要收回来，先拿到上游对这两处说法的澄清。"
     }
   ],
   "servers": [

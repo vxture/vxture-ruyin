@@ -11,6 +11,10 @@
  *   3. tier 只能是清单自己声明的档位之一（owner 2026-09-05 定三档；§7.2 加第四档）。
  *   4. id 全局唯一。
  *   5. repo 必须是 GitHub URL —— 来源要能被 gh api 复核。
+ *   6. `refused` 段：查过了、不能收的来源，连原因和核实日期一起留着，且它的 id 不许
+ *      同时出现在 skills / servers 里。「不在清单里」和「查过了、不能收」在字节上长得
+ *      一模一样 —— 没有这一段，下一个人会把同一条重新加一遍（2026-09-09，xberg-io/xberg：
+ *      仓库级 LICENSE 记 MIT，技能自己的前言写 Elastic-2.0，它曾以 default 档随包默认启用）。
  *
  * 2026-09-06（ADR-018 §7.2 获取通道）又加一组，全部是**字段测试**：不联网、不判断、
  * 不猜。它们要钉的一句话是「**档位与装没装进包是同一件事**」—— 上一版清单里 10 条
@@ -191,10 +195,27 @@ for (const c of components) {
     errors.push(`${where}: kind ${c.kind} 的组件不该带 tools`);
   }
 }
-if (errors.length) {
-  console.error(`[skill-manifest] ${errors.length} 处不合规：\n  - ` + errors.join("\n  - "));
-  exit(1);
+// --- refused（查过了、不能收的来源）------------------------------------
+// 纯字段测试，和这份守卫的其余部分一样：不联网、不读技能字节。真正的「两读」在
+// pull-skills 拉取时做（那里才有字节）；这里只保证被拒的那条留下了痕迹，且没有
+// 从另一个数组里悄悄回来。
+if (m.refused !== undefined) {
+  if (!Array.isArray(m.refused)) {
+    errors.push("refused 要是数组");
+  } else {
+    for (const r of m.refused) {
+      const where = `refused:${r?.id ?? "(无 id)"}`;
+      if (!r?.id) errors.push(`${where}: 缺 id`);
+      if (!r?.repo?.startsWith("https://github.com/")) errors.push(`${where}: repo 不是 GitHub URL`);
+      // 拒收要说得出理由 —— 一条没有理由的 refused 和把它删掉是同一件事。
+      if (!r?.reason || r.reason.length < 10) errors.push(`${where}: 缺 reason（为什么不能收）`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(r?.verifiedAt ?? "")) errors.push(`${where}: verifiedAt 要是 YYYY-MM-DD（哪天核的）`);
+      if (r?.commit !== undefined && !/^[0-9a-f]{40}$/.test(r.commit)) errors.push(`${where}: commit 给了就要是 40 位十六进制`);
+      if (seen.has(r?.id)) errors.push(`${where}: 被拒的来源又出现在 skills / servers 里`);
+    }
+  }
 }
+
 const servers = m.servers ?? [];
 const launchable = servers.filter((e) => e.launch).length;
 const offlineDefault = servers.filter((e) => e.tier === "default").length;
@@ -220,11 +241,20 @@ if (m.pythonRuntime?.uv) {
   }
 }
 
+// 汇报放在**所有**规则跑完之后。此前它夹在组件段与 pythonRuntime 段之间，
+// 于是 pythonRuntime 的每一条 push 都是死信 —— 检查在跑，结论没人读
+// （2026-09-09 顺带修）。
+if (errors.length) {
+  console.error(`[skill-manifest] ${errors.length} 处不合规：\n  - ` + errors.join("\n  - "));
+  exit(1);
+}
+
 const needsSetup = (m.servers ?? []).filter(
   (e) => e.tier === "default" && e.launch && ((e.launch.requiresEnv ?? []).length > 0 || e.launch.requiresBin),
 ).length;
 console.log(
   `[skill-manifest] OK - 技能来源 ${(m.skills ?? []).length} 个、MCP 服务器 ${servers.length} 个` +
     `（${launchable} 个带本机启动规格；${offlineDefault} 个默认档随包、不下载任何字节${needsSetup ? `，其中 ${needsSetup} 条要先配置才能起` : "，且都开箱即起"}）、` +
-    `获取通道组件 ${(m.components ?? []).length} 个，全部有许可证与来源、commit 与 sha256 已钉死。`,
+    `获取通道组件 ${(m.components ?? []).length} 个，全部有许可证与来源、commit 与 sha256 已钉死` +
+    `${(m.refused ?? []).length ? `；另有 ${(m.refused ?? []).length} 条查过不能收，记在 refused 里` : ""}。`,
 );
