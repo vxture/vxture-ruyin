@@ -918,6 +918,11 @@ export class Api {
   session = () => this.call<SessionInfo>("/auth/session");
   login = () => this.call<{ authorizeUrl: string }>("/auth/login", "POST");
   logout = () => this.call<{ ok: boolean }>("/auth/logout", "POST");
+  /**
+   * 「换个账号」要打开的地址（平台的 RP-initiated logout）。平台没公布这个
+   * 端点时 `url` 缺席 —— 那时不给入口，而不是给一个点了没反应的链接。
+   */
+  endSessionUrl = () => this.call<{ url?: string }>("/auth/end-session-url");
   entitlements = (products: string[]) =>
     this.call<EntitlementsBatch>(
       `/entitlements?products=${encodeURIComponent(products.join(","))}`,

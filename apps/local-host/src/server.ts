@@ -573,6 +573,15 @@ async function handle(
       send(res, 200, { ok: true });
       return;
     }
+    // 「换个账号」用的地址：平台的 RP-initiated logout。**只是交出地址，这里
+    // 不去调它** —— 清掉浏览器里的 IdP 会话是浏览器级的动作，必须由用户自己
+    // 按（TD-057）。平台没公布这个端点时回 `{}`，界面据此不给这个入口，而不是
+    // 给一个点了没反应的链接。
+    if (method === "GET" && path === "/auth/end-session-url") {
+      const url = await deps.platform.endSessionUrl();
+      send(res, 200, url ? { url } : {});
+      return;
+    }
     // GET /entitlements?products=a,b - daemon-proxied C2 envelope read; the
     // UI never sees platform tokens, only the envelope.
     if (method === "GET" && path === "/entitlements") {

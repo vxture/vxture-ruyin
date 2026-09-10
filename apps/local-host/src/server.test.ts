@@ -499,6 +499,42 @@ void test("HTTP /auth/session, /auth/login, /auth/logout wire straight through t
   }
 });
 
+/**
+ * 「换个账号」那个地址：平台公布了就交出来，没公布就回空对象。
+ *
+ * 回空对象而**不是** 404/501 是有意的：界面只需要「给不给这个入口」这一个
+ * 答案，一个错误码会逼它把「平台没这功能」和「这次请求坏了」当成一回事 ——
+ * 而这两者该有不同的下场（前者安静地不给入口，后者才是故障）。
+ */
+void test("HTTP GET /auth/end-session-url: 公布了就给地址，没公布回空对象（不是错误）", async () => {
+  const withIt = await startServer({
+    platform: signedInTo("wsp_x", {
+      endSessionUrl: async () => "https://accounts.vxture.com/oidc/end_session?client_id=ruyin",
+    }),
+  });
+  try {
+    const res = await fetch(`${withIt.base}/auth/end-session-url`, { headers: withIt.headers });
+    assert.equal(res.status, 200);
+    assert.equal(
+      ((await res.json()) as { url?: string }).url,
+      "https://accounts.vxture.com/oidc/end_session?client_id=ruyin",
+    );
+  } finally {
+    closeRig(withIt);
+  }
+
+  const without = await startServer({
+    platform: signedInTo("wsp_x", { endSessionUrl: async () => undefined }),
+  });
+  try {
+    const res = await fetch(`${without.base}/auth/end-session-url`, { headers: without.headers });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {});
+  } finally {
+    closeRig(without);
+  }
+});
+
 void test("HTTP: /auth/* is a 404 when no platform integration is configured", async () => {
   const rig = await startServer();
   try {
