@@ -110,6 +110,25 @@ void test("LoginScreen: 说明「会直接用浏览器里那个账号」，并�
 });
 
 /**
+ * 点了「换人」之后要接着告诉他下一步 —— 这一步**不会自动接回来**。
+ *
+ * 实测 `end_session` 把 `post_logout_redirect_uri` 也忽略了（带回环地址、带乱写
+ * 的地址、什么都不带，三种回应逐字相同），所以没有可靠的返回跳。换人只能是
+ * 两步，那就得说出第二步是什么，否则用户在浏览器里退完了会站在那儿等它自己
+ * 回来。
+ */
+void test("LoginScreen: 点了换人之后，告诉他退完回来再点登录", async () => {
+  const api = fakeApi();
+  render(<SessionGate api={api} />);
+  const link = await screen.findByText(/先在浏览器里退出 Vxture/);
+  expect(screen.queryByText(/回到这里再点一次登录/)).not.toBeInTheDocument();
+
+  const user = userEvent.setup();
+  await user.click(link);
+  expect(await screen.findByText(/在浏览器里退出之后，回到这里再点一次登录/)).toBeInTheDocument();
+});
+
+/**
  * 平台没公布 `end_session_endpoint` 时**不给这个入口** —— 给一个点了没反应的
  * 链接，比没有这个链接更糟。那句状态说明照旧留着：它成立与否跟平台有没有这个
  * 端点无关。

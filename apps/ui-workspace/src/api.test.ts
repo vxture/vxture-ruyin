@@ -393,6 +393,12 @@ const WRAPPER_CASES: WrapperCase[] = [
   { name: "login", call: (api) => api.login(), method: "POST", path: "/auth/login" },
   { name: "logout", call: (api) => api.logout(), method: "POST", path: "/auth/logout" },
   {
+    name: "endSessionUrl",
+    call: (api) => api.endSessionUrl(),
+    method: "GET",
+    path: "/auth/end-session-url",
+  },
+  {
     name: "entitlements",
     call: (api) => api.entitlements(["bidproposal", "vxture.crm"]),
     method: "GET",
