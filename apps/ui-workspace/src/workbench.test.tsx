@@ -75,10 +75,11 @@ vi.mock("./workspace", () => ({
   ),
 }));
 vi.mock("./user", () => ({
-  UserSlot: (props: { onOpenSettings: () => void }) => (
+  UserSlot: (props: { onOpenSettings: () => void; onSignedOut: () => void }) => (
     <div data-testid="user-slot-stub">
       user
       <button onClick={() => props.onOpenSettings()}>user-stub-open-settings</button>
+      <button onClick={() => props.onSignedOut()}>user-stub-sign-out</button>
     </div>
   ),
 }));
@@ -164,7 +165,7 @@ afterEach(() => {
 
 void test("Workbench: starts on the home view, showing the brand and the home stub", async () => {
   const { Workbench } = await import("./workbench");
-  render(<Workbench api={fakeApi()} />);
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   // 字标只写 RUYIN：标记已经在左边了，再写一遍「如影」是同一个身份说两遍。
   expect(await screen.findByText("RUYIN")).toBeInTheDocument();
   expect(screen.getByText("Intelligent Workbench")).toBeInTheDocument();
@@ -176,13 +177,13 @@ void test("Workbench: starts on the home view, showing the brand and the home st
 void test("Workbench: a refreshSidebar failure surfaces as an error box, not a silent blank sidebar", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi({ products: vi.fn().mockRejectedValue(new Error("守护进程未响应")) });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   expect(await screen.findByText("守护进程未响应")).toBeInTheDocument();
 });
 
 void test("Workbench: clicking 设置 switches the header identity, sidebar domain, and main content together", async () => {
   const { Workbench } = await import("./workbench");
-  render(<Workbench api={fakeApi()} />);
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
@@ -202,7 +203,7 @@ void test("Workbench: opening a project shows its product/project identity in th
     products: vi.fn().mockResolvedValue([product()]),
     projects: vi.fn().mockResolvedValue(projectList([workspace({ id: "prj_open", name: "我的投标" })])),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
 
   const user = userEvent.setup();
   await user.click(await screen.findByText("我的投标"));
@@ -221,7 +222,7 @@ void test("Workbench: 设置 always lands on the account section", async () => {
   // SETTINGS_SECTIONS 这份固定数据——没有一条真实交互路径能拼出一个不存在的
   // 分区名。所以这里只如实验证唯一可达的路径：点"设置"落在 account。
   const { Workbench } = await import("./workbench");
-  render(<Workbench api={fakeApi()} />);
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
@@ -240,7 +241,7 @@ void test("Workbench: the sidebar splits attributed projects from the unattribut
       ]),
     ),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   expect(await screen.findByText("最近工作")).toBeInTheDocument();
   expect(screen.getByText("待导入工作区")).toBeInTheDocument();
   expect(screen.getByText("我的项目")).toBeInTheDocument();
@@ -270,7 +271,7 @@ void test("Workbench: 最近工作 is newest-first, and each row carries its pro
       ]),
     ),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByText("最近工作");
   // 产品名走第二行：项目名是他要找的东西，产品名是用来区分重名的上下文。
   expect(screen.getAllByText("标书编写").length).toBeGreaterThan(0);
@@ -285,7 +286,7 @@ void test("Workbench: with no real project the 最近工作 samples show, marked
   const { Workbench } = await import("./workbench");
   const { DEMO_RECENT } = await import("./catalog");
   const api = fakeApi({ projects: vi.fn().mockResolvedValue(projectList([])) });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByText("最近工作");
   const sample = DEMO_RECENT[0]!;
   // 样例不指向任何项目路由 —— 一个点进去是空的项目，比没有这一组更让人困惑。
@@ -315,7 +316,7 @@ void test("Workbench: one real project and the whole sample group is gone - neve
         projectList([workspace({ id: "prj_real", name: "真项目", workspaceId: "wsp_1" })]),
       ),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   expect(await screen.findByText("真项目")).toBeInTheDocument();
   // 真假混排是最坏的一种：用户没有办法分辨哪一条是自己的。
   for (const d of DEMO_RECENT) {
@@ -326,7 +327,7 @@ void test("Workbench: one real project and the whole sample group is gone - neve
 void test("Workbench: projects left in other workspaces are reported by count only, in the sidebar footer", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi({ projects: vi.fn().mockResolvedValue(projectList([], 3)) });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   expect(await screen.findByText("另有 3 个项目在其他工作区")).toBeInTheDocument();
 });
 
@@ -336,7 +337,7 @@ void test("Workbench: search filters across projects, products, and actions by t
     products: vi.fn().mockResolvedValue([product({ name: "标书编写" })]),
     projects: vi.fn().mockResolvedValue(projectList([workspace({ name: "某储能电站投标" })])),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
@@ -352,7 +353,7 @@ void test("Workbench: search filters across projects, products, and actions by t
 
 void test("Workbench: search surfaces a matching action, and selecting it navigates there", async () => {
   const { Workbench } = await import("./workbench");
-  render(<Workbench api={fakeApi()} />);
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   // 弹层的开合完全由 query 是否非空决定（点击/聚焦/方向键都不开），所以
@@ -372,7 +373,7 @@ void test("Workbench: search surfaces a matching action, and selecting it naviga
 void test("Workbench: the runtime health badge reflects a real /health failure, not a stale 就绪", async () => {
   globalThis.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
   const { Workbench } = await import("./workbench");
-  render(<Workbench api={fakeApi()} />);
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   expect(await screen.findByText("未连接")).toBeInTheDocument();
 });
 
@@ -380,7 +381,7 @@ void test("Workbench: window focus triggers an entitlements refresh (D5) without
   const { Workbench } = await import("./workbench");
   const refreshEntitlements = vi.fn().mockResolvedValue([product({ id: "vxture.new" })]);
   const api = fakeApi({ refreshEntitlements });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   window.dispatchEvent(new Event("focus"));
@@ -398,7 +399,7 @@ void test("Workbench: opening a project with same-product siblings lists them in
       ]),
     ),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
 
   const user = userEvent.setup();
   await user.click(await screen.findByText("项目甲"));
@@ -410,7 +411,7 @@ void test("Workbench: opening a project with same-product siblings lists them in
 
 void test("Workbench: 回到工作台 navigates back to the home view from settings", async () => {
   const { Workbench } = await import("./workbench");
-  render(<Workbench api={fakeApi()} />);
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
@@ -424,7 +425,7 @@ void test("Workbench: 回到工作台 navigates back to the home view from setti
 
 void test("Workbench: the sidebar collapse toggle flips collapsed state", async () => {
   const { Workbench } = await import("./workbench");
-  render(<Workbench api={fakeApi()} />);
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
@@ -439,7 +440,7 @@ void test("Workbench: selecting a project from search results opens it", async (
       projectList([workspace({ id: "prj_x", name: "某储能电站投标" })]),
     ),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
@@ -455,7 +456,7 @@ void test("Workbench: selecting a project from search results opens it", async (
 void test("Workbench: search results for a product and for 回到首页 both navigate back to home", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi({ products: vi.fn().mockResolvedValue([product({ name: "标书编写" })]) });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
   const user = userEvent.setup();
   const box = screen.getByPlaceholderText("搜索项目、产品与动作…");
@@ -477,7 +478,7 @@ void test("Workbench: search results for a product and for 回到首页 both nav
 
 void test("Workbench: HomePage's onOpen routes to the opened project", async () => {
   const { Workbench } = await import("./workbench");
-  render(<Workbench api={fakeApi()} />);
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
@@ -490,7 +491,7 @@ void test("Workbench: HomePage's onOpen routes to the opened project", async () 
 void test("Workbench: HomePage's onCreated refreshes the sidebar and opens the new project", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi();
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
@@ -505,7 +506,7 @@ void test("Workbench: HomePage's onCreated refreshes the sidebar and opens the n
 
 void test("Workbench: PendingInbox's onOpen routes to the pending project", async () => {
   const { Workbench } = await import("./workbench");
-  render(<Workbench api={fakeApi()} />);
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
@@ -517,12 +518,30 @@ void test("Workbench: PendingInbox's onOpen routes to the pending project", asyn
 
 void test("Workbench: UserSlot's onOpenSettings opens settings", async () => {
   const { Workbench } = await import("./workbench");
-  render(<Workbench api={fakeApi()} />);
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
   await user.click(screen.getByText("user-stub-open-settings"));
   expect(await screen.findByTestId("settings-stub")).toHaveTextContent("settings:account");
+});
+
+/**
+ * 工作台自己不决定退出后的去留，它只负责把 `UserSlot` 的退出**原样**传上去。
+ *
+ * 钉的是「传上去的就是调用方给的那个回调」而不是「有没有传」—— 必填的 prop
+ * 已经让编译器保证有东西传，但一个 `onSignedOut={() => {}}` 同样能编译通过，
+ * 而那正是这个 bug 的形状：接上了，接的却不是值。
+ */
+void test("Workbench: 侧栏那一格的退出被原样转给调用方（不是接了个空函数）", async () => {
+  const { Workbench } = await import("./workbench");
+  const onSignedOut = vi.fn();
+  render(<Workbench api={fakeApi()} onSignedOut={onSignedOut} />);
+  await screen.findByTestId("home-stub");
+
+  const user = userEvent.setup();
+  await user.click(screen.getByText("user-stub-sign-out"));
+  expect(onSignedOut).toHaveBeenCalledTimes(1);
 });
 
 void test("Workbench: the active workspace name shows in the header once signed in", async () => {
@@ -536,7 +555,7 @@ void test("Workbench: the active workspace name shows in the header once signed 
       entitlementsConfigured: false,
     }),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
   expect(await screen.findByText("某工作区")).toBeInTheDocument();
 });
@@ -548,7 +567,7 @@ void test("Workbench: search also matches a project by its productId, not just i
       projectList([workspace({ name: "无关名字", productId: "bidproposal" })]),
     ),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
@@ -563,7 +582,7 @@ void test("Workbench: pending task count from an open project appends to the 任
     products: vi.fn().mockResolvedValue([product()]),
     projects: vi.fn().mockResolvedValue(projectList([workspace({ id: "prj_1" })])),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
 
   const user = userEvent.setup();
   await user.click(await screen.findByText("投标项目"));
@@ -577,7 +596,7 @@ void test("Workbench (electron chrome): the caption-button spacer appears, brows
   vi.resetModules();
   vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 Electron/30.0.0" });
   const { Workbench } = await import("./workbench");
-  const { container } = render(<Workbench api={fakeApi()} />);
+  const { container } = render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
   expect(container.querySelector(".caption-spacer")).toBeInTheDocument();
 });
@@ -595,7 +614,7 @@ void test("Header workspace control: icon + name only (no 工作区 label); open
       entitlementsConfigured: false,
     }),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   const trigger = await screen.findByRole("button", { name: /某工作区/ });
   expect(trigger.textContent).not.toContain("工作区名");
   expect(screen.queryByText("工作区", { exact: true })).not.toBeInTheDocument();
@@ -628,7 +647,7 @@ void test("Sidebar 最近工作: capped at 8, newest first; no 总览 group; dom
     workspace({ id: `prj_${i}`, name: `项目${i}`, createdAt: `2026-09-${String(i + 1).padStart(2, "0")}T00:00:00Z` }),
   );
   const api = fakeApi({ projects: vi.fn().mockResolvedValue({ items: many, elsewhere: 0 } as ProjectList) });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByText("项目11");
   const links = Array.from(document.querySelectorAll(".app-sidebar nav a")).map((a) => a.getAttribute("href"));
   const recent = links.filter((h) => h?.startsWith("#ws/"));
@@ -647,7 +666,7 @@ void test("Sidebar 最近工作 follows the home card selection: one product sel
       elsewhere: 0,
     } as ProjectList),
   });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByText("甲一");
   const user = userEvent.setup();
   await user.click(screen.getByTestId("home-stub-select-a"));
@@ -661,7 +680,7 @@ void test("Scrollbars: any scroll marks the document as scrolling, and the mark 
   const { Workbench } = await import("./workbench");
   vi.useFakeTimers();
   try {
-    render(<Workbench api={fakeApi()} />);
+    render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
     const main = document.querySelector("main") ?? document.body;
     main.dispatchEvent(new Event("scroll", { bubbles: true }));
     expect(document.documentElement.hasAttribute("data-scrolling")).toBe(true);
@@ -678,7 +697,7 @@ void test("Scrollbars: any scroll marks the document as scrolling, and the mark 
 
 void test("Workbench: 认不出来的地址什么也不做 —— 不清空视图，也不跳回首页", async () => {
   const { Workbench } = await import("./workbench");
-  render(<Workbench api={fakeApi()} />);
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "设置" }));
@@ -694,7 +713,7 @@ void test("Workbench: 认不出来的地址什么也不做 —— 不清空视�
 void test("Workbench: 侧栏拉不到时顶部报一条，且那条提醒可以关掉", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi({ projects: vi.fn().mockRejectedValue(new Error("daemon unreachable")) });
-  render(<Workbench api={api} />);
+  render(<Workbench api={api} onSignedOut={() => {}} />);
   expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
   // 关掉之后不再占着内容区顶部；它讲的是刚才那次拉取，不是这一页的状态。
   await userEvent.setup().click(screen.getByRole("button", { name: "关闭提醒" }));

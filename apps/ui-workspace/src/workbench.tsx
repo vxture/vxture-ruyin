@@ -147,7 +147,14 @@ function useRuntimeHealth() {
   return health;
 }
 
-export function Workbench({ api }: { api: Api }) {
+export function Workbench({
+  api,
+  onSignedOut,
+}: {
+  api: Api;
+  /** 用户在侧栏底部退出登录后调用；工作台自己不决定去留，交给会话闸门重读。 */
+  onSignedOut: () => void;
+}) {
   const [products, setProducts] = useState<ProductInfo[]>([]);
   const [workspaces, setWorkspaces] = useState<ProjectMeta[]>([]);
   /** 其他工作区里还有几个项目。只报数量——让人知道数据还在，不泄露名字。 */
@@ -636,6 +643,7 @@ export function Workbench({ api }: { api: Api }) {
             productIds={products.map((p) => p.id)}
             collapsed={collapsed}
             onOpenSettings={() => navigate("#settings/account")}
+            onSignedOut={onSignedOut}
           />
         </>
       }

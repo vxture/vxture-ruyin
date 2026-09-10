@@ -32,11 +32,23 @@ export function UserSlot({
   productIds,
   collapsed,
   onOpenSettings,
+  onSignedOut,
 }: {
   api: Api;
   productIds: string[];
   collapsed?: boolean;
   onOpenSettings: () => void;
+  /**
+   * 退出登录之后调用 —— 由会话闸门（login.tsx 的 `SessionGate`）重读会话。
+   *
+   * **必填，不是可选。** 这一格里的「退出登录」只能改到这一格自己的状态，
+   * 而决定「显示登录页还是工作台」的是闸门，且闸门只在挂载时读过一次会话。
+   * 少了这个回调，退出之后工作台会带着一个已经不成立的登录态继续站在屏幕上：
+   * 面板翻成未登录，背后整个界面照常可点，设置 › 账号还照旧显示着人
+   * （owner 2026-09-10 报的就是这一幕）。写成必填，是为了让下一个挂载
+   * `UserSlot` 的人在**编译期**就被拦住，而不是等到有人真去点那个按钮。
+   */
+  onSignedOut: () => void;
 }) {
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [online, setOnline] = useState(false);
@@ -114,9 +126,20 @@ export function UserSlot({
     setBusy(true);
     try {
       await api.logout();
-      await refreshSession();
+    } catch {
+      // 退出失败不拦人，也不炸出一个没人接的 rejection：本地会话到底还在不在，
+      // 由守护进程说了算，而下面那一次重读就是去问它的。
     } finally {
       setBusy(false);
+      // 退出必须传到会话闸门那里去，这一格自己刷新是不够的 —— 见 onSignedOut
+      // 的说明。**放在 finally 里是有意的**：logout 失败时也要通知，因为闸门
+      // 做的是「重读会话」而不是「假定已退出」；守护进程说还登着，它就什么
+      // 都不变。反过来若只在成功路径上通知，一次失败的退出会让界面停在一个
+      // 谁也没读过的状态里。
+      //
+      // 这里**不**再 refreshSession()：那会让面板先闪一下「会话已失效」，
+      // 而这是用户自己按的退出，不是掉线。两者在用户那里不是一回事。
+      onSignedOut();
     }
   };
 

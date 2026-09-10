@@ -70,7 +70,7 @@ afterEach(() => {
 
 void test("UserSlot: not signed in reads 'session expired', not a generic 'not logged in' label", async () => {
   const api = fakeApi({ session: vi.fn().mockResolvedValue(session({ signedIn: false })) });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   expect(await screen.findByText("会话已失效")).toBeInTheDocument();
 });
 
@@ -81,7 +81,7 @@ void test("UserSlot: 侧栏那一格只放显示名，退到用户名，**从不
     ),
   });
   const { unmount, container } = render(
-    <UserSlot api={withName} productIds={[]} onOpenSettings={() => {}} />,
+    <UserSlot api={withName} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />,
   );
   expect(
     await screen.findByText("郭彦豪", { selector: ".user-chip-name" }),
@@ -100,7 +100,7 @@ void test("UserSlot: 侧栏那一格只放显示名，退到用户名，**从不
     ),
   });
   const { container: c2 } = render(
-    <UserSlot api={noName} productIds={[]} onOpenSettings={() => {}} />,
+    <UserSlot api={noName} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />,
   );
   expect(
     await screen.findByText("yanhao", { selector: ".user-chip-name" }),
@@ -111,7 +111,7 @@ void test("UserSlot: 侧栏那一格只放显示名，退到用户名，**从不
 void test("UserSlot: online health reflects the /health poll result", async () => {
   globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
   const api = fakeApi();
-  const { container } = render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  const { container } = render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await screen.findByText("会话已失效");
   expect(container.querySelector(".user-chip-dot.off")).toBeInTheDocument();
 });
@@ -119,14 +119,14 @@ void test("UserSlot: online health reflects the /health poll result", async () =
 void test("UserSlot: a /health fetch that rejects outright (not just a non-ok status) still reads offline", async () => {
   globalThis.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
   const api = fakeApi();
-  const { container } = render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  const { container } = render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await screen.findByText("会话已失效");
   expect(container.querySelector(".user-chip-dot.off")).toBeInTheDocument();
 });
 
 void test("UserSlot: a session() rejection leaves the slot signed-out rather than crashing", async () => {
   const api = fakeApi({ session: vi.fn().mockRejectedValue(new Error("daemon unreachable")) });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   expect(await screen.findByText("会话已失效", { selector: ".user-chip-name" })).toBeInTheDocument();
 });
 
@@ -136,14 +136,14 @@ void test("UserSlot: shows the active workspace name when signed in with one", a
   const api = fakeApi({
     session: vi.fn().mockResolvedValue(session({ signedIn: true, workspace: { name: "某工作区" } })),
   });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await openPopover();
   expect(await screen.findByText("某工作区")).toBeInTheDocument();
 });
 
 void test("UserSlot: online before system info has loaded shows 运行中 without a version, not stuck on the offline label", async () => {
   const api = fakeApi({ system: vi.fn((): Promise<SystemInfo> => new Promise(() => {})) });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await openPopover();
   expect(await screen.findByText(/^已就绪/)).toBeInTheDocument();
 });
@@ -152,7 +152,7 @@ void test("UserSlot: non-DPAPI key protection reads 开发态, not left blank", 
   const api = fakeApi({
     system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "plaintext" })),
   });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await openPopover();
   expect(await screen.findByText("开发态 · 主密钥明文")).toBeInTheDocument();
 });
@@ -162,7 +162,7 @@ void test("UserSlot: non-DPAPI key protection reads 开发态, not left blank", 
 void test("UserSlot: the login button is disabled while offline", async () => {
   globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
   const api = fakeApi({ session: vi.fn().mockResolvedValue(session({ signedIn: false })) });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await openPopover();
   expect(await screen.findByText("登录 Vxture 账号")).toBeDisabled();
 });
@@ -173,7 +173,7 @@ void test("UserSlot: clicking login calls api.login() and opens the authorize UR
     session: vi.fn().mockResolvedValue(session({ signedIn: false })),
     login,
   });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await openPopover();
   const button = await screen.findByText("登录 Vxture 账号");
   await vi.waitFor(() => expect(button).not.toBeDisabled());
@@ -194,7 +194,7 @@ void test("UserSlot: login polling picks up a completed sign-in and clears the f
     .mockResolvedValueOnce(session({ signedIn: false })) // 挂载时
     .mockResolvedValue(session({ signedIn: false })); // 轮询前几次
   const api = fakeApi({ session: sessionFn });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await openPopover();
   const button = await screen.findByText("登录 Vxture 账号");
   await vi.waitFor(() => expect(button).not.toBeDisabled());
@@ -214,7 +214,7 @@ void test("UserSlot: clicking login again while a poll is already running replac
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const sessionFn = vi.fn().mockResolvedValue(session({ signedIn: false })); // 从不签入
   const api = fakeApi({ session: sessionFn });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await openPopover();
   const button = await screen.findByText("登录 Vxture 账号");
   await vi.waitFor(() => expect(button).not.toBeDisabled());
@@ -237,7 +237,7 @@ void test("UserSlot: login polling gives up after 5 minutes rather than polling 
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const sessionFn = vi.fn().mockResolvedValue(session({ signedIn: false }));
   const api = fakeApi({ session: sessionFn });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await openPopover();
   const button = await screen.findByText("登录 Vxture 账号");
   await vi.waitFor(() => expect(button).not.toBeDisabled());
@@ -251,29 +251,59 @@ void test("UserSlot: login polling gives up after 5 minutes rather than polling 
   vi.useRealTimers();
 });
 
-void test("UserSlot: logging out calls api.logout(), then re-reads the session", async () => {
-  const sessionFn = vi
-    .fn()
-    .mockResolvedValueOnce(session({ signedIn: true, profile: { sub: "u1", name: "郭彦豪" } }))
-    .mockResolvedValue(session({ signedIn: false }));
+/**
+ * 退出登录必须往上报，光调 `api.logout()` 是不够的。
+ *
+ * owner 2026-09-10 报的那一幕：点退出，**只有这一格退了** —— 它翻成未登录、
+ * 显示「登录 Vxture 账号」，而背后整个工作台原地不动、照样可点，设置 › 账号
+ * 还照旧显示着人。原因是登录态在界面里有四份各自读取的副本，而决定「登录页
+ * 还是工作台」的那一份在 `SessionGate` 里，它只在挂载时读过一次会话。
+ *
+ * 所以这里钉的是 **`onSignedOut` 真的被调用了**，而不是「`api.logout()` 调过
+ * 了」—— 后者在出这个 bug 的那版代码里同样成立。
+ */
+void test("UserSlot: 退出登录会通知上层（否则只有这一格退了，工作台原地不动）", async () => {
   const logout = vi.fn().mockResolvedValue({ ok: true });
-  const api = fakeApi({ session: sessionFn, logout });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  const onSignedOut = vi.fn();
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue(session({ signedIn: true, profile: { sub: "u1", name: "郭彦豪" } })),
+    logout,
+  });
+  render(
+    <UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={onSignedOut} />,
+  );
   await openPopover();
   const user = userEvent.setup();
   await user.click(await screen.findByText("退出登录"));
 
   expect(logout).toHaveBeenCalledTimes(1);
-  // 弹窗此刻还开着，"会话已失效" 会同时出现在 chip 和弹窗标题两处 —— 都是
-  // 预期行为，钉 chip 那一处就够了。
-  await screen.findByText("会话已失效", { selector: ".user-chip-name" });
-  expect(sessionFn).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(onSignedOut).toHaveBeenCalledTimes(1));
+});
+
+/**
+ * 退出失败也要通知 —— 上层做的是「重读会话」，不是「假定已退出」。
+ * 只在成功路径上通知，会让一次失败的退出把界面留在一个谁也没读过的状态里。
+ */
+void test("UserSlot: `api.logout()` 失败时同样通知上层（上层是重读，不是假定）", async () => {
+  const onSignedOut = vi.fn();
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue(session({ signedIn: true, profile: { sub: "u1", name: "郭彦豪" } })),
+    logout: vi.fn().mockRejectedValue(new Error("network down")),
+  });
+  render(
+    <UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={onSignedOut} />,
+  );
+  await openPopover();
+  const user = userEvent.setup();
+  await user.click(await screen.findByText("退出登录"));
+
+  await vi.waitFor(() => expect(onSignedOut).toHaveBeenCalledTimes(1));
 });
 
 void test("UserSlot: clicking the settings row calls onOpenSettings", async () => {
   const onOpenSettings = vi.fn();
   const api = fakeApi();
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={onOpenSettings} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={onOpenSettings} onSignedOut={() => {}} />);
   await openPopover();
   const user = userEvent.setup();
   await user.click(await screen.findByText("设置"));
@@ -284,7 +314,7 @@ void test("UserSlot: collapsed hides the name/sub text but keeps the accessible 
   const api = fakeApi({
     session: vi.fn().mockResolvedValue(session({ signedIn: true, profile: { sub: "u1", name: "郭彦豪" } })),
   });
-  render(<UserSlot api={api} productIds={[]} collapsed onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} collapsed onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await vi.waitFor(() =>
     expect(screen.getByRole("button", { name: "账户 · 郭彦豪" })).toBeInTheDocument(),
   );
@@ -296,7 +326,7 @@ void test("UserSlot panel: the three environment rows mirror the home page word 
     session: vi.fn().mockResolvedValue(session({ signedIn: true, workspace: { name: "某工作区" } })),
     system: vi.fn().mockResolvedValue(systemInfo({ version: "0.1.0", keyProtection: "dpapi" })),
   });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /账户/ }));
   expect(await screen.findByText("运行环境")).toBeInTheDocument();
@@ -315,7 +345,7 @@ void test("UserSlot: the platform's avatar picture is used when the session carr
       session({ signedIn: true, profile: { sub: "u1", name: "郭", picture: "https://img.example/u1.png" } }),
     ),
   });
-  const { container } = render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} />);
+  const { container } = render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await screen.findAllByText("郭");
   // Radix Avatar only mounts the <img> after it loads; the src is on the image element when present,
   // and the fallback initial is always there for the failure case.
