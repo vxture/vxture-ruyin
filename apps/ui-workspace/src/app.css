@@ -1195,54 +1195,25 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 .crypto-how { min-width: 0; }
 .crypto-note { opacity: 0.85; }
 
-/* ---------- 关于页：法律外链与归属清单 ----------
-   两组都用 `.crypto-chain` 的排版语言（同一个标签列宽、同一条虚线），但**不复用
-   那个类**：`.crypto-chain li` 是 `align-items: center` + 固定行高，那是给「一行
-   一句」的加密链条定的。这里的说明会折行（「安装与分发」那两条都是两三行），
-   居中对齐会让标签飘到说明的正中间，行高也撑不住。 */
-.oss-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.oss-list li {
+/* ---------- 关于页 ----------
+   条款是**一行内联链接**，照登录页页脚（`.login-foot`）那一行。上一版给它们
+   一人一张可点的卡（owner 2026-09-10：「不要都做 card 链接」）—— 关于页是偶尔
+   来一次、看一眼就走的地方，三张卡把它撑成了一个导航页。 */
+.about-legal {
   display: flex;
-  align-items: flex-start;      /* ← 与 .crypto-chain 唯一的实质差别 */
+  justify-content: center;
+  flex-wrap: wrap;
   gap: var(--spacing-md);
-  padding: var(--spacing-xs) 0;
-  border-bottom: 1px dashed var(--border);
+  margin-top: var(--spacing-md);
   font-size: var(--body-sm-font-size);
-  line-height: 1.55;
 }
-.oss-what { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
-.oss-how { min-width: 0; }
+.about-legal a { color: var(--muted-foreground); text-decoration: none; }
+.about-legal a:hover { color: var(--foreground); text-decoration: underline; }
 
-/* 法律外链：整块可点，不是一行字里挑那三个蓝字 —— 这几页是用户偶尔才找一次的
-   东西，命中区域小会让「找不到」变成「点不中」。 */
-.legal-links { display: flex; flex-direction: column; }
-.legal-link {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--spacing-sm) var(--spacing-xs);
-  margin: 0 calc(var(--spacing-xs) * -1);
-  border-bottom: 1px dashed var(--border);
-  border-radius: var(--radius-sm);
-  color: inherit;
-  text-decoration: none;
-}
-.legal-link:hover { background: var(--surface-3, rgba(127, 127, 127, 0.1)); }
-.legal-link-main {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2xs);
-  font-size: var(--body-sm-font-size);
-}
-.legal-link-desc {
-  color: var(--muted-foreground);
-  font-size: var(--body-sm-font-size);
-  opacity: 0.85;
-}
+/* 「须知」那四行沿用 `.crypto-chain`（同一个标签列宽、同一条虚线），只把
+   居中对齐改成顶对齐：那边一行一句，这边每句都会折行，居中会让标签飘到
+   说明的正中间。 */
+.about-facts li { align-items: flex-start; min-height: 0; padding: var(--spacing-xs) 0; line-height: 1.55; }
 /* 事实行尾的动作（「打开目录」）：顶到右端，不去挤值那一列 —— 值是这一行的
    主角，路径本来就长。 */
 /* 行尾的动作位。可以放不止一个（数据目录那一行有「打开目录」和「更改…」），
