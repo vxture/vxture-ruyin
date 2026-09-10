@@ -77,3 +77,22 @@ void test("resolveCodeSigning: 认不出的值忽略掉，回到构建印", () =
     assert.equal(resolveCodeSigning(dir, {}), "signed");
   });
 });
+
+/**
+ * 带 BOM 的印也要读得出来。
+ *
+ * 2026-09-10 验证这条链时被它绊过一次：用 PowerShell 写的测试文件带了 BOM，
+ * `JSON.parse` 抛，静默落到 `unpackaged`，看起来像「守护进程找错了目录」。
+ * 真正的坏处不是那次误诊，是**这个印会静默退化** —— 而界面上「没有提醒」和
+ * 「已签名」长得一模一样。
+ */
+void test("readBuildInfo: 带 BOM 的文件照样读得出来，不静默退化", () => {
+  withDir((dir) => {
+    writeFileSync(
+      join(dir, BUILD_INFO_FILE),
+      "﻿" + JSON.stringify({ codeSigning: "signed" }),
+      "utf8",
+    );
+    assert.equal(readBuildInfo(dir).codeSigning, "signed");
+  });
+});

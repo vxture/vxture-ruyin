@@ -400,6 +400,10 @@ const fileArea = {
   },
 };
 
+/** 这个包签没签名 —— **算一次**，播报与 /system 共用同一个值。
+ *  算两遍的话，播报说的和界面读的有一天会不一样，而那正是这类事实最难查的坏法。 */
+const codeSigning = resolveCodeSigning(dirname(fileURLToPath(import.meta.url)), process.env);
+
 const server = createLocalApi({
   runtime,
   registry,
@@ -517,7 +521,7 @@ const server = createLocalApi({
     keyProtection: keys.protection,
     capabilitySurface: capabilityBase ? "configured" : "mock",
     // 构建期落的印，跟着守护进程一起被打进 resources；仓里跑时它不存在。
-    codeSigning: resolveCodeSigning(dirname(fileURLToPath(import.meta.url)), process.env),
+    codeSigning,
     startedAt: new Date().toISOString(),
     // 这两条是**给界面讲清楚状态**用的：有没有排着一次搬家、上一次搬得怎么样。
     // 每次问 /system 都重新读指针文件，而不是缓存启动那一刻的值 —— 用户可能刚
@@ -696,6 +700,17 @@ server.listen(port, "127.0.0.1", () => {
       ? `[ruyin] capability surface: ${capabilityBase}`
       : "[ruyin] capability surface: NOT configured - tasks will return mock output",
   );
+  // **这一行是给打包链看的，不只是给人看的。**
+  //
+  // 关于页底部那条「未签名」提醒读的是构建印（build-info.ts），而那个印要经过
+  // 「pack 写入 → electron-builder 拷进 resources → 守护进程按自己的目录去找」
+  // 三步。第一次写的时候这三步就没对上：印落在 `daemon/` 根上，而打包后的入口
+  // 是 `daemon/dist/main.js` —— 差一层目录，装机态永远读成 unpackaged，于是那条
+  // 提醒**在真安装包里一次都不会出现**，而「没有提醒」和「已签名」长得一模一样。
+  //
+  // 所以把它播报出来，让 pack.mjs 在打完包之后**问跑起来的守护进程**它到底看见
+  // 了什么。这比检查文件在不在强：它一次证明整条链通了。
+  console.log(`[ruyin] code signing: ${codeSigning}`);
   // 改了预算就要能看见它生效了 —— 一个不说话的旋钮，拧了和没拧长得一样。
   console.log(`[ruyin] ${contextBudget.note}`);
   // 只在被改动过的时候说 —— 缺省值天天打一行，读日志的人会学会忽略它。

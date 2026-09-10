@@ -105,7 +105,11 @@ const certInEnv = Boolean(
     process.env["CSC_KEY_PASSWORD"],
 );
 const codeSigning = certInYml || certInEnv ? "signed" : "unsigned";
-writeFileSync(join(daemonOut, "build-info.json"), JSON.stringify({ codeSigning }, null, 2));
+// **落在 `dist/` 里，不是 daemon 根上**：守护进程按**自己那个文件所在的目录**去
+// 找（`dirname(import.meta.url)`），而打包后的入口是 `resources/daemon/dist/main.js`。
+// 第一版写在根上，差一层目录，装机态永远读成 unpackaged —— 下面那条断言就是为了
+// 这种错而加的。
+writeFileSync(join(daemonOut, "dist", "build-info.json"), JSON.stringify({ codeSigning }, null, 2));
 console.log(`[pack] build-info: codeSigning=${codeSigning}`);
 
 // `pnpm deploy --prod` production-installs the WHOLE workspace as a side
@@ -185,6 +189,34 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
       " see the output above.",
   );
   process.exit(1);
+}
+
+// 构建印真的到了打包产物里，而且守护进程**找得到**它。
+//
+// 这一条防的是一个已经犯过的错：印落在 `daemon/` 根上，而打包后的入口是
+// `daemon/dist/main.js`，守护进程按自己的目录去找，差一层，读成 `unpackaged`。
+// 后果是关于页底部那条「未签名」提醒**在真安装包里一次都不出现** —— 而
+// 「没有提醒」和「已签名」在屏幕上长得一模一样，谁也不会发现。
+//
+// 断言的是**跑起来的守护进程报了什么**，不是「文件在不在」：文件在而路径对不上
+// 时，前者红、后者绿 —— 而那正是当时的情形。
+{
+  const m = /\[ruyin\] code signing: (\w+)/.exec(smokeOut);
+  if (!m) {
+    console.error(
+      '[pack] FAILED: 守护进程没有报签名状态（缺 "[ruyin] code signing: X" 这一行）',
+    );
+    process.exit(1);
+  }
+  if (m[1] !== codeSigning) {
+    console.error(
+      `[pack] FAILED: 构建印没到位 —— pack 写的是 ${codeSigning}，打包后的守护进程读到的是 ${m[1]}。\n` +
+        `       多半是 build-info.json 的落点与守护进程的查找目录对不上\n` +
+        `       （入口在 resources/daemon/dist/main.js，印就得在同一层）。`,
+    );
+    process.exit(1);
+  }
+  console.log(`[pack] build-info 落位核对: 守护进程读到 codeSigning=${m[1]}`);
 }
 
 // 预置技能层真的在包里。

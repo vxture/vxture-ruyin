@@ -59,7 +59,16 @@ export function readBuildInfo(dir: string): BuildInfo {
   const path = join(dir, BUILD_INFO_FILE);
   if (!existsSync(path)) return { codeSigning: "unpackaged" };
   try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    // **去掉 BOM 再解析。** 我们自己的写入方（`pack.mjs` 的 `writeFileSync`）
+    // 不会写 BOM，但任何人在 Windows 上手改过这个文件都可能带上一个
+    // （PowerShell 5.1 的 `-Encoding utf8` 就写 BOM），而 `JSON.parse` 见了 BOM
+    // 直接抛 —— 于是这个印**静默退化成 `unpackaged`**，界面上那条提醒随之消失，
+    // 而「没有提醒」和「已签名」长得一模一样。2026-09-10 验证这条链时就是这么
+    // 被绊了一次（当时以为是查找目录错了，其实是测试文件带了 BOM）。
+    const raw = JSON.parse(readFileSync(path, "utf8").replace(/^﻿/, "")) as Record<
+      string,
+      unknown
+    >;
     const v = raw["codeSigning"];
     if (v === "signed" || v === "unsigned") return { codeSigning: v };
     return { codeSigning: "unpackaged" };
