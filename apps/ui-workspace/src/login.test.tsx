@@ -21,7 +21,12 @@ vi.mock("./host-chrome", () => ({
   useHostChrome: () => hostChrome,
 }));
 vi.mock("./workbench", () => ({
-  Workbench: () => <div data-testid="workbench-stub">workbench</div>,
+  Workbench: (props: { onSignedOut: () => void }) => (
+    <div data-testid="workbench-stub">
+      workbench
+      <button onClick={() => props.onSignedOut()}>workbench-stub-sign-out</button>
+    </div>
+  ),
 }));
 
 function signedOut(overrides: Partial<SessionInfo> = {}): SessionInfo {
@@ -88,6 +93,33 @@ void test("SessionGate: signed in renders the product (Workbench), not the login
   render(<SessionGate api={api} />);
   expect(await screen.findByTestId("workbench-stub")).toBeInTheDocument();
   expect(screen.queryByText("登录 Vxture 账号")).not.toBeInTheDocument();
+});
+
+/**
+ * 退出登录之后必须回到登录页 —— 这一条是 owner 2026-09-10 报的那个 bug 的正面。
+ *
+ * 当时的样子：点了退出，只有侧栏底部那一格翻成未登录，**工作台原地不动、照样
+ * 可点，设置 › 账号还照旧显示着人**。原因就在这里：闸门只在挂载时读过一次会话，
+ * 没有任何东西再叫它读第二次。
+ *
+ * 所以钉两件事：① 闸门确实重读了会话（`session` 被调了第二次）；② 重读之后
+ * 换回了登录页 —— 只钉①的话，一个读了却不换页的实现照样能过。
+ */
+void test("SessionGate: 工作台报出退出后，闸门重读会话并换回登录页", async () => {
+  const sessionFn = vi
+    .fn()
+    .mockResolvedValueOnce(signedIn())
+    .mockResolvedValue(signedOut());
+  const api = fakeApi({ session: sessionFn });
+  render(<SessionGate api={api} />);
+  await screen.findByTestId("workbench-stub");
+
+  const user = userEvent.setup();
+  await user.click(screen.getByText("workbench-stub-sign-out"));
+
+  expect(await screen.findByText("登录 Vxture 账号")).toBeInTheDocument();
+  expect(screen.queryByTestId("workbench-stub")).not.toBeInTheDocument();
+  expect(sessionFn).toHaveBeenCalledTimes(2);
 });
 
 void test("DragStrip: renders in the Electron chrome, not in a plain browser tab", async () => {

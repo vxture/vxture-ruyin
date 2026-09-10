@@ -169,13 +169,36 @@ const harness = await runtime.createHarness(first);
 const created = await harness.startTask("analyze_tender");
 await harness.advance(created.id);
 
+// 登录态是**可变的**，不是一个常量 true。
+//
+// 原来这里写死了 signedIn: true，也没有 beginLogin / logout —— 于是观察台上
+// 「退出登录」按下去打到 `/auth/logout`，那一路 `deps.platform.logout()` 是
+// undefined，直接 500。换句话说：**观察台从来走不了退出这条路**，而退出恰恰
+// 是 2026-09-10 出问题的那条路（退出只退了侧栏那一格，工作台原地不动）。
+// 又一次「一条从没被走过的路径，坏了和好了长得一模一样」。
+//
+// 现在给它一个真的开关。登录这一端也是桩：真流程要过系统浏览器 + 平台
+// 授权码，观察台上没有那两样，所以 beginLogin 直接把开关拨回已登录并回一个
+// about:blank —— 界面那边本来就是「开个窗口，然后轮询 session 等它翻」，
+// 轮询照旧生效。**这是观察台专用的桩，不是产品行为**。
+let signedIn = true;
 const platform = {
-  session: () => ({
-    signedIn: true,
-    profile: { sub: "u_demo", name: "郭彦豪", email: "yanhaoguo@gmail.com" },
-    org: { id: "org_demo", name: "Vxture" },
-    workspace: { id: "wsp_demo", name: "演示工作区" },
-  }),
+  session: () =>
+    signedIn
+      ? {
+          signedIn: true,
+          profile: { sub: "u_demo", name: "郭彦豪", email: "yanhaoguo@gmail.com" },
+          org: { id: "org_demo", name: "Vxture" },
+          workspace: { id: "wsp_demo", name: "演示工作区" },
+        }
+      : { signedIn: false, issuer: "(stub)", consoleBase: "https://vxture.com", entitlementsConfigured: false },
+  beginLogin: async () => {
+    signedIn = true;
+    return "about:blank";
+  },
+  logout: async () => {
+    signedIn = false;
+  },
   config: { issuer: "(stub)", clientId: "ruyin", platformApiBase: "" },
   bearerToken: () => undefined,
 };

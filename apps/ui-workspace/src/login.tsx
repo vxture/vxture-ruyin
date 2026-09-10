@@ -93,7 +93,10 @@ export function SessionGate({ api }: { api: Api }) {
         </div>
       }
     >
-      <Workbench api={api} />
+      {/* 退出登录由工作台里那一格发起，但**决定去留的是这里** —— 闸门只在挂载
+          时读过一次会话，所以必须让它重读一次；`refresh()` 读到未登录就换回
+          登录页，整棵工作台随之卸载，设置 › 账号那份会话副本也一起没了。 */}
+      <Workbench api={api} onSignedOut={() => void refresh()} />
     </Suspense>
   );
 }
