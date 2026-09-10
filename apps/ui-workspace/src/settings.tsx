@@ -1260,37 +1260,42 @@ function AboutSection({
   return (
     <div className="about-page">
       <div className="about-main">
-        <div className="about-block">
-          <p>
-            <span className="brand-name">RUYIN</span>
-          </p>
-          <p className="brand-tag">Intelligent Workbench</p>
-          <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
-            Vxture AI 原生智能体的本地智能工作环境
-          </p>
-          <div className="mono text-muted-foreground">
-            Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
-            {system?.arch ?? ""}
-          </div>
-          <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
-            © 2026 Vxture · 保留所有权利
-          </p>
-          {/* 三条做成按钮式（owner 2026-09-10），但**仍然是 `<a>`**：真链接才能
-              中键新开、右键复制地址；用按钮 + onClick 去 window.open 会把这两样
-              都弄丢，而它看起来一模一样。 */}
-          <div className="about-legal">
-            {LEGAL_LINKS.map((l) => (
-              <a
-                key={l.path}
-                className="about-legal-btn"
-                href={`${consoleBase}${l.path}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {l.label}
-                <Icon name="external-link" size="xs" />
-              </a>
-            ))}
+        {/* 卡片这一层是**内容的容器**，不是装饰：这一页的身份信息落在深色底上时
+            没有边界，读起来像浮在背景里（owner 2026-09-10 报的）。上一轮重构版式
+            时把它弄丢了。 */}
+        <div className="card about-card">
+          <div className="about-block">
+            <p>
+              <span className="brand-name">RUYIN</span>
+            </p>
+            <p className="brand-tag">Intelligent Workbench</p>
+            <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
+              Vxture AI 原生智能体的本地智能工作环境
+            </p>
+            <div className="mono text-muted-foreground">
+              Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
+              {system?.arch ?? ""}
+            </div>
+            <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
+              © 2026 Vxture · 保留所有权利
+            </p>
+            {/* 三条做成按钮式（owner 2026-09-10），但**仍然是 `<a>`**：真链接才能
+                中键新开、右键复制地址；用按钮 + onClick 去 window.open 会把这两样
+                都弄丢，而它看起来一模一样。 */}
+            <div className="about-legal">
+              {LEGAL_LINKS.map((l) => (
+                <a
+                  key={l.path}
+                  className="about-legal-btn"
+                  href={`${consoleBase}${l.path}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {l.label}
+                  <Icon name="external-link" size="xs" />
+                </a>
+              ))}
+            </div>
           </div>
         </div>
       </div>

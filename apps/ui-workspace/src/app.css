@@ -1220,6 +1220,12 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   flex-direction: column;
   overflow-y: auto;
 }
+/* 卡片在这里要去掉默认的下外边距：`.card` 自带 margin-bottom，是给「一摞卡」
+   用的；这一页只有一张，那段外边距会算进下方留白里，把黄金分割挪偏。 */
+.about-card { margin-bottom: 0; }
+/* 关于页的字标放大到 heading-1（36px，缺省 `.brand-name` 是 20px）。这一页的
+   主角就是这个字标 —— 登录页有 120px 的图形标撑场，这里没有，只有字。 */
+.about-block .brand-name { font-size: var(--heading-1-font-size); }
 .about-main::before { content: ""; flex: var(--about-golden); }
 .about-main::after { content: ""; flex: calc(1 - var(--about-golden)); }
 
@@ -1242,7 +1248,9 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   justify-content: center;
   flex-wrap: wrap;
   gap: var(--spacing-sm);
-  margin-top: var(--spacing-lg);
+  /* 与上面的版权行拉开一段（24 → 48px）：它们是**另一类东西** —— 上面是
+     「这是什么」，下面是「去别处看条款」，靠太近会读成同一段。 */
+  margin-top: var(--space-row-sm);
 }
 .about-legal-btn {
   display: inline-flex;
