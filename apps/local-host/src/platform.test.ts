@@ -286,6 +286,24 @@ void test("PlatformService.beginLogin returns a well-formed PKCE authorize URL",
   assert.ok(authorizeUrl.searchParams.get("state"));
 });
 
+/**
+ * 退出之后再登录不该是静默的 —— authorize 必须带 `prompt`。
+ *
+ * owner 2026-09-10 报的那一幕：在应用里退出登录，再点登录，**一路直接进来，
+ * 没有任何验证过程**，因为浏览器里 accounts 的 cookie 还活着。桌面应用不该
+ * 去杀那个 cookie（它是浏览器级、跨应用的），所以缓解只能放在这一端。
+ *
+ * 钉的是**参数的值**而不是「有没有带 prompt」：一个 `prompt=none` 同样能让
+ * 「带了 prompt」成立，而它的意思恰好相反 —— 那是「绝对不要问用户」。
+ */
+void test("PlatformService.beginLogin 带 prompt=select_account —— 退出后的下一次登录不静默", async (t) => {
+  const { keys, dataDir } = await newKeys();
+  installOidcMock(t, {});
+  const svc = new PlatformService(testConfig(), keys, dataDir);
+  const authorizeUrl = new URL(await svc.beginLogin());
+  assert.equal(authorizeUrl.searchParams.get("prompt"), "select_account");
+});
+
 void test("PlatformService: login completes, session reflects claims, and persists sealed to disk", async (t) => {
   const { keys, dataDir } = await newKeys();
   installOidcMock(t, { tokenExchange: () => ({ status: 200, body: tokenResponse() }) });
