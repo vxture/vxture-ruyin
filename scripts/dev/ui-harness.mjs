@@ -199,6 +199,11 @@ const platform = {
   logout: async () => {
     signedIn = false;
   },
+  // 登录页上那个「先在浏览器里退出 Vxture ↗」要的地址。观察台上**故意给
+  // about:blank** 而不是真地址：这一屏要看的是「入口在不在、话说没说清楚」，
+  // 而一个开发观察台上的链接真把人从 Vxture 登出去，是个纯粹的坑。href 到底
+  // 对不对由用例钉（login.test.tsx 断言的是真地址）。
+  endSessionUrl: async () => "about:blank",
   config: { issuer: "(stub)", clientId: "ruyin", platformApiBase: "" },
   bearerToken: () => undefined,
 };

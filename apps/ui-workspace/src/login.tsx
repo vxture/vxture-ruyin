@@ -112,6 +112,9 @@ function LoginScreen({
 }) {
   const [busy, setBusy] = useState(false);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
+  /** 平台的 RP-initiated logout 地址；平台没公布就不给「换个账号」这个入口。 */
+  const [endSession, setEndSession] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
   const pollRef = useRef<number | undefined>(undefined);
 
   useEffect(
@@ -120,6 +123,19 @@ function LoginScreen({
     },
     [],
   );
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .endSessionUrl()
+      .then((r) => alive && setEndSession(r.url ?? null))
+      .catch(() => {
+        /* 取不到就不给入口 —— 给一个点了没反应的链接更糟 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [api]);
 
   const startLogin = async () => {
     setBusy(true);
@@ -173,6 +189,41 @@ function LoginScreen({
         >
           {busy ? "正在打开浏览器…" : "登录 Vxture 账号"}
         </Button>
+        {/* 登录之前先把状态说清楚 —— 这一段是 owner 2026-09-10 实测之后要的。
+            当时的样子：退出登录，再点登录，**一路直接进来，没有任何验证过程**。
+            那不是缺陷，是浏览器里 accounts 的会话还活着；桌面应用不该去杀它
+            （浏览器级、跨应用），行业默认也是不杀。
+
+            行业默认里真正拦一下的是**下一次登录那一屏**（账号选择器），靠
+            authorize 带 `prompt=select_account`。我们带了 —— **平台忽略它**
+            （owner 实测：清空重来一遍，第一次有验证、退出后第二次静默直入）。
+            所以那一屏在平台补上支持之前不会出现。
+
+            界面这一侧能做的就只有这段话和下面那个入口：**把「会直接用浏览器
+            里那个账号」说出来，并给一条换人的路。**说清楚不能代替验证，但
+            一个静默发生、又没人告诉你的登录，比说清楚了的更糟。见 TD-057。 */}
+        <p className="login-note text-body-sm text-muted-foreground">
+          浏览器中若已登录 Vxture，会直接用那个账号继续。
+          {endSession && (
+            <>
+              {" "}要换人，
+              <a
+                className="text-primary-text underline"
+                href={endSession}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setSwitching(true)}
+              >
+                先在浏览器里退出 Vxture ↗
+              </a>
+            </>
+          )}
+        </p>
+        {switching && (
+          <div className="login-hint text-body-sm text-muted-foreground">
+            在浏览器里退出之后，回到这里再点一次登录。
+          </div>
+        )}
         {pendingUrl && (
           <div className="login-hint text-body-sm text-muted-foreground">
             在浏览器中完成登录后自动返回…{" "}

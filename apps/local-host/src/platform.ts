@@ -440,6 +440,30 @@ export class PlatformService {
     }
   }
 
+  /**
+   * 平台的 RP-initiated logout 地址（discovery 公布了才有）。
+   *
+   * **我们自己绝不去调它，也绝不在退出登录时顺手打开它。** 它清掉的是浏览器
+   * 里 `accounts` 的会话 —— 那是浏览器级、跨应用的东西，退出一个桌面应用就把
+   * 它杀掉，等于顺手登出这台机器上同账号的所有网站和应用（TD-057）。
+   *
+   * 这里只把地址交出去，供界面做一个**用户自己按**的「换个账号」：在系统浏览器
+   * 里退出 Vxture，再回来登录。为什么必须是两步、不能自动接回来 —— 实测
+   * `end_session` 把 `post_logout_redirect_uri` 也忽略了（带我们的回环地址、
+   * 带一个乱写的地址、什么都不带，三种回应逐字相同：302 到 `/logout`），所以
+   * 没有可靠的返回跳。
+   *
+   * 不带 `id_token_hint`：我们这一侧是在**已经登出之后**才用得上这个地址的，
+   * 那时 id_token 早没了。平台会在它自己的 `/logout` 页上问人。
+   */
+  async endSessionUrl(): Promise<string | undefined> {
+    const doc = await this.discover();
+    if (!doc.end_session_endpoint) return undefined;
+    const url = new URL(doc.end_session_endpoint);
+    url.searchParams.set("client_id", this.config.clientId);
+    return url.toString();
+  }
+
   private signOutLocal(): void {
     this.accessToken = undefined;
     this.refreshToken = undefined;

@@ -85,6 +85,13 @@ body {
   margin-top: var(--spacing-sm);
 }
 .login-hint { margin-top: var(--spacing-2xs); }
+/* 登录按钮下面那句状态说明（「会直接用浏览器里那个账号」+ 换人的路）。
+   宽度跟 .login-sub 一致，免得它比标语还长、把这一屏的重心带偏。 */
+.login-note {
+  margin-top: var(--spacing-sm);
+  max-width: 30em;
+  text-align: center;
+}
 /* （.login-local 已随「暂不登录，先本地使用」一并移除。） */
 .login-foot {
   display: flex;

@@ -166,6 +166,8 @@ function tokenResponse(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 interface MockRoutes {
+  /** 让 discovery **不**公布 `end_session_endpoint`（默认公布）。 */
+  omitEndSession?: boolean;
   tokenExchange?: (params: URLSearchParams) => { status: number; body: Record<string, unknown> };
   refresh?: (params: URLSearchParams) => { status: number; body: Record<string, unknown> };
   entitlements?: (
@@ -183,6 +185,7 @@ function installOidcMock(t: import("node:test").TestContext, routes: MockRoutes)
     token_endpoint: `${ISSUER}/token`,
     jwks_uri: `${ISSUER}/jwks`,
     revocation_endpoint: `${ISSUER}/revoke`,
+    ...(routes.omitEndSession ? {} : { end_session_endpoint: `${ISSUER}/end_session` }),
   };
   t.mock.method(globalThis, "fetch", async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -302,6 +305,40 @@ void test("PlatformService.beginLogin 带 prompt=select_account —— 退出后
   const svc = new PlatformService(testConfig(), keys, dataDir);
   const authorizeUrl = new URL(await svc.beginLogin());
   assert.equal(authorizeUrl.searchParams.get("prompt"), "select_account");
+});
+
+/**
+ * 「换个账号」要的地址：只**交出来**，不去调。
+ *
+ * 这一条同时钉住一件更要紧的事 —— **退出登录不许碰它**。清掉浏览器里
+ * accounts 的会话是浏览器级、跨应用的动作，桌面应用不该替用户做（TD-057）。
+ * 所以下面既断言 `logout()` 打了 `/revoke`，也断言它**没有**打
+ * `/end_session`：只测前者的话，哪天有人在 logout 里顺手加一行，测试全绿。
+ */
+void test("PlatformService.endSessionUrl 交出地址；而 logout() 绝不去调它", async (t) => {
+  const { keys, dataDir } = await newKeys();
+  const calls = installOidcMock(t, { tokenExchange: () => ({ status: 200, body: tokenResponse() }) });
+  const svc = new PlatformService(testConfig(), keys, dataDir);
+
+  const url = new URL((await svc.endSessionUrl())!);
+  assert.equal(url.origin + url.pathname, `${ISSUER}/end_session`);
+  assert.equal(url.searchParams.get("client_id"), CLIENT);
+
+  await loggedIn(svc);
+  await svc.logout();
+  assert.ok(calls.includes("POST /revoke"), "退出要吊销 refresh token");
+  assert.ok(
+    !calls.some((c) => c.endsWith("/end_session")),
+    "退出登录绝不能去调 end_session —— 那会顺手登出浏览器里的所有 Vxture",
+  );
+});
+
+/** 平台没公布这个端点时给 undefined —— 界面据此不给入口，而不是给个死链接。 */
+void test("PlatformService.endSessionUrl: 平台没公布 end_session_endpoint 时为 undefined", async (t) => {
+  const { keys, dataDir } = await newKeys();
+  installOidcMock(t, { omitEndSession: true });
+  const svc = new PlatformService(testConfig(), keys, dataDir);
+  assert.equal(await svc.endSessionUrl(), undefined);
 });
 
 void test("PlatformService: login completes, session reflects claims, and persists sealed to disk", async (t) => {
