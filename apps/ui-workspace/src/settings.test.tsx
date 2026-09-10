@@ -122,12 +122,19 @@ void test("AboutSection: shows version/platform/arch once system loads, placehol
  *
  * 钉**结构**而不只是文案：只钉文案的话，下一个人再加两张卡，用例照样全绿。
  */
-void test("AboutSection: 只有身份与三条条款，没有板块、没有按钮元素", async () => {
+void test("AboutSection: 两块版式 —— 关于信息自动布满，提示按需显隐", async () => {
   const { container } = renderSection("about");
   await screen.findByText("RUYIN");
+  // 没有板块卡、没有按钮：这一页收过三次，钉住结构才拦得住第四次被撑回导航站。
   expect(container.querySelectorAll(".set-block")).toHaveLength(0);
-  expect(container.querySelectorAll(".about-legal-btn")).toHaveLength(3);
   expect(container.querySelectorAll("button")).toHaveLength(0);
+  expect(container.querySelectorAll(".about-legal-btn")).toHaveLength(3);
+
+  // 第一块永远在；第二块**不出现时连元素都不在**（不是 display:none 占着位）——
+  // 占着位的话第一块就布不满，而那正是 owner 要的「自动布满」。
+  expect(container.querySelector(".about-page")).toBeInTheDocument();
+  expect(container.querySelector(".about-main")).toBeInTheDocument();
+  expect(container.querySelector(".about-notice")).not.toBeInTheDocument();
 });
 
 /**
@@ -194,8 +201,9 @@ void test("AboutSection: 未签名才提醒；已签名与开发态都不提醒"
   const withSigning = (v: SystemInfo["codeSigning"]) =>
     fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ codeSigning: v })) });
 
-  renderSection("about", withSigning("unsigned"));
+  const unsignedRender = renderSection("about", withSigning("unsigned"));
   expect(await screen.findByText(/SmartScreen/)).toBeInTheDocument();
+  expect(unsignedRender.container.querySelector(".about-notice")).toBeInTheDocument();
   cleanup();
 
   renderSection("about", withSigning("signed"));
