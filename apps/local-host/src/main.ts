@@ -648,10 +648,23 @@ await connectorRegistry.load();
 if (capabilityBase) {
   void refreshAllDistributed()
     .then((outcomes) => {
-      for (const o of outcomes as Array<{ product: string; status: string; fetched: string[]; reason?: string }>) {
+      for (const o of outcomes as Array<{
+        product: string;
+        status: string;
+        fetched: string[];
+        reason?: string;
+        heldBack?: { names: string[]; reason: string };
+      }>) {
         console.log(
           `[ruyin] skills: distributed layer for ${o.product}: ${o.status}${o.fetched.length ? ` (+${o.fetched.length})` : ""}${o.reason ? ` - ${o.reason}` : ""}`,
         );
+        // 保护挡下了删除就必须说出来 —— 一个不出声的保护，和没有保护，在日志里
+        // 长得一模一样，而这一轮的本地投影确实是旧的。
+        if (o.heldBack) {
+          console.warn(
+            `[ruyin] skills: ${o.product} 的 ${o.heldBack.names.length} 条本该按目录删除，已挡下：${o.heldBack.reason}（${o.heldBack.names.join(", ")}）`,
+          );
+        }
       }
     })
     .catch((cause) => console.error("[ruyin] skills: distributed refresh failed:", cause));

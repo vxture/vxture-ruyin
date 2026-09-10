@@ -37,6 +37,11 @@ export interface DistributionOutcome {
   fetched: string[];
   unchanged: string[];
   removed: string[];
+  /**
+   * 本该按目录删、却被本地保护挡下的那些（连原因）。见 `pruneVerdict`。
+   * 有值就说明这一轮的投影是**旧的**，而不是产品真的撤了这些技能。
+   */
+  heldBack?: { names: string[]; reason: string };
   failed: Array<{ name: string; reason: string }>;
 }
 
@@ -64,6 +69,55 @@ interface FetchedSkill {
   contentDigest?: string;
   version?: string;
   capabilityId?: string;
+}
+
+/**
+ * 少于这个数就不做比例判断 —— 本地只有两三条时，「删掉一半」是再正常不过的
+ * 增删，比例在小样本上没有意义。
+ */
+const RATIO_FLOOR = 4;
+
+/**
+ * 删哪些、以及什么时候一条都不删。
+ *
+ * **删除是 Ruyin 自己的行为**：rmSync 跑在用户的机器上，删的是用户的文件。而
+ * 决定删什么的那份目录来自产品的云端能力面 —— 一个本仓不控制、由每个产品各自
+ * 实现的上游。把本机数据的删除权无条件交出去，赌的是每一个产品都不出错。
+ *
+ * 所以在动手之前先看两件事，两件都与任何具体产品无关：
+ *
+ * 1. **目录空了，而本地有。** 一个产品突然一条都不分发，比起「它真的撤销了
+ *    全部」，更可能是它那边出了问题（拿了一份残缺的上游目录、少了一次分页、
+ *    权益查询失败却返回了 200）。
+ * 2. **一次要删掉本地的大多数。** 同上，只是程度轻一些。
+ *
+ * 两种情况都**一条不删**，并把名字与原因记进 heldBack。刻意选的取舍：宁可留下
+ * 一个陈旧的投影，也不误删用户已经装好的技能 —— 留着的代价是几条不再分发的
+ * 技能仍可用（它们是只读内容，scripts 本来就不落盘，TD-005），删错的代价是
+ * 用户的东西没了，而且不可逆。
+ *
+ * 这不是「永不删」：目录恢复正常之后，下一轮照常删。产品真要清空，路径是它先
+ * 分发一份非空的目录再逐步减少，或者用户在能力平台界面自己移除。
+ */
+export function pruneVerdict(
+  local: string[],
+  wanted: Set<string>,
+): { prune: string[]; heldBack?: { names: string[]; reason: string } } {
+  const stale = local.filter((name) => !wanted.has(name));
+  if (stale.length === 0) return { prune: [] };
+  if (wanted.size === 0) {
+    return { prune: [], heldBack: { names: stale, reason: "目录一条都没有，而本地有 —— 更像是能力面出了问题，不是产品撤销了全部" } };
+  }
+  if (stale.length >= RATIO_FLOOR && stale.length > local.length / 2) {
+    return {
+      prune: [],
+      heldBack: {
+        names: stale,
+        reason: `一次要删掉本地 ${local.length} 条里的 ${stale.length} 条 —— 大多数，先不删`,
+      },
+    };
+  }
+  return { prune: stale };
 }
 
 export async function refreshDistributedSkills(
@@ -133,13 +187,14 @@ export async function refreshDistributedSkills(
     outcome.fetched.push(item.name);
   }
 
-  // 产品不再分发的，本地删掉。
-  for (const name of existingSkills(targetDir)) {
-    if (!wanted.has(name)) {
-      rmSync(join(targetDir, name), { recursive: true, force: true });
-      outcome.removed.push(name);
-    }
+  // 产品不再分发的，本地删掉 —— 但先过一道自我保护，见 pruneVerdict。
+  const local = existingSkills(targetDir);
+  const verdict = pruneVerdict(local, wanted);
+  for (const name of verdict.prune) {
+    rmSync(join(targetDir, name), { recursive: true, force: true });
+    outcome.removed.push(name);
   }
+  if (verdict.heldBack) outcome.heldBack = verdict.heldBack;
   return outcome;
 }
 
