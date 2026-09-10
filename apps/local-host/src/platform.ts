@@ -262,6 +262,38 @@ export class PlatformService {
     url.searchParams.set("state", state);
     url.searchParams.set("code_challenge", challenge);
     url.searchParams.set("code_challenge_method", "S256");
+    // 退出登录之后再点登录，**不该是静默的**。
+    //
+    // owner 2026-09-10 报的：退出之后再点登录，一路直接进来，没有任何验证。
+    // 那不是缺陷，是 SSO 的正常样子 —— 会话有三个，我们的「退出」只清掉了
+    // 第一个（本机令牌，并尽力吊销 refresh token），浏览器里 accounts 的
+    // cookie（②）和 vxture.com 自己的 cookie（③）原封不动；authorize 请求
+    // 带着还活着的 ② 过去，IdP 直接发码。
+    //
+    // 桌面应用的行业默认是**不去动 ②** —— 它是浏览器级、跨应用的公共资产，
+    // 因为退出一个桌面应用就把它杀掉，等于顺手登出这台机器上同账号的所有
+    // 网站和应用，那是个比「没退干净」更意外的副作用。缓解放在**下一次
+    // 登录**这一端：让它至少有一屏。
+    //
+    // 选 `select_account` 而不是 `login`：ruyin 的项目按工作区/组织隔离
+    // （ADR-015），**换账号是真实用例**，账号选择器同时解决「看得见」和
+    // 「能换人」；`prompt=login` 每次都逼着重输密码，对个人桌面应用是纯摩擦。
+    // 要改成强制重新认证，就是这一行换个词。
+    //
+    // **无条件带上，不看「上次是不是主动退的」**：正常使用里根本走不到登录页
+    // （refresh token 会自己恢复会话），登录页只在三种低频情形出现 —— 头一次
+    // 装、用户主动退出、refresh 被上游吊销。所以「总是带」的代价约等于零，
+    // 却省掉了一份要持久化、会失效、坏了还看不出来的状态。
+    //
+    // **诚实记一笔：平台侧认不认这个参数，没验证过。** discovery 没有公布
+    // `prompt_values_supported`（可选字段，缺席不代表不支持）。实测过的只有
+    // 一件事 —— 它**不会把登录打坏**：给 authorize 带 `prompt=select_account`、
+    // `prompt=login`、乃至 `prompt=bogus_value`，未登录状态下四种请求的回应
+    // 逐字相同（302 到 `/login?login_challenge=…`），既没有 `invalid_request`
+    // 也没有任何差别。而那个 `bogus_value` 也照单全收，恰恰说明**这个探针
+    // 判定不了它到底认不认** —— 要判定得带着一个活着的 IdP cookie 去问，
+    // 那只有真人在浏览器里点一次才做得到。见 TD-057。
+    url.searchParams.set("prompt", "select_account");
     return url.toString();
   }
 
