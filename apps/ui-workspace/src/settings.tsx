@@ -100,7 +100,7 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
       {view === "skills" && <SkillsSection api={api} />}
       {view === "database" && <DatabaseSection />}
       {view === "updates" && <UpdatesSection system={system} api={api} />}
-      {view === "about" && <AboutSection system={system} />}
+      {view === "about" && <AboutSection system={system} session={session} />}
     </div>
   );
 }
@@ -1218,26 +1218,169 @@ function UpdatesSection({
 
 /* ---------------- 关于 ---------------- */
 
-function AboutSection({ system }: { system: SystemInfo | null }) {
+/** 官网法律页的外链。**只列真的存在的那几页** —— 见 `LEGAL_LINKS` 的注释。 */
+function LegalLink({ href, label, desc }: { href: string; label: string; desc: string }) {
   return (
-    <div className="card">
-      <div className="about-block">
-        <p>
-          <span className="brand-name">RUYIN</span>
-        </p>
-        <p className="brand-tag">Intelligent Workbench</p>
-        <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
-          Vxture AI 原生智能体的本地智能工作环境
-        </p>
-        <div className="mono text-muted-foreground">
-          Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
-          {system?.arch ?? ""}
+    <a className="legal-link" href={href} target="_blank" rel="noopener noreferrer">
+      <span className="legal-link-main">
+        {label}
+        <Icon name="external-link" size="xs" />
+      </span>
+      <span className="legal-link-desc">{desc}</span>
+    </a>
+  );
+}
+
+/**
+ * 关于页要链哪几页 —— **逐条实测过在不在**（2026-09-10，跟到语言前缀跳转之后）。
+ *
+ * 在的：`privacy` `terms` `cookies` `refund`（200）。
+ * 不在的：`dpa` `security` `subprocessors` `open-source` `acceptable-use` `licenses`
+ * 全是 404 —— 所以这里一条都不写。**一个点开是 404 的法律链接，比没有这个链接
+ * 糟得多**：用户会以为自己没找到，而不是它不存在。
+ *
+ * **`cookies` 在，但故意不链。** 那份《Cookie 使用政策》讲的是网站的必要 / 偏好 /
+ * 分析 / 第三方 Cookie；桌面应用不设分析 Cookie、也没有第三方 Cookie。链过去等于
+ * 替产品宣称了一件不成立的事。应用在本机存了什么（登录令牌、主题与语言偏好），
+ * 在下面那一块里直说，比指向一份讲别的东西的政策诚实。
+ */
+const LEGAL_LINKS: Array<{ path: string; label: string; desc: string }> = [
+  { path: "/legal/privacy", label: "隐私政策", desc: "收集什么、怎么用、你有哪些权利" },
+  { path: "/legal/terms", label: "服务条款", desc: "使用 Vxture 服务的约定" },
+  {
+    path: "/legal/refund",
+    label: "退款政策",
+    desc: "订阅与退款 —— 订阅发生在 Vxture 平台，不在这台机器上",
+  },
+];
+
+function AboutSection({
+  system,
+  session,
+}: {
+  system: SystemInfo | null;
+  session: SessionInfo | null;
+}) {
+  // 未登录时也要能看条款 —— 落到与登录页同一个缺省，不是空链接。
+  const consoleBase = session?.consoleBase || "https://vxture.com";
+  return (
+    <>
+      <div className="card">
+        <div className="about-block">
+          <p>
+            <span className="brand-name">RUYIN</span>
+          </p>
+          <p className="brand-tag">Intelligent Workbench</p>
+          <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
+            Vxture AI 原生智能体的本地智能工作环境
+          </p>
+          <div className="mono text-muted-foreground">
+            Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
+            {system?.arch ?? ""}
+          </div>
+          <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
+            © 2026 Vxture · 保留所有权利
+          </p>
         </div>
-        <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
-          © 2026 Vxture · 保留所有权利
-        </p>
       </div>
-    </div>
+
+      <SettingsBlock
+        icon="file-text"
+        title="法律与政策"
+        desc="在浏览器中打开 —— 条款由 Vxture 平台统一发布，不随这台机器的版本走"
+      >
+        <div className="legal-links">
+          {LEGAL_LINKS.map((l) => (
+            <LegalLink key={l.path} href={`${consoleBase}${l.path}`} {...l} />
+          ))}
+        </div>
+      </SettingsBlock>
+
+      <SettingsBlock
+        icon="sparkles"
+        title="开源与归属"
+        desc="这个安装包里重新分发了别人的作品，署名是它们许可证里的要求，不是可选项"
+      >
+        {/* 逐条许可证**已经在「能力平台」页上**（每条技能、每个工具后面跟着
+            MIT / Apache-2.0 …），所以这里不抄第二份 —— 抄一份就会有两份各自漂。
+            这一块只做两件事：把「装机包里到底有别人的什么东西」说全，并指路。 */}
+        <ul className="oss-list">
+          <li>
+            <span className="oss-what">技能与工具</span>
+            <span className="oss-how">
+              随包的技能源码与 MCP 服务器，逐条的仓库、提交号与许可证在「能力平台」页上
+            </span>
+          </li>
+          <li>
+            <span className="oss-what">运行时</span>
+            <span className="oss-how">Electron 与 Chromium，以及守护进程的依赖树</span>
+          </li>
+        </ul>
+        {/* **如实说缺口**：上面第二行那一大块目前没有汇总声明，官网
+            `/legal/open-source` 也还不存在（实测 404）。写一个「查看全部许可证」
+            按钮而背后只有 49 条，正是这个仓最该避免的形状 —— 看起来齐全，其实不是。 */}
+        <p className="crypto-note">
+          <strong>目前只有技能与工具这一半是逐条可查的。</strong>
+          运行时那一半（Electron / Chromium / 依赖树）尚无汇总声明，官网也还没有开源许可页 ——
+          这是一处已知的缺口，不是这里没写。
+        </p>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            location.hash = "#settings/skills";
+          }}
+        >
+          去「能力平台」看逐条许可证
+        </Button>
+      </SettingsBlock>
+
+      <SettingsBlock
+        icon="shield"
+        title="安装与分发"
+        desc="两件你会撞上、而别处不会告诉你的事"
+      >
+        {/* 这两条都是 owner 已经定过的取舍的**用户可见后果**，不写出来用户只能自己
+            猜 —— 而两种猜法都指向「这软件有问题」。 */}
+        <ul className="oss-list">
+          <li>
+            <span className="oss-what">安装包未做代码签名</span>
+            <span className="oss-how">
+              首次安装时 Windows 会弹 SmartScreen 警告 —— 这是预期的，不是被篡改。
+              请从 Vxture 官方下载页取安装包，并核对 SHA256
+            </span>
+          </li>
+          <li>
+            <span className="oss-what">运行时拒装未签名的产品包</span>
+            <span className="oss-how">
+              产品包要经 Vxture 副署才装 —— 副署所需的信任锚尚未建立，所以正式版
+              暂时装不了产品包。这是默认拒绝，不是失败
+            </span>
+          </li>
+        </ul>
+      </SettingsBlock>
+
+      <SettingsBlock
+        icon="info"
+        title="数据边界"
+        desc="一句话版本，详细的在「通用设置」里逐条写着"
+      >
+        <p className="crypto-note">
+          业务数据落在你自己的机器上并整库加密；只有<strong>送去推理的那部分上下文</strong>
+          会离开本机，且推理是传输不是存储。哪些会送、送之前是否先问你一句，由
+          「通用设置 › 推理策略」决定；成果与审计记录始终留在本机，随时可导出。
+        </p>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            location.hash = "#settings/general";
+          }}
+        >
+          去「通用设置」看逐条
+        </Button>
+      </SettingsBlock>
+    </>
   );
 }
 

@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@vxture/design-system";
 import { useEffect, useState } from "react";
@@ -112,6 +112,98 @@ void test("AboutSection: shows version/platform/arch once system loads, placehol
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ version: "0.2.0", platform: "win32", arch: "x64" })) });
   renderSection("about", api);
   expect(await screen.findByText("Runtime 0.2.0 · win32-x64")).toBeInTheDocument();
+});
+
+/**
+ * 关于页的法律外链 —— **只列真的存在的那几页**。
+ *
+ * 2026-09-10 跟着语言前缀跳转逐条实测过 `vxture.com/legal/*`：`privacy` /
+ * `terms` / `cookies` / `refund` 是 200，`dpa` / `security` / `subprocessors` /
+ * `open-source` / `acceptable-use` / `licenses` 全是 404。
+ *
+ * 所以这条用例钉两件事，第二件比第一件重要：链接指对了，**并且没有多出来的**。
+ * 一个点开是 404 的法律链接比没有这个链接糟得多 —— 用户会以为是自己没找到。
+ */
+void test("AboutSection: 法律外链只有实测存在的三页，且不含 Cookie 政策", async () => {
+  renderSection("about");
+  const privacy = await screen.findByText("隐私政策");
+  expect(privacy.closest("a")).toHaveAttribute("href", "https://vxture.com/legal/privacy");
+  expect(screen.getByText("服务条款").closest("a")).toHaveAttribute(
+    "href",
+    "https://vxture.com/legal/terms",
+  );
+  expect(screen.getByText("退款政策").closest("a")).toHaveAttribute(
+    "href",
+    "https://vxture.com/legal/refund",
+  );
+
+  // 那一页**在**（200），故意不链：它讲的是网站的必要 / 偏好 / 分析 / 第三方
+  // Cookie，而桌面应用不设分析 Cookie、也没有第三方 Cookie。链过去等于替产品
+  // 宣称了一件不成立的事。
+  expect(screen.queryByText(/Cookie/)).not.toBeInTheDocument();
+  // 这几页实测 404，一条都不该出现。
+  for (const gone of ["数据处理协议", "安全说明", "子处理方", "可接受使用"]) {
+    expect(screen.queryByText(new RegExp(gone))).not.toBeInTheDocument();
+  }
+});
+
+/** 条款地址跟着会话走；未登录时落到与登录页同一个缺省，不是空链接。 */
+void test("AboutSection: 外链基址取自会话的 consoleBase，未登录则落到默认站点", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue({ signedIn: true, consoleBase: "https://staging.vxture.com" }),
+  });
+  renderSection("about", api);
+  await vi.waitFor(() =>
+    expect(screen.getByText("隐私政策").closest("a")).toHaveAttribute(
+      "href",
+      "https://staging.vxture.com/legal/privacy",
+    ),
+  );
+});
+
+/**
+ * 开源那一块**必须承认它只覆盖一半**。
+ *
+ * 逐条许可证只有技能与工具那一侧有（在「能力平台」页上）；Electron / Chromium
+ * 与守护进程的依赖树没有任何汇总声明，官网 `/legal/open-source` 也还不存在。
+ *
+ * 钉的是那句「目前只有…是逐条可查的」真的在屏幕上 —— 一个写着「查看全部许可证」
+ * 而背后只有一半的入口，正是这个仓最该避免的形状：看起来齐全，其实不是。
+ */
+void test("AboutSection: 开源归属如实说明只覆盖一半，不假装齐全", async () => {
+  renderSection("about");
+  expect(await screen.findByText(/目前只有技能与工具这一半是逐条可查的/)).toBeInTheDocument();
+  expect(screen.getByText(/尚无汇总声明/)).toBeInTheDocument();
+});
+
+/**
+ * 「安装与分发」两条是 owner 已定取舍的**用户可见后果**。不写出来，用户只能自己
+ * 猜，而两种猜法都指向「这软件有问题」。
+ */
+void test("AboutSection: 说明未签名安装包会弹 SmartScreen、以及产品包暂时装不了", async () => {
+  renderSection("about");
+  expect(await screen.findByText(/SmartScreen/)).toBeInTheDocument();
+  expect(screen.getByText(/默认拒绝，不是失败/)).toBeInTheDocument();
+});
+
+/**
+ * 关于页不重复事实，它**指路** —— 那两个按钮就是路，所以要测「真的到了那一页」。
+ *
+ * 关于页有意不再抄一遍数据目录、加密链条、推理策略：那些在「通用设置」里逐条
+ * 写着，抄第二份就会有两份各自漂。逐条许可证同理，在「能力平台」页上。
+ * 既然靠指路，指错了就等于没写。
+ */
+void test("AboutSection: 两个入口真的把人送到能力平台与通用设置", async () => {
+  const user = userEvent.setup();
+
+  renderRouted("about", skillsApi());
+  await user.click(await screen.findByRole("button", { name: "去「能力平台」看逐条许可证" }));
+  expect(await screen.findByText(/预置 .* 个/)).toBeInTheDocument();
+  cleanup();
+
+  renderRouted("about");
+  await user.click(await screen.findByRole("button", { name: "去「通用设置」看逐条" }));
+  expect(await screen.findByText("数据目录")).toBeInTheDocument();
 });
 
 void test("偏好设置（在账户之下）: language + the three axes, in that order, each persisted on this machine", async () => {
