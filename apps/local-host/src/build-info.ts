@@ -38,6 +38,23 @@ export const BUILD_INFO_FILE = "build-info.json";
  * 值不认识 —— 一个读坏了的构建印不该让界面去断言「未签名」，那是在拿一次读失败
  * 冒充一个结论。
  */
+/**
+ * 生效的签名状态：**环境变量优先，其次构建印**。
+ *
+ * 为什么要有这个开关：仓里直接跑时永远是 `unpackaged`，于是界面上那条「未签名」
+ * 提醒**在开发态一次都走不到** —— 而看不见的那一支正是最容易坏掉的那一支
+ * （owner 2026-09-10 就是这样报的「提醒没有出现」）。给它一个开发/验收用的开关，
+ * 那条路才走得到。
+ *
+ * **这不是一个能骗过什么的东西**：它只影响界面上一句提醒的显隐，不参与任何
+ * 校验、不放松任何门。装机态没人会去设它，设了也只是让自己少看/多看一句话。
+ */
+export function resolveCodeSigning(dir: string, env: NodeJS.ProcessEnv): CodeSigning {
+  const forced = env["RUYIN_CODE_SIGNING"];
+  if (forced === "signed" || forced === "unsigned" || forced === "unpackaged") return forced;
+  return readBuildInfo(dir).codeSigning;
+}
+
 export function readBuildInfo(dir: string): BuildInfo {
   const path = join(dir, BUILD_INFO_FILE);
   if (!existsSync(path)) return { codeSigning: "unpackaged" };

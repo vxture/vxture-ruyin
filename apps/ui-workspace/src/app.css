@@ -1196,15 +1196,61 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 .crypto-note { opacity: 0.85; }
 
 /* ---------- 关于页 ----------
-   条款做成**按钮式**（owner 2026-09-10），但底层仍是 `<a>`：真链接才能中键新开、
-   右键复制地址。上一版一人一张大卡（「不要都做 card 链接」），再上一版是一行
-   纯文字链 —— 现在是三个并排的小按钮。 */
+   两块（owner 2026-09-10）：① 关于信息**自动布满**；② 提示信息**按需显隐、固定
+   高度**。要撑满就得让这条链上每一层都有确定高度 —— 滚动容器是 flex 定高的，
+   所以只在**关于页在场时**给 `.workbench-page` 一个 `min-height: 100%`，其余页面
+   照旧按内容高，不受影响。 */
+.workbench-page:has(.about-page) { min-height: 100%; }
+.settings-page:has(.about-page) { flex: 1; min-height: 0; }
+.about-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 黄金分割：上方留白 : 下方留白 = 0.382 : 0.618，于是内容落在「中部靠上一些」，
+   而不是正中。写成两个弹性空白而不是一个魔法 padding —— 换窗口高度它自己按比例
+   走，不用重新算一个数。 */
+.about-main {
+  --about-golden: 0.382;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+/* 卡片在这里要去掉默认的下外边距：`.card` 自带 margin-bottom，是给「一摞卡」
+   用的；这一页只有一张，那段外边距会算进下方留白里，把黄金分割挪偏。 */
+.about-card { margin-bottom: 0; }
+/* 关于页的字标放大到 heading-1（36px，缺省 `.brand-name` 是 20px）。这一页的
+   主角就是这个字标 —— 登录页有 120px 的图形标撑场，这里没有，只有字。 */
+.about-block .brand-name { font-size: var(--heading-1-font-size); }
+.about-main::before { content: ""; flex: var(--about-golden); }
+.about-main::after { content: ""; flex: calc(1 - var(--about-golden)); }
+
+/* 固定高度取 `--space-row-2xl`（96px）：实测那条提醒在 1280 宽是 57px、900 宽
+   75px、760 宽 93px，96 刚好罩住最窄那一档。**内部仍留滚动兜底** —— 固定高度是
+   为了版式不跳，不是为了把话裁掉；再窄的窗口下宁可滚，也不能少一行。 */
+.about-notice {
+  flex: 0 0 var(--space-row-2xl);
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+}
+.about-notice > .set-callout { margin: 0; width: 100%; }
+
+/* 条款做成**按钮式**（owner 2026-09-10），但底层仍是 `<a>`：真链接才能中键新开、
+   右键复制地址。 */
 .about-legal {
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
   gap: var(--spacing-sm);
-  margin-top: var(--spacing-lg);
+  /* 与上面的版权行拉开一段（24 → 48px）：它们是**另一类东西** —— 上面是
+     「这是什么」，下面是「去别处看条款」，靠太近会读成同一段。 */
+  margin-top: var(--space-row-sm);
 }
 .about-legal-btn {
   display: inline-flex;
@@ -1224,8 +1270,6 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   border-color: var(--ring);
   background: var(--surface-3, rgba(127, 127, 127, 0.1));
 }
-/* 未签名提醒钉在这一页最底下：它不属于任何一块，是整页的一条脚注。 */
-.about-unsigned { margin-top: var(--spacing-md); }
 /* 事实行尾的动作（「打开目录」）：顶到右端，不去挤值那一列 —— 值是这一行的
    主角，路径本来就长。 */
 /* 行尾的动作位。可以放不止一个（数据目录那一行有「打开目录」和「更改…」），

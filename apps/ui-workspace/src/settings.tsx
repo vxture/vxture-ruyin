@@ -1230,18 +1230,23 @@ const LEGAL_LINKS: Array<{ path: string; label: string }> = [
 ];
 
 /**
- * 关于页：身份 + 三条条款 + **一条只在该出现时才出现的提醒**。
+ * 关于页：**两块**（owner 2026-09-10 定的版式）。
  *
- * 这一页收过两次（owner 2026-09-10）：先从四张卡片收成两块，再把「须知」整块去掉。
- * 关于页是偶尔来一次、看一眼就走的地方 —— 事实逐条写在「通用设置」与「能力平台」，
- * 抄第二份就会有两份各自漂。
+ * 1. `.about-main` —— 关于信息，**自动布满**剩下的高度。内容不居中，落在**黄金
+ *    分割**上（上方留白 : 下方留白 = 0.382 : 0.618），所以是「中部靠上一些」。
+ * 2. `.about-notice` —— 提示信息，**按需显隐、固定高度**。不出现时这块不占位，
+ *    第一块随之长满。
  *
- * 底部那条**未签名提醒是判断式的**：签了就自己没了，不需要有人回来删这段文案。
- * 所以它读的是构建期落下的印（`build-info.ts`），不是一个写死的常量 —— 写死的话
+ * 事实不在这一页重复：数据目录、加密链条、推理策略、审计逐条写在「通用设置」，
+ * 逐条许可证在「能力平台」页上 —— 抄第二份就会有两份各自漂。
+ *
+ * 底部那条未签名提醒是**判断式**的：签了就自己没了，不需要有人回来删文案。
+ * 它读的是构建期落下的印（`build-info.ts`），不是写死的常量 —— 写死的话
  * 「签了自动消失」这条路从此没人走得到，而坏了和好了长得一模一样。
  *
  * `unpackaged`（从仓里直接跑）**什么都不提醒**：那时根本没有安装包可谈。
- * 缺失 ≠ 未签名，同 `capabilitySurface` 的纪律。
+ * 缺失 ≠ 否定，同 `capabilitySurface` 的纪律。要在开发态看这一支，
+ * 设 `RUYIN_CODE_SIGNING=unsigned`。
  */
 function AboutSection({
   system,
@@ -1253,55 +1258,62 @@ function AboutSection({
   // 未登录时也要能看条款 —— 落到与登录页同一个缺省，不是空链接。
   const consoleBase = session?.consoleBase || "https://vxture.com";
   return (
-    <>
-      <div className="card">
-        <div className="about-block">
-          <p>
-            <span className="brand-name">RUYIN</span>
-          </p>
-          <p className="brand-tag">Intelligent Workbench</p>
-          <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
-            Vxture AI 原生智能体的本地智能工作环境
-          </p>
-          <div className="mono text-muted-foreground">
-            Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
-            {system?.arch ?? ""}
-          </div>
-          <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
-            © 2026 Vxture · 保留所有权利
-          </p>
-          {/* 三条做成按钮式（owner 2026-09-10），但**仍然是 `<a>`**：真链接才能
-              中键新开、右键复制地址；用按钮 + onClick 去 window.open 会把这两样
-              都弄丢，而它看起来一模一样。 */}
-          <div className="about-legal">
-            {LEGAL_LINKS.map((l) => (
-              <a
-                key={l.path}
-                className="about-legal-btn"
-                href={`${consoleBase}${l.path}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {l.label}
-                <Icon name="external-link" size="xs" />
-              </a>
-            ))}
+    <div className="about-page">
+      <div className="about-main">
+        {/* 卡片这一层是**内容的容器**，不是装饰：这一页的身份信息落在深色底上时
+            没有边界，读起来像浮在背景里（owner 2026-09-10 报的）。上一轮重构版式
+            时把它弄丢了。 */}
+        <div className="card about-card">
+          <div className="about-block">
+            <p>
+              <span className="brand-name">RUYIN</span>
+            </p>
+            <p className="brand-tag">Intelligent Workbench</p>
+            <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
+              Vxture AI 原生智能体的本地智能工作环境
+            </p>
+            <div className="mono text-muted-foreground">
+              Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
+              {system?.arch ?? ""}
+            </div>
+            <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
+              © 2026 Vxture · 保留所有权利
+            </p>
+            {/* 三条做成按钮式（owner 2026-09-10），但**仍然是 `<a>`**：真链接才能
+                中键新开、右键复制地址；用按钮 + onClick 去 window.open 会把这两样
+                都弄丢，而它看起来一模一样。 */}
+            <div className="about-legal">
+              {LEGAL_LINKS.map((l) => (
+                <a
+                  key={l.path}
+                  className="about-legal-btn"
+                  href={`${consoleBase}${l.path}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {l.label}
+                  <Icon name="external-link" size="xs" />
+                </a>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
       {system?.codeSigning === "unsigned" && (
-        <p className="set-callout set-callout--warning about-unsigned">
-          <Icon name="warning" size="sm" />
-          <span>
-            <strong>这个安装包没有做代码签名。</strong>
-            首次安装时 Windows 的 SmartScreen 会弹一个蓝色提示框：点「更多信息」，再点
-            「仍要运行」即可继续 —— 这是提醒，不是阻止，同一台机器以后不再提示。
-            请从 Vxture 官方下载页取安装包，并核对 SHA256。
-          </span>
-        </p>
+        <div className="about-notice">
+          <p className="set-callout set-callout--warning">
+            <Icon name="warning" size="sm" />
+            <span>
+              <strong>这个安装包没有做代码签名。</strong>
+              首次安装时 Windows 的 SmartScreen 会弹一个蓝色提示框：点「更多信息」，再点
+              「仍要运行」即可继续 —— 这是提醒，不是阻止，同一台机器以后不再提示。
+              请从 Vxture 官方下载页取安装包，并核对 SHA256。
+            </span>
+          </p>
+        </div>
       )}
-    </>
+    </div>
   );
 }
 

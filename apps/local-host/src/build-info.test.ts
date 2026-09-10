@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BUILD_INFO_FILE, readBuildInfo } from "./build-info.js";
+import { BUILD_INFO_FILE, readBuildInfo, resolveCodeSigning } from "./build-info.js";
 
 function withDir(body: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "ruyin-buildinfo-"));
@@ -51,5 +51,29 @@ void test("readBuildInfo: 坏 JSON / 不认识的值 一律落到开发态，不
 
     writeFileSync(join(dir, BUILD_INFO_FILE), JSON.stringify({ somethingElse: true }));
     assert.equal(readBuildInfo(dir).codeSigning, "unpackaged");
+  });
+});
+
+/**
+ * 环境变量优先 —— 这个开关的存在理由是**让那条路走得到**。
+ *
+ * 仓里直接跑时构建印不存在，恒为 `unpackaged`，于是界面上那条「未签名」提醒
+ * 在开发态一次都不显示（owner 2026-09-10 就是这样报的「提醒没有出现」）。
+ * 看不见的那一支正是最容易坏掉的那一支。
+ */
+void test("resolveCodeSigning: 环境变量能把三种状态各自拨出来", () => {
+  withDir((dir) => {
+    for (const v of ["signed", "unsigned", "unpackaged"] as const) {
+      assert.equal(resolveCodeSigning(dir, { RUYIN_CODE_SIGNING: v }), v);
+    }
+  });
+});
+
+/** 不认识的值不该被当成一种状态 —— 落回构建印，而不是猜。 */
+void test("resolveCodeSigning: 认不出的值忽略掉，回到构建印", () => {
+  withDir((dir) => {
+    writeFileSync(join(dir, BUILD_INFO_FILE), JSON.stringify({ codeSigning: "signed" }));
+    assert.equal(resolveCodeSigning(dir, { RUYIN_CODE_SIGNING: "yes" }), "signed");
+    assert.equal(resolveCodeSigning(dir, {}), "signed");
   });
 });
