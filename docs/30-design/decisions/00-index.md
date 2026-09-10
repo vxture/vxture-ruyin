@@ -27,7 +27,7 @@
 
 | [ADR-021](ADR-021-registration-boundary-with-platform.md) | Ruyin 是环境不是产品：对平台的登记只到 OIDC client 这一层；产品码／订阅项都不要，RP 五端点不适用。由此推出会话与设备管理归 accounts（TD-057 的归属） | 已接受 | 2026-09-10 |
 
-| [ADR-022](ADR-022-product-surface-trust-boundary.md) | 产品接入面：沙箱 iframe 是必须的边界但不够 —— **契约裁剪归守护进程、凭据按 (项目, 产品) 限定**，SDK 只给便利与类型、不做判断；修订 60-technical §8.2 那条「桥在渲染进程裁剪 + 携带会话 token」 | **提议** | 2026-09-10 |
+| [ADR-022](ADR-022-product-surface-trust-boundary.md) | 产品接入面：沙箱 iframe 是必须的边界但不够 —— **契约裁剪归守护进程、凭据按 (项目, 产品) 限定**，SDK 只给便利与类型、不做判断；已修订 60-technical §8.2 那条「桥在渲染进程裁剪 + 携带会话 token」 | 已接受 | 2026-09-10 |
 
 后续候选（定稿时立 ADR）：Electron vs Tauri（60 §5.1）、
 每 Workspace 一库（60 §7.1）、推理传输 ≠ 数据存储（10 §15.2）。

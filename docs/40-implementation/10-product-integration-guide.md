@@ -214,10 +214,10 @@ Local Runtime  → 沙箱 iframe（独立 origin + CSP + sandbox 属性）
 
 ## 6.2 SDK 概貌
 
-`@ruyin/product-sdk`（TypeScript，API 面随 Phase A 冻结）：
+`@vxture/ruyin-product-sdk`（TypeScript，API 面随 Phase A 冻结）：
 
 ```typescript
-import { connect } from "@ruyin/product-sdk";
+import { connect } from "@vxture/ruyin-product-sdk";
 
 const ruyin = await connect();               // 桥握手，取得契约裁剪后的能力面
 
