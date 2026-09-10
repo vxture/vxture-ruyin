@@ -302,6 +302,10 @@ const server = createLocalApi({
     // 照实说用的是哪一个：不配 base 时仍是 mock，首页产品卡的「未接通」
     // （TD-033）在这里就能看见，而不是只在装机后才第一次出现。
     capabilitySurface: capabilityBase ? "configured" : "mock",
+    // 观察台**故意报 unsigned**：关于页底部那条提醒是判断式的，报 unpackaged 的话
+    // 它在观察台上永远不显示 —— 而看不见的那一支正是最容易坏掉的那一支。
+    // 装机态由 pack.mjs 落的真印决定，跟这里无关。
+    codeSigning: "unsigned",
     startedAt: new Date().toISOString(),
     get dataDirPending() {
       return harnessLocation.pending;

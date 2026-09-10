@@ -1196,24 +1196,36 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 .crypto-note { opacity: 0.85; }
 
 /* ---------- 关于页 ----------
-   条款是**一行内联链接**，照登录页页脚（`.login-foot`）那一行。上一版给它们
-   一人一张可点的卡（owner 2026-09-10：「不要都做 card 链接」）—— 关于页是偶尔
-   来一次、看一眼就走的地方，三张卡把它撑成了一个导航页。 */
+   条款做成**按钮式**（owner 2026-09-10），但底层仍是 `<a>`：真链接才能中键新开、
+   右键复制地址。上一版一人一张大卡（「不要都做 card 链接」），再上一版是一行
+   纯文字链 —— 现在是三个并排的小按钮。 */
 .about-legal {
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
-  gap: var(--spacing-md);
-  margin-top: var(--spacing-md);
-  font-size: var(--body-sm-font-size);
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-lg);
 }
-.about-legal a { color: var(--muted-foreground); text-decoration: none; }
-.about-legal a:hover { color: var(--foreground); text-decoration: underline; }
-
-/* 「须知」那四行沿用 `.crypto-chain`（同一个标签列宽、同一条虚线），只把
-   居中对齐改成顶对齐：那边一行一句，这边每句都会折行，居中会让标签飘到
-   说明的正中间。 */
-.about-facts li { align-items: flex-start; min-height: 0; padding: var(--spacing-xs) 0; line-height: 1.55; }
+.about-legal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  padding: var(--spacing-2xs) var(--spacing-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.about-legal-btn:hover {
+  color: var(--foreground);
+  border-color: var(--ring);
+  background: var(--surface-3, rgba(127, 127, 127, 0.1));
+}
+/* 未签名提醒钉在这一页最底下：它不属于任何一块，是整页的一条脚注。 */
+.about-unsigned { margin-top: var(--spacing-md); }
 /* 事实行尾的动作（「打开目录」）：顶到右端，不去挤值那一列 —— 值是这一行的
    主角，路径本来就长。 */
 /* 行尾的动作位。可以放不止一个（数据目录那一行有「打开目录」和「更改…」），

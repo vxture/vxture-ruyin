@@ -19,7 +19,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
@@ -83,6 +83,30 @@ run(
   ],
   repoRoot,
 );
+
+// ---------------------------------------------------------------------------
+// 构建印：这个包到底签没签名。
+//
+// 界面底部那条「未签名」提醒是**判断式**的（关于页），要的是「签了自动消失」。
+// 写死一个 false 的话它永远不会消失 —— 那条路从此没人走得到。所以这里按**决定
+// 要不要签的那同一个条件**写：electron-builder 在没有证书时只编辑、不签
+// （electron-builder.yml 里那段注释写着这件事），而证书来自 CSC_* 环境变量或
+// win.certificateFile / certificateSubjectName。
+//
+// **加了新的签名机制就要回来改这里**，否则包签了而界面还在喊未签名。
+// `pack.test.mjs` 逐个钉住下面这几个来源。
+// ---------------------------------------------------------------------------
+const builderYml = readFileSync(join(shellDir, "electron-builder.yml"), "utf8");
+const certInYml = /^\s*(certificateFile|certificateSubjectName|certificateSha1):/m.test(builderYml);
+const certInEnv = Boolean(
+  process.env["CSC_LINK"] ||
+    process.env["WIN_CSC_LINK"] ||
+    process.env["CSC_NAME"] ||
+    process.env["CSC_KEY_PASSWORD"],
+);
+const codeSigning = certInYml || certInEnv ? "signed" : "unsigned";
+writeFileSync(join(daemonOut, "build-info.json"), JSON.stringify({ codeSigning }, null, 2));
+console.log(`[pack] build-info: codeSigning=${codeSigning}`);
 
 // `pnpm deploy --prod` production-installs the WHOLE workspace as a side
 // effect, stripping devDependencies (including electron-builder). Restore

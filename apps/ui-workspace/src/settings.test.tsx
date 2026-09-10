@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@vxture/design-system";
 import { useEffect, useState } from "react";
@@ -30,6 +30,8 @@ function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
     dataDir: "C:/Users/demo/.ruyin/dev",
     productsDir: "D:/ruyin/products",
     keyProtection: "dpapi",
+    // 缺省是**开发态**，不是「未签名」：只有明确要测那条提醒的用例才把它拨过去。
+    codeSigning: "unpackaged",
     capabilitySurface: "configured",
     startedAt: "2026-09-01T00:00:00Z",
     ...over,
@@ -115,16 +117,30 @@ void test("AboutSection: shows version/platform/arch once system loads, placehol
 });
 
 /**
- * 关于页的条款链接 —— **只列真的存在的那几页**。
+ * 关于页只有身份 + 三条条款 + 一条判断式提醒（owner 2026-09-10 连收两次：
+ * 四张卡 → 两块 → 去掉「须知」）。
+ *
+ * 钉**结构**而不只是文案：只钉文案的话，下一个人再加两张卡，用例照样全绿。
+ */
+void test("AboutSection: 只有身份与三条条款，没有板块、没有按钮元素", async () => {
+  const { container } = renderSection("about");
+  await screen.findByText("RUYIN");
+  expect(container.querySelectorAll(".set-block")).toHaveLength(0);
+  expect(container.querySelectorAll(".about-legal-btn")).toHaveLength(3);
+  expect(container.querySelectorAll("button")).toHaveLength(0);
+});
+
+/**
+ * 三条条款 —— **只列真的存在的那几页**。
  *
  * 2026-09-10 跟着语言前缀跳转逐条实测过 `vxture.com/legal/*`：`privacy` /
  * `terms` / `cookies` / `refund` 是 200，`dpa` / `security` / `subprocessors` /
  * `open-source` / `acceptable-use` / `licenses` 全是 404。
  *
- * 钉两件事，第二件比第一件重要：链接指对了，**并且没有多出来的**。一个点开是
- * 404 的法律链接比没有这个链接糟得多 —— 用户会以为是自己没找到。
+ * 第二个断言比第一个重要：**没有多出来的**。一个点开是 404 的法律链接比没有这个
+ * 链接糟得多 —— 用户会以为是自己没找到。
  */
-void test("AboutSection: 条款链接只有实测存在的三页，且不含 Cookie 政策", async () => {
+void test("AboutSection: 条款只有实测存在的三页，且不含 Cookie 政策", async () => {
   renderSection("about");
   const privacy = await screen.findByText("隐私政策");
   expect(privacy.closest("a")).toHaveAttribute("href", "https://vxture.com/legal/privacy");
@@ -136,12 +152,19 @@ void test("AboutSection: 条款链接只有实测存在的三页，且不含 Coo
     "href",
     "https://vxture.com/legal/refund",
   );
-
   // 那一页**在**（200），故意不链：它讲的是网站的必要 / 偏好 / 分析 / 第三方
   // Cookie，而桌面应用不设分析 Cookie、也没有第三方 Cookie。
   expect(screen.queryByText(/Cookie/)).not.toBeInTheDocument();
-  for (const gone of ["数据处理协议", "安全说明", "子处理方", "可接受使用"]) {
-    expect(screen.queryByText(new RegExp(gone))).not.toBeInTheDocument();
+});
+
+/** 做成按钮式，但底层仍是真链接 —— 中键新开、右键复制地址都得留着。 */
+void test("AboutSection: 按钮式条款底层仍是 <a>，不是 button", async () => {
+  const { container } = renderSection("about");
+  await screen.findByText("隐私政策");
+  for (const el of container.querySelectorAll(".about-legal-btn")) {
+    expect(el.tagName).toBe("A");
+    expect(el).toHaveAttribute("target", "_blank");
+    expect(el).toHaveAttribute("rel", expect.stringContaining("noopener"));
   }
 });
 
@@ -160,36 +183,40 @@ void test("AboutSection: 外链基址取自会话的 consoleBase，未登录则�
 });
 
 /**
- * 「须知」那几行是**别处不会说、而租户该知道**的事实。
+ * 底部那条未签名提醒是**判断式**的（owner 2026-09-10）：签了就自己没了，不需要
+ * 有人回来删这段文案。
  *
- * 两条最要紧：① RUYIN 是商业闭源软件 —— 租户得知道自己拿到的是什么；
- * ② 第三方组件那一句**必须承认只覆盖一半**（TD-058）：随包技能与工具逐条可查，
- * 而 Electron / Chromium / 依赖树没有汇总声明。写成「全部许可证见 X」而背后
- * 只有一半，正是这个仓最该避免的形状。
- *
- * 我们自己闭源，与随包组件要署名，是两件事 —— 后者是那些 MIT / Apache 许可证
- * 自己的要求，跟我们闭不闭源无关。
+ * 三种状态各钉一条，**中间那条最要紧**：`unpackaged` 绝不能当成「未签名」——
+ * 从仓里直接跑时根本没有安装包可谈，那时挂一条讲 SmartScreen 的提醒是错的。
+ * 缺失 ≠ 否定，同 `capabilitySurface` 的纪律。
  */
-void test("AboutSection: 须知说明闭源授权、数据边界、第三方组件只覆盖一半、未签名安装包", async () => {
-  renderSection("about");
-  expect(await screen.findByText(/商业闭源软件/)).toBeInTheDocument();
-  expect(screen.getByText(/推理是传输不是存储/)).toBeInTheDocument();
-  expect(screen.getByText(/尚无汇总声明/)).toBeInTheDocument();
-  expect(screen.getByText(/SmartScreen/)).toBeInTheDocument();
+void test("AboutSection: 未签名才提醒；已签名与开发态都不提醒", async () => {
+  const withSigning = (v: SystemInfo["codeSigning"]) =>
+    fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ codeSigning: v })) });
+
+  renderSection("about", withSigning("unsigned"));
+  expect(await screen.findByText(/SmartScreen/)).toBeInTheDocument();
+  cleanup();
+
+  renderSection("about", withSigning("signed"));
+  await screen.findByText("RUYIN");
+  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
+  cleanup();
+
+  renderSection("about", withSigning("unpackaged"));
+  await screen.findByText("RUYIN");
+  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
 });
 
 /**
- * 关于页**不做成一个导航站**（owner 2026-09-10：「不要都做 card 链接」）。
- *
- * 上一版是四张卡、每张带一个跳转按钮。这条钉的是**块数**与**按钮数** ——
- * 只钉文案的话，下一个人再加两张卡，用例全绿。
+ * 提醒**只留一处**（owner 2026-09-10）。原来「软件更新」页上还有一条无条件的
+ * 同款语气块 —— 那一条签名那天会原地变成一句假话，而没有任何东西会提醒谁回来
+ * 删它。这条断言盯着它别回来。
  */
-void test("AboutSection: 只有一个板块、没有跳转按钮 —— 关于页不是导航站", async () => {
-  const { container } = renderSection("about");
-  await screen.findByText(/商业闭源软件/);
-  expect(container.querySelectorAll(".set-block")).toHaveLength(1);
-  expect(container.querySelectorAll(".about-legal a")).toHaveLength(3);
-  expect(container.querySelectorAll("button")).toHaveLength(0);
+void test("软件更新页不再重复那条 SmartScreen 提醒（只留关于页那一处）", async () => {
+  renderSection("updates");
+  await screen.findByText("检查");
+  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
 });
 
 void test("偏好设置（在账户之下）: language + the three axes, in that order, each persisted on this machine", async () => {

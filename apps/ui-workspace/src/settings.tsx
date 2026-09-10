@@ -1199,18 +1199,11 @@ function UpdatesSection({
         <FactRow label="检查" value="手动，或每次打开设置时你点一下" />
         <FactRow label="下载" value="浏览器下载，安装包落在你的下载目录" />
         <FactRow label="安装" value="双击安装包，覆盖安装，业务数据不动" />
-        {/* 语气块，不是灰色小字（owner 2026-09-04 第 1 条）：这一条是**装之前
-            要先知道**的事，混在事实行下面的说明里会被划过去。原来那句还带着
-            「照实说，而不是让你装到一半才遇到」—— 那是写给我们自己看的编辑说明，
-            不是给用户的话，删掉。 */}
-        <p className="set-callout set-callout--warning">
-          <Icon name="warning" size="sm" />
-          <span>
-            <strong>首次安装时 Windows 会拦一下。</strong>
-            安装包还没做代码签名，SmartScreen 第一次会弹一个蓝色提示框：点「更多信息」，
-            再点「仍要运行」即可继续。这是提醒，不是阻止；同一台机器以后不再提示。
-          </span>
-        </p>
+        {/* 这里原本还有一条 SmartScreen 提醒（语气块）。**移到「关于」页底部了**
+            （owner 2026-09-10：只留一处）—— 那一条是**判断式**的，读构建期落的印，
+            签了就自己没了；这一条是无条件的散文，签名那天会原地变成一句假话，
+            而且没有任何东西会提醒谁回来删它。
+            代价照实记：失去了「正要下载时就地提醒」这个位置。 */}
       </SettingsBlock>
     </>
   );
@@ -1229,9 +1222,6 @@ function UpdatesSection({
  * **`cookies` 在，但故意不链。** 那份《Cookie 使用政策》讲的是网站的必要 / 偏好 /
  * 分析 / 第三方 Cookie；桌面应用不设分析 Cookie、也没有第三方 Cookie。链过去等于
  * 替产品宣称了一件不成立的事。
- *
- * 排版照**登录页页脚**那一行（`.login-foot`）：一行内联链接，不是三张卡片。
- * 这几页是偶尔才找一次的东西，给它们一人一张卡会让关于页看起来像个导航站。
  */
 const LEGAL_LINKS: Array<{ path: string; label: string }> = [
   { path: "/legal/privacy", label: "隐私政策" },
@@ -1240,14 +1230,18 @@ const LEGAL_LINKS: Array<{ path: string; label: string }> = [
 ];
 
 /**
- * 关于页 = 身份 + **两块**：条款在哪、以及几条别处不会说的事实。
+ * 关于页：身份 + 三条条款 + **一条只在该出现时才出现的提醒**。
  *
- * 上一版做成了四块卡片、每块带一个跳转按钮（owner 2026-09-10：「不要都做 card
- * 链接」）。关于页是偶尔来一次、看一眼就走的地方，四张卡把它撑成了一个导航页。
+ * 这一页收过两次（owner 2026-09-10）：先从四张卡片收成两块，再把「须知」整块去掉。
+ * 关于页是偶尔来一次、看一眼就走的地方 —— 事实逐条写在「通用设置」与「能力平台」，
+ * 抄第二份就会有两份各自漂。
  *
- * 事实也不在这里重复：数据目录、加密链条、推理策略、审计逐条写在「通用设置」，
- * 逐条许可证在「能力平台」页上 —— 抄第二份就会有两份各自漂。这里只留**别处
- * 没有、而租户该知道**的那几句。
+ * 底部那条**未签名提醒是判断式的**：签了就自己没了，不需要有人回来删这段文案。
+ * 所以它读的是构建期落下的印（`build-info.ts`），不是一个写死的常量 —— 写死的话
+ * 「签了自动消失」这条路从此没人走得到，而坏了和好了长得一模一样。
+ *
+ * `unpackaged`（从仓里直接跑）**什么都不提醒**：那时根本没有安装包可谈。
+ * 缺失 ≠ 未签名，同 `capabilitySurface` 的纪律。
  */
 function AboutSection({
   system,
@@ -1276,59 +1270,37 @@ function AboutSection({
           <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
             © 2026 Vxture · 保留所有权利
           </p>
-          {/* 条款就挂在字标下面，和登录页页脚同一个样子 —— 用户找条款时会先看这儿。 */}
+          {/* 三条做成按钮式（owner 2026-09-10），但**仍然是 `<a>`**：真链接才能
+              中键新开、右键复制地址；用按钮 + onClick 去 window.open 会把这两样
+              都弄丢，而它看起来一模一样。 */}
           <div className="about-legal">
             {LEGAL_LINKS.map((l) => (
               <a
                 key={l.path}
+                className="about-legal-btn"
                 href={`${consoleBase}${l.path}`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 {l.label}
+                <Icon name="external-link" size="xs" />
               </a>
             ))}
           </div>
         </div>
       </div>
 
-      <SettingsBlock
-        icon="info"
-        title="须知"
-        desc="几条别处不会说、而你迟早会撞上的事"
-      >
-        <ul className="crypto-chain about-facts">
-          <li>
-            <span className="crypto-what">软件授权</span>
-            <span className="crypto-how">
-              RUYIN 是 Vxture 的<strong>商业闭源软件</strong>，保留所有权利；订阅与授权在 Vxture 平台
-            </span>
-          </li>
-          <li>
-            <span className="crypto-what">数据边界</span>
-            <span className="crypto-how">
-              业务数据在本机、整库加密；只有送去推理的那部分上下文会离开本机，且推理是传输不是存储
-            </span>
-          </li>
-          <li>
-            <span className="crypto-what">第三方组件</span>
-            {/* 我们自己闭源，与随包的第三方组件要署名，是两件事：Electron / Chromium /
-                依赖树是别人的 MIT / Apache 代码，署名是它们许可证里的要求。
-                **如实说只覆盖一半**（TD-058）——写一句「全部许可证见 X」而背后只有
-                技能与工具那一半，正是这个仓最该避免的形状。 */}
-            <span className="crypto-how">
-              随包的技能与工具，逐条许可证在「能力平台」页上；运行时组件（Electron / Chromium /
-              依赖树）尚无汇总声明
-            </span>
-          </li>
-          <li>
-            <span className="crypto-what">安装包未签名</span>
-            <span className="crypto-how">
-              首次安装 Windows 会弹 SmartScreen 警告 —— 这是预期的，不是被篡改；请从官方下载页取包并核对 SHA256
-            </span>
-          </li>
-        </ul>
-      </SettingsBlock>
+      {system?.codeSigning === "unsigned" && (
+        <p className="set-callout set-callout--warning about-unsigned">
+          <Icon name="warning" size="sm" />
+          <span>
+            <strong>这个安装包没有做代码签名。</strong>
+            首次安装时 Windows 的 SmartScreen 会弹一个蓝色提示框：点「更多信息」，再点
+            「仍要运行」即可继续 —— 这是提醒，不是阻止，同一台机器以后不再提示。
+            请从 Vxture 官方下载页取安装包，并核对 SHA256。
+          </span>
+        </p>
+      )}
     </>
   );
 }
