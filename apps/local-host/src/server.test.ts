@@ -62,6 +62,7 @@ const testSystemInfo = {
   productsDir: "(test)",
   keyProtection: "plaintext" as const,
   capabilitySurface: "mock" as const,
+  codeSigning: "unpackaged" as const,
   startedAt: new Date().toISOString(),
 };
 

@@ -264,6 +264,12 @@ export interface LocalApiDeps {
      * 「没接上」绝不能看起来像「在工作」，而守护进程日志到不了用户眼前。
      */
     capabilitySurface: "configured" | "mock";
+    /**
+     * 这个安装包签没签名（build-info.ts）。**`unpackaged` 不是「未签名」** ——
+     * 从仓里直接跑时没有安装包可谈。界面只在明确是 `unsigned` 时才提醒，
+     * 签了之后这条提醒自己就没了（TD-001）。
+     */
+    codeSigning: "signed" | "unsigned" | "unpackaged";
     /** 待搬到的目录（重启时生效）。没有待搬时不出现。 */
     dataDirPending?: string;
     /** 上一次搬家的结果 —— 重启后界面要能说清楚成没成、没成是因为什么。 */

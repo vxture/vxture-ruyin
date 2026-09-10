@@ -100,7 +100,7 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
       {view === "skills" && <SkillsSection api={api} />}
       {view === "database" && <DatabaseSection />}
       {view === "updates" && <UpdatesSection system={system} api={api} />}
-      {view === "about" && <AboutSection system={system} />}
+      {view === "about" && <AboutSection system={system} session={session} />}
     </div>
   );
 }
@@ -1199,18 +1199,11 @@ function UpdatesSection({
         <FactRow label="检查" value="手动，或每次打开设置时你点一下" />
         <FactRow label="下载" value="浏览器下载，安装包落在你的下载目录" />
         <FactRow label="安装" value="双击安装包，覆盖安装，业务数据不动" />
-        {/* 语气块，不是灰色小字（owner 2026-09-04 第 1 条）：这一条是**装之前
-            要先知道**的事，混在事实行下面的说明里会被划过去。原来那句还带着
-            「照实说，而不是让你装到一半才遇到」—— 那是写给我们自己看的编辑说明，
-            不是给用户的话，删掉。 */}
-        <p className="set-callout set-callout--warning">
-          <Icon name="warning" size="sm" />
-          <span>
-            <strong>首次安装时 Windows 会拦一下。</strong>
-            安装包还没做代码签名，SmartScreen 第一次会弹一个蓝色提示框：点「更多信息」，
-            再点「仍要运行」即可继续。这是提醒，不是阻止；同一台机器以后不再提示。
-          </span>
-        </p>
+        {/* 这里原本还有一条 SmartScreen 提醒（语气块）。**移到「关于」页底部了**
+            （owner 2026-09-10：只留一处）—— 那一条是**判断式**的，读构建期落的印，
+            签了就自己没了；这一条是无条件的散文，签名那天会原地变成一句假话，
+            而且没有任何东西会提醒谁回来删它。
+            代价照实记：失去了「正要下载时就地提醒」这个位置。 */}
       </SettingsBlock>
     </>
   );
@@ -1218,26 +1211,97 @@ function UpdatesSection({
 
 /* ---------------- 关于 ---------------- */
 
-function AboutSection({ system }: { system: SystemInfo | null }) {
+/**
+ * 关于页要链哪几页 —— **逐条实测过在不在**（2026-09-10，跟到语言前缀跳转之后）。
+ *
+ * 在的：`privacy` `terms` `cookies` `refund`（200）。
+ * 不在的：`dpa` `security` `subprocessors` `open-source` `acceptable-use` `licenses`
+ * 全是 404 —— 所以这里一条都不写。**一个点开是 404 的法律链接，比没有这个链接
+ * 糟得多**：用户会以为自己没找到，而不是它不存在。
+ *
+ * **`cookies` 在，但故意不链。** 那份《Cookie 使用政策》讲的是网站的必要 / 偏好 /
+ * 分析 / 第三方 Cookie；桌面应用不设分析 Cookie、也没有第三方 Cookie。链过去等于
+ * 替产品宣称了一件不成立的事。
+ */
+const LEGAL_LINKS: Array<{ path: string; label: string }> = [
+  { path: "/legal/privacy", label: "隐私政策" },
+  { path: "/legal/terms", label: "服务条款" },
+  { path: "/legal/refund", label: "退款政策" },
+];
+
+/**
+ * 关于页：身份 + 三条条款 + **一条只在该出现时才出现的提醒**。
+ *
+ * 这一页收过两次（owner 2026-09-10）：先从四张卡片收成两块，再把「须知」整块去掉。
+ * 关于页是偶尔来一次、看一眼就走的地方 —— 事实逐条写在「通用设置」与「能力平台」，
+ * 抄第二份就会有两份各自漂。
+ *
+ * 底部那条**未签名提醒是判断式的**：签了就自己没了，不需要有人回来删这段文案。
+ * 所以它读的是构建期落下的印（`build-info.ts`），不是一个写死的常量 —— 写死的话
+ * 「签了自动消失」这条路从此没人走得到，而坏了和好了长得一模一样。
+ *
+ * `unpackaged`（从仓里直接跑）**什么都不提醒**：那时根本没有安装包可谈。
+ * 缺失 ≠ 未签名，同 `capabilitySurface` 的纪律。
+ */
+function AboutSection({
+  system,
+  session,
+}: {
+  system: SystemInfo | null;
+  session: SessionInfo | null;
+}) {
+  // 未登录时也要能看条款 —— 落到与登录页同一个缺省，不是空链接。
+  const consoleBase = session?.consoleBase || "https://vxture.com";
   return (
-    <div className="card">
-      <div className="about-block">
-        <p>
-          <span className="brand-name">RUYIN</span>
-        </p>
-        <p className="brand-tag">Intelligent Workbench</p>
-        <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
-          Vxture AI 原生智能体的本地智能工作环境
-        </p>
-        <div className="mono text-muted-foreground">
-          Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
-          {system?.arch ?? ""}
+    <>
+      <div className="card">
+        <div className="about-block">
+          <p>
+            <span className="brand-name">RUYIN</span>
+          </p>
+          <p className="brand-tag">Intelligent Workbench</p>
+          <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
+            Vxture AI 原生智能体的本地智能工作环境
+          </p>
+          <div className="mono text-muted-foreground">
+            Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
+            {system?.arch ?? ""}
+          </div>
+          <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
+            © 2026 Vxture · 保留所有权利
+          </p>
+          {/* 三条做成按钮式（owner 2026-09-10），但**仍然是 `<a>`**：真链接才能
+              中键新开、右键复制地址；用按钮 + onClick 去 window.open 会把这两样
+              都弄丢，而它看起来一模一样。 */}
+          <div className="about-legal">
+            {LEGAL_LINKS.map((l) => (
+              <a
+                key={l.path}
+                className="about-legal-btn"
+                href={`${consoleBase}${l.path}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {l.label}
+                <Icon name="external-link" size="xs" />
+              </a>
+            ))}
+          </div>
         </div>
-        <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
-          © 2026 Vxture · 保留所有权利
-        </p>
       </div>
-    </div>
+
+      {system?.codeSigning === "unsigned" && (
+        <p className="set-callout set-callout--warning about-unsigned">
+          <Icon name="warning" size="sm" />
+          <span>
+            <strong>这个安装包没有做代码签名。</strong>
+            首次安装时 Windows 的 SmartScreen 会弹一个蓝色提示框：点「更多信息」，再点
+            「仍要运行」即可继续 —— 这是提醒，不是阻止，同一台机器以后不再提示。
+            请从 Vxture 官方下载页取安装包，并核对 SHA256。
+          </span>
+        </p>
+      )}
+    </>
   );
 }
 

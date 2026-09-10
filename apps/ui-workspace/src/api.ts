@@ -587,6 +587,11 @@ export interface SystemInfo {
    * 不是「没接上」。
    */
   capabilitySurface: "configured" | "mock";
+  /**
+   * 安装包签没签名。**`unpackaged` 不是「未签名」**：从仓里直接跑时没有安装包
+   * 可谈。关于页只在 `unsigned` 时才在底部提醒，签了之后那条自己就没了。
+   */
+  codeSigning: "signed" | "unsigned" | "unpackaged";
   startedAt: string;
   /** 排着一次搬家（重启时生效）。TD-039。 */
   dataDirPending?: string;

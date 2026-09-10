@@ -36,6 +36,8 @@ function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
     dataDir: "(test)",
     productsDir: "(test)",
     keyProtection: "dpapi",
+    // 缺省是**开发态**，不是「未签名」：只有明确要测那条提醒的用例才把它拨过去。
+    codeSigning: "unpackaged",
     capabilitySurface: "configured",
     startedAt: "2026-09-01T00:00:00Z",
     ...over,

@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@vxture/design-system";
 import { useEffect, useState } from "react";
@@ -30,6 +30,8 @@ function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
     dataDir: "C:/Users/demo/.ruyin/dev",
     productsDir: "D:/ruyin/products",
     keyProtection: "dpapi",
+    // 缺省是**开发态**，不是「未签名」：只有明确要测那条提醒的用例才把它拨过去。
+    codeSigning: "unpackaged",
     capabilitySurface: "configured",
     startedAt: "2026-09-01T00:00:00Z",
     ...over,
@@ -112,6 +114,109 @@ void test("AboutSection: shows version/platform/arch once system loads, placehol
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ version: "0.2.0", platform: "win32", arch: "x64" })) });
   renderSection("about", api);
   expect(await screen.findByText("Runtime 0.2.0 · win32-x64")).toBeInTheDocument();
+});
+
+/**
+ * 关于页只有身份 + 三条条款 + 一条判断式提醒（owner 2026-09-10 连收两次：
+ * 四张卡 → 两块 → 去掉「须知」）。
+ *
+ * 钉**结构**而不只是文案：只钉文案的话，下一个人再加两张卡，用例照样全绿。
+ */
+void test("AboutSection: 只有身份与三条条款，没有板块、没有按钮元素", async () => {
+  const { container } = renderSection("about");
+  await screen.findByText("RUYIN");
+  expect(container.querySelectorAll(".set-block")).toHaveLength(0);
+  expect(container.querySelectorAll(".about-legal-btn")).toHaveLength(3);
+  expect(container.querySelectorAll("button")).toHaveLength(0);
+});
+
+/**
+ * 三条条款 —— **只列真的存在的那几页**。
+ *
+ * 2026-09-10 跟着语言前缀跳转逐条实测过 `vxture.com/legal/*`：`privacy` /
+ * `terms` / `cookies` / `refund` 是 200，`dpa` / `security` / `subprocessors` /
+ * `open-source` / `acceptable-use` / `licenses` 全是 404。
+ *
+ * 第二个断言比第一个重要：**没有多出来的**。一个点开是 404 的法律链接比没有这个
+ * 链接糟得多 —— 用户会以为是自己没找到。
+ */
+void test("AboutSection: 条款只有实测存在的三页，且不含 Cookie 政策", async () => {
+  renderSection("about");
+  const privacy = await screen.findByText("隐私政策");
+  expect(privacy.closest("a")).toHaveAttribute("href", "https://vxture.com/legal/privacy");
+  expect(screen.getByText("服务条款").closest("a")).toHaveAttribute(
+    "href",
+    "https://vxture.com/legal/terms",
+  );
+  expect(screen.getByText("退款政策").closest("a")).toHaveAttribute(
+    "href",
+    "https://vxture.com/legal/refund",
+  );
+  // 那一页**在**（200），故意不链：它讲的是网站的必要 / 偏好 / 分析 / 第三方
+  // Cookie，而桌面应用不设分析 Cookie、也没有第三方 Cookie。
+  expect(screen.queryByText(/Cookie/)).not.toBeInTheDocument();
+});
+
+/** 做成按钮式，但底层仍是真链接 —— 中键新开、右键复制地址都得留着。 */
+void test("AboutSection: 按钮式条款底层仍是 <a>，不是 button", async () => {
+  const { container } = renderSection("about");
+  await screen.findByText("隐私政策");
+  for (const el of container.querySelectorAll(".about-legal-btn")) {
+    expect(el.tagName).toBe("A");
+    expect(el).toHaveAttribute("target", "_blank");
+    expect(el).toHaveAttribute("rel", expect.stringContaining("noopener"));
+  }
+});
+
+/** 条款地址跟着会话走；未登录时落到与登录页同一个缺省，不是空链接。 */
+void test("AboutSection: 外链基址取自会话的 consoleBase，未登录则落到默认站点", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue({ signedIn: true, consoleBase: "https://staging.vxture.com" }),
+  });
+  renderSection("about", api);
+  await vi.waitFor(() =>
+    expect(screen.getByText("隐私政策").closest("a")).toHaveAttribute(
+      "href",
+      "https://staging.vxture.com/legal/privacy",
+    ),
+  );
+});
+
+/**
+ * 底部那条未签名提醒是**判断式**的（owner 2026-09-10）：签了就自己没了，不需要
+ * 有人回来删这段文案。
+ *
+ * 三种状态各钉一条，**中间那条最要紧**：`unpackaged` 绝不能当成「未签名」——
+ * 从仓里直接跑时根本没有安装包可谈，那时挂一条讲 SmartScreen 的提醒是错的。
+ * 缺失 ≠ 否定，同 `capabilitySurface` 的纪律。
+ */
+void test("AboutSection: 未签名才提醒；已签名与开发态都不提醒", async () => {
+  const withSigning = (v: SystemInfo["codeSigning"]) =>
+    fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ codeSigning: v })) });
+
+  renderSection("about", withSigning("unsigned"));
+  expect(await screen.findByText(/SmartScreen/)).toBeInTheDocument();
+  cleanup();
+
+  renderSection("about", withSigning("signed"));
+  await screen.findByText("RUYIN");
+  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
+  cleanup();
+
+  renderSection("about", withSigning("unpackaged"));
+  await screen.findByText("RUYIN");
+  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
+});
+
+/**
+ * 提醒**只留一处**（owner 2026-09-10）。原来「软件更新」页上还有一条无条件的
+ * 同款语气块 —— 那一条签名那天会原地变成一句假话，而没有任何东西会提醒谁回来
+ * 删它。这条断言盯着它别回来。
+ */
+void test("软件更新页不再重复那条 SmartScreen 提醒（只留关于页那一处）", async () => {
+  renderSection("updates");
+  await screen.findByText("检查");
+  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
 });
 
 void test("偏好设置（在账户之下）: language + the three axes, in that order, each persisted on this machine", async () => {

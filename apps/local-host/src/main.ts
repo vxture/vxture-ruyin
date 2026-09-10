@@ -30,13 +30,14 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
 import {
   bundledSkillsDir as bundledSkillsDirOf,
   bundledToolsDir as bundledToolsDirOf,
 } from "./bundled-layers.js";
+import { readBuildInfo } from "./build-info.js";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import {
@@ -515,6 +516,8 @@ const server = createLocalApi({
     productsDir,
     keyProtection: keys.protection,
     capabilitySurface: capabilityBase ? "configured" : "mock",
+    // 构建期落的印，跟着守护进程一起被打进 resources；仓里跑时它不存在。
+    codeSigning: readBuildInfo(dirname(fileURLToPath(import.meta.url))).codeSigning,
     startedAt: new Date().toISOString(),
     // 这两条是**给界面讲清楚状态**用的：有没有排着一次搬家、上一次搬得怎么样。
     // 每次问 /system 都重新读指针文件，而不是缓存启动那一刻的值 —— 用户可能刚
