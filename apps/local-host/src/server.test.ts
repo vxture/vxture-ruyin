@@ -1766,3 +1766,121 @@ test("components: 列出 / 获取 / 取消 / 移除，失败按种类分开报�
     closeRig(rig);
   }
 });
+
+/**
+ * 产品接入面的信任脊柱（ADR-022 §5 片一）。
+ *
+ * 这四条是这一片存在的理由，其余都是脚手架。**它们不需要任何真实产品、也不需要
+ * 能力面** —— 用 `bidproposal` 那份契约夹具就能全部证伪。
+ */
+
+/** ① 会话令牌**不能**走桥面。允许它走，「桥面是被裁剪过的」这句话就没有意义了。 */
+void test("bridge: 会话令牌打 /bridge/* 被拒（403，不是当成有效凭据）", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const res = await fetch(`${rig.base}/bridge/context`, { headers: rig.headers });
+    assert.equal(res.status, 403);
+    assert.equal(((await res.json()) as { code: string }).code, "BRIDGE_TOKEN_REQUIRED");
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
+ * ② 产品凭据**不能**走 `/projects/*`。
+ *
+ * 这一条今天是「自然成立」的（桥凭据 ≠ 会话令牌 → 401），**正因如此它更需要被
+ * 钉住**：没人测过的事实，改一行就会变，而变了之后坏了和好了长得一模一样。
+ */
+void test("bridge: 产品凭据打 /projects/* 被拒（两个方向是一对，不是一条）", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    const minted = (await (
+      await fetch(`${rig.base}/projects/${projectId}/bridge-token`, {
+        method: "POST",
+        headers: rig.headers,
+      })
+    ).json()) as { token: string; productId: string };
+    assert.equal(minted.productId, "bidproposal", "产品码从项目记录取，不是调用方给的");
+
+    const res = await fetch(`${rig.base}/projects/${projectId}/bindings`, {
+      headers: { authorization: `Bearer ${minted.token}` },
+    });
+    assert.equal(res.status, 401);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/** ③ 一张凭据只开它自己那个项目 —— 它绑的就是 (projectId, productId)。 */
+void test("bridge: A 项目的凭据读到的是 A，不是调用方说的那个", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const a = await projectIn(rig, "wsp_x");
+    const b = await projectIn(rig, "wsp_x");
+    const tokenA = (
+      (await (
+        await fetch(`${rig.base}/projects/${a}/bridge-token`, {
+          method: "POST",
+          headers: rig.headers,
+        })
+      ).json()) as { token: string }
+    ).token;
+
+    const ctx = (await (
+      await fetch(`${rig.base}/bridge/context`, {
+        headers: { authorization: `Bearer ${tokenA}` },
+      })
+    ).json()) as { projectId: string };
+    assert.equal(ctx.projectId, a);
+    assert.notEqual(ctx.projectId, b);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
+ * ④ **绝对路径一个字都不出现在桥面的回应里。**
+ *
+ * 裁剪就发生在这里：`Binding` 里有 `root`（用户机器上的绝对目录），产品界面不需要
+ * 它 —— 它需要知道的是「绑了几条、都是什么类型」。把整条 `Binding` 直接发出去，
+ * 是把裁剪这件事忘了，而忘了之后回应看起来一样正常。
+ *
+ * 断言的是**整个回应体里搜不到那个路径**，不是「bindings[0].root 是 undefined」——
+ * 后者只挡得住这一个字段，挡不住下一个人把整条对象塞进别的键里。
+ */
+void test("bridge: /bridge/context 只回元数据，绝对路径不出现在回应里", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    // 先授权再绑 —— 绑定不能绕过目录授权，那道校验本身是对的（这一条是准备段，
+    // 不是被测的东西）。
+    const root = join(tmpdir(), "ruyin-bridge-secret-dir");
+    mkdirSync(root, { recursive: true });
+    await rig.runtime.addGrant(projectId, root, "read");
+    await rig.runtime.setBinding(projectId, { type: "tender_document", root });
+
+    const tokenR = (
+      (await (
+        await fetch(`${rig.base}/projects/${projectId}/bridge-token`, {
+          method: "POST",
+          headers: rig.headers,
+        })
+      ).json()) as { token: string }
+    ).token;
+
+    const res = await fetch(`${rig.base}/bridge/context`, {
+      headers: { authorization: `Bearer ${tokenR}` },
+    });
+    assert.equal(res.status, 200);
+    const raw = await res.text();
+    assert.ok(raw.includes("tender_document"), "类型要给 —— 产品得知道绑了什么");
+    assert.ok(
+      !raw.includes("ruyin-bridge-secret-dir"),
+      `绝对路径漏进了桥面的回应：${raw}`,
+    );
+  } finally {
+    closeRig(rig);
+  }
+});

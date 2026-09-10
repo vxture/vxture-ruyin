@@ -7,6 +7,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type { PermissionValue } from "@vxture/ruyin-contract-schema";
+import { BridgeTokens } from "./bridge-token.js";
 import type { StoredFile } from "./file-store.js";
 import { cloudIntakeRefusal } from "./cloud-sync.js";
 import { currentHost } from "./system-dirs.js";
@@ -429,8 +430,16 @@ function errorStatus(cause: unknown): { status: number; body: unknown } {
 }
 
 export function createLocalApi(deps: LocalApiDeps): Server {
+  /**
+   * 产品级凭据表**一台服务器一份**（ADR-022 §3.2）。
+   *
+   * 不放在 `deps` 上：它是这一台服务器的内部状态，不是调用方要注入的东西 ——
+   * 放上去等于让每个装配点都得先造一个，而造错了（比如两台共用一张表）没有任何
+   * 东西会报错。也不做成模块级单例：两台服务器共用一张表，A 的凭据能开 B 的门。
+   */
+  const bridgeTokens = new BridgeTokens();
   return createServer((req, res) => {
-    void handle(deps, req, res).catch((cause) => {
+    void handle(deps, bridgeTokens, req, res).catch((cause) => {
       const { status, body } = errorStatus(cause);
       send(res, status, body);
     });
@@ -439,6 +448,7 @@ export function createLocalApi(deps: LocalApiDeps): Server {
 
 async function handle(
   deps: LocalApiDeps,
+  bridgeTokens: BridgeTokens,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
@@ -513,6 +523,62 @@ async function handle(
         page("登录失败", cause instanceof Error ? cause.message : String(cause)),
       );
     }
+    return;
+  }
+
+  // ---- 产品接入面（ADR-022）：`/bridge/*` 走**另一种凭据**，在会话令牌那道门之前分叉 ----
+  //
+  // **两个方向都要拒，这是一对，不是一条。**
+  //   · 会话令牌打 `/bridge/*` —— 在这里拒（下面这段）
+  //   · 产品凭据打 `/projects/*` —— 由那道会话令牌检查自然拒掉
+  //
+  // 第二条是「自然成立」的，正因如此它更需要被钉住：没人测过的事实，改一行就会
+  // 变，而变了之后坏了和好了长得一模一样。用例里两条都在。
+  //
+  // 拒会话令牌不是洁癖：会话令牌是**整台守护进程**的钥匙。允许它走桥面，等于让
+  // 「桥面是被裁剪过的」这句话失去意义 —— 谁都能用没被裁剪的那把钥匙走这条路。
+  if (path === "/bridge" || path.startsWith("/bridge/")) {
+    const presented = req.headers.authorization ?? "";
+    if (presented === `Bearer ${deps.token}`) {
+      send(
+        res,
+        403,
+        apiError(
+          "BRIDGE_TOKEN_REQUIRED",
+          "产品接入面只收产品级凭据；会话令牌不能走这条路（ADR-022 §3.2）",
+        ),
+      );
+      return;
+    }
+    const scope = bridgeTokens.verify(
+      presented.startsWith("Bearer ") ? presented.slice("Bearer ".length) : undefined,
+    );
+    if (!scope) {
+      send(res, 401, apiError("AUTH_REQUIRED", "缺少或无效的产品级凭据"));
+      return;
+    }
+
+    // GET /bridge/context —— **只回元数据**（接入指南 §6.2 那行注释：产品 UI 不能
+    // 读取 Item 内容，只看得到元数据与绑定状态）。
+    //
+    // 裁剪就发生在这一行：`Binding` 里有 `root`，那是用户机器上的**绝对路径**，
+    // 产品界面不需要它 —— 它需要知道的是「绑了几条、都是什么类型」。把整条
+    // `Binding` 直接发出去，是把裁剪这件事忘了。
+    if (method === "GET" && path === "/bridge/context") {
+      const bindings = await deps.runtime.listBindings(scope.projectId);
+      send(res, 200, {
+        projectId: scope.projectId,
+        productId: scope.productId,
+        bindings: bindings.map((b) => ({
+          type: b.type,
+          source: b.source,
+          connector: b.connector,
+        })),
+      });
+      return;
+    }
+
+    send(res, 404, apiError("NOT_FOUND", `产品接入面没有这个地址：${method} ${path}`));
     return;
   }
 
@@ -1592,6 +1658,27 @@ async function handle(
         send(res, 200, { items: await deps.runtime.listToolPolicy(projectId) });
         return;
       }
+    }
+
+    // POST /projects/:id/bridge-token —— 工作台为「这个项目里的这个产品」换一张
+    // 产品级凭据（ADR-022 §3.2）。**只有会话令牌能走到这里**（上面那道门）。
+    //
+    // 产品码**从项目记录里取，不收调用方给的**。收了的话，工作台被塞一个别的
+    // 产品码就能签出一张越界的凭据 —— 而这张凭据下游是当权威用的。**能从已有
+    // 事实推出来的东西，就不该让人传进来。**
+    if (method === "POST" && segments.length === 3 && segments[2] === "bridge-token") {
+      const metas = await deps.runtime.listProjects();
+      const meta = metas.find((m) => m.id === projectId);
+      if (!meta) {
+        send(res, 404, apiError("PROJECT_NOT_FOUND", `没有这个项目：${projectId}`));
+        return;
+      }
+      const { token, expiresAt } = bridgeTokens.mint({
+        projectId,
+        productId: meta.productId,
+      });
+      send(res, 200, { token, expiresAt, productId: meta.productId });
+      return;
     }
 
     // GET/POST /projects/:id/bindings  { type, root, connector?, source? }
