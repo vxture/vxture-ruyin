@@ -426,3 +426,97 @@ test("ProductBridge: 不注入 fetchImpl 时照样发得出请求（fetch 不能
   expect(strictFetch).toHaveBeenCalledTimes(1);
   vi.unstubAllGlobals();
 });
+
+/* ---------------- 事件投影（片四）：守护进程那条流，原样转投 ---------------- */
+
+/** 一条会吐出这些 SSE 帧、然后结束的流。 */
+function sseResponse(frames: string[], status = 200): Response {
+  return new Response(
+    new ReadableStream({
+      start(c) {
+        for (const f of frames) c.enqueue(new TextEncoder().encode(f));
+        c.close();
+      },
+    }),
+    { status, headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+function eventsOf(source: Window): BridgeOutboundMessage[] {
+  return outboxOf(source).filter((m) => m.kind === "event");
+}
+
+/**
+ * **原样转投，不筛。** 给什么守护进程已经按凭据定了；桥只把帧拆开、按原 topic 投出去。
+ * 坏帧、没有 topic 的帧丢掉（不是整条流作废）。
+ */
+void test("ProductBridge 事件: 开 /bridge/events（带产品级凭据），把每一帧原样投给产品界面", async () => {
+  const source = fakeSource();
+  const fetchImpl = vi.fn(
+    async (input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+      String(input) === "/bridge/events"
+        ? sseResponse([
+            ": ok\n\n",
+            'data: {"topic":"task","payload":{"taskInstance":"ti_1"}}\n\n',
+            "data: {not json}\n\n",
+            'data: {"payload":{}}\n\n',
+            'data: {"topic":"project","payload":{}}\n\n',
+          ])
+        : jsonResponse({}),
+  );
+  bridge({ source, fetchImpl, events: true, reconnectDelayMs: 60_000 });
+  await vi.waitFor(() => expect(eventsOf(source)).toHaveLength(2));
+  expect(eventsOf(source)).toEqual([
+    { ns: "ruyin.bridge", kind: "event", topic: "task", payload: { taskInstance: "ti_1" } },
+    { ns: "ruyin.bridge", kind: "event", topic: "project", payload: {} },
+  ]);
+  const [path, init] = fetchImpl.mock.calls[0]!;
+  expect(path).toBe("/bridge/events");
+  expect((init as RequestInit).headers).toEqual({ authorization: "Bearer tok_1" });
+});
+
+/**
+ * 流会断（凭据到期被守护进程收掉、守护进程重启）：断了就重连。**401 时扔掉手上那张
+ * 凭据** —— 按时间看它还没到期，不扔就会拿着一张被作废的凭据一直撞门。
+ */
+void test("ProductBridge 事件: 流断了就重连；401 时换一张新凭据", async () => {
+  const source = fakeSource();
+  const getBridgeToken = vi
+    .fn()
+    .mockResolvedValueOnce({ token: "tok_revoked", expiresAt: Date.now() + 600_000 })
+    .mockResolvedValue({ token: "tok_fresh", expiresAt: Date.now() + 600_000 });
+  const fetchImpl = vi
+    .fn()
+    .mockResolvedValueOnce(jsonResponse({ code: "AUTH_REQUIRED" }, 401))
+    .mockImplementation(async () => sseResponse(['data: {"topic":"project","payload":{}}\n\n']));
+  bridge({ source, fetchImpl, getBridgeToken, events: true, reconnectDelayMs: 5 });
+  await vi.waitFor(() => expect(eventsOf(source).length).toBeGreaterThanOrEqual(2));
+  const auths = fetchImpl.mock.calls.map((c) => ((c[1] as RequestInit).headers as Record<string, string>)["authorization"]);
+  expect(auths[0]).toBe("Bearer tok_revoked");
+  expect(auths.slice(1).every((a) => a === "Bearer tok_fresh")).toBe(true);
+});
+
+/** 卸下产品界面：事件流跟着掐断，不再重连 —— 否则一个关掉的界面一直占着一条长连接。 */
+void test("ProductBridge 事件: detach() 掐断事件流，之后不再重连", async () => {
+  const source = fakeSource();
+  let seen: AbortSignal | undefined;
+  const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    seen = init?.signal ?? undefined;
+    return new Response(new ReadableStream({ start() {} }), { status: 200 }); // 一直开着
+  });
+  const b = bridge({ source, fetchImpl, events: true, reconnectDelayMs: 5 });
+  await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+  b.detach();
+  expect(seen?.aborted).toBe(true);
+  await new Promise((r) => setTimeout(r, 30));
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+/** 缺省不开：只做请求 / 响应的桥不该平白多一条长连接。 */
+void test("ProductBridge 事件: 没打开 events 时不连事件流", async () => {
+  const source = fakeSource();
+  const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}));
+  bridge({ source, fetchImpl });
+  await flush();
+  expect(fetchImpl).not.toHaveBeenCalled();
+});

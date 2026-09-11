@@ -9,6 +9,7 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import type { PermissionValue } from "@vxture/ruyin-contract-schema";
 import { BridgeTokens } from "./bridge-token.js";
 import { StateRequests } from "./state-requests.js";
+import { bridgeEventOf } from "./bridge-events.js";
 import { isInside } from "./path-guard.js";
 import { productOrigin } from "./product-ui-server.js";
 import type { StoredFile } from "./file-store.js";
@@ -267,6 +268,11 @@ export interface LocalApiDeps {
    * `<root>/<productId>/ui/<sha256>/`（ADR-023），与产品界面服务器读的是同一处。
    */
   productUi?: { root: string; port: number };
+  /**
+   * 产品事件流的心跳间隔（毫秒，缺省 25 秒）。心跳顺带重新认凭据，所以它也是「凭据
+   * 失效后多久收掉一条安静的流」的上限。只为测试注入：真实装配用缺省值。
+   */
+  bridgeEventBeatMs?: number;
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -607,6 +613,53 @@ async function handle(
     // 只读、只在凭据限定的那一个项目里：凭据里的 projectId 是唯一的项目来源，请求
     // 里说什么都不算（与 /bridge/context 同一条）。
 
+    // GET /bridge/events —— 事件投影（片四）：凭据限定的那个项目里「什么变了」。
+    //
+    // **给什么由 bridgeEventOf 决定**（白名单，只有 task / project 两种、只有这个项目），
+    // 不由工作台的桥去筛 —— 筛子放在渲染进程里，闸门就不是最后一站。
+    //
+    // **流开着的时候也要认凭据**：每写一条、每次心跳前都重新认一次，认不下来（过期、
+    // 被作废）就收掉这条流。只在建立连接时认一次的话，一张 10 分钟的凭据换来的是一条
+    // 永远不断的流 —— 作废（TD-059）对它不起作用。桥那一侧见流断了，换张新凭据重连。
+    if (method === "GET" && path === "/bridge/events") {
+      if (!deps.events) {
+        send(res, 503, apiError("EVENTS_UNAVAILABLE", "此运行时未接事件流"));
+        return;
+      }
+      const bus = deps.events;
+      const presentedToken = presented.slice("Bearer ".length);
+      const stillValid = (): boolean => bridgeTokens.verify(presentedToken) !== undefined;
+      res.writeHead(200, {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "x-accel-buffering": "no",
+      });
+      res.write(": ok\n\n");
+      let stopped = false;
+      const stop = (): void => {
+        if (stopped) return;
+        stopped = true;
+        clearInterval(beat);
+        unsubscribe();
+        res.end();
+      };
+      const unsubscribe = bus.subscribe((event) => {
+        const out = bridgeEventOf(event, scope.projectId);
+        if (!out) return;
+        if (!stillValid()) return stop();
+        res.write(`data: ${JSON.stringify(out)}\n\n`);
+      });
+      // 心跳顺带认凭据：一条安静的流也会在凭据过期后被收掉，而不是等到下一个事件。
+      const beat = setInterval(() => {
+        if (!stillValid()) return stop();
+        res.write(": beat\n\n");
+      }, deps.bridgeEventBeatMs ?? 25_000);
+      beat.unref?.();
+      req.on("close", stop);
+      return;
+    }
+
     // GET /bridge/project —— 这个项目：名字、形态、业务阶段、此刻能往哪推进。
     //
     // **不给**：工作区 / 租户 id（平台那一侧的身份，产品的云端自己有）、目录授权
@@ -662,6 +715,7 @@ async function handle(
       const requestedBy = `product:${scope.productId}`;
       if (transition.confirm !== "human") {
         const state = await deps.runtime.transitionBusinessState(scope.projectId, to, { requestedBy });
+        deps.events?.publish({ kind: "project", projectId: scope.projectId });
         send(res, 200, { status: "done", businessState: state });
         return;
       }
@@ -682,6 +736,7 @@ async function handle(
         return;
       }
       deps.events?.publish({ kind: "pending" });
+      deps.events?.publish({ kind: "project", projectId: scope.projectId });
       send(res, 202, { status: "awaiting_confirmation", to });
       return;
     }
@@ -1745,6 +1800,7 @@ async function handle(
       }
       deps.events?.publish({ kind: "pending" });
       if (body["approve"] !== true) {
+        deps.events?.publish({ kind: "project", projectId });
         send(res, 200, { status: "rejected" });
         return;
       }
@@ -1753,6 +1809,7 @@ async function handle(
         humanConfirmed: true,
         requestedBy: `product:${taken.productId}`,
       });
+      deps.events?.publish({ kind: "project", projectId });
       send(res, 200, { status: "done", businessState: state });
       return;
     }
@@ -1764,6 +1821,7 @@ async function handle(
       const state = await deps.runtime.transitionBusinessState(projectId, to, {
         humanConfirmed: body["humanConfirmed"] === true,
       });
+      deps.events?.publish({ kind: "project", projectId });
       send(res, 200, { businessState: state });
       return;
     }

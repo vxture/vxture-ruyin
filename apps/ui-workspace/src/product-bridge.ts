@@ -12,6 +12,8 @@
  * 里——用一个测试页当假产品，就能把协议本身验完（ADR-022 §5「片二」）。
  */
 
+import { extractSseEvents } from "./sse";
+
 /** 命名空间字段：postMessage 是整个页面共用的通道，得先筛出是不是在跟我们说话。 */
 const NAMESPACE = "ruyin.bridge";
 
@@ -47,7 +49,10 @@ export interface BridgeResponseMessage {
   error?: BridgeApiError;
 }
 
-/** 工作台 → 产品界面：一次事件投影（片四补事件来源之前，先把形状定下来）。 */
+/**
+ * 工作台 → 产品界面：一次事件投影。来源是守护进程的 `GET /bridge/events`（片四）：
+ * 给什么由守护进程定（bridge-events.ts，只有这个项目的 task / project），桥原样转投。
+ */
 export interface BridgeEventMessage {
   ns: typeof NAMESPACE;
   kind: "event";
@@ -89,6 +94,13 @@ export interface ProductBridgeOptions {
   targetOrigin: string;
   /** 供测试替换；默认 `window.fetch`。 */
   fetchImpl?: typeof fetch;
+  /**
+   * 挂上时就开守护进程那条事件流、原样转投给产品界面（片四）。缺省关：只做请求 /
+   * 响应的桥（以及它的用例）不该平白多一条长连接。
+   */
+  events?: boolean;
+  /** 事件流断了之后多久重连（毫秒，每次翻倍、封顶 5 秒）。供测试调小。 */
+  reconnectDelayMs?: number;
 }
 
 export class ProductBridge {
@@ -97,6 +109,9 @@ export class ProductBridge {
   private readonly targetOrigin: string;
   private readonly fetchImpl: typeof fetch;
   private cached?: { token: string; expiresAt: number };
+  private readonly eventsEnabled: boolean;
+  private readonly reconnectDelayMs: number;
+  private streamAbort?: AbortController;
 
   private readonly listener = (event: MessageEvent): void => {
     if (event.source !== this.source) return;
@@ -116,15 +131,71 @@ export class ProductBridge {
     // 测不出来（jsdom 的 fetch 不查 this）。是片三 a 在真 Chromium 里跑观察台测试包时
     // 抓到的。包一层箭头函数，让 `fetch` 以全局身份被调用。
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.eventsEnabled = options.events ?? false;
+    this.reconnectDelayMs = options.reconnectDelayMs ?? 500;
   }
 
   attach(): void {
     window.addEventListener("message", this.listener);
+    if (this.eventsEnabled && !this.streamAbort) void this.streamEvents();
   }
 
-  /** 卸载产品界面时调用——监听器不摘，一扇已经关掉的窗口的引用会一直留着。 */
+  /**
+   * 卸载产品界面时调用——监听器不摘，一扇已经关掉的窗口的引用会一直留着；事件流
+   * 不断，一个已经卸掉的产品界面会一直占着一条长连接。
+   */
   detach(): void {
     window.removeEventListener("message", this.listener);
+    this.streamAbort?.abort();
+    this.streamAbort = undefined;
+  }
+
+  /**
+   * 守护进程那条事件流（片四），**原样**转投给产品界面。**不筛**：给什么守护进程
+   * 已经按凭据定了 —— 桥在这里再筛一遍，筛子就进了渲染进程（ADR-022 §2）。
+   *
+   * 流会断：凭据到期或被作废时守护进程主动收掉它，守护进程重启也会断。断了就换张
+   * 凭据重连，间隔翻倍、封顶 5 秒；**401 时扔掉手上那张凭据** —— 它按时间看还没到期，
+   * 不扔的话会拿着一张被作废的凭据一直撞门。
+   */
+  private async streamEvents(): Promise<void> {
+    const abort = new AbortController();
+    this.streamAbort = abort;
+    let delay = this.reconnectDelayMs;
+    while (!abort.signal.aborted) {
+      try {
+        const res = await this.fetchImpl("/bridge/events", {
+          headers: { authorization: `Bearer ${await this.token()}` },
+          signal: abort.signal,
+        });
+        if (res.status === 401) this.cached = undefined;
+        if (res.ok && res.body) {
+          delay = this.reconnectDelayMs;
+          await this.pump(res.body, abort.signal);
+        }
+      } catch {
+        // 断开、换不到凭据、或者 detach() 掐断了请求 —— 下面按是否已掐断决定走不走。
+      }
+      if (abort.signal.aborted) return;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay * 2, 5_000);
+    }
+  }
+
+  private async pump(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<void> {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      const parsed = extractSseEvents<unknown>(buffer, decoder.decode(value, { stream: true }));
+      buffer = parsed.buffer;
+      for (const e of parsed.events) {
+        const d = e as { topic?: unknown; payload?: unknown } | null;
+        if (d && typeof d.topic === "string") this.emit(d.topic, d.payload);
+      }
+    }
   }
 
   /**

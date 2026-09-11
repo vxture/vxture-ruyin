@@ -115,22 +115,28 @@ test("sameOrigin: 只比 origin，路径不算；解析不了按同源处理（�
  */
 test("ProductSurface: 桥只认这扇 iframe 的消息，并为这个项目换凭据", async () => {
   const api = fakeApi();
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })),
+  // 事件流（片四）一挂上就会连 /bridge/events —— 给它一条立刻结束的流；这条用例看的
+  // 是请求那一路，所以只数打到 /bridge/context 的调用。
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+    String(input) === "/bridge/events"
+      ? new Response(new ReadableStream({ start: (c) => c.close() }), { status: 200 })
+      : new Response(JSON.stringify({ ok: true }), { status: 200 }),
   );
+  vi.stubGlobal("fetch", fetchMock);
+  const contextCalls = () => fetchMock.mock.calls.filter((c) => String(c[0]) === "/bridge/context");
   render(<ProductSurface api={api} projectId="prj_1" surface={surface()} />);
   const win = (screen.getByTitle("产品界面") as HTMLIFrameElement).contentWindow!;
   const request = { ns: "ruyin.bridge", kind: "request", id: "r1", method: "GET", path: "/context" };
 
-  // 另一扇窗口冒充同一个 origin 发来 —— 桥不理，也就不会去换凭据。
+  // 另一扇窗口冒充同一个 origin 发来 —— 桥不理，一个请求都不替它发。
   window.dispatchEvent(new MessageEvent("message", { data: request, origin: ORIGIN, source: window }));
   await new Promise((r) => setTimeout(r, 20));
-  expect(api.bridgeToken).not.toHaveBeenCalled();
+  expect(contextCalls()).toHaveLength(0);
 
-  // 这扇 iframe 发来 —— 桥为 prj_1 换凭据。
+  // 这扇 iframe 发来 —— 桥用为 prj_1 换来的凭据转发。
   window.dispatchEvent(new MessageEvent("message", { data: request, origin: ORIGIN, source: win }));
-  await waitFor(() => expect(api.bridgeToken).toHaveBeenCalledWith("prj_1"));
+  await waitFor(() => expect(contextCalls()).toHaveLength(1));
+  expect(new Set((api.bridgeToken as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]))).toEqual(new Set(["prj_1"]));
   vi.unstubAllGlobals();
 });
 

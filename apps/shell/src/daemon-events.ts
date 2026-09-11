@@ -8,6 +8,8 @@
 export type DaemonEventKind =
   | "task"
   | "pending"
+  /** 某个项目的业务阶段或推进请求变了（ADR-022 片四）。壳用不上，收到即忽略 —— 列在这里是为了与守护进程那份对齐。 */
+  | "project"
   | "component"
   | "ui-theme"
   | "app-restart"
