@@ -27,6 +27,7 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { isInside } from "./path-guard.js";
 
@@ -55,13 +56,30 @@ const MIME: Record<string, string> = {
 export interface ProductUiServerOptions {
   /** 各产品界面包的总根：`<root>/<productId>/index.html`。 */
   root: string;
-  /** 这台服务器监听的端口 —— 子域名的 origin 里要带它。 */
-  port: number;
   /**
    * 工作台的 origin —— 写进 CSP 的 `frame-ancestors`：**只有工作台能把产品界面
    * 装进 iframe**。别的网页想把它嵌进去，浏览器会拒。
    */
   workspaceOrigin: string;
+}
+
+/**
+ * 产品界面服务器该请求哪个端口。
+ *
+ * - 显式给了 `RUYIN_PRODUCT_UI_PORT` 就用它；
+ * - 守护进程端口是固定的 → **守护进程端口 + 1**（开发 7421、冒烟 17421）。固定端口
+ *   才能让 origin 跨重启稳定，产品自己的存储不会每次重启都丢；
+ * - **守护进程端口是 0（系统分配）→ 这里也请求 0。**
+ *
+ * 最后一条是 CI 教的：观察台冒烟用 `PORT=0` 避免撞车，而第一版写的是「+1」—— 于是
+ * 请求了**端口 1**。Linux 上 1024 以下是特权端口，直接 EACCES；**Windows 没有这个
+ * 限制**，所以本地冒烟一路绿、CI 挂。抽成纯函数，就是为了让这一支在任何系统上都
+ * 测得到，不用等 Linux 来报。
+ */
+export function productUiPortFor(daemonPort: number, env: NodeJS.ProcessEnv): number {
+  const forced = env["RUYIN_PRODUCT_UI_PORT"];
+  if (forced !== undefined && forced !== "") return Number(forced);
+  return daemonPort === 0 ? 0 : daemonPort + 1;
 }
 
 /** 产品界面的 origin。工作台据此设 iframe 的 src 与桥的 `targetOrigin`。 */
@@ -120,7 +138,7 @@ function securityHeaders(workspaceOrigin: string): Record<string, string> {
 export function createProductUiServer(options: ProductUiServerOptions): Server {
   const headers = securityHeaders(options.workspaceOrigin);
 
-  return createServer((req, res) => {
+  const server = createServer((req, res) => {
     const reply = (status: number, body: string) => {
       res.writeHead(status, { ...headers, "content-type": "text/plain; charset=utf-8" });
       res.end(req.method === "HEAD" ? undefined : body);
@@ -132,7 +150,9 @@ export function createProductUiServer(options: ProductUiServerOptions): Server {
       return;
     }
 
-    const productId = productFromHost(req.headers.host, options.port);
+    // 按**实际绑到的端口**认 Host，不按构造时传入的数：端口可能是系统分配的（0），
+    // 那时只有绑上之后才知道是几。
+    const productId = productFromHost(req.headers.host, (server.address() as AddressInfo).port);
     if (!productId) {
       reply(404, "not found");
       return;
@@ -156,4 +176,5 @@ export function createProductUiServer(options: ProductUiServerOptions): Server {
     });
     res.end(req.method === "HEAD" ? undefined : readFileSync(full));
   });
+  return server;
 }

@@ -24,6 +24,7 @@ import {
   createProductUiServer,
   productFromHost,
   productOrigin,
+  productUiPortFor,
 } from "./product-ui-server.js";
 
 const WORKSPACE = "http://127.0.0.1:7420";
@@ -61,13 +62,10 @@ async function withServer(body: (port: number) => Promise<void>): Promise<void> 
   mkdirSync(join(root, "bidproposal2"), { recursive: true });
   writeFileSync(join(root, "bidproposal2", "secret.js"), "SECRET-OF-ANOTHER-PRODUCT");
 
-  // 先占一个空闲端口再把它告诉服务器：Host 头里要对上这个端口。
-  const probe = createProductUiServer({ root, port: 0, workspaceOrigin: WORKSPACE });
-  await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
-  const { port } = probe.address() as AddressInfo;
-  probe.close();
-  const server: Server = createProductUiServer({ root, port, workspaceOrigin: WORKSPACE });
-  await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
+  // 端口交给系统分配 —— 服务器按**实际绑到的**端口认 Host，不需要事先知道是几。
+  const server: Server = createProductUiServer({ root, workspaceOrigin: WORKSPACE });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const { port } = server.address() as AddressInfo;
   try {
     await body(port);
   } finally {
@@ -183,5 +181,29 @@ void test("产品界面服务器: 成功与失败的回应都带 CSP，且锁死
       assert.ok(csp.includes(`frame-ancestors ${WORKSPACE}`), `${host}${path} 缺 frame-ancestors`);
       assert.equal(res.headers["x-content-type-options"], "nosniff");
     }
+  });
+});
+
+/**
+ * **守护进程端口是 0 时，产品界面也请求 0 —— 不是 1。**
+ *
+ * CI 教的：观察台冒烟用 `PORT=0`，第一版写「+1」于是请求了端口 1。Linux 上 1024 以下
+ * 是特权端口，EACCES 直接把观察台带走；**Windows 没有这个限制**，本地一路绿。
+ * 抽成纯函数钉住，这一支在任何系统上都测得到，不用等 Linux 来报。
+ */
+void test("productUiPortFor: 固定端口 +1；端口 0 仍是 0；显式给了就用显式的", () => {
+  assert.equal(productUiPortFor(7420, {}), 7421);
+  assert.equal(productUiPortFor(17420, {}), 17421);
+  assert.equal(productUiPortFor(0, {}), 0, "端口 0 推成 1 是特权端口，Linux 上 EACCES");
+  assert.equal(productUiPortFor(7420, { RUYIN_PRODUCT_UI_PORT: "9000" }), 9000);
+  assert.equal(productUiPortFor(0, { RUYIN_PRODUCT_UI_PORT: "" }), 0, "空串不算显式给了");
+});
+
+/** 服务器按**实际绑到的**端口认 Host —— 系统分配端口时它也得认得出自己。 */
+void test("产品界面服务器: 端口由系统分配时照样认得出自己的 Host", async () => {
+  await withServer(async (port) => {
+    assert.ok(port > 0);
+    const res = await get(port, `bidproposal.localhost:${port}`, "/");
+    assert.equal(res.status, 200);
   });
 });
