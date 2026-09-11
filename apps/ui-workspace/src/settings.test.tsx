@@ -125,9 +125,13 @@ void test("AboutSection: shows version/platform/arch once system loads, placehol
 void test("AboutSection: 两块版式 —— 关于信息自动布满，提示按需显隐", async () => {
   const { container } = renderSection("about");
   await screen.findByText("RUYIN");
-  // 没有板块卡、没有按钮：这一页收过三次，钉住结构才拦得住第四次被撑回导航站。
+  // 没有板块卡、没有导航按钮：这一页收过三次，钉住结构才拦得住第四次被撑回导航站。
+  // **唯一的按钮**是「随包第三方组件许可」（TD-058，2026-09-12）：它不去别处，只是就地
+  // 展开一份许可证要求的署名清单。再多一个按钮，这条就该红。
   expect(container.querySelectorAll(".set-block")).toHaveLength(0);
-  expect(container.querySelectorAll("button")).toHaveLength(0);
+  const buttons = container.querySelectorAll("button");
+  expect(buttons).toHaveLength(1);
+  expect(buttons[0]).toHaveClass("about-third-party");
   expect(container.querySelectorAll(".about-legal-btn")).toHaveLength(3);
 
   // 第一块永远在；第二块**不出现时连元素都不在**（不是 display:none 占着位）——

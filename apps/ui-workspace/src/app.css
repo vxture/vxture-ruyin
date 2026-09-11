@@ -1300,6 +1300,28 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   border-color: var(--ring);
   background: var(--surface-3, rgba(127, 127, 127, 0.1));
 }
+/* 随包第三方组件许可（TD-058）：比上面三条轻一档 —— 那三条是「去官网看条款」，这一条是
+   「这个安装包里带了谁的东西」，同属一类但不该抢那一排的位置。 */
+.about-third-party {
+  margin-top: var(--spacing-sm);
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.about-third-party:hover {
+  color: var(--foreground);
+}
+.third-party-dialog {
+  max-width: min(760px, 92vw);
+}
+.third-party-scroll {
+  max-height: 60vh;
+  overflow: auto;
+}
 /* 事实行尾的动作（「打开目录」）：顶到右端，不去挤值那一列 —— 值是这一行的
    主角，路径本来就长。 */
 /* 行尾的动作位。可以放不止一个（数据目录那一行有「打开目录」和「更改…」），

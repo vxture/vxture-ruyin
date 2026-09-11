@@ -19,7 +19,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
@@ -45,6 +45,17 @@ function run(cmd, args, cwd) {
 // left the workspace production-pruned).
 run("pnpm", ["install", "--prefer-offline"], repoRoot);
 run("pnpm", ["--recursive", "build"], repoRoot);
+
+// 随包第三方组件的许可声明全文（TD-058）：守护进程与界面的生产依赖、外加 Electron。
+// **放在 deploy 之前**：下面的 `pnpm deploy --prod` 会把整个工作区的开发依赖剥掉，
+// Electron 就在其中 —— 那之后再扫，这一条就静静地少了。清单本身有 CI 守着
+// （lint:third-party），这里只写全文，由 electron-builder 装进 resources/。
+mkdirSync(join(shellDir, "out"), { recursive: true });
+run(
+  "node",
+  [join(repoRoot, "scripts", "release", "third-party.mjs"), "--full", join(shellDir, "out", "THIRD-PARTY-NOTICES.txt")],
+  repoRoot,
+);
 
 // 预置技能层（ADR-018 §2.3）：按 resources/skill-manifest.json 拉到 resources/skills，
 // electron-builder 再把它连同 index.json 与许可证一起装进 resources/skills。
@@ -217,6 +228,31 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
     process.exit(1);
   }
   console.log(`[pack] build-info 落位核对: 守护进程读到 codeSigning=${m[1]}`);
+}
+
+// 第三方许可声明真的在包里（TD-058）。
+//
+// extraResources 配了不等于装进去了 —— 源文件不在时 electron-builder 一声不吭地跳过。
+// Electron 自带的两份（LICENSE.electron.txt、LICENSES.chromium.html）由 electron-builder
+// 放在 exe 旁边；关于页那句「在安装目录下」说的就是它们，这里一并核。
+{
+  const unpacked = join(shellDir, "release", "win-unpacked");
+  const required = [
+    [join(unpacked, "resources", "THIRD-PARTY-NOTICES.txt"), "第三方组件许可声明"],
+    [join(unpacked, "LICENSES.chromium.html"), undefined],
+    [join(unpacked, "LICENSE.electron.txt"), undefined],
+  ];
+  for (const [file, mustContain] of required) {
+    if (!existsSync(file) || statSync(file).size === 0) {
+      console.error(`[pack] FAILED: 许可声明不在包里：${file}`);
+      process.exit(1);
+    }
+    if (mustContain && !readFileSync(file, "utf8").includes(mustContain)) {
+      console.error(`[pack] FAILED: ${file} 不是 third-party.mjs 写的那份（缺「${mustContain}」）`);
+      process.exit(1);
+    }
+  }
+  console.log("[pack] 许可声明落位核对: THIRD-PARTY-NOTICES.txt、LICENSES.chromium.html、LICENSE.electron.txt 都在");
 }
 
 // 预置技能层真的在包里。
