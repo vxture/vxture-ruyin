@@ -2273,6 +2273,115 @@ void test("bridge 写: 发起任务只收任务名；带 inputs 拒，契约里�
   }
 });
 
+/* ---------------- 片四：事件投影（/bridge/events） ---------------- */
+
+/** 读一条 SSE 流里的 `data:` 行，直到拿够 n 条或流结束。 */
+async function readEvents(res: Response, n: number): Promise<{ events: unknown[]; ended: boolean }> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  const events: unknown[] = [];
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return { events, ended: true };
+    buffer += decoder.decode(value, { stream: true });
+    let cut: number;
+    while ((cut = buffer.indexOf("\n\n")) >= 0) {
+      const frame = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)));
+      }
+      if (events.length >= n) {
+        await reader.cancel();
+        return { events, ended: false };
+      }
+    }
+  }
+}
+
+/**
+ * **只收到自己那个项目的 task / project**：别的项目的任务、给壳的指令、「在等我」
+ * 变了 —— 一条都不进这条流。发布顺序里把「该收的」放在最后，前面那几条要是漏进来，
+ * 拿到的第一条就不是它。
+ */
+void test("bridge 事件: 只给凭据限定的项目、只给 task / project；别的事件一条不进", async () => {
+  const events = new EventBus();
+  const rig = await startServer({ platform: signedInTo("wsp_x"), events });
+  try {
+    const mine = await projectIn(rig, "wsp_x");
+    const other = await projectIn(rig, "wsp_x");
+    const res = await fetch(`${rig.base}/bridge/events`, {
+      headers: { authorization: `Bearer ${await bridgeTokenFor(rig, mine)}` },
+    });
+    assert.equal(res.status, 200);
+    assert.match(String(res.headers.get("content-type")), /text\/event-stream/);
+    const reading = readEvents(res, 2);
+    await new Promise((r) => setTimeout(r, 30)); // 订阅在服务端挂上
+    events.publish({ kind: "task", projectId: other, taskInstance: "ti_other" });
+    events.publish({ kind: "pending" });
+    events.publish({ kind: "app-open-data-dir" });
+    events.publish({ kind: "project", projectId: other });
+    events.publish({ kind: "task", projectId: mine, taskInstance: "ti_mine" });
+    events.publish({ kind: "project", projectId: mine });
+    const { events: got } = await reading;
+    assert.deepEqual(got, [
+      { topic: "task", payload: { taskInstance: "ti_mine" } },
+      { topic: "project", payload: {} },
+    ]);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/** 会话令牌打事件流同样 403（桥面的两个方向是一对，事件流也不例外）。 */
+void test("bridge 事件: 会话令牌打 /bridge/events 被拒", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x"), events: new EventBus() });
+  try {
+    await projectIn(rig, "wsp_x");
+    const res = await fetch(`${rig.base}/bridge/events`, { headers: rig.headers });
+    assert.equal(res.status, 403);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
+ * **流开着的时候也要认凭据。** 凭据过期后，下一个事件到来时这条流被收掉（事件不写），
+ * 一条安静的流在下一次心跳时收掉 —— 否则一张 10 分钟的凭据换来一条永远不断的流。
+ * 只把 Date 换成可拨的钟，定时器照常走。
+ */
+void test("bridge 事件: 凭据过期后流被收掉 —— 有事件时当场收，没事件时心跳时收", async (t) => {
+  const events = new EventBus();
+  const rig = await startServer({ platform: signedInTo("wsp_x"), events, bridgeEventBeatMs: 40 });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    // 安静的那条要是**另一个项目**的：同一个项目的话，下面那条事件也会到它那里，
+    // 它就是被事件收掉的，心跳那条路根本没被走过（第一版就是这样，演练才发现）。
+    const quietProject = await projectIn(rig, "wsp_x");
+    const openStream = async (id: string) =>
+      fetch(`${rig.base}/bridge/events`, { headers: { authorization: `Bearer ${await bridgeTokenFor(rig, id)}` } });
+
+    const busy = await openStream(projectId);
+    const quiet = await openStream(quietProject);
+    const busyReading = readEvents(busy, 1);
+    const quietReading = readEvents(quiet, 1);
+    await new Promise((r) => setTimeout(r, 30));
+
+    t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 11 * 60 * 1000 }); // 过了 10 分钟的有效期
+    events.publish({ kind: "task", projectId, taskInstance: "ti_after_expiry" });
+
+    const b = await busyReading;
+    assert.equal(b.ended, true, "有事件到来：凭据认不下来就收掉");
+    assert.deepEqual(b.events, [], "过期之后的事件不写给它");
+    const q = await quietReading;
+    assert.equal(q.ended, true, "没有事件：下一次心跳时收掉");
+  } finally {
+    t.mock.timers.reset();
+    closeRig(rig);
+  }
+});
+
 /**
  * `GET /projects/:id/product-surface`（ADR-022 片三 a）：这个项目的产品有没有界面、
  * 在哪个 origin。

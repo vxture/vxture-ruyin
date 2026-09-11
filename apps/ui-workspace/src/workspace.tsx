@@ -189,7 +189,7 @@ export function ProjectPanel({
   useEffect(() => {
     void refresh();
     const stop = api.subscribe((event) => {
-      if (event.kind === "task" && event.projectId !== id) return;
+      if ((event.kind === "task" || event.kind === "project") && event.projectId !== id) return;
       void refresh();
     });
     const timer = setInterval(() => void refresh(), 30_000);

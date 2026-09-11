@@ -181,6 +181,8 @@ export interface ProjectExport {
 export type RuntimeEvent =
   | { kind: "task"; projectId: string; taskInstance: string }
   | { kind: "pending" }
+  /** 某个项目的业务阶段、或产品提出的推进请求变了（ADR-022 片四）。 */
+  | { kind: "project"; projectId: string }
   /** 获取通道的某个组件动了；界面据此重取 GET /components（事件不带进度数值）。 */
   | { kind: "component" }
   /** 界面主题变了；壳据此重画窗口按钮（见 chrome-theme.ts）。 */

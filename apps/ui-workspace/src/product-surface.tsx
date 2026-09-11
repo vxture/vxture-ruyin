@@ -92,6 +92,8 @@ export function ProductSurface({ api, projectId, surface }: { api: Api; projectI
       getBridgeToken: () => api.bridgeToken(projectId),
       source: win,
       targetOrigin: frameState.origin,
+      // 产品界面收得到它自己那个项目的「什么变了」（片四），不用反复轮询。
+      events: true,
     });
     // **构造不等于在听。** 桥的监听器挂在 attach() 里，不在构造函数里 —— 第一版
     // 这里只构造、卸载时 detach()，唯独没 attach()：桥对象在、看起来接好了，却一个
