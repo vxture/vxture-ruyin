@@ -1885,6 +1885,191 @@ void test("bridge: /bridge/context 只回元数据，绝对路径不出现在回
   }
 });
 
+/* ---------------- 片四：只读的面（/bridge/project、/bridge/tasks、成果） ---------------- */
+
+async function bridgeTokenFor(rig: Rig, projectId: string): Promise<string> {
+  return (
+    (await (
+      await fetch(`${rig.base}/projects/${projectId}/bridge-token`, { method: "POST", headers: rig.headers })
+    ).json()) as { token: string }
+  ).token;
+}
+
+/**
+ * 往项目里放一个任务记录，**故意塞满不该出桥面的东西**：本机路径、工具参数、
+ * 对话原文、错误原文、评审意见。断言看的是整个回应体里搜不到它们。
+ */
+const SECRET_PATH = "D:/客户资料/ruyin-bridge-secret-task-path/招标.pdf";
+async function putTask(rig: Rig, projectId: string, over: Record<string, unknown> = {}): Promise<void> {
+  const store = await rig.storage.openProjectStore(projectId);
+  const record = {
+    id: "ti_1",
+    workspace: projectId,
+    taskId: "analyze_tender",
+    definition: { id: "analyze_tender", secretDefinitionMarker: SECRET_PATH },
+    inputs: { tender_document: [SECRET_PATH] },
+    contextSet: [
+      { id: "ci_1", type: "tender_document", source: "local", connector: "local-fs", ref: SECRET_PATH, name: "招标.pdf", bytes: 1, modifiedAt: "x" },
+    ],
+    checkpoints: [
+      {
+        id: "cp_1",
+        kind: "tool_ask",
+        subject: { tool: "write_document", args: { path: SECRET_PATH } },
+        options: ["approve", "reject"],
+        raisedAt: "2026-09-11T00:00:01Z",
+      },
+      {
+        id: "cp_0",
+        kind: "context_confirm",
+        subject: [SECRET_PATH],
+        options: ["approve"],
+        raisedAt: "2026-09-11T00:00:00Z",
+        decision: { by: "u", choice: "approve", at: "x" },
+      },
+    ],
+    conversation: [{ role: "user", content: `原文 ${SECRET_PATH}` }],
+    state: "waiting_human",
+    capabilityOutputs: {},
+    verification: [{ id: "v1", kind: "human", status: "failed", note: `评审意见 ${SECRET_PATH}`, feedback: SECRET_PATH }],
+    error: `outside every granted folder: ${SECRET_PATH}`,
+    suspendedReason: SECRET_PATH,
+    createdAt: "2026-09-11T00:00:00Z",
+    updatedAt: "2026-09-11T00:00:02Z",
+    ...over,
+  };
+  await store!.putTaskInstance(String(record.id), JSON.stringify(record));
+}
+
+void test("bridge: /bridge/project 给名字、阶段与能往哪推进；不给租户与目录", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_secret_tenant") });
+  try {
+    const projectId = await projectIn(rig, "wsp_secret_tenant");
+    const root = join(tmpdir(), "ruyin-bridge-secret-grant");
+    mkdirSync(root, { recursive: true });
+    await rig.runtime.addGrant(projectId, root, "read");
+
+    const res = await fetch(`${rig.base}/bridge/project`, {
+      headers: { authorization: `Bearer ${await bridgeTokenFor(rig, projectId)}` },
+    });
+    assert.equal(res.status, 200);
+    const raw = await res.text();
+    const body = JSON.parse(raw) as {
+      projectId: string;
+      name: string;
+      businessState: string;
+      transitions: Array<{ to: string; confirm: string }>;
+    };
+    assert.equal(body.projectId, projectId);
+    assert.equal(body.name, "投标项目");
+    assert.equal(body.businessState, "draft");
+    assert.deepEqual(body.transitions, [{ to: "planning", confirm: "none" }]);
+    assert.ok(!raw.includes("wsp_secret_tenant"), `租户 id 漏进了桥面：${raw}`);
+    assert.ok(!raw.includes("ruyin-bridge-secret-grant"), `授权目录漏进了桥面：${raw}`);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
+ * 任务列表：到哪一步、在等哪一类确认、有没有成果。**整条记录里塞满的路径、参数、
+ * 原文，一个字都不出来** —— 看的是整个回应体，不是某几个键。
+ */
+void test("bridge: /bridge/tasks 只给进度与在等哪类确认，路径、参数、原文一个字都不出来", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    await putTask(rig, projectId);
+    const res = await fetch(`${rig.base}/bridge/tasks`, {
+      headers: { authorization: `Bearer ${await bridgeTokenFor(rig, projectId)}` },
+    });
+    assert.equal(res.status, 200);
+    const raw = await res.text();
+    const body = JSON.parse(raw) as {
+      tasks: Array<{ id: string; state: string; waitingOn: Array<{ kind: string }>; hasResult: boolean }>;
+    };
+    assert.equal(body.tasks.length, 1);
+    assert.equal(body.tasks[0]!.state, "waiting_human");
+    // 只列未决的那一个（已决定的 context_confirm 不算在等）。
+    assert.deepEqual(body.tasks[0]!.waitingOn.map((w) => w.kind), ["tool_ask"]);
+    assert.equal(body.tasks[0]!.hasResult, false);
+    assert.ok(!raw.includes("ruyin-bridge-secret-task-path"), `任务记录里的东西漏进了桥面：${raw}`);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("bridge: 成果给内容、条目 id 与校验结论；评审原文与条目路径不出来", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    await putTask(rig, projectId, {
+      state: "completed",
+      checkpoints: [],
+      result: {
+        content: { requirement_matrix: "| 条款 | 响应 |" },
+        sources: ["ci_1"],
+        provenance: { task: "analyze_tender", capabilities: ["requirement_analysis"], finishedAt: "2026-09-11T00:01:00Z" },
+      },
+    });
+    const auth = { authorization: `Bearer ${await bridgeTokenFor(rig, projectId)}` };
+    const res = await fetch(`${rig.base}/bridge/tasks/ti_1/result`, { headers: auth });
+    assert.equal(res.status, 200);
+    const raw = await res.text();
+    const body = JSON.parse(raw) as {
+      content: Record<string, string>;
+      sources: string[];
+      verification: Array<Record<string, unknown>>;
+    };
+    assert.equal(body.content["requirement_matrix"], "| 条款 | 响应 |");
+    assert.deepEqual(body.sources, ["ci_1"]);
+    assert.deepEqual(body.verification, [{ id: "v1", kind: "human", status: "failed" }]);
+    assert.ok(!raw.includes("ruyin-bridge-secret-task-path"), `评审原文或条目路径漏进了桥面：${raw}`);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("bridge: 还没成果 → 409；任务不在这个项目 → 404，与不存在同一个回答", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const a = await projectIn(rig, "wsp_x");
+    const b = await projectIn(rig, "wsp_x");
+    await putTask(rig, a); // 在 A 里，还在等人，没有成果
+    const authA = { authorization: `Bearer ${await bridgeTokenFor(rig, a)}` };
+    const authB = { authorization: `Bearer ${await bridgeTokenFor(rig, b)}` };
+
+    const notReady = await fetch(`${rig.base}/bridge/tasks/ti_1/result`, { headers: authA });
+    assert.equal(notReady.status, 409);
+
+    // B 的凭据问 A 的任务：和问一个根本不存在的任务一模一样。
+    const cross = await fetch(`${rig.base}/bridge/tasks/ti_1/result`, { headers: authB });
+    const missing = await fetch(`${rig.base}/bridge/tasks/ti_nope/result`, { headers: authB });
+    assert.equal(cross.status, 404);
+    assert.equal(missing.status, 404);
+    assert.deepEqual(await cross.json(), await missing.json());
+    // B 的任务列表里也看不到 A 的任务。
+    const listB = (await (await fetch(`${rig.base}/bridge/tasks`, { headers: authB })).json()) as { tasks: unknown[] };
+    assert.deepEqual(listB.tasks, []);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/** 新的面同样只收产品级凭据：会话令牌打过来一律 403（片一那条，换新端点再钉一次）。 */
+void test("bridge: 会话令牌打新的只读面同样被拒", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    await projectIn(rig, "wsp_x");
+    for (const path of ["/bridge/project", "/bridge/tasks", "/bridge/tasks/ti_1/result"]) {
+      const res = await fetch(`${rig.base}${path}`, { headers: rig.headers });
+      assert.equal(res.status, 403, path);
+    }
+  } finally {
+    closeRig(rig);
+  }
+});
+
 /**
  * `GET /projects/:id/product-surface`（ADR-022 片三 a）：这个项目的产品有没有界面、
  * 在哪个 origin。
