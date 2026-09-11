@@ -109,7 +109,13 @@ export class ProductBridge {
     this.getBridgeToken = options.getBridgeToken;
     this.source = options.source;
     this.targetOrigin = options.targetOrigin;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // **不能直接存 `fetch`**：存下来再以 `this.fetchImpl(...)` 调用时，`fetch` 的 `this`
+    // 是桥实例，真浏览器直接抛「Failed to execute 'fetch' on 'Window': Illegal
+    // invocation」—— 片二第一版就是这样，**在真浏览器里一个请求都发不出去**。它的
+    // 26 条用例全部注入了 mock 的 fetchImpl，默认这条路一次都没被走过；jsdom 里也
+    // 测不出来（jsdom 的 fetch 不查 this）。是片三 a 在真 Chromium 里跑观察台测试包时
+    // 抓到的。包一层箭头函数，让 `fetch` 以全局身份被调用。
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
   attach(): void {

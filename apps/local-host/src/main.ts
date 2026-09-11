@@ -30,6 +30,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import type { AddressInfo } from "node:net";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectRuntime, type ConnectorPort } from "@vxture/ruyin-core";
@@ -38,6 +39,7 @@ import {
   bundledToolsDir as bundledToolsDirOf,
 } from "./bundled-layers.js";
 import { resolveCodeSigning } from "./build-info.js";
+import { createProductUiServer, productUiPortFor } from "./product-ui-server.js";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import {
@@ -404,7 +406,25 @@ const fileArea = {
  *  算两遍的话，播报说的和界面读的有一天会不一样，而那正是这类事实最难查的坏法。 */
 const codeSigning = resolveCodeSigning(dirname(fileURLToPath(import.meta.url)), process.env);
 
+/**
+ * 产品界面的静态服务器（ADR-022 片三 a）。**端口 = 守护进程端口 + 1**：开发 7421、
+ * 冒烟 17421，两套自动错开；而且**固定** —— 产品界面的 origin
+ * （`<产品>.localhost:<端口>`）要跨重启稳定，否则产品自己的存储每次重启都丢。
+ *
+ * 根缺省在数据目录下，今天是空的：界面包从哪来是片三 b 的题（契约里钉一个 UI 包 +
+ * sha256，像组件那样取回缓存）。在那之前这台服务器什么都不出，所有产品都是没有
+ * 界面的产品 —— 那本来就是缺省。
+ */
+const productUiRoot = process.env["RUYIN_PRODUCT_UI_DIR"] ?? join(dataDir, "product-ui");
+/**
+ * 交给服务端的那一份。**`port` 在产品界面服务器真正绑上之后才回填** —— 请求的端口
+ * 可能是 0（系统分配），那时只有绑上之后才知道是几。服务端每次问 origin 时读它，
+ * 所以回填之后立刻生效；回填之前问到的是 0，那一刻也确实还没有产品界面可装。
+ */
+const productUi = { root: productUiRoot, port: 0 };
+
 const server = createLocalApi({
+  productUi,
   runtime,
   registry,
   tasks,
@@ -678,6 +698,26 @@ if (capabilityBase) {
 }
 
 server.listen(port, "127.0.0.1", () => {
+  // 产品界面服务器与守护进程**分开监听**：它是另一个 origin，这正是它存在的理由。
+  //
+  // **放在守护进程绑上之后才起**：CSP 的 frame-ancestors 要写工作台的**真实** origin，
+  // 而守护进程端口可能是 0（系统分配）—— 第一版在外面按请求的端口拼，于是 PORT=0
+  // 时写出来的是 `127.0.0.1:0`，而产品界面端口被推成了 1（Linux 上 EACCES）。
+  //
+  // 起不来不拖垮守护进程 —— 没有它，所有产品照常作为「没有界面的产品」工作。
+  const workspacePort = (server.address() as AddressInfo).port;
+  const productUiServer = createProductUiServer({
+    root: productUiRoot,
+    workspaceOrigin: `http://127.0.0.1:${workspacePort}`,
+  });
+  productUiServer.on("error", (cause) =>
+    console.error(`[ruyin] product ui: 起不来（${(cause as Error).message}）—— 产品一律按没有界面处理`),
+  );
+  productUiServer.listen(productUiPortFor(port, process.env), "127.0.0.1", () => {
+    productUi.port = (productUiServer.address() as AddressInfo).port;
+    console.log(`[ruyin] product ui: <产品>.localhost:${productUi.port} (${productUiRoot})`);
+  });
+
   console.log(`[ruyin] local runtime ${VERSION}`);
   console.log(`[ruyin] data dir: ${dataDir}`);
   // 已经在用的数据目录落在系统位置上（手改过指针、或者早于这份清单就设好了）：

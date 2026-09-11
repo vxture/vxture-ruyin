@@ -1,0 +1,37 @@
+// 观察台测试包的探针（ADR-022 片三 a）。只在观察台里用，不进安装包。
+//
+// 报给父窗口用 targetOrigin "*" —— **只有这个测试包这么写**：它不知道工作台的
+// origin（referrerPolicy 是 no-referrer，拿不到来源），而这条消息只是测试结果。
+// 真产品的界面走片二的桥，不自己发这种消息。
+(function () {
+  var result = { ns: "ruyin.test-probe", origin: location.origin };
+
+  // ① 工作台把会话令牌存在 localStorage。独立 origin 的话，这里读到的是**自己那一份**
+  //    存储 —— 里面没有 ruyin-token。
+  try {
+    result.tokenSeen = localStorage.getItem("ruyin-token");
+  } catch (e) {
+    result.tokenSeen = "（读取抛错：" + e.name + "）";
+  }
+
+  // ② 摸父窗口的 DOM。跨源的话浏览器直接抛 SecurityError。
+  try {
+    result.parentTitle = window.parent.document.title;
+  } catch (e) {
+    result.parentTitle = "（被拒：" + e.name + "）";
+  }
+
+  // ③ 走一次片二的桥：发一条请求，等回音。
+  var id = "probe-" + Date.now();
+  window.addEventListener("message", function (ev) {
+    var d = ev.data || {};
+    if (d.ns !== "ruyin.bridge" || d.id !== id) return;
+    result.bridge = { ok: d.ok, status: d.status, body: d.body, error: d.error };
+    document.getElementById("out").textContent = JSON.stringify(result);
+    window.parent.postMessage(result, "*");
+  });
+  window.parent.postMessage(
+    { ns: "ruyin.bridge", kind: "request", id: id, method: "GET", path: "/context" },
+    "*",
+  );
+})();

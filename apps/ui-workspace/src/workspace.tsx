@@ -49,6 +49,7 @@ import {
   type ProjectFile,
   type ProjectView,
 } from "./api";
+import { ProductSurface } from "./product-surface";
 import { verifyChain } from "./chain";
 // TabId/PROJECT_TABS live in their own module (workspace-tabs.ts) so the
 // sidebar can know the tab list without pulling in this file's DS-heavy
@@ -258,13 +259,19 @@ export function ProjectPanel({
       ))}
 
       {tab === "overview" && (
-        <OverviewTab
-          api={api}
-          projectId={id}
-          view={view}
-          instances={instances}
-          onTransition={(to, c) => void guard(() => api.transition(id, to, c))}
-        />
+        <>
+          <OverviewTab
+            api={api}
+            projectId={id}
+            view={view}
+            instances={instances}
+            onTransition={(to, c) => void guard(() => api.transition(id, to, c))}
+          />
+          {/* 产品自己的界面（ADR-022 片三 a）。**今天什么都不渲染**：没有任何产品带
+              界面包，没有界面是缺省。放在概览页末尾是**临时位置** —— 产品界面该在
+              项目的哪一块出现，是个要 owner 定的界面决定，不是这一片的事。 */}
+          <ProductSurface api={api} projectId={id} />
+        </>
       )}
       {tab === "context" && (
         <ContextTab
