@@ -52,10 +52,10 @@ Verification 作为 Task Definition 的子结构进入 MVP；
 # 3. 契约顶层结构
 
 ```yaml
-contract: "0.1"        # 契约 schema 版本（本规范的版本）
+contract: "0.2"        # 契约 schema 版本（本规范的版本）；运行时同时接受 0.1 与 0.2
 
-product: {}            # §5  产品身份
-workspace: {}          # §6  工作空间定义
+product: {}            # §5  产品身份（其下 ui 可选）
+project: {}            # §6  项目容器定义
 objects: []            # §7  业务对象
 states: {}             # §8  业务状态机
 context: {}            # §9  上下文需求
@@ -66,7 +66,12 @@ permissions: {}        # §13 权限默认值
 sync: {}               # §14 同步策略
 ```
 
-顶层键全部必填（MVP 无可选顶层键）。
+顶层键全部必填（MVP 无可选顶层键）。可选项只出现在顶层键**之内**，例如 `product.ui`。
+
+> **契约版本 0.2（2026-09-11，ADR-023）只多一个可选字段 `product.ui`。** 为一个
+> 可选字段升版本，是因为 `product` 是 `additionalProperties: false`：0.1 的运行时
+> 见到 `ui` 报的是一句莫名的结构错误；升了版本，它报的是「契约版本不受支持」——
+> 结果一样不能用，但说的是真话、指向该做的事（升级 RUYIN）。
 
 ---
 
@@ -96,14 +101,32 @@ product:
   publisher: vxture       # 必填。发布者 ID，必须与包签名身份一致（R12）
   runtime:
     minimum: 0.1.0        # 必填。所需最低 Workspace Runtime 规范版本
+  ui:                     # 可选（contract ≥ 0.2）。不写 = 这个产品没有自己的界面
+    sha256: 3f2a…         # 界面包的摘要，64 位小写十六进制
 ```
+
+**`ui` —— 产品自己的界面（ADR-023）。** 契约**钉摘要不钉地址**：运行时从产品
+能力面按 `GET /products/{id}/ui/{sha256}` 取回界面包（一个 zip，入口固定为包根
+的 `index.html`），摘要一致才解包，按摘要落盘，装进每产品一个 origin 的沙箱
+iframe。
+
+- **可选，缺省没有**：工作台通用地渲染任务、检查点、上下文、成果，很多产品不需要
+  自己的界面；
+- **坏了等于没有界面，不拒收契约**：取不回、摘要不符、包不合规，这个产品暂时没有
+  界面，产品本身照常可用；
+- **跟项目快照走**：项目装的是它快照里那份契约钉的界面 —— 界面与裁剪它的契约必须
+  是同一份；
+- **界面包必须自足**：沙箱 CSP 不许出网，字体、图片、脚本全部在包里。
 
 ---
 
-# 6. workspace —— 工作空间定义
+# 6. project —— 项目容器定义
+
+> **键名是 `project`，不是 `workspace`**：workspace 归平台（ADR-007），本地的
+> 容器是项目（ADR-015）。代码与夹具早已改过，本节此前没跟上（2026-09-11 补正）。
 
 ```yaml
-workspace:
+project:
   type: project           # 必填。continuous | project
   operations:             # 可选。默认 [create, open]
     - create
@@ -374,25 +397,31 @@ sync:
 | R14 | 声明了 tools 的 task 必须至少声明一条 capability——工具只在能力回合内被调用，`capabilities: []` 的任务一个回合都不跑，声明的工具永远调不到 | L2 |
 | R15 | `provider: connector` 的工具 category 只能是 `query` 或 `external_send`——其余类别靠路径参数过目录授权（连接器工具没有路径可查）或是模型自己的产出 | L1 |
 | R16 | `tasks[].skills` 在任务内唯一；声明了 skills 的 task 必须至少一条 capability（技能在能力回合里被 `use_skill` 打开）。名字格式（kebab、≤64）是 L1 pattern；**在不在本机清单里是 L3**：登记册按机器、按项目，lint 看不见，Harness 启动前查并按名拒绝（ADR-018） | L1 / L2 / L3 |
+| R17 | `product.ui` 只能出现在 `contract ≥ "0.2"` 的契约里；`sha256` 为 64 位小写十六进制（L1 pattern）。**取回的字节与 `sha256` 一致、包根有 `index.html`** 是加载期校验，**不过则该产品没有界面，不拒收契约**（ADR-023） | L1 / L2 / L3 |
 
 ---
 
 # 16. 完整示例：Bid 产品契约
 
-以下契约通过 §15 的全部规则校验（区间写法会过期，这里不写区间）：
+以下契约与 `products/bidproposal/ruyin.product.yaml` 是同一份，通过 §15 的全部
+规则校验（区间写法会过期，这里不写区间）。**这一段 YAML 由 `contract-schema` 的测试
+直接读出来校验** —— 此前这里是一份手抄的旧版，键名、来源枚举、工具的
+`input_schema` 都已过期，而文字还写着「通过全部规则」，没有任何东西去核（2026-09-11
+补正并加了这条测试）。
 
 ```yaml
 contract: "0.1"
 
 product:
   id: bidproposal
-  name: 标书方案智能体
+  name: 标书方案智能体          # = 平台产品目录 product_name（2026-09-05 owner：名字对齐平台）
   version: 1.0.0
   publisher: vxture
   runtime:
     minimum: 0.1.0
 
-workspace:
+project:
+  # 项目型：每次投标开一个独立容器，交付即闭合（持续型见 continuous）。
   type: project
   operations: [create, open, archive, restore]
 
@@ -443,7 +472,8 @@ context:
     - id: enterprise_capability
       name: 企业能力资料
       required: false
-      sources: [local, cloud]
+      # lan：企业能力资料常在内网系统里（CRM / 案例库），经本地连接器取（ADR-005）
+      sources: [local, cloud, lan]
       class: source
       sensitivity: high
     - id: enterprise_knowledge
@@ -461,25 +491,25 @@ context:
     - id: requirement_matrix
       name: 需求矩阵
       required: false
-      sources: [workspace]
+      sources: [project]
       class: derived
       sensitivity: medium
     - id: technical_proposal
       name: 技术方案文档
       required: false
-      sources: [workspace]
+      sources: [project]
       class: generated
       sensitivity: high
     - id: coverage_report
       name: 需求覆盖报告
       required: false
-      sources: [workspace]
+      sources: [project]
       class: derived
       sensitivity: medium
     - id: deliverable_package
       name: 投标成果包
       required: false
-      sources: [workspace]
+      sources: [project]
       class: generated
       sensitivity: high
 
@@ -499,12 +529,67 @@ capabilities:
   - id: consistency_analysis
     kind: verification
     description: 校验方案内部与资料间的一致性
+  # 汇总是要动手的：读回各部分、决定次序、调用导出。没有这条能力，
+  # export_deliverable 连一个回合都不会跑，工具声明了也调不到（R14）。
+  - id: deliverable_assembly
+    kind: generation
+    description: 汇总技术方案与覆盖报告，组装并导出最终投标成果包
 
 tools:
-  - { id: read_file,        category: local_read,  risk: low,    default: allow }
-  - { id: write_document,   category: local_write, risk: medium, default: ask }
-  - { id: search_knowledge, category: query,       risk: low,    default: allow }
-  - { id: export_result,    category: export,      risk: high,   default: ask }
+  # input_schema 必填：闸门校验不了参数的工具，就是放行不了的工具。
+  # x-ruyin-ref 标出需要超出类型检查的参数 —— path 必须落在已授权目录内，
+  # context_item 必须属于本次任务的上下文集（50-harness §5.2）。
+  - id: read_file
+    category: local_read
+    risk: low
+    default: allow
+    input_schema:
+      type: object
+      properties:
+        path: { type: string, x-ruyin-ref: path }
+      required: [path]
+
+  - id: write_document
+    category: local_write
+    risk: medium
+    default: ask
+    input_schema:
+      type: object
+      properties:
+        path:    { type: string, x-ruyin-ref: path }
+        content: { type: string }
+        source:  { type: string, x-ruyin-ref: context_item }
+      required: [path, content]
+
+  - id: search_knowledge
+    category: query
+    risk: low
+    default: allow
+    input_schema:
+      type: object
+      properties:
+        query: { type: string }
+        limit: { type: integer, minimum: 1, maximum: 50 }
+      required: [query]
+
+  # sources 是**路径**而不是正文：这些文档上一轮已经由 write_document 写在授权
+  # 目录里了，把正文再贴进调用参数等于让整篇文档二次流经对话（ADR-016）。
+  # 顺序由模型定 —— 哪几份、按什么次序汇总，只有它知道。
+  # format 只列宿主真渲染得出来的：声明一个没人实现的格式，就是 export_result
+  # 这条工具原本的毛病（契约里有、宿主没有、任务因此无路可走）。pdf 由壳里的
+  # Chromium 排版（ADR-017），发布形态下总在；守护进程脱离壳单独跑（开发时）
+  # 会如实报「本宿主没有接 PDF 渲染器」。
+  - id: export_result
+    category: export
+    risk: high
+    default: ask
+    input_schema:
+      type: object
+      properties:
+        path:    { type: string, x-ruyin-ref: path }
+        format:  { type: string, enum: [docx, pdf] }
+        sources: { type: array, x-ruyin-ref: path }
+      required: [path, format, sources]
 
 tasks:
   - id: analyze_tender
@@ -515,6 +600,7 @@ tasks:
       - 需求条目必须可回溯到招标原文
     capabilities: [requirement_analysis]
     tools: [read_file, write_document]
+    skills: [pdf]                                # 招标文件抽文本 / 表格（预置层，openai.skills）
     verification:
       - { id: source_traceability, kind: automated }
       - { id: matrix_review,       kind: human }
@@ -528,6 +614,7 @@ tasks:
       - 必须基于已授权资料
     capabilities: [knowledge_retrieval, proposal_generation]
     tools: [search_knowledge, read_file, write_document]
+    skills: [officecli-docx, officecli-word-form]  # Word 文档与表单（预置层，iofficeai.officecli）
     verification:
       - { id: requirement_coverage, kind: ai_assisted }
       - { id: consistency_check,    kind: ai_assisted }
@@ -550,8 +637,9 @@ tasks:
     output_types: [deliverable_package]
     constraints:
       - 导出前必须通过覆盖校验
-    capabilities: []
+    capabilities: [deliverable_assembly]
     tools: [read_file, export_result]
+    skills: [officecli-docx]
     verification:
       - { id: final_confirmation, kind: human }
 
@@ -607,12 +695,17 @@ Vxture Cloud Runtime              Ruyin Local Runtime
 bid-1.0.0.ruyinpkg（zip 容器）
 │
 ├── ruyin.product.yaml      # manifest，唯一事实源
-├── ui/                     # 业务 UI 资源（web bundle，技术形态由 06 定）
+├── ui.zip                  # 可选。界面包，与契约拉取取回的是同一份字节（ADR-023）
 ├── resources/              # 模板 / 静态资源
 ├── i18n/                   # 多语言
 ├── CHECKSUMS               # 包内文件摘要清单
 └── SIGNATURE               # 对 CHECKSUMS 的签名
 ```
+
+> **`ui/` 目录改为 `ui.zip` 一个文件（2026-09-11，ADR-023）。** 界面包的完整性
+> 权威是 `product.ui.sha256`，一份字节、两种承载：一级供给按摘要取回，二级供给
+> 带在包里（同样受 CHECKSUMS 覆盖、同样要与摘要一致）。二级这一侧**尚未实现**，
+> 等第一个需要二级供给的产品。
 
 ## 18.2 签名与信任链
 
@@ -742,7 +835,7 @@ runtime.minimum 兼容性校验（L3）
 
 # 19. Open Questions
 
-- UI 资源的技术形态与加载隔离（依赖 06 技术选型）
+- ~~UI 资源的技术形态与加载隔离~~ **已关闭**：沙箱 iframe + 每产品一个 origin（ADR-022、60 T6），来源与形态见 ADR-023
 - 第三方 publisher 的审核与吊销流程
 - 契约 diff 工具链（lint 已有：`ruyin lint` 静态执行全部 R 规则）
 - major 版本数据迁移声明的格式

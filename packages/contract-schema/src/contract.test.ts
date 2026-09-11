@@ -68,6 +68,28 @@ test("validateContractYaml: the one-step parse+validate convenience also has a s
   assert.ok(result.ok);
 });
 
+/**
+ * 设计文档 §16 那段「完整示例」**从文档里读出来**校验，并与夹具逐字段比对。
+ *
+ * 此前那里是一份手抄的旧版：顶层键还叫 workspace、来源枚举里有早已不存在的
+ * workspace、四个工具缺 input_schema —— 十处错，而文字写着「通过 §15 的全部规则
+ * 校验」。没有任何东西去核，所以它和好的时候长得一模一样（2026-09-11 发现）。
+ */
+test("design doc §16: the full example is the fixture, and it validates", () => {
+  const docUrl = new URL("../../../docs/30-design/30-contract-schema.md", import.meta.url);
+  const doc = readFileSync(docUrl, "utf8").split(/\r?\n/);
+  const heading = doc.findIndex((l) => l.startsWith("# 16."));
+  assert.ok(heading >= 0, "§16 heading not found");
+  const open = doc.indexOf("```yaml", heading);
+  const close = doc.indexOf("```", open + 1);
+  assert.ok(open > heading && close > open, "§16 yaml block not found");
+  const yaml = doc.slice(open + 1, close).join("\n");
+
+  const result = validateContractYaml(yaml);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(parseContract(yaml), base);
+});
+
 test("R1: unsupported contract version", () => {
   assert.ok(
     rules(
