@@ -37,6 +37,7 @@ export {
   ProjectLifecycleError,
   ProjectNotFoundError,
   ProjectRuntime,
+  type UpgradeOutcome,
   LOCAL_FS,
   bindingRevoked,
   folderGrants,

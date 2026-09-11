@@ -9,7 +9,10 @@
  */
 
 import {
+  compareContracts,
+  compareProductVersions,
   validateContract,
+  type ContractBreak,
   type PermissionValue,
   type RuyinContract,
   type ValidationError,
@@ -169,6 +172,12 @@ export interface ProjectView {
   contract: RuyinContract;
 }
 
+/** 一次升级的结果（ADR-024）。不升不是错误，是一个带原因的结果。 */
+export type UpgradeOutcome =
+  | { status: "upgraded"; from: string; to: string }
+  | { status: "skipped"; reason: "not_newer" | "archived" | "unsettled"; from: string; to: string }
+  | { status: "skipped"; reason: "incompatible"; from: string; to: string; breaks: ContractBreak[] };
+
 /** 不会再自己变的任务状态 —— 归档只在所有任务都停在这里时才做。 */
 const TERMINAL_TASK_STATES = new Set(["completed", "failed", "cancelled"]);
 
@@ -256,6 +265,46 @@ export class ProjectRuntime {
     await store.putMeta(archived);
     await this.audit(store, id, "project.archived", "user", { at: archived.archivedAt });
     return archived;
+  }
+
+  /**
+   * 把项目升到产品的新版本（ADR-024：**直接升**，删了东西的才留在旧版）。
+   *
+   * **从不为「这次不升」抛错**，而是说明为什么 —— 宿主拿它把一个产品的项目挨个过一遍，
+   * 一个不升不该打断其余的：
+   * - `not_newer`：给的版本不比快照新（只往上走；产品库回滚不把项目退回去）；
+   * - `archived`：只读的项目不升，恢复之后再说；
+   * - `unsettled`：还有没落定的任务 —— 跑到一半的任务一边按旧快照一边按新快照，谁都
+   *   说不清它该听哪一份。等它落定，下一次再升；
+   * - `incompatible`：新契约删了 / 改窄了项目在用的东西（`compareContracts`），留在旧版，
+   *   原因交回去让界面写明。
+   *
+   * 契约本身不合法、或不是这个项目的产品 —— 那是调用方的错，照常抛。
+   */
+  async upgradeProject(id: string, rawNext: unknown): Promise<UpgradeOutcome> {
+    const { store, meta, contract } = await this.load(id);
+    const validation = validateContract(rawNext);
+    if (!validation.ok) throw new ContractInvalidError(validation.errors);
+    const next = rawNext as RuyinContract;
+    if (next.product.id !== contract.product.id) {
+      throw new ProjectLifecycleError(
+        `cannot upgrade a "${contract.product.id}" project with a "${next.product.id}" contract`,
+      );
+    }
+    const from = contract.product.version;
+    const to = next.product.version;
+    if (compareProductVersions(to, from) <= 0) return { status: "skipped", reason: "not_newer", from, to };
+    if (meta.archivedAt) return { status: "skipped", reason: "archived", from, to };
+    const unsettled = (await this.listTaskInstances(id)).some((t) => !TERMINAL_TASK_STATES.has(t.state));
+    if (unsettled) return { status: "skipped", reason: "unsettled", from, to };
+    const comparison = compareContracts(contract, next);
+    if (!comparison.compatible) {
+      return { status: "skipped", reason: "incompatible", from, to, breaks: comparison.breaks };
+    }
+    await store.putContract(JSON.stringify(next));
+    await store.putMeta({ ...meta, productVersion: to, contractVersion: next.contract });
+    await this.audit(store, id, "project.upgraded", "system", { from, to });
+    return { status: "upgraded", from, to };
   }
 
   /** 恢复一个归档的项目（契约里的 `restore`）。契约没声明 `restore` 的，归档就是单向的。 */

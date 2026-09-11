@@ -206,6 +206,11 @@ export interface ProjectView {
   states?: { object: string; initial: string; items: StateItem[] };
   /** 契约声明的容器操作（create / open / archive / restore）。 */
   operations: string[];
+  /**
+   * 产品库里有更新的版本，但它删了（或改窄了）这个项目在用的东西，项目留在旧版
+   * （ADR-024）。能升的项目守护进程已经直接升了，不会出现这个字段。
+   */
+  upgradeBlocked?: { version: string; breaks: Array<{ path: string; change: "removed" | "narrowed" }> };
 }
 
 export interface ContextItemMeta {

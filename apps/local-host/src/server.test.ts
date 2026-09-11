@@ -37,7 +37,8 @@ import { EventBus } from "./events.js";
 import { LocalToolExecutor } from "./tool-executor.js";
 import { loadProducts } from "./products.js";
 import { ProductRegistry } from "./product-registry.js";
-import { createLocalApi, type LocalApiDeps } from "./server.js";
+import { createLocalApi, upgradeProjects, type LocalApiDeps } from "./server.js";
+import type { RuyinContract } from "@vxture/ruyin-contract-schema";
 import { ComponentError } from "./component-store.js";
 import { TaskRunner } from "./task-runner.js";
 import { SkillRegistry } from "./skill-registry.js";
@@ -2474,6 +2475,97 @@ void test("archive: 还有没落定的任务 → 409 PROJECT_LIFECYCLE，项目�
     assert.equal(res.status, 409);
     assert.equal(((await res.json()) as { code: string }).code, "PROJECT_LIFECYCLE");
     assert.equal((await rig.runtime.openProject(projectId)).meta.archivedAt, undefined);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/* ---------------- 升到产品的新版本（ADR-024：直接升） ---------------- */
+
+/** 一个产品库替身：别的都照真的来，只把 bidproposal 的生效版本换成给定的那一份。 */
+function registryServing(next: RuyinContract): ProductRegistry {
+  const real = new ProductRegistry(productsDir, mkdtempSync(join(tmpdir(), "ruyin-reg-")));
+  return Object.assign(Object.create(real) as ProductRegistry, {
+    contractOf: (id: string) => (id === next.product.id ? next : real.contractOf(id)),
+  });
+}
+
+function bidNext(fn: (c: RuyinContract) => void = () => {}): RuyinContract {
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal")!;
+  const next = structuredClone(bid.contract);
+  next.product.version = "1.1.0";
+  fn(next);
+  return next;
+}
+
+/** 打开项目时顺手升：只增的 1.1 → 项目直接变成 1.1，不用人点。 */
+void test("upgrade: 打开项目时，产品库里有只增的新版本就直接升", async () => {
+  const next = bidNext((c) => {
+    c.tasks.push({ ...structuredClone(c.tasks[0]!), id: "price_check" });
+  });
+  const events = new EventBus();
+  const seen: string[] = [];
+  events.subscribe((e) => {
+    if (e.kind === "project") seen.push(e.projectId);
+  });
+  const rig = await startServer({ platform: signedInTo("wsp_x"), registry: registryServing(next), events });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    const view = (await (await fetch(`${rig.base}/projects/${projectId}`, { headers: rig.headers })).json()) as {
+      meta: { productVersion: string };
+      tasks: Array<{ id: string }>;
+      upgradeBlocked?: unknown;
+    };
+    assert.equal(view.meta.productVersion, "1.1.0");
+    assert.ok(view.tasks.some((t) => t.id === "price_check"));
+    assert.equal(view.upgradeBlocked, undefined);
+    assert.deepEqual(seen, [projectId]);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/** 删了东西的新版本：不升，界面拿到原因（写明，不静默）。 */
+void test("upgrade: 新版本删了项目在用的东西 → 不升，详情里带上 upgradeBlocked", async () => {
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal")!;
+  const dropped = bid.contract.tasks[0]!.id;
+  const next = bidNext((c) => {
+    c.tasks = c.tasks.slice(1);
+  });
+  const rig = await startServer({ platform: signedInTo("wsp_x"), registry: registryServing(next) });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    const view = (await (await fetch(`${rig.base}/projects/${projectId}`, { headers: rig.headers })).json()) as {
+      meta: { productVersion: string };
+      upgradeBlocked?: { version: string; breaks: Array<{ path: string; change: string }> };
+    };
+    assert.equal(view.meta.productVersion, bid.contract.product.version);
+    assert.equal(view.upgradeBlocked?.version, "1.1.0");
+    assert.ok(view.upgradeBlocked?.breaks.some((b) => b.path === `tasks.${dropped}` && b.change === "removed"));
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
+ * 产品库变了之后把一个产品的项目逐个过一遍：能升的升，有没落定任务的等下次；一个项目
+ * 出错不打断其余。
+ */
+void test("upgradeProjects: 逐个升；有没落定任务的跳过；别的产品不动", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const free = await projectIn(rig, "wsp_x");
+    const busy = await projectIn(rig, "wsp_x");
+    await putTask(rig, busy); // waiting_human
+    const next = bidNext();
+    await upgradeProjects({ runtime: rig.runtime, registry: registryServing(next), events: undefined }, "bidproposal");
+    assert.equal((await rig.runtime.openProject(free)).meta.productVersion, "1.1.0");
+    assert.notEqual((await rig.runtime.openProject(busy)).meta.productVersion, "1.1.0");
+
+    // 只看别的产品：这个产品的项目一个都不碰。
+    const again = await projectIn(rig, "wsp_x");
+    await upgradeProjects({ runtime: rig.runtime, registry: registryServing(next), events: undefined }, "other-product");
+    assert.notEqual((await rig.runtime.openProject(again)).meta.productVersion, "1.1.0");
   } finally {
     closeRig(rig);
   }

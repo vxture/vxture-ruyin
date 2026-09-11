@@ -8,3 +8,9 @@ export {
   validateContract,
   validateContractYaml,
 } from "./validate.js";
+export {
+  compareContracts,
+  compareProductVersions,
+  type ContractBreak,
+  type ContractComparison,
+} from "./compare.js";

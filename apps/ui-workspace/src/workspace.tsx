@@ -266,6 +266,17 @@ export function ProjectPanel({
         </div>
       )}
 
+      {/* 智能体有新版本、但它删了本项目在用的东西：项目留在旧版（ADR-024）。如实说一行 ——
+          不说的话，用户会以为新版本的功能坏了。 */}
+      {view.upgradeBlocked && (
+        <div className="notice-box">
+          <span className="text-body-sm">
+            智能体已有新版本 {view.upgradeBlocked.version}，但它删去或改窄了本项目在用的内容（
+            {describeBreaks(view.upgradeBlocked.breaks)}），本项目继续用 {view.meta.productVersion}。
+          </span>
+        </div>
+      )}
+
       {/* 归档的项目：只读。说清楚是什么、能做什么，恢复入口就在这里（契约声明了 restore 时）。 */}
       {view.meta.archivedAt && (
         <div className="notice-box">
@@ -494,6 +505,30 @@ function OverviewTab({
       )}
     </>
   );
+}
+
+/** 契约里各段的叫法（给人看的，不是给机器看的）。 */
+const BREAK_SECTION: Record<string, string> = {
+  objects: "对象",
+  states: "阶段",
+  context: "资料类型",
+  capabilities: "能力",
+  tools: "工具",
+  tasks: "任务",
+  project: "项目形态",
+};
+
+/**
+ * 新版本删了 / 改窄了什么，压成一句：前三处点名，其余说「等 N 处」。
+ * `tasks.generate_proposal` → 「任务 generate_proposal」；`context.types.x` → 「资料类型 x」。
+ */
+export function describeBreaks(breaks: ReadonlyArray<{ path: string; change: string }>): string {
+  const named = breaks.slice(0, 3).map(({ path }) => {
+    const [section = "", ...rest] = path.split(".");
+    const tail = (section === "context" ? rest.slice(1) : rest)[0] ?? "";
+    return `${BREAK_SECTION[section] ?? section} ${tail}`.trim();
+  });
+  return breaks.length > 3 ? `${named.join("、")} 等 ${breaks.length} 处` : named.join("、");
 }
 
 /**

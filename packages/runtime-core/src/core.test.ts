@@ -2366,3 +2366,80 @@ test("archive: 有没落定的任务不归档；重复归档、恢复没归档�
   await runtime.archiveProject(clean.id);
   await assert.rejects(runtime.archiveProject(clean.id), /already archived/);
 });
+
+// --- 升到产品的新版本（ADR-024：直接升，删了东西的才留在旧版） -------------------
+
+function nextVersion(fn: (c: RuyinContract) => void = () => {}, version = "1.1.0"): RuyinContract {
+  const next = structuredClone(bidContract) as RuyinContract;
+  next.product.version = version;
+  fn(next);
+  return next;
+}
+
+test("upgrade: 只增的新版本直接升 —— 快照换了、版本号更新、新任务能用、审计记着从哪版到哪版", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  const base = bidContract as RuyinContract;
+  const next = nextVersion((c) => {
+    c.tasks.push({ ...structuredClone(c.tasks[0]!), id: "price_check" });
+  });
+  const outcome = await runtime.upgradeProject(meta.id, next);
+  assert.deepEqual(outcome, { status: "upgraded", from: base.product.version, to: "1.1.0" });
+
+  const view = await runtime.openProject(meta.id);
+  assert.equal(view.meta.productVersion, "1.1.0");
+  assert.ok(view.contract.tasks.some((t) => t.id === "price_check"));
+  const harness = await runtime.createHarness(meta.id);
+  await harness.startTask("price_check"); // 新版本加的任务，老项目里能发起了
+  const upgradedEvent = (await runtime.listAuditEvents(meta.id)).find(
+    (e) => "action" in e && e.action === "project.upgraded",
+  );
+  assert.deepEqual(upgradedEvent?.payload, { from: base.product.version, to: "1.1.0" });
+});
+
+/** 删了 / 改窄了项目在用的东西：留在旧版，原因交回去（界面据此写明，不静默）。 */
+test("upgrade: 新版本删了项目在用的东西 → 不升，留在旧版，交回原因", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  const dropped = (bidContract as RuyinContract).tasks[0]!.id;
+  const outcome = await runtime.upgradeProject(meta.id, nextVersion((c) => {
+    c.tasks = c.tasks.slice(1);
+  }));
+  assert.equal(outcome.status, "skipped");
+  assert.equal(outcome.status === "skipped" && outcome.reason, "incompatible");
+  assert.ok(outcome.status === "skipped" && outcome.reason === "incompatible" && outcome.breaks.some((b) => b.path === `tasks.${dropped}`));
+  assert.equal((await runtime.openProject(meta.id)).meta.productVersion, (bidContract as RuyinContract).product.version);
+});
+
+test("upgrade: 不比快照新、归档了、还有没落定的任务 —— 都不升，说清原因", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const same = await runtime.createProject(bidContract, "same", "wsp_test");
+  assert.equal(
+    ((await runtime.upgradeProject(same.id, nextVersion(() => {}, (bidContract as RuyinContract).product.version))) as { reason: string }).reason,
+    "not_newer",
+  );
+  assert.equal(
+    ((await runtime.upgradeProject(same.id, nextVersion(() => {}, "0.0.1"))) as { reason: string }).reason,
+    "not_newer",
+  );
+
+  const archived = await runtime.createProject(bidContract, "archived", "wsp_test");
+  await runtime.archiveProject(archived.id);
+  assert.equal(((await runtime.upgradeProject(archived.id, nextVersion())) as { reason: string }).reason, "archived");
+
+  const busy = await runtime.createProject(bidContract, "busy", "wsp_test");
+  await (await runtime.createHarness(busy.id)).startTask("analyze_tender");
+  assert.equal(((await runtime.upgradeProject(busy.id, nextVersion())) as { reason: string }).reason, "unsettled");
+});
+
+test("upgrade: 契约不合法、或是别的产品的契约 —— 那是调用方的错，照常抛", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  await assert.rejects(runtime.upgradeProject(meta.id, { contract: "0.1" }), ContractInvalidError);
+  await assert.rejects(
+    runtime.upgradeProject(meta.id, nextVersion((c) => {
+      c.product.id = "other-product";
+    })),
+    ProjectLifecycleError,
+  );
+});
