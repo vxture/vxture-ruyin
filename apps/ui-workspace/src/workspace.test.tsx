@@ -65,6 +65,7 @@ function projectView(over: Partial<ProjectView> = {}): ProjectView {
         { name: "submitted", transitions: [] },
       ],
     },
+    operations: ["create", "open", "archive", "restore"],
     ...over,
   };
 }
@@ -156,6 +157,8 @@ function fakeApi(over: Partial<Api> = {}): Api {
     // 缺省没有产品提出的推进：那张卡不出现，既有用例不受影响（ADR-022 片四）。
     stateRequest: vi.fn().mockResolvedValue({ pending: null }),
     decideStateRequest: vi.fn().mockResolvedValue({ status: "done", businessState: "reviewing" }),
+    archiveProject: vi.fn().mockResolvedValue({}),
+    restoreProject: vi.fn().mockResolvedValue({}),
     ...over,
   } as unknown as Api;
 }
@@ -1176,4 +1179,70 @@ void test("产品提出的推进：在产品界面那一格里，确认卡在产
   const card = await screen.findByText("「标书编写」请求把项目推进到「reviewing」");
   const stub = screen.getByTestId("product-tab-stub");
   expect(card.compareDocumentPosition(stub) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+/* ---------------- 项目的归档与恢复 ---------------- */
+
+function archivedView(over: Partial<ProjectView> = {}): ProjectView {
+  const base = projectView(over);
+  return { ...base, meta: { ...base.meta, archivedAt: "2026-09-11T10:00:00.000Z" } };
+}
+
+/** 契约声明了 archive：概览最下面有归档入口，点了走 api.archiveProject。 */
+void test("归档：契约声明了 archive 才给入口；点了归档", async () => {
+  const api = fakeApi();
+  render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
+  await userEvent.setup().click(await screen.findByRole("button", { name: "归档" }));
+  expect(api.archiveProject).toHaveBeenCalledWith("prj_1");
+});
+
+void test("归档：契约没声明 archive 就没有入口", async () => {
+  const api = fakeApi({ workspace: vi.fn().mockResolvedValue(projectView({ operations: ["create", "open"] })) });
+  render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
+  await screen.findByText("标书编写 1.0.0");
+  expect(screen.queryByRole("button", { name: "归档" })).not.toBeInTheDocument();
+});
+
+/**
+ * **归档的项目只读，界面也看得出来**：顶上说清是什么、能做什么；推进、发起任务、改授权
+ * 的控件全禁掉（守护进程照样会拒，这里是不让人去点注定被拒的按钮）；导出与恢复照常。
+ */
+void test("归档：顶上说明 + 恢复入口；推进与任务、资料的控件禁掉；导出照常", async () => {
+  const api = fakeApi({ workspace: vi.fn().mockResolvedValue(archivedView()) });
+  const { unmount } = render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
+  expect(await screen.findByText(/项目已归档/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "归档" })).not.toBeInTheDocument();
+  // 推进阶段的按钮在禁用的 fieldset 里。
+  const advance = screen.getByRole("button", { name: /→ reviewing/ });
+  expect(advance).toBeDisabled();
+  expect(screen.getByRole("button", { name: "导出" }).closest("fieldset")).toBeNull();
+  await userEvent.setup().click(screen.getByRole("button", { name: "恢复项目" }));
+  expect(api.restoreProject).toHaveBeenCalledWith("prj_1");
+  unmount();
+
+  render(<ProjectPanel api={fakeApi({ workspace: vi.fn().mockResolvedValue(archivedView()) })} id="prj_1" tab="tasks" />);
+  await screen.findByText(/项目已归档/);
+  const fieldset = document.querySelector("fieldset");
+  expect(fieldset).not.toBeNull();
+  expect(fieldset).toBeDisabled();
+});
+
+/** 契约没声明 restore：归档是单向的，不给恢复按钮（给了点下去会被拒）。 */
+void test("归档：契约没声明 restore 就不给恢复按钮", async () => {
+  const api = fakeApi({
+    workspace: vi.fn().mockResolvedValue(archivedView({ operations: ["create", "open", "archive"] })),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
+  await screen.findByText(/项目已归档/);
+  expect(screen.queryByRole("button", { name: "恢复项目" })).not.toBeInTheDocument();
+});
+
+/** 契约声明了 archive 没声明 restore：入口照给，但先说清归档是单向的。 */
+void test("归档：契约没声明 restore 时，入口旁说清归档是单向的", async () => {
+  const api = fakeApi({
+    workspace: vi.fn().mockResolvedValue(projectView({ operations: ["create", "open", "archive"] })),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
+  expect(await screen.findByText(/这个产品不支持恢复，归档是单向的/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "归档" })).toBeInTheDocument();
 });

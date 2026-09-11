@@ -130,6 +130,23 @@ export class NeedsHumanConfirmationError extends Error {
   }
 }
 
+/**
+ * 项目已归档：只读。看、导出照常；任何改动（发起任务、推进阶段、改授权与绑定、改工具
+ * 策略）都在内核这里被拒 —— 宿主忘了拦也过不去，闸门是最后一站。
+ */
+export class ProjectArchivedError extends Error {
+  constructor(id: string) {
+    super(`project "${id}" is archived and read-only; restore it first`);
+  }
+}
+
+/**
+ * 归档 / 恢复这一下不成立：契约没声明这个操作、还有任务没落定、已经是那个状态。
+ * 与 ProjectArchivedError 分开：那一个说「这个项目现在不能改」，这一个说「这一下
+ * 归档（或恢复）现在不能做」。
+ */
+export class ProjectLifecycleError extends Error {}
+
 /** No workspace to put a project in - the caller is not signed in to one. */
 export class NoWorkspaceError extends Error {
   constructor(message: string) {
@@ -151,6 +168,9 @@ export interface ProjectView {
   businessState: string;
   contract: RuyinContract;
 }
+
+/** 不会再自己变的任务状态 —— 归档只在所有任务都停在这里时才做。 */
+const TERMINAL_TASK_STATES = new Set(["completed", "failed", "cancelled"]);
 
 export class ProjectRuntime {
   constructor(private readonly ports: RuntimePorts) {}
@@ -209,6 +229,48 @@ export class ProjectRuntime {
     return meta;
   }
 
+  /**
+   * 归档一个项目（契约 `project.operations` 里的 `archive`）。
+   *
+   * 三条前提，每条都说得出为什么：
+   * - **契约声明了 `archive`**：容器能做什么由产品的契约定（30-contract-schema §6，
+   *   缺省只有 create / open）。没声明就不做 —— Runtime 替产品加一个它没说过的操作，
+   *   等于替产品改了它的业务形态；
+   * - **没有还没落定的任务**：归档之后一切改动都被拒，一个跑到一半的任务会停在一个
+   *   谁都推不动、也取消不了的地方。先取消或等它跑完；
+   * - **还没归档**：重复归档不是无害的空操作 —— 它会把归档时刻改掉。
+   */
+  async archiveProject(id: string): Promise<ProjectMeta> {
+    const { store, meta, contract } = await this.load(id);
+    if (meta.archivedAt) throw new ProjectLifecycleError(`project "${id}" is already archived`);
+    if (!(contract.project.operations ?? ["create", "open"]).includes("archive")) {
+      throw new ProjectLifecycleError(`the product's contract does not declare "archive" for its projects`);
+    }
+    const unsettled = (await this.listTaskInstances(id)).filter((t) => !TERMINAL_TASK_STATES.has(t.state));
+    if (unsettled.length > 0) {
+      throw new ProjectLifecycleError(
+        `${unsettled.length} task(s) have not settled yet (${unsettled.map((t) => t.state).join(", ")}); cancel them or let them finish first`,
+      );
+    }
+    const archived: ProjectMeta = { ...meta, archivedAt: this.ports.clock.now() };
+    await store.putMeta(archived);
+    await this.audit(store, id, "project.archived", "user", { at: archived.archivedAt });
+    return archived;
+  }
+
+  /** 恢复一个归档的项目（契约里的 `restore`）。契约没声明 `restore` 的，归档就是单向的。 */
+  async restoreProject(id: string): Promise<ProjectMeta> {
+    const { store, meta, contract } = await this.load(id);
+    if (!meta.archivedAt) throw new ProjectLifecycleError(`project "${id}" is not archived`);
+    if (!(contract.project.operations ?? ["create", "open"]).includes("restore")) {
+      throw new ProjectLifecycleError(`the product's contract does not declare "restore" for its projects`);
+    }
+    const { archivedAt: _was, ...restored } = meta;
+    await store.putMeta(restored);
+    await this.audit(store, id, "project.restored", "user", { archivedAt: meta.archivedAt });
+    return restored;
+  }
+
   async openProject(id: string): Promise<ProjectView> {
     const { store, meta, contract } = await this.load(id);
     const businessState =
@@ -240,7 +302,7 @@ export class ProjectRuntime {
       requestedBy?: string;
     },
   ): Promise<string> {
-    const { store, contract } = await this.load(id);
+    const { store, contract } = await this.loadWritable(id);
     const current =
       (await store.getBusinessState()) ?? contract.states.initial;
     const item = contract.states.items.find((s) => s.name === current);
@@ -326,7 +388,7 @@ export class ProjectRuntime {
     toolId: string,
     value: PermissionValue | undefined,
   ): Promise<ToolPolicy> {
-    const { store, contract } = await this.load(id);
+    const { store, contract } = await this.loadWritable(id);
     const tool = contract.tools.find((t) => t.id === toolId);
     if (!tool) {
       throw new ToolPolicyError(`工具 "${toolId}" 不在这个产品的契约里`, "unknown_tool");
@@ -351,7 +413,7 @@ export class ProjectRuntime {
     path: string,
     mode: FolderGrant["mode"] = "read",
   ): Promise<FolderGrant> {
-    const { store } = await this.load(id);
+    const { store } = await this.loadWritable(id);
     const grants = parseJsonArray<Grant>(await store.getGrants());
     const grant: FolderGrant = {
       id: this.ports.id.newId("grant"),
@@ -376,13 +438,15 @@ export class ProjectRuntime {
    * 永远对不上的记录。授权本身不启动任何读取；读发生在绑定与选择那一步。
    */
   async addConnectorGrant(id: string, connector: string): Promise<ConnectorGrant> {
+    // 先认项目、再认连接器：归档的项目该听到的是「它已归档」，不是「连接器没装」——
+    // 后者会让人去装一个装了也没用的连接器。
+    const { store } = await this.loadWritable(id);
     if (connector === LOCAL_FS) {
       throw new Error("local-fs is granted per folder, not as a connector");
     }
     if (!this.ports.connectors?.get(connector)) {
       throw new Error(`connector "${connector}" is not installed`);
     }
-    const { store } = await this.load(id);
     const grants = parseJsonArray<Grant>(await store.getGrants());
     if (hasConnectorGrant(connector, grants)) {
       throw new Error(`connector "${connector}" is already granted to this project`);
@@ -426,7 +490,7 @@ export class ProjectRuntime {
       source?: ContextSource;
     },
   ): Promise<Binding> {
-    const { store, contract } = await this.load(id);
+    const { store, contract } = await this.loadWritable(id);
     const ctxType = contract.context.types.find((t) => t.id === input.type);
     if (!ctxType) {
       throw new Error(`context type "${input.type}" is not declared in the contract`);
@@ -496,7 +560,7 @@ export class ProjectRuntime {
 
   /** Harness factory (docs/30-design/50-harness.md section 2). */
   async createHarness(id: string): Promise<Harness> {
-    const { store, contract } = await this.load(id);
+    const { store, contract } = await this.loadWritable(id);
     return new Harness({
       store,
       contract,
@@ -552,7 +616,7 @@ export class ProjectRuntime {
         "a project must belong to a workspace; sign in and select one first",
       );
     }
-    const { store, meta } = await this.load(id);
+    const { store, meta } = await this.loadWritable(id);
     if (meta.workspaceId) {
       throw new AlreadyAttributedError(id, meta.workspaceId);
     }
@@ -643,6 +707,17 @@ export class ProjectRuntime {
   }
 
   // -------------------------------------------------------------------------
+
+  /** 要改这个项目时用它，不用 load：归档的项目在这里被拒（ProjectArchivedError）。 */
+  private async loadWritable(id: string): Promise<{
+    store: ProjectStore;
+    meta: ProjectMeta;
+    contract: RuyinContract;
+  }> {
+    const loaded = await this.load(id);
+    if (loaded.meta.archivedAt) throw new ProjectArchivedError(id);
+    return loaded;
+  }
 
   private async load(id: string): Promise<{
     store: ProjectStore;

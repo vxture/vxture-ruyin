@@ -23,6 +23,8 @@ import {
   ToolPolicyError,
   unrunnableTools,
   NeedsHumanConfirmationError,
+  ProjectArchivedError,
+  ProjectLifecycleError,
   ProjectNotFoundError,
   type Binding,
   type FolderGrant,
@@ -405,6 +407,12 @@ function errorStatus(cause: unknown): { status: number; body: unknown } {
   }
   if (cause instanceof ProjectNotFoundError) {
     return { status: 404, body: apiError("PROJECT_NOT_FOUND", cause.message) };
+  }
+  if (cause instanceof ProjectArchivedError) {
+    return { status: 409, body: apiError("PROJECT_ARCHIVED", "项目已归档，只读；恢复之后才能改") };
+  }
+  if (cause instanceof ProjectLifecycleError) {
+    return { status: 409, body: apiError("PROJECT_LIFECYCLE", cause.message) };
   }
   if (cause instanceof NeedsHumanConfirmationError) {
     // X-1 词表：这是一条出路，不是一个错误 —— 引导去确认，别当失败展示。
@@ -1613,9 +1621,8 @@ async function handle(
     //
     // 没有归属的项目是 attribution 之前的记录，属**待导入队列**，任何工作区下
     // 都看得见（ADR-015），所以这里放行 —— 挡住它，导入这条路就没了。
-    const owner = (await deps.runtime.listProjects()).find(
-      (p) => p.id === projectId,
-    )?.workspaceId;
+    const projectMeta = (await deps.runtime.listProjects()).find((p) => p.id === projectId);
+    const owner = projectMeta?.workspaceId;
     const active = activeWorkspace(deps);
     if (owner && owner !== active) {
       // 同样是拒绝，理由要分清楚 —— 没登录时说「属于另一个工作区」不是实话，
@@ -1628,6 +1635,39 @@ async function handle(
         ? [403, apiError(REJECTION.POLICY_DENIED, "该项目属于另一个工作区；切换过去再打开")]
         : [409, apiError("WORKSPACE_REQUIRED", "请先登录并选择工作区，再打开这个项目")];
       send(res, status, body);
+      return;
+    }
+
+    // 归档的项目只读。内核拒它自己管的那些改动（ProjectArchivedError）；**宿主自己管的**
+    // —— 收进项目的文件、为产品界面换凭据 —— 在这里一并拦，不然归档就只归了一半。
+    // 放行三样：归档 / 恢复本身（让内核给出准确的说法），以及**导出**：数据主权底线是
+    // 任何状态下本地数据都可访问、可导出（30-contract-schema §18.5），归档不打这个折。
+    if (
+      projectMeta?.archivedAt &&
+      (method === "POST" || method === "PUT" || method === "DELETE") &&
+      !["archive", "restore", "export"].includes(segments[2] ?? "")
+    ) {
+      send(res, 409, apiError("PROJECT_ARCHIVED", "项目已归档，只读；恢复之后才能改"));
+      return;
+    }
+
+    // POST /projects/:id/archive | /restore —— 项目的归档与恢复（契约 project.operations）。
+    //
+    // 归档时**作废这个项目名下的产品级凭据**（TD-059 等的就是这个钩子）：桥面立刻 401，
+    // 开着的事件流在下一次写或心跳时被收掉（它每次都重新认凭据）。挂着的推进请求一并
+    // 撤掉 —— 归档之后什么都推进不了，留着只会让人去点一张无效的卡。
+    if (method === "POST" && segments.length === 3 && (segments[2] === "archive" || segments[2] === "restore")) {
+      if (segments[2] === "archive") {
+        const archived = await deps.runtime.archiveProject(projectId);
+        bridgeTokens.revokeProject(projectId);
+        if (stateRequests.drop(projectId)) deps.events?.publish({ kind: "pending" });
+        deps.events?.publish({ kind: "project", projectId });
+        send(res, 200, archived);
+        return;
+      }
+      const restored = await deps.runtime.restoreProject(projectId);
+      deps.events?.publish({ kind: "project", projectId });
+      send(res, 200, restored);
       return;
     }
 
@@ -1766,6 +1806,9 @@ async function handle(
           ),
         })),
         states: view.contract.states,
+        // 这个产品的项目能做哪些容器操作（契约 project.operations，缺省 create / open）。
+        // 界面据此决定给不给「归档」「恢复」按钮 —— 给了点下去却被拒，比不给更糟。
+        operations: view.contract.project.operations ?? ["create", "open"],
       });
       return;
     }
@@ -1985,6 +2028,12 @@ async function handle(
         return;
       }
       const productId = meta.productId;
+      // 归档的项目不装产品界面：它是只读的，而产品界面的用处是在项目里做事 —— 连为它
+      // 换凭据都会被上面的归档守卫拒掉。说清原因，界面据此不列那一格。
+      if (meta.archivedAt) {
+        send(res, 200, { productId, available: false, reason: "archived" });
+        return;
+      }
       if (!deps.productUi) {
         send(res, 200, { productId, available: false, reason: "no_ui_server" });
         return;

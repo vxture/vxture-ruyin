@@ -33,6 +33,8 @@ export {
   ContractInvalidError,
   NeedsHumanConfirmationError,
   NoWorkspaceError,
+  ProjectArchivedError,
+  ProjectLifecycleError,
   ProjectNotFoundError,
   ProjectRuntime,
   LOCAL_FS,

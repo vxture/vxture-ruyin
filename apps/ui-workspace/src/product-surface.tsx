@@ -155,6 +155,13 @@ export function ProductTab({
   if (surface?.available) {
     return <ProductSurface api={api} projectId={projectId} surface={surface} />;
   }
+  if (surface?.reason === "archived") {
+    return (
+      <p className="text-body-md text-muted-foreground">
+        项目已归档：产品界面不再装入。记录照常可看、可导出，恢复之后产品界面回来。
+      </p>
+    );
+  }
   if (!declaresUi(surface)) {
     return (
       <p className="text-body-md text-muted-foreground">

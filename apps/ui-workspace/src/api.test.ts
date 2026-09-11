@@ -196,6 +196,8 @@ const WRAPPER_CASES: WrapperCase[] = [
     path: "/projects/prj_1/state",
     body: { to: "reviewing", humanConfirmed: false },
   },
+  { name: "archiveProject", call: (api) => api.archiveProject("prj_1"), method: "POST", path: "/projects/prj_1/archive" },
+  { name: "restoreProject", call: (api) => api.restoreProject("prj_1"), method: "POST", path: "/projects/prj_1/restore" },
   {
     name: "stateRequest",
     call: (api) => api.stateRequest("prj_1"),

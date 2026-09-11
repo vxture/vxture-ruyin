@@ -47,6 +47,11 @@ export class StateRequests {
    * 人做了决定：取走这个请求。**目标对不上就不取**（见文件头第 2 条），返回 undefined，
    * 挂着的那个原样留着。
    */
+  /** 项目归档时撤掉挂着的请求：归档之后什么都推进不了，留着它只会让人去点一张无效的卡。 */
+  drop(projectId: string): boolean {
+    return this.pending.delete(projectId);
+  }
+
   take(projectId: string, to: string): StateRequest | undefined {
     const existing = this.pending.get(projectId);
     if (!existing || existing.to !== to) return undefined;

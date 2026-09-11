@@ -191,3 +191,9 @@ test("ProductTab: 重新获取失败时把原因说出来，不再问一遍", as
   expect(onReload).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "重新获取" })).toBeEnabled();
 });
+
+test("ProductTab: 项目已归档 → 说清产品界面不再装入，不说成「没有界面」", () => {
+  renderTab({ productId: "bidproposal", available: false, reason: "archived" });
+  expect(screen.getByText(/项目已归档：产品界面不再装入/)).toBeInTheDocument();
+  expect(screen.queryByText(/这个产品没有自己的界面/)).not.toBeInTheDocument();
+});
