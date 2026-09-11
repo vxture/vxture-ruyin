@@ -20,10 +20,19 @@
 import { createHash } from "node:crypto";
 import { inflateRawSync } from "node:zlib";
 
-/** 单个包的硬上限，防解压炸弹。业务产品包是契约 + 资源，不该接近这些量级。 */
-const MAX_ENTRIES = 4096;
-const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+/** 解包的硬上限，防解压炸弹。 */
+export interface ZipLimits {
+  maxEntries: number;
+  maxEntryBytes: number;
+  maxTotalBytes: number;
+}
+
+/** 产品包的上限。业务产品包是契约 + 资源，不该接近这些量级。 */
+export const PACKAGE_LIMITS: ZipLimits = {
+  maxEntries: 4096,
+  maxEntryBytes: 64 * 1024 * 1024,
+  maxTotalBytes: 256 * 1024 * 1024,
+};
 
 const SIG_EOCD = 0x06054b50;
 const SIG_CENTRAL = 0x02014b50;
@@ -87,7 +96,8 @@ function findEocd(buf: Buffer): number {
  * 读取 .ruyinpkg 容器，返回全部条目。只做容器层解析与护栏；摘要/签名/契约校验
  * 由 verifyIntegrity 与安装管线负责。
  */
-export function readPackage(buf: Buffer): PackageContents {
+export function readPackage(buf: Buffer, limits: ZipLimits = PACKAGE_LIMITS): PackageContents {
+  const { maxEntries, maxEntryBytes, maxTotalBytes } = limits;
   const eocd = findEocd(buf);
   const entryCount = buf.readUInt16LE(eocd + 10);
   const centralSize = buf.readUInt32LE(eocd + 12);
@@ -96,7 +106,7 @@ export function readPackage(buf: Buffer): PackageContents {
   if (entryCount === 0xffff || centralOffset === 0xffffffff) {
     throw new PackageError("zip64 containers are not supported");
   }
-  if (entryCount > MAX_ENTRIES) {
+  if (entryCount > maxEntries) {
     throw new PackageError(`too many entries: ${entryCount}`);
   }
   if (centralOffset + centralSize > buf.length) {
@@ -137,11 +147,11 @@ export function readPackage(buf: Buffer): PackageContents {
     ) {
       throw new PackageError(`zip64 sizes not supported: ${name}`);
     }
-    if (uncompressedSize > MAX_ENTRY_BYTES) {
+    if (uncompressedSize > maxEntryBytes) {
       throw new PackageError(`entry too large: ${name}`);
     }
     total += uncompressedSize;
-    if (total > MAX_TOTAL_BYTES) {
+    if (total > maxTotalBytes) {
       throw new PackageError("package exceeds total size limit");
     }
     if (out.has(name)) {
@@ -164,7 +174,7 @@ export function readPackage(buf: Buffer): PackageContents {
     if (method === 0) {
       data = Buffer.from(raw);
     } else {
-      data = inflateRawSync(raw, { maxOutputLength: MAX_ENTRY_BYTES });
+      data = inflateRawSync(raw, { maxOutputLength: maxEntryBytes });
     }
     if (data.length !== uncompressedSize) {
       throw new PackageError(`entry size mismatch: ${name}`);

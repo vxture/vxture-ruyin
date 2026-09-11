@@ -35,6 +35,7 @@ import { SkillNotFoundError, type SkillListing, type SkillView } from "./skill-r
 import type { SkillDocument, SkillLayer } from "@vxture/ruyin-core";
 import { installPackage } from "./installer.js";
 import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
+import type { UiFetchOutcome } from "./ui-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import { apiError, REJECTION } from "./errors.js";
 import type { ToolProvider } from "@vxture/ruyin-contract-schema";
@@ -184,8 +185,11 @@ export interface LocalApiDeps {
   /**
    * 一级供给：从产品能力面拉契约（ADR-012）。未配置能力面时缺省——此时
    * POST /products/:id/fetch 如实回答「没有可拉的地方」，不假装拉过。
+   *
+   * 契约落了盘，宿主紧接着取它钉的界面包（ADR-023），结果放在 `ui` 里一并回。
+   * **界面取不成不改变契约的结果** —— 状态码仍按契约算，`ui.status` 另说。
    */
-  fetchContract?: (productId: string) => Promise<FetchOutcome>;
+  fetchContract?: (productId: string) => Promise<FetchOutcome & { ui?: UiFetchOutcome }>;
   /**
    * 强制拉一次订阅（TD-014 D5）。轮询周期 5 分钟，而用户付完款回到应用时
    * **不该等 5 分钟**；C2 的 45 秒缓存仍然生效，所以频繁调用不会打爆平台。
