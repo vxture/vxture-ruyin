@@ -49,7 +49,8 @@ import {
   type ProjectFile,
   type ProjectView,
 } from "./api";
-import { ProductSurface } from "./product-surface";
+import { ProductTab } from "./product-surface";
+import type { SurfaceInfo } from "./product-surface-info";
 import { verifyChain } from "./chain";
 // TabId/PROJECT_TABS live in their own module (workspace-tabs.ts) so the
 // sidebar can know the tab list without pulling in this file's DS-heavy
@@ -119,12 +120,21 @@ export function ProjectPanel({
   id,
   tab,
   onPending,
+  surface,
+  onReloadSurface,
 }: {
   api: Api;
   id: string;
   tab: TabId;
   /** 未决数上报给侧栏：徽章挂在导航条目上，不再另开一条横条。 */
   onPending?: (count: number) => void;
+  /**
+   * 产品有没有自己的界面 —— 侧栏已经问过一次（列不列那一格、默认进哪），这里用
+   * 同一份回答，不再各问各的：两份回答不一致时，侧栏列着那一格、点进去却说没有。
+   */
+  surface?: SurfaceInfo | null | undefined;
+  /** 「重新获取」之后让上层再问一次。 */
+  onReloadSurface?: () => void;
 }) {
   const [view, setView] = useState<ProjectView | null>(null);
   const [instances, setInstances] = useState<TaskInstance[]>([]);
@@ -259,19 +269,24 @@ export function ProjectPanel({
       ))}
 
       {tab === "overview" && (
-        <>
-          <OverviewTab
-            api={api}
-            projectId={id}
-            view={view}
-            instances={instances}
-            onTransition={(to, c) => void guard(() => api.transition(id, to, c))}
-          />
-          {/* 产品自己的界面（ADR-022 片三 a）。**今天什么都不渲染**：没有任何产品带
-              界面包，没有界面是缺省。放在概览页末尾是**临时位置** —— 产品界面该在
-              项目的哪一块出现，是个要 owner 定的界面决定，不是这一片的事。 */}
-          <ProductSurface api={api} projectId={id} />
-        </>
+        <OverviewTab
+          api={api}
+          projectId={id}
+          view={view}
+          instances={instances}
+          onTransition={(to, c) => void guard(() => api.transition(id, to, c))}
+        />
+      )}
+      {/* 产品自己的界面（ADR-023；owner 2026-09-11 定位置：侧栏单独一格）。未决确认
+          与项目摘要在上面，钉在所有分区之上 —— 产品界面盖不住它们。 */}
+      {tab === "product" && (
+        <ProductTab
+          api={api}
+          projectId={id}
+          productId={view.meta.productId}
+          surface={surface}
+          onReload={() => onReloadSurface?.()}
+        />
       )}
       {tab === "context" && (
         <ContextTab

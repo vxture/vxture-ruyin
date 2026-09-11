@@ -41,7 +41,8 @@ import {
 } from "@vxture/design-system";
 import { Api, type ProductInfo, type ProjectMeta, type SessionInfo } from "./api";
 import { TenantMenu } from "./tenant-menu";
-import { PROJECT_TABS, type TabId } from "./workspace-tabs";
+import { PROJECT_TABS, type RuntimeTabId, type TabId } from "./workspace-tabs";
+import { declaresUi, useProductSurface } from "./product-surface-info";
 import { SETTINGS_SECTIONS, resolveSection, type SectionId } from "./settings-sections";
 import { NoticeBar } from "./notice-bar";
 import { DEMO_RECENT } from "./catalog";
@@ -69,7 +70,8 @@ const ProjectPanel = lazy(() =>
 type View =
   | { kind: "home" }
   | { kind: "settings"; section: SectionId }
-  | { kind: "workspace"; id: string; tab: TabId };
+  /** `tab` 缺省 = 还没决定进哪一格：有产品界面进它，没有进概览（见下面的解析）。 */
+  | { kind: "workspace"; id: string; tab: TabId | undefined };
 
 /** 分区图标。名字取自 DS 图标表，改名会在构建时被类型挡住。 */
 const TAB_ICON = {
@@ -77,17 +79,21 @@ const TAB_ICON = {
   context: "folder-open",
   tasks: "list-checks",
   audit: "fingerprint",
-} as const satisfies Record<TabId, string>;
+} as const satisfies Record<RuntimeTabId, string>;
+/** 产品界面那一格：与首页「我的智能体」同一个图标 —— 那一格就是这个智能体自己。 */
+const PRODUCT_TAB_ICON = "package" as const;
 
 const viewHref = (v: View): string =>
   v.kind === "workspace"
-    ? `#ws/${v.id}/${v.tab}`
+    ? v.tab
+      ? `#ws/${v.id}/${v.tab}`
+      : `#ws/${v.id}`
     : v.kind === "settings"
       ? `#settings/${v.section}`
       : `#${v.kind}`;
 
 const isTab = (s: string): s is TabId =>
-  PROJECT_TABS.some((t) => t.id === s);
+  s === "product" || PROJECT_TABS.some((t) => t.id === s);
 
 /**
  * 当前会话的工作区名。
@@ -166,6 +172,27 @@ export function Workbench({
   const health = useRuntimeHealth();
   const chrome = useHostChrome();
   const pending = usePending(api);
+  /**
+   * 打开的这个项目，产品有没有自己的界面。**侧栏与项目面板共用这一份回答**：列不列
+   * 产品界面那一格、进项目默认落在哪、那一格里装什么，都按它。
+   */
+  const openId = view.kind === "workspace" ? view.id : undefined;
+  const { surface, reload: reloadSurface } = useProductSurface(api, openId);
+  const hasProductUi = declaresUi(surface);
+
+  /**
+   * 进项目时没指定分区 → **有产品界面就进它，没有就进概览**（owner 2026-09-11）。
+   *
+   * 等回答到了再决定，不先落概览再跳：那样每次进一个有界面的项目都会闪一下概览。
+   * 决定之后**改写**地址（replaceState，不新增历史）—— 返回键回到的是进项目之前的
+   * 那一页，而不是这个还没决定的中间态。
+   */
+  useEffect(() => {
+    if (view.kind !== "workspace" || view.tab !== undefined || surface === undefined) return;
+    const tab: TabId = hasProductUi ? "product" : "overview";
+    window.history.replaceState(null, "", `#ws/${view.id}/${tab}`);
+    setView({ kind: "workspace", id: view.id, tab });
+  }, [view, surface, hasProductUi]);
 
   const refreshSidebar = useCallback(async () => {
     try {
@@ -214,7 +241,8 @@ export function Workbench({
     }
     if (href.startsWith("#ws/")) {
       const [id, tab] = href.slice(4).split("/");
-      if (id) return { kind: "workspace", id, tab: isTab(tab ?? "") ? (tab as TabId) : "overview" };
+      // 没写分区（或写错）就留空，由下面按「有没有产品界面」决定进哪一格。
+      if (id) return { kind: "workspace", id, tab: isTab(tab ?? "") ? (tab as TabId) : undefined };
     }
     return null;
   }, []);
@@ -335,7 +363,7 @@ export function Workbench({
         title: "最近工作",
         dividerBefore: true,
         items: recent.map((w) => ({
-          href: `#ws/${w.id}/overview`,
+          href: `#ws/${w.id}`,
           label: w.name,
           subLabel:
             products.find((p) => p.id === w.productId)?.name ?? w.productId,
@@ -541,16 +569,23 @@ export function Workbench({
            项目名 —— 而标题栏那一行已经把项目名摆在那儿了，同屏两遍。下面
            「同产品的其他项目」那一组的标题留着：它说的是另一件事。 */
         title: "",
-        items: PROJECT_TABS.map((t) => ({
-          href: `#ws/${view.id}/${t.id}`,
-          // 未决数挂在「任务」上：徽章跟着它要指向的东西走，才省得下那条
-          // 32px 的横条。
-          label:
-            t.id === "tasks" && projectPending > 0
-              ? `${t.label}（${projectPending}）`
-              : t.label,
-          icon: TAB_ICON[t.id],
-        })),
+        items: [
+          // 产品自己的界面：契约声明了才有这一格，有就排第一（owner 2026-09-11）。
+          // 名字用产品自己的名字 —— 这一格就是这个产品，不是 Runtime 的又一个控制面。
+          ...(hasProductUi
+            ? [{ href: `#ws/${view.id}/product`, label: openProductName ?? "产品界面", icon: PRODUCT_TAB_ICON }]
+            : []),
+          ...PROJECT_TABS.map((t) => ({
+            href: `#ws/${view.id}/${t.id}`,
+            // 未决数挂在「任务」上：徽章跟着它要指向的东西走，才省得下那条
+            // 32px 的横条。
+            label:
+              t.id === "tasks" && projectPending > 0
+                ? `${t.label}（${projectPending}）`
+                : t.label,
+            icon: TAB_ICON[t.id],
+          })),
+        ],
       },
     ];
     if (siblings.length > 0) {
@@ -558,14 +593,14 @@ export function Workbench({
         title: "同产品的其他项目",
         dividerBefore: true,
         items: siblings.map((w) => ({
-          href: `#ws/${w.id}/overview`,
+          href: `#ws/${w.id}`,
           label: w.name,
           icon: "cube" as const,
         })),
       });
     }
     return list;
-  }, [view, workspaces, openProjectMeta, projectPending]);
+  }, [view, workspaces, openProjectMeta, projectPending, hasProductUi, openProductName]);
 
   /** 设置的分区。和产品态同一套道理：它是设置自己的导航，所以它在侧栏 ——
    *  页面里再放一根竖直导航，屏幕上就并排站着两根。 */
@@ -659,13 +694,20 @@ export function Workbench({
           {view.kind === "settings" ? (
             <SettingsView api={api} section={view.section} />
           ) : view.kind === "workspace" ? (
-            <ProjectPanel
-              key={view.id}
-              api={api}
-              id={view.id}
-              tab={view.tab}
-              onPending={setProjectPending}
-            />
+            view.tab === undefined ? (
+              // 还在等「有没有产品界面」的回答，决定进哪一格（见上面的解析）。
+              <p className="text-body-md text-muted-foreground">加载中……</p>
+            ) : (
+              <ProjectPanel
+                key={view.id}
+                api={api}
+                id={view.id}
+                tab={view.tab}
+                onPending={setProjectPending}
+                surface={surface}
+                onReloadSurface={reloadSurface}
+              />
+            )
           ) : (
             <HomePage
               api={api}

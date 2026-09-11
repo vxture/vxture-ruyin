@@ -1492,3 +1492,18 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   font-weight: 400;
 }
 @media (max-width: 760px) { .cap-group-desc { display: none; } }
+
+/* 产品自己的界面（ADR-023；owner 2026-09-11：侧栏单独一格，给整块地方）。云端的产品
+   独占一个子域名、一整页；本地也给整块内容区，不是一条缝 —— 同一个界面包在两边
+   得是同一个产品。高度照 .home 的算法按视口算（父容器高度自适应，百分比拿不到
+   参照）：视口减去标题栏、页面上下留白、上面那条项目摘要与间距。未决确认卡出现时
+   页面会多出它们的高度而滚动，那是对的 —— 人的决定压过产品界面。 */
+.product-surface {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 48px - 2 * var(--spacing-lg, 24px) - 88px);
+  min-height: 360px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+}
