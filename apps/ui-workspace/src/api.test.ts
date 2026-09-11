@@ -196,6 +196,19 @@ const WRAPPER_CASES: WrapperCase[] = [
     path: "/projects/prj_1/state",
     body: { to: "reviewing", humanConfirmed: false },
   },
+  {
+    name: "stateRequest",
+    call: (api) => api.stateRequest("prj_1"),
+    method: "GET",
+    path: "/projects/prj_1/state-request",
+  },
+  {
+    name: "decideStateRequest",
+    call: (api) => api.decideStateRequest("prj_1", "submitted", true),
+    method: "POST",
+    path: "/projects/prj_1/state-request",
+    body: { to: "submitted", approve: true },
+  },
   { name: "grants", call: (api) => api.grants("prj_1"), method: "GET", path: "/projects/prj_1/grants" },
   {
     name: "addGrant",

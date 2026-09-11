@@ -48,6 +48,7 @@ import {
   type ToolPolicyRow,
   type ProjectFile,
   type ProjectView,
+  type StateRequest,
 } from "./api";
 import { ProductTab } from "./product-surface";
 import type { SurfaceInfo } from "./product-surface-info";
@@ -142,6 +143,8 @@ export function ProjectPanel({
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [audit, setAudit] = useState<StoredAuditEvent[]>([]);
   const [chainOk, setChainOk] = useState<boolean | null>(null);
+  /** 产品界面提出、等人确认的推进（ADR-022 片四）。 */
+  const [stateRequest, setStateRequest] = useState<StateRequest | null>(null);
   /**
    * 两种错误分开存，因为它们的寿命不一样。
    *
@@ -155,18 +158,21 @@ export function ProjectPanel({
 
   const refresh = useCallback(async () => {
     try {
-      const [v, ti, g, b, a] = await Promise.all([
+      const [v, ti, g, b, a, sr] = await Promise.all([
         api.workspace(id),
         api.taskInstances(id),
         api.grants(id),
         api.bindings(id),
         api.audit(id),
+        // 问不到就当没有：这张卡是附加的，不该因为它把整个项目面板拖成错误。
+        api.stateRequest(id).then((r) => r.pending, () => null),
       ]);
       setView(v);
       setInstances(ti);
       setGrants(g);
       setBindings(b);
       setAudit(a);
+      setStateRequest(sr);
       setChainOk(await verifyChain(id, a));
       setPollError(null);
     } catch (e) {
@@ -258,6 +264,17 @@ export function ProjectPanel({
             导入当前工作区
           </Button>
         </div>
+      )}
+
+      {/* 产品提出的推进：与任务确认同一个位置、同一种分量 —— 人的决定压过导航，也压过
+          产品界面（它就钉在产品界面那一格的上方）。 */}
+      {stateRequest && (
+        <StateRequestCard
+          productName={view.product.name}
+          request={stateRequest}
+          current={view.businessState}
+          onDecide={(approve) => void guard(() => api.decideStateRequest(id, stateRequest.to, approve))}
+        />
       )}
 
       {pending.map((t) => (
@@ -1237,6 +1254,49 @@ function InstanceCard({ instance }: { instance: TaskInstance }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * 产品界面提出的「请把项目推进到 X」（ADR-022 片四，owner 2026-09-11 方案 A）。
+ *
+ * **产品只能提，只有人能批** —— 批准的那一下由这里发出，带着卡片上写的那个目标：请求
+ * 若已经变了，守护进程不认（409），人的「确认」不会挪给他没看见的那一个。
+ */
+function StateRequestCard({
+  productName,
+  request,
+  current,
+  onDecide,
+}: {
+  productName: string;
+  request: StateRequest;
+  current: string;
+  onDecide: (approve: boolean) => void;
+}) {
+  return (
+    <PanelCard
+      tone="warning"
+      icon="shield-warning"
+      title={`「${productName}」请求把项目推进到「${request.to}」`}
+      description={`当前阶段「${current}」。这一步在产品的契约里要求人确认 —— 产品只能提出，推不推进由你决定。`}
+      action={
+        <div className="flex items-center gap-xs">
+          <Button onClick={() => onDecide(true)}>确认推进</Button>
+          <Button
+            variant="destructive"
+            confirmExempt="这张卡本身就是人工确认步骤（契约的 confirm: human），无需二次弹窗"
+            onClick={() => onDecide(false)}
+          >
+            拒绝
+          </Button>
+        </div>
+      }
+    >
+      <p className="text-body-sm text-muted-foreground">
+        「{current}」→「{request.to}」 · 提出于 {shortTime(request.requestedAt)}
+      </p>
+    </PanelCard>
   );
 }
 

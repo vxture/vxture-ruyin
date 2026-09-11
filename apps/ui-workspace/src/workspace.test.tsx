@@ -153,6 +153,9 @@ function fakeApi(over: Partial<Api> = {}): Api {
     fileBytes: vi.fn().mockResolvedValue(new Blob(["x"])),
     toolPolicy: vi.fn().mockResolvedValue({ items: [] }),
     setToolPolicy: vi.fn().mockResolvedValue({ items: [] }),
+    // 缺省没有产品提出的推进：那张卡不出现，既有用例不受影响（ADR-022 片四）。
+    stateRequest: vi.fn().mockResolvedValue({ pending: null }),
+    decideStateRequest: vi.fn().mockResolvedValue({ status: "done", businessState: "reviewing" }),
     ...over,
   } as unknown as Api;
 }
@@ -1128,5 +1131,49 @@ void test("产品界面：未决确认仍钉在最上面，产品界面在它下
   const card = await screen.findByText('任务「draft_section」的成果等待人工评审');
   const stub = screen.getByTestId("product-tab-stub");
   // 文档顺序：确认卡在前（DOCUMENT_POSITION_FOLLOWING = 4 表示 stub 在 card 之后）。
+  expect(card.compareDocumentPosition(stub) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+/* ---------------- 产品提出的推进（ADR-022 片四，方案 A） ---------------- */
+
+const REQUEST = { to: "reviewing", productId: "bidproposal", requestedAt: "2026-09-11T08:00:00.000Z" };
+
+/**
+ * **产品只能提，只有人能批。** 卡片说清是谁提的、要推进到哪；批准与拒绝都带着卡片上
+ * 那个目标去 —— 请求若已经变了，守护进程不认，人的「确认」不会挪给他没看见的那一个。
+ */
+void test("产品提出的推进：钉一张确认卡；确认与拒绝都带着卡片上的目标", async () => {
+  const api = fakeApi({ stateRequest: vi.fn().mockResolvedValue({ pending: REQUEST }) });
+  render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
+  expect(await screen.findByText("「标书编写」请求把项目推进到「reviewing」")).toBeInTheDocument();
+  expect(screen.getByText(/产品只能提出，推不推进由你决定/)).toBeInTheDocument();
+
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "确认推进" }));
+  expect(api.decideStateRequest).toHaveBeenCalledWith("prj_1", "reviewing", true);
+  await user.click(screen.getByRole("button", { name: "拒绝" }));
+  expect(api.decideStateRequest).toHaveBeenLastCalledWith("prj_1", "reviewing", false);
+});
+
+/** 没有请求就没有卡；问不到也当没有 —— 这张卡是附加的，不该把整个面板拖成错误。 */
+void test("产品提出的推进：没有请求、或问不到，都不出卡，面板照常", async () => {
+  for (const stateRequest of [
+    vi.fn().mockResolvedValue({ pending: null }),
+    vi.fn().mockRejectedValue(new Error("down")),
+  ]) {
+    const { unmount } = render(<ProjectPanel api={fakeApi({ stateRequest })} id="prj_1" tab="overview" />);
+    await screen.findByText("标书编写 1.0.0");
+    expect(screen.queryByRole("button", { name: "确认推进" })).not.toBeInTheDocument();
+    expect(document.querySelector(".error-box")).toBeNull();
+    unmount();
+  }
+});
+
+/** 在产品界面那一格里，这张卡同样钉在产品界面上方 —— 产品界面盖不住它。 */
+void test("产品提出的推进：在产品界面那一格里，确认卡在产品界面上方", async () => {
+  const api = fakeApi({ stateRequest: vi.fn().mockResolvedValue({ pending: REQUEST }) });
+  render(<ProjectPanel api={api} id="prj_1" tab="product" surface={null} />);
+  const card = await screen.findByText("「标书编写」请求把项目推进到「reviewing」");
+  const stub = screen.getByTestId("product-tab-stub");
   expect(card.compareDocumentPosition(stub) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

@@ -234,7 +234,11 @@ export class ProjectRuntime {
   async transitionBusinessState(
     id: string,
     to: string,
-    options?: { humanConfirmed?: boolean },
+    options?: {
+      humanConfirmed?: boolean;
+      /** 谁提的这一下（见 Harness.startTask 同名选项）。只进审计。 */
+      requestedBy?: string;
+    },
   ): Promise<string> {
     const { store, contract } = await this.load(id);
     const current =
@@ -252,6 +256,7 @@ export class ProjectRuntime {
       from: current,
       to,
       humanConfirmed: transition.confirm === "human",
+      ...(options?.requestedBy ? { requestedBy: options.requestedBy } : {}),
     });
     return to;
   }

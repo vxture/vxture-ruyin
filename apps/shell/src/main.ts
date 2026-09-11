@@ -503,6 +503,8 @@ const KIND_LABEL: Record<string, string> = {
   context_confirm: "需要确认要送出的资料",
   tool_ask: "需要批准一次工具调用",
   verification_review: "需要人工复核",
+  // 产品界面提出、要人确认的推进（ADR-022 片四）：产品只能提，只有人能批。
+  state_transition: "产品请求推进业务阶段，需要你确认",
 };
 
 interface PendingRow {

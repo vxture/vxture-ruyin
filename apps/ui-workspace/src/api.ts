@@ -141,8 +141,20 @@ export interface PendingConfirmation {
   taskInstanceId: string;
   taskId: string;
   checkpointId: string;
-  kind: "context_confirm" | "verification_review" | "tool_ask";
+  /**
+   * `state_transition`：产品界面提出、要人确认的推进（ADR-022 片四）。那一行不属于
+   * 任何任务 —— `taskInstanceId` / `taskId` 为空，要推进到的阶段在 `to`。
+   */
+  kind: "context_confirm" | "verification_review" | "tool_ask" | "state_transition";
   raisedAt: string;
+  to?: string;
+}
+
+/** 产品提出、等人确认的推进（GET /projects/:id/state-request）。 */
+export interface StateRequest {
+  to: string;
+  productId: string;
+  requestedAt: string;
 }
 
 export interface TaskDef {
@@ -792,6 +804,19 @@ export class Api {
       to,
       humanConfirmed,
     });
+  /** 产品界面提出、等人确认的推进；没有就是 null（ADR-022 片四）。 */
+  stateRequest = (id: string) =>
+    this.call<{ pending: StateRequest | null }>(`/projects/${id}/state-request`);
+  /**
+   * 人对那张确认卡的决定。**带着卡片上的目标来**：请求已经变了（或不在了）守护进程
+   * 回 409，人的「确认」不会挪给他没看见的那一个。
+   */
+  decideStateRequest = (id: string, to: string, approve: boolean) =>
+    this.call<{ status: "done" | "rejected"; businessState?: string }>(
+      `/projects/${id}/state-request`,
+      "POST",
+      { to, approve },
+    );
   grants = (id: string) => this.call<Grant[]>(`/projects/${id}/grants`);
   addGrant = (id: string, path: string) =>
     this.call<FolderGrant>(`/projects/${id}/grants`, "POST", { path });

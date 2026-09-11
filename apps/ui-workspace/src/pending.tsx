@@ -31,6 +31,7 @@ const KIND_LABEL: Record<PendingConfirmation["kind"], string> = {
   context_confirm: "确认要送出的资料",
   tool_ask: "批准一次工具调用",
   verification_review: "人工复核",
+  state_transition: "确认产品提出的阶段推进",
 };
 
 export function usePending(api: Api): PendingConfirmation[] {
