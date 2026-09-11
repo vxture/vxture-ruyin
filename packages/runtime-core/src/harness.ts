@@ -382,6 +382,14 @@ export class Harness {
   async startTask(
     taskId: string,
     inputs?: Record<string, unknown>,
+    options?: {
+      /**
+       * 谁提的这一下，**不是谁批的**（ADR-022 §3.2：守护进程知道发起方，审计记得下）。
+       * 产品界面经桥发起时由宿主填 `product:<产品码>`；Runtime 自己的界面不填。
+       * 只进审计，不改变任何判断 —— 关卡对谁都一样。
+       */
+      requestedBy?: string;
+    },
   ): Promise<TaskInstanceRecord> {
     const { contract, clock, id } = this.deps;
     const definition = contract.tasks.find((t) => t.id === taskId);
@@ -434,6 +442,7 @@ export class Harness {
     await this.audit(instance, "task.created", {
       task: taskId,
       mode: inputs ? "manual" : "selection",
+      ...(options?.requestedBy ? { requestedBy: options.requestedBy } : {}),
     });
     // Returns without executing anything: a real provider takes tens of
     // seconds per turn, so the caller must be able to answer its request and

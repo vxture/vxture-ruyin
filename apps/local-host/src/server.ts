@@ -8,6 +8,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type { PermissionValue } from "@vxture/ruyin-contract-schema";
 import { BridgeTokens } from "./bridge-token.js";
+import { StateRequests } from "./state-requests.js";
 import { isInside } from "./path-guard.js";
 import { productOrigin } from "./product-ui-server.js";
 import type { StoredFile } from "./file-store.js";
@@ -456,8 +457,10 @@ export function createLocalApi(deps: LocalApiDeps): Server {
    * 东西会报错。也不做成模块级单例：两台服务器共用一张表，A 的凭据能开 B 的门。
    */
   const bridgeTokens = new BridgeTokens();
+  /** 产品提出、等人确认的推进（state-requests.ts）。与凭据表同一条理由：一台服务器一份。 */
+  const stateRequests = new StateRequests();
   return createServer((req, res) => {
-    void handle(deps, bridgeTokens, req, res).catch((cause) => {
+    void handle(deps, bridgeTokens, stateRequests, req, res).catch((cause) => {
       const { status, body } = errorStatus(cause);
       send(res, status, body);
     });
@@ -467,6 +470,7 @@ export function createLocalApi(deps: LocalApiDeps): Server {
 async function handle(
   deps: LocalApiDeps,
   bridgeTokens: BridgeTokens,
+  stateRequests: StateRequests,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
@@ -622,8 +626,91 @@ async function handle(
           to: t.to,
           confirm: t.confirm === "human" ? "human" : "none",
         })),
+        // 产品提过、还在等人确认的那一次推进 —— 产品据此知道「提了，人还没点」。
+        pendingTransition: (() => {
+          const p = stateRequests.get(scope.projectId);
+          return p ? { to: p.to, requestedAt: p.requestedAt } : null;
+        })(),
         createdAt: view.meta.createdAt,
       });
+      return;
+    }
+
+    // ---- 片四第二批：写的面（owner 2026-09-11「按推荐走」）。**关卡对谁都一样**：
+    // 产品发起的，与人在 Runtime 界面里点的，走的是同一套判断；区别只记在审计里
+    // （`requestedBy`），不在任何判断里。
+
+    // POST /bridge/project/transition { to } —— 推进业务阶段。
+    //
+    // 不要人确认的推进：直接做。**要人确认的：只记下请求**，由 Runtime 在产品界面上方
+    // 钉一张确认卡，人点了才推进（state-requests.ts 文件头）。「人已确认」这个标记
+    // **在桥上根本不收** —— 请求体里写了也当没写。
+    if (method === "POST" && path === "/bridge/project/transition") {
+      const body = await readJson(req);
+      const to = String(body["to"] ?? "");
+      const view = await deps.runtime.openProject(scope.projectId);
+      const here = view.contract.states.items.find((st) => st.name === view.businessState);
+      const transition = here?.transitions.find((t) => t.to === to);
+      if (!transition) {
+        send(
+          res,
+          409,
+          apiError("STATE_TRANSITION_ILLEGAL", `从「${view.businessState}」推进不到「${to}」`),
+        );
+        return;
+      }
+      const requestedBy = `product:${scope.productId}`;
+      if (transition.confirm !== "human") {
+        const state = await deps.runtime.transitionBusinessState(scope.projectId, to, { requestedBy });
+        send(res, 200, { status: "done", businessState: state });
+        return;
+      }
+      const filed = stateRequests.request({
+        projectId: scope.projectId,
+        productId: scope.productId,
+        to,
+        requestedAt: new Date().toISOString(),
+      });
+      if (!filed.ok) {
+        send(res, 409, {
+          ...apiError(
+            "TRANSITION_PENDING",
+            `已有一次推进在等人确认（到「${filed.pending.to}」）；人决定之前不收新的`,
+          ),
+          pending: { to: filed.pending.to, requestedAt: filed.pending.requestedAt },
+        });
+        return;
+      }
+      deps.events?.publish({ kind: "pending" });
+      send(res, 202, { status: "awaiting_confirmation", to });
+      return;
+    }
+
+    // POST /bridge/tasks { taskId } —— 发起一个任务。
+    //
+    // **只按任务名发起**：资料由 Runtime 按契约自己挑（选取管线），产品传不了文件
+    // 路径或资料 —— 请求体里带 `inputs` 直接拒，不是悄悄忽略：悄悄忽略的话，产品
+    // 以为自己指定了资料，跑出来的却是另一批。资料确认、工具闸门一道不少。
+    if (method === "POST" && path === "/bridge/tasks") {
+      const body = await readJson(req);
+      if (body["inputs"] !== undefined) {
+        send(
+          res,
+          400,
+          apiError(
+            "INPUTS_NOT_ACCEPTED",
+            "经桥发起任务只收任务名（taskId）；资料由 Runtime 按契约挑选，产品不能指定",
+          ),
+        );
+        return;
+      }
+      const harness = await deps.runtime.createHarness(scope.projectId);
+      const instance = await harness.startTask(String(body["taskId"] ?? ""), undefined, {
+        requestedBy: `product:${scope.productId}`,
+      });
+      // 与会话那条路一样：先认领再回答，调用方不会在「已受理」与「真在跑」之间扑空。
+      deps.tasks.start(scope.projectId, instance.id);
+      send(res, 202, { id: instance.id, taskId: instance.taskId, state: instance.state });
       return;
     }
 
@@ -971,7 +1058,29 @@ async function handle(
   // GET /pending - 跨项目的「在等我」清单（50-harness §6）。
   // 桌面壳轮询它发系统通知，界面用它做未决入口；两者看的是同一份事实。
   if (method === "GET" && path === "/pending") {
-    send(res, 200, await deps.runtime.listPendingConfirmations());
+    const confirmations = await deps.runtime.listPendingConfirmations();
+    // 产品提出、等人确认的推进（state-requests.ts）也是「在等你」—— 不并进这张单子，
+    // 人不在那个项目里就不会知道有一张卡在等他。形状照任务确认那一行，任务字段留空；
+    // checkpointId 按请求时刻取，壳的系统通知按它去重，每一次新请求各报一次。
+    const requests = (await deps.runtime.listProjects()).flatMap((meta) => {
+      const p = stateRequests.get(meta.id);
+      return p
+        ? [
+            {
+              projectId: meta.id,
+              projectName: meta.name,
+              productId: meta.productId,
+              taskInstanceId: "",
+              taskId: "",
+              checkpointId: `state-request:${meta.id}:${p.requestedAt}`,
+              kind: "state_transition" as const,
+              raisedAt: p.requestedAt,
+              to: p.to,
+            },
+          ]
+        : [];
+    });
+    send(res, 200, [...confirmations, ...requests].sort((x, y) => x.raisedAt.localeCompare(y.raisedAt)));
     return;
   }
 
@@ -1610,6 +1719,41 @@ async function handle(
     if (method === "GET" && segments.length === 3 && segments[2] === "tasks") {
       const list = await deps.runtime.listTaskInstances(projectId);
       send(res, 200, list.map((t) => withRunState(t, deps)));
+      return;
+    }
+
+    // GET /projects/:id/state-request —— 产品提出、等人确认的推进（没有就是 null）。
+    // Runtime 的项目面板据此在产品界面上方钉一张确认卡。
+    if (method === "GET" && segments.length === 3 && segments[2] === "state-request") {
+      const p = stateRequests.get(projectId);
+      send(res, 200, { pending: p ? { to: p.to, productId: p.productId, requestedAt: p.requestedAt } : null });
+      return;
+    }
+
+    // POST /projects/:id/state-request { to, approve } —— 人对那张卡的决定。
+    //
+    // **要带着人看见的目标来**：对不上（卡片过期、请求已经变了）就不认，409 —— 人的
+    // 「确认」不能挪给一个他没看见的请求。批准时由这里带上「人已确认」：这是整条链上
+    // 唯一能带这个标记的地方，而它只在会话令牌后面。
+    if (method === "POST" && segments.length === 3 && segments[2] === "state-request") {
+      const body = await readJson(req);
+      const to = String(body["to"] ?? "");
+      const taken = stateRequests.take(projectId, to);
+      if (!taken) {
+        send(res, 409, apiError("STATE_REQUEST_STALE", "这张确认卡已经过期：请求不在了，或者要推进到的阶段变了"));
+        return;
+      }
+      deps.events?.publish({ kind: "pending" });
+      if (body["approve"] !== true) {
+        send(res, 200, { status: "rejected" });
+        return;
+      }
+      // 期间阶段可能已经被别人推进过：推进不了就照实报（409，见 errorStatus），请求已取走。
+      const state = await deps.runtime.transitionBusinessState(projectId, to, {
+        humanConfirmed: true,
+        requestedBy: `product:${taken.productId}`,
+      });
+      send(res, 200, { status: "done", businessState: state });
       return;
     }
 

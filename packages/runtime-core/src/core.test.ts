@@ -221,6 +221,28 @@ test("business state machine follows the contract, confirm: human enforced", asy
   await assert.rejects(runtime.transitionBusinessState(meta.id, "draft"));
 });
 
+/**
+ * 谁提的这一下记进审计（ADR-022 §3.2：守护进程知道发起方）。**只进审计**：
+ * 产品提的推进照样要人确认，产品发起的任务照样过全部关卡 —— 这里只钉「记下了」。
+ */
+test("requestedBy: 产品发起的推进与任务，审计里记得是谁提的；不提就不记", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  await runtime.transitionBusinessState(meta.id, "planning", { requestedBy: "product:bidproposal" });
+  await runtime.transitionBusinessState(meta.id, "writing");
+  const harness = await runtime.createHarness(meta.id);
+  await harness.startTask("analyze_tender", undefined, { requestedBy: "product:bidproposal" });
+
+  const events = await runtime.listAuditEvents(meta.id);
+  const payloads = events
+    .filter((e) => "action" in e && (e.action === "state.writeback" || e.action === "task.created"))
+    .map((e) => e.payload as Record<string, unknown>);
+  assert.deepEqual(
+    payloads.map((p) => p["requestedBy"]),
+    ["product:bidproposal", undefined, "product:bidproposal"],
+  );
+});
+
 test("harness: task with human verification suspends, resume completes", async () => {
   const runtime = new ProjectRuntime(makePorts());
   const meta = await runtime.createProject(bidContract, "ws", "wsp_test");

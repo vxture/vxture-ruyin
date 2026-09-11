@@ -2070,6 +2070,209 @@ void test("bridge: 会话令牌打新的只读面同样被拒", async () => {
   }
 });
 
+/* ---------------- 片四第二批：写的面（推进业务阶段、发起任务） ---------------- */
+
+async function bridgePost(rig: Rig, token: string, path: string, body: unknown): Promise<Response> {
+  return fetch(`${rig.base}${path}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+async function auditPayloads(rig: Rig, projectId: string, action: string): Promise<Array<Record<string, unknown>>> {
+  return (await rig.runtime.listAuditEvents(projectId))
+    .filter((e) => "action" in e && e.action === action)
+    .map((e) => e.payload as Record<string, unknown>);
+}
+
+/** 不要人确认的推进：直接做，审计里记着是产品提的。 */
+void test("bridge 写: 不要人确认的推进直接做；审计记得是哪个产品提的", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    const token = await bridgeTokenFor(rig, projectId);
+    const res = await bridgePost(rig, token, "/bridge/project/transition", { to: "planning" });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { status: "done", businessState: "planning" });
+    const [writeback] = await auditPayloads(rig, projectId, "state.writeback");
+    assert.equal(writeback?.["requestedBy"], "product:bidproposal");
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("bridge 写: 推进不到的阶段 → 409，阶段不动", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    const res = await bridgePost(rig, await bridgeTokenFor(rig, projectId), "/bridge/project/transition", { to: "submitted" });
+    assert.equal(res.status, 409);
+    assert.equal((await rig.runtime.openProject(projectId)).businessState, "draft");
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
+ * **要人确认的推进：产品只能提，只有人能批。**
+ *
+ * 请求体里写 `humanConfirmed: true` 也当没写 —— 那个标记在桥上根本不收。阶段不动，
+ * 请求挂起来；Runtime 的界面看得到它；挂着时新的拒收（不是顶替）。
+ */
+void test("bridge 写: 要人确认的推进只挂成请求；桥上带「人已确认」也不算；挂着时新的拒收", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    for (const s of ["planning", "writing", "review"]) await rig.runtime.transitionBusinessState(projectId, s);
+    const token = await bridgeTokenFor(rig, projectId);
+
+    const res = await bridgePost(rig, token, "/bridge/project/transition", { to: "submitted", humanConfirmed: true });
+    assert.equal(res.status, 202);
+    assert.deepEqual(await res.json(), { status: "awaiting_confirmation", to: "submitted" });
+    assert.equal((await rig.runtime.openProject(projectId)).businessState, "review", "产品提了不等于推进了");
+
+    const project = (await (
+      await fetch(`${rig.base}/bridge/project`, { headers: { authorization: `Bearer ${token}` } })
+    ).json()) as { pendingTransition: { to: string } | null };
+    assert.equal(project.pendingTransition?.to, "submitted");
+
+    const seen = (await (await fetch(`${rig.base}/projects/${projectId}/state-request`, { headers: rig.headers })).json()) as {
+      pending: { to: string; productId: string } | null;
+    };
+    assert.deepEqual({ to: seen.pending?.to, productId: seen.pending?.productId }, { to: "submitted", productId: "bidproposal" });
+
+    const again = await bridgePost(rig, token, "/bridge/project/transition", { to: "submitted" });
+    assert.equal(again.status, 409);
+    assert.equal(((await again.json()) as { code: string }).code, "TRANSITION_PENDING");
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/** **产品自己批不了。** 决定的端点在会话令牌后面，产品级凭据打过去 401。 */
+void test("bridge 写: 产品级凭据批不了自己提的请求", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    for (const s of ["planning", "writing", "review"]) await rig.runtime.transitionBusinessState(projectId, s);
+    const token = await bridgeTokenFor(rig, projectId);
+    await bridgePost(rig, token, "/bridge/project/transition", { to: "submitted" });
+
+    const selfApprove = await bridgePost(rig, token, `/projects/${projectId}/state-request`, { to: "submitted", approve: true });
+    assert.equal(selfApprove.status, 401);
+    assert.equal((await rig.runtime.openProject(projectId)).businessState, "review");
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
+ * 人的决定：**目标对不上就不认**（卡片过期、请求变了）；拒绝就撤掉、阶段不动；批准才推进，
+ * 审计里既有「人已确认」也有「是哪个产品提的」。
+ */
+void test("bridge 写: 人对确认卡的决定 —— 目标对不上不认，拒绝撤掉，批准才推进", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    for (const s of ["planning", "writing", "review"]) await rig.runtime.transitionBusinessState(projectId, s);
+    const token = await bridgeTokenFor(rig, projectId);
+    const decide = (body: unknown) =>
+      fetch(`${rig.base}/projects/${projectId}/state-request`, {
+        method: "POST",
+        headers: { ...rig.headers, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    await bridgePost(rig, token, "/bridge/project/transition", { to: "submitted" });
+    const stale = await decide({ to: "writing", approve: true });
+    assert.equal(stale.status, 409);
+    assert.equal(((await stale.json()) as { code: string }).code, "STATE_REQUEST_STALE");
+
+    const rejected = await decide({ to: "submitted", approve: false });
+    assert.deepEqual(await rejected.json(), { status: "rejected" });
+    assert.equal((await rig.runtime.openProject(projectId)).businessState, "review");
+
+    await bridgePost(rig, token, "/bridge/project/transition", { to: "submitted" });
+    const approved = await decide({ to: "submitted", approve: true });
+    assert.deepEqual(await approved.json(), { status: "done", businessState: "submitted" });
+    const last = (await auditPayloads(rig, projectId, "state.writeback")).at(-1);
+    assert.equal(last?.["humanConfirmed"], true);
+    assert.equal(last?.["requestedBy"], "product:bidproposal");
+
+    // 决定过的请求就没了：再决定一次是过期卡。
+    assert.equal((await decide({ to: "submitted", approve: true })).status, 409);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
+ * 「在等我」也要列出它：人不在那个项目里，就只有这张单子（和壳的系统通知）会告诉他
+ * 有一张卡在等。决定之后就从单子上消失。
+ */
+void test("bridge 写: 挂着的推进请求出现在 /pending 里；决定之后消失", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    for (const s of ["planning", "writing", "review"]) await rig.runtime.transitionBusinessState(projectId, s);
+    await bridgePost(rig, await bridgeTokenFor(rig, projectId), "/bridge/project/transition", { to: "submitted" });
+
+    const rows = (await (await fetch(`${rig.base}/pending`, { headers: rig.headers })).json()) as Array<{
+      kind: string;
+      projectId: string;
+      projectName: string;
+      to?: string;
+      checkpointId: string;
+    }>;
+    const row = rows.find((r) => r.kind === "state_transition");
+    assert.ok(row, `单子上没有这张卡：${JSON.stringify(rows)}`);
+    assert.deepEqual([row.projectId, row.projectName, row.to], [projectId, "投标项目", "submitted"]);
+    assert.match(row.checkpointId, /^state-request:/);
+
+    await fetch(`${rig.base}/projects/${projectId}/state-request`, {
+      method: "POST",
+      headers: { ...rig.headers, "content-type": "application/json" },
+      body: JSON.stringify({ to: "submitted", approve: false }),
+    });
+    const after = (await (await fetch(`${rig.base}/pending`, { headers: rig.headers })).json()) as Array<{ kind: string }>;
+    assert.ok(!after.some((r) => r.kind === "state_transition"));
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
+ * 发起任务：只按任务名。**带 inputs 直接拒**，不是悄悄忽略 —— 悄悄忽略的话产品以为
+ * 自己指定了资料，跑出来的却是另一批。契约里没有的任务照常被拒。
+ */
+void test("bridge 写: 发起任务只收任务名；带 inputs 拒，契约里没有的拒，正常的记下是谁提的", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    const token = await bridgeTokenFor(rig, projectId);
+
+    const withInputs = await bridgePost(rig, token, "/bridge/tasks", { taskId: "analyze_tender", inputs: { tender_document: ["D:/x.pdf"] } });
+    assert.equal(withInputs.status, 400);
+    assert.equal(((await withInputs.json()) as { code: string }).code, "INPUTS_NOT_ACCEPTED");
+
+    const unknown = await bridgePost(rig, token, "/bridge/tasks", { taskId: "no_such_task" });
+    assert.equal(unknown.status, 400);
+
+    const ok = await bridgePost(rig, token, "/bridge/tasks", { taskId: "analyze_tender" });
+    assert.equal(ok.status, 202);
+    const started = (await ok.json()) as { id: string; taskId: string };
+    assert.equal(started.taskId, "analyze_tender");
+    const created = await auditPayloads(rig, projectId, "task.created");
+    assert.deepEqual(
+      created.map((p) => [p["mode"], p["requestedBy"]]),
+      [["selection", "product:bidproposal"]],
+    );
+  } finally {
+    closeRig(rig);
+  }
+});
+
 /**
  * `GET /projects/:id/product-surface`（ADR-022 片三 a）：这个项目的产品有没有界面、
  * 在哪个 origin。
