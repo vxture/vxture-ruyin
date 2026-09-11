@@ -34,10 +34,8 @@ import {
   ShellHeader,
   ShellIconButton,
   ShellPageContainer,
-  ShellSearchBox,
   ShellSidebarNav,
   ShellViewport,
-  StatusBadge,
   type ShellNavSection,
   type ShellSearchGroup,
 } from "@vxture/design-system";
@@ -48,6 +46,8 @@ import { SETTINGS_SECTIONS, resolveSection, type SectionId } from "./settings-se
 import { NoticeBar } from "./notice-bar";
 import { DEMO_RECENT } from "./catalog";
 import { UserSlot } from "./user";
+import { HeaderSearch } from "./header-search";
+import { RuntimeMenu } from "./runtime-menu";
 import { PendingInbox, usePending } from "./pending";
 import { useHostChrome } from "./host-chrome";
 
@@ -480,28 +480,16 @@ export function Workbench({
               className="app-brand cursor-pointer"
             />
           )}
-          {/* Runtime 紧跟在品牌之后（owner 2026-09-04 定），与品牌隔一段；字号与标语一致。 */}
+          {/* Runtime 紧跟在品牌之后（owner 2026-09-04 定），与品牌隔一段；字号与标语一致。
+              2026-09-11 起可以点开：运行环境那三行从用户面板挪到这里（runtime-menu.tsx）。 */}
           <span className="app-header-context app-runtime">
-            <StatusBadge tone={health.ok ? "success" : "danger"} dot>
-              {health.ok ? `Runtime ${health.version ?? ""}` : "未连接"}
-            </StatusBadge>
+            <RuntimeMenu api={api} health={health} session={session} />
           </span>
         </span>
       }
-      center={
-        <div className="no-drag w-full max-w-[520px]">
-          <ShellSearchBox
-            query={query}
-            onQueryChange={setQuery}
-            groups={searchGroups}
-            labels={{
-              placeholder: "搜索项目、产品与动作…",
-              empty: "没有匹配的结果",
-              resultsLabel: "搜索结果",
-            }}
-          />
-        </div>
-      }
+      /* 中槽**有意留空**（owner 2026-09-11）：搜索收成右侧一个图标（header-search.tsx）。
+         桌面壳里 header 就是拖动窗口的把手，常驻的搜索框占着正中间又是 no-drag ——
+         最顺手去抓的那块恰好拖不动。留空后中间整块变回可拖拽区。 */
       trailing={
         <div className="no-drag flex items-center gap-xs app-header-trailing">
           {/* 当前工作区常驻。**此前它一个字都没有出现在项目面板上**，而项目、
@@ -516,6 +504,8 @@ export function Workbench({
               最右。通知紧挨设置，是各家桌面应用的惯例（VS Code / GitHub 皆如此）。 */}
           {/* 租户 / 工作区菜单在右侧（owner 2026-09-04 定）：租户 + 工作区、只读 AI 配额、
               租户管理链接（tenant-menu.tsx）。 */}
+          {/* 搜索在右侧一簇的**最左边**：9-04 定的顺序（租户 → 未决 → 设置固定最右）不动。 */}
+          <HeaderSearch query={query} onQueryChange={setQuery} groups={searchGroups} />
           {session && workspaceName && (
             <TenantMenu api={api} session={session} productIds={products.map((p) => p.id)} />
           )}

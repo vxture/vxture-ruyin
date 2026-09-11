@@ -1099,11 +1099,41 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   gap: var(--spacing-xs);
   margin-left: var(--spacing-lg);
 }
-/* Runtime 徽章：字号与标语「Intelligent Workbench」一致（11px），样式（圆点 + 描边）不变。 */
-.app-runtime > * {
+/* Runtime 徽章：字号与标语「Intelligent Workbench」一致（11px），样式（圆点 + 描边）不变。
+   2026-09-11 起徽章外面包了一层可点的触发器（runtime-menu.tsx），**选择器跟着往里挪
+   一层**：原来的 `.app-runtime > *` 如今会落在按钮上而不是徽章上，字号就对不上了。 */
+.app-runtime-trigger > :first-child {
   font-size: 11px /* DS 最小是 body-sm(12px)，这里有意再降一档 */;
   line-height: 1.2;
   padding-block: 1px;
+}
+/* 触发器照租户按钮的样子：透明底、悬停一层浅底、圆角，右边一个上下箭头。 */
+.app-runtime-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs, 4px);
+  padding: 1px var(--spacing-2xs, 4px);
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.app-runtime-trigger:hover { background: var(--surface-3, rgba(127, 127, 127, 0.12)); }
+/* 连不上时下拉里那句说明：窄一点，免得一行拉得比面板还宽。 */
+.app-runtime-note { max-width: 260px; margin: 0; line-height: 1.5; }
+
+/* 标题栏的搜索（header-search.tsx）：平时一个图标；展开是**浮层**，从图标处向左
+   展开 —— 不推挤标题栏上别的东西。宽度收窄到 320（原来常驻时上限 520），窗口窄时
+   再按视口收。 */
+.header-search { position: relative; display: inline-flex; align-items: center; }
+.header-search-box {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(320px, 60vw);
+  z-index: 50;
 }
 
 /* 9-12. 侧栏：不写域名文字，只留收缩按钮；首页组不画组头；导航项加高，
