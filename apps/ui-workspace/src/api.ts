@@ -745,6 +745,16 @@ export class Api {
    */
   exportProject = (id: string, path: string) =>
     this.call<ProjectExport>(`/projects/${id}/export`, "POST", { path });
+  /**
+   * 为「这个项目里的这个产品」换一张产品级凭据（ADR-022 §3.2）。**只有会话
+   * 令牌能换**——产品界面自己够不到这个端点，它连会话令牌都没有。换来的这张
+   * 凭据才是产品界面唯一能出示的东西，见 product-bridge.ts。
+   */
+  bridgeToken = (id: string) =>
+    this.call<{ token: string; expiresAt: number; productId: string }>(
+      `/projects/${id}/bridge-token`,
+      "POST",
+    );
   workspace = (id: string) => this.call<ProjectView>(`/projects/${id}`);
   taskInstances = (id: string) =>
     this.call<TaskInstance[]>(`/projects/${id}/tasks`);
