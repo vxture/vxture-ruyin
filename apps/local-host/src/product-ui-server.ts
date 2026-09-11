@@ -20,6 +20,16 @@
  * origin 做的事，本地与云端行为相同。`*.localhost` 由浏览器解析到回环（Chromium /
  * Electron、Firefox 都这么做），不需要改 hosts。
  *
+ * **出哪些文件：只出按摘要落盘、校验过的界面包**（ADR-023 片 3b-3）。地址是
+ * `http://<productId>.localhost:<port>/<sha256>/…`，对应产品库里的
+ * `<root>/<productId>/ui/<sha256>/…`。路径第一段必须是 64 位摘要，而且判断「在不在
+ * 里面」是对着**那一份界面包的目录**做的 —— 同一个产品目录下的契约、来源记录、
+ * 别的版本，一概够不到。目录在 = 当初取回时校验过（ui-fetch.ts），这里不重算。
+ *
+ * 摘要只在路径里，**origin 仍然每产品一个**：产品自己的存储跨版本保留。所以界面包
+ * 里的引用要用**相对路径**（`app.js`，不是 `/app.js`）—— 包被装在 `/<sha256>/`
+ * 底下，而云端装在别的位置；相对路径两边都对。
+ *
  * **这台服务器只做一件事：出静态文件。** 没有 API、没有 `/bridge`、没有 `/projects`
  * —— 产品界面从不直连守护进程，只通过 postMessage 跟父窗口说话（片二的桥）。
  * 把任何一个 API 挂到这些 origin 上，都等于在沙箱墙上开一扇门。
@@ -30,6 +40,9 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { isInside } from "./path-guard.js";
+import { UI_DIR, UI_ENTRY } from "./ui-fetch.js";
+
+const DIGEST = /^[0-9a-f]{64}$/;
 
 /**
  * 产品 id 的样子。**比契约 schema 更严**：它会成为子域名、也会被拼进文件路径 ——
@@ -54,7 +67,7 @@ const MIME: Record<string, string> = {
 };
 
 export interface ProductUiServerOptions {
-  /** 各产品界面包的总根：`<root>/<productId>/index.html`。 */
+  /** 产品库根目录（`<dataDir>/products`）；界面包在 `<root>/<productId>/ui/<sha256>/`。 */
   root: string;
   /**
    * 工作台的 origin —— 写进 CSP 的 `frame-ancestors`：**只有工作台能把产品界面
@@ -159,12 +172,22 @@ export function createProductUiServer(options: ProductUiServerOptions): Server {
     }
 
     const url = new URL(req.url ?? "/", "http://placeholder");
-    const rel = url.pathname.split("/").filter((s) => s.length > 0).join("/") || "index.html";
-    const productDir = join(options.root, productId);
-    const full = join(productDir, rel);
-    // **对着该产品自己的目录判断**。路径里的 `..` 在这一步之前多半已经被 URL 解析
-    // 规整掉了，但照样把关，不靠它。
-    if (!isInside(productDir, full) || !existsSync(full) || !statSync(full).isFile()) {
+    const [digest, ...rest] = url.pathname.split("/").filter((s) => s.length > 0);
+    if (digest === undefined || !DIGEST.test(digest)) {
+      reply(404, "not found");
+      return;
+    }
+    // `/<sha256>` 不带斜杠时，包里的相对引用会按 `/` 解析、全部落空 —— 补上斜杠。
+    if (rest.length === 0 && !url.pathname.endsWith("/")) {
+      res.writeHead(308, { ...headers, location: `/${digest}/` });
+      res.end();
+      return;
+    }
+    const bundleDir = join(options.root, productId, UI_DIR, digest);
+    const full = join(bundleDir, rest.join("/") || UI_ENTRY);
+    // **对着这一份界面包自己的目录判断**，不是对着产品目录：产品目录底下还有契约与
+    // 来源记录。路径里的 `..` 在这一步之前多半已经被 URL 解析规整掉了，但照样把关。
+    if (!isInside(bundleDir, full) || !existsSync(full) || !statSync(full).isFile()) {
       reply(404, "not found");
       return;
     }

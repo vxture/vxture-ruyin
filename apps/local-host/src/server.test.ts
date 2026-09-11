@@ -1901,35 +1901,90 @@ void test("product-surface: 没配产品界面服务器时一律答没有界面"
       headers: rig.headers,
     });
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { productId: "bidproposal", available: false });
+    assert.deepEqual(await res.json(), { productId: "bidproposal", available: false, reason: "no_ui_server" });
   } finally {
     closeRig(rig);
   }
 });
 
-void test("product-surface: 界面包不在就答 available:false，在就给出该产品自己的 origin", async () => {
+type Surface = { productId: string; available: boolean; origin?: string; entry?: string; reason?: string };
+
+async function askSurface(rig: Rig, projectId: string): Promise<Surface> {
+  return (await (
+    await fetch(`${rig.base}/projects/${projectId}/product-surface`, { headers: rig.headers })
+  ).json()) as Surface;
+}
+
+/** 在工作区里建一个项目，快照用的是**钉了界面摘要的 0.2 契约**（夹具本身不带界面）。 */
+async function projectWithUi(rig: Rig, workspaceId: string, sha256: string): Promise<string> {
+  const bid = loadProducts(productsDir).loaded.find((p) => p.id === "bidproposal")!;
+  const contract = structuredClone(bid.contract);
+  contract.contract = "0.2";
+  contract.product.ui = { sha256 };
+  return (await rig.runtime.createProject(contract, "带界面的项目", workspaceId)).id;
+}
+
+function placeBundle(root: string, sha256: string): void {
+  const dir = join(root, "bidproposal", "ui", sha256);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "index.html"), "<p>ui</p>");
+}
+
+/** 夹具契约没声明界面：答没有界面，原因是「没声明」—— 缺省，不是故障。 */
+void test("product-surface: 契约没声明界面 → available:false，reason not_declared", async () => {
   const root = mkdtempSync(join(tmpdir(), "ruyin-pui-"));
-  const rig = await startServer({
-    platform: signedInTo("wsp_x"),
-    productUi: { root, port: 7421 },
-  });
+  const rig = await startServer({ platform: signedInTo("wsp_x"), productUi: { root, port: 7421 } });
   try {
-    const projectId = await projectIn(rig, "wsp_x");
-    const ask = async () =>
-      (await (
-        await fetch(`${rig.base}/projects/${projectId}/product-surface`, { headers: rig.headers })
-      ).json()) as { productId: string; available: boolean; origin?: string };
+    const s = await askSurface(rig, await projectIn(rig, "wsp_x"));
+    assert.deepEqual(s, {
+      productId: "bidproposal",
+      available: false,
+      reason: "not_declared",
+      // origin 照样给：它是这个产品的身份，不取决于有没有界面。
+      origin: "http://bidproposal.localhost:7421",
+    });
+  } finally {
+    closeRig(rig);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
-    const before = await ask();
-    assert.equal(before.available, false, "包还没放进来");
-    // origin 照样给：它是这个产品的身份，不取决于包在不在。
-    assert.equal(before.origin, "http://bidproposal.localhost:7421");
+void test("product-surface: 快照钉的那份不在 → not_fetched；在了就给出按摘要的入口", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ruyin-pui-"));
+  const sha = "d".repeat(64);
+  const rig = await startServer({ platform: signedInTo("wsp_x"), productUi: { root, port: 7421 } });
+  try {
+    const projectId = await projectWithUi(rig, "wsp_x", sha);
+    const before = await askSurface(rig, projectId);
+    assert.equal(before.available, false, "包还没取回来");
+    assert.equal(before.reason, "not_fetched");
+    assert.equal(before.entry, undefined, "不可用时不给入口 —— 给了工作台就会去装一个 404");
 
-    mkdirSync(join(root, "bidproposal"), { recursive: true });
-    writeFileSync(join(root, "bidproposal", "index.html"), "<p>ui</p>");
-    const after = await ask();
+    placeBundle(root, sha);
+    const after = await askSurface(rig, projectId);
     assert.equal(after.available, true);
+    assert.equal(after.origin, "http://bidproposal.localhost:7421");
+    assert.equal(after.entry, `http://bidproposal.localhost:7421/${sha}/`);
     assert.equal(after.productId, "bidproposal", "产品码从项目记录取，不是调用方给的");
+  } finally {
+    closeRig(rig);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * **装的是项目快照钉的那一份，不回退。** 产品库里有另一份界面（比如新版本的），而
+ * 这个项目的快照钉的那份不在 —— 答没有界面，不拿新版顶上：守护进程按快照裁剪，
+ * 新版界面去对旧版快照，调到快照里没声明的面就被拒。
+ */
+void test("product-surface: 快照钉的那份不在时，不拿产品库里别的摘要顶上", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ruyin-pui-"));
+  const rig = await startServer({ platform: signedInTo("wsp_x"), productUi: { root, port: 7421 } });
+  try {
+    placeBundle(root, "e".repeat(64)); // 另一个版本的界面
+    const s = await askSurface(rig, await projectWithUi(rig, "wsp_x", "f".repeat(64)));
+    assert.equal(s.available, false);
+    assert.equal(s.reason, "not_fetched");
   } finally {
     closeRig(rig);
     rmSync(root, { recursive: true, force: true });

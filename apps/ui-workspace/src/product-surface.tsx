@@ -22,6 +22,10 @@
  *
  * **没有界面是缺省。** 守护进程说 `available: false` 时这里什么都不装，工作台照常
  * 通用地渲染任务、检查点、上下文与成果；而不是装一个会 404 的 iframe。
+ *
+ * **装哪个地址由守护进程给**（`entry`，ADR-023：`<origin>/<sha256>/`，项目快照钉的
+ * 那一份）。这里不自己拼。同源拦截与桥的 `targetOrigin` 都从**这个地址**算 ——
+ * 真正装进 iframe 的是它，要核的也就是它，不是旁边另一个字段说的 origin。
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -50,7 +54,16 @@ type Surface =
   | { state: "loading" }
   | { state: "none" }
   | { state: "refused"; origin: string }
-  | { state: "ready"; origin: string };
+  | { state: "ready"; origin: string; entry: string };
+
+/** 入口地址的 origin；解析不了就是 undefined（当没有界面处理，不猜）。 */
+function originOf(url: string): string | undefined {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
+}
 
 export function ProductSurface({ api, projectId }: { api: Api; projectId: string }) {
   const [surface, setSurface] = useState<Surface>({ state: "loading" });
@@ -62,16 +75,17 @@ export function ProductSurface({ api, projectId }: { api: Api; projectId: string
       .productSurface(projectId)
       .then((s) => {
         if (!alive) return;
-        if (!s.available || !s.origin) {
+        const origin = s.available && s.entry ? originOf(s.entry) : undefined;
+        if (!s.entry || origin === undefined) {
           setSurface({ state: "none" });
           return;
         }
         // 兜底拦截：同源就不装（见文件头第 1、2 条的依赖关系）。
-        if (sameOrigin(s.origin, window.location.origin)) {
-          setSurface({ state: "refused", origin: s.origin });
+        if (sameOrigin(origin, window.location.origin)) {
+          setSurface({ state: "refused", origin });
           return;
         }
-        setSurface({ state: "ready", origin: s.origin });
+        setSurface({ state: "ready", origin, entry: s.entry });
       })
       .catch(() => alive && setSurface({ state: "none" }));
     return () => {
@@ -110,7 +124,7 @@ export function ProductSurface({ api, projectId }: { api: Api; projectId: string
       ref={frame}
       className="product-surface"
       title="产品界面"
-      src={`${surface.origin}/`}
+      src={surface.entry}
       sandbox={PRODUCT_SANDBOX}
       referrerPolicy="no-referrer"
     />

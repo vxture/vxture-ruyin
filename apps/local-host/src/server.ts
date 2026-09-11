@@ -35,7 +35,7 @@ import { SkillNotFoundError, type SkillListing, type SkillView } from "./skill-r
 import type { SkillDocument, SkillLayer } from "@vxture/ruyin-core";
 import { installPackage } from "./installer.js";
 import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
-import type { UiFetchOutcome } from "./ui-fetch.js";
+import { hasUiBundle, type UiFetchOutcome } from "./ui-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import { apiError, REJECTION } from "./errors.js";
 import type { ToolProvider } from "@vxture/ruyin-contract-schema";
@@ -261,6 +261,9 @@ export interface LocalApiDeps {
    * 产品界面的静态服务器（ADR-022 片三 a）。**可选**：没有它时，问「这个项目的产品
    * 有没有界面」一律答没有 —— 默认就是没有界面的产品，工作台照常通用地渲染任务、
    * 检查点、上下文与成果。
+   *
+   * `root` 是**产品库**（`<dataDir>/products`）：界面包按摘要落在
+   * `<root>/<productId>/ui/<sha256>/`（ADR-023），与产品界面服务器读的是同一处。
    */
   productUi?: { root: string; port: number };
   /** Runtime transparency surface for the settings panel (GET /system). */
@@ -1683,6 +1686,11 @@ async function handle(
     //
     // `available` 照实说：界面包不在就答 false，工作台据此**什么都不装**，而不是
     // 装一个会 404 的 iframe。没有界面是默认，不是故障。
+    //
+    // **装哪一份：项目快照里的那一份**（ADR-023 §3.4）。守护进程按快照裁剪
+    // `/bridge/*`；装新版界面去对旧版快照，界面会去调快照里没声明的面。所以摘要从
+    // 快照取，不从产品库的当前版本取，也**不回退**到别的摘要 —— 快照钉的那份不在，
+    // 就是没有界面。不可用时带上原因，工作台据此决定说不说、说什么。
     if (method === "GET" && segments.length === 3 && segments[2] === "product-surface") {
       const metas = await deps.runtime.listProjects();
       const meta = metas.find((m) => m.id === projectId);
@@ -1690,17 +1698,22 @@ async function handle(
         send(res, 404, apiError("PROJECT_NOT_FOUND", `没有这个项目：${projectId}`));
         return;
       }
+      const productId = meta.productId;
       if (!deps.productUi) {
-        send(res, 200, { productId: meta.productId, available: false });
+        send(res, 200, { productId, available: false, reason: "no_ui_server" });
         return;
       }
-      const origin = productOrigin(meta.productId, deps.productUi.port);
-      const entry = joinPath(deps.productUi.root, meta.productId.toLowerCase(), "index.html");
-      send(res, 200, {
-        productId: meta.productId,
-        available: existsSync(entry),
-        origin,
-      });
+      const origin = productOrigin(productId, deps.productUi.port);
+      const pinned = (await deps.runtime.openProject(projectId)).contract.product.ui?.sha256;
+      if (pinned === undefined) {
+        send(res, 200, { productId, available: false, reason: "not_declared", origin });
+        return;
+      }
+      if (!hasUiBundle(deps.productUi.root, productId, pinned)) {
+        send(res, 200, { productId, available: false, reason: "not_fetched", origin });
+        return;
+      }
+      send(res, 200, { productId, available: true, origin, entry: `${origin}/${pinned}/` });
       return;
     }
 
