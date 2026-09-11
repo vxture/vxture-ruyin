@@ -596,6 +596,90 @@ async function handle(
       return;
     }
 
+    // ---- 片四（只读的面）。每个面都**按字段挑着给**，不是整条记录转手 —— 转手就是
+    // 把裁剪这件事忘了。挑的判据只有一条：产品界面**做它的事**需要什么。能从别处
+    // 推出来、或者带着用户机器上的路径与原文的，一律不给。
+    //
+    // 只读、只在凭据限定的那一个项目里：凭据里的 projectId 是唯一的项目来源，请求
+    // 里说什么都不算（与 /bridge/context 同一条）。
+
+    // GET /bridge/project —— 这个项目：名字、形态、业务阶段、此刻能往哪推进。
+    //
+    // **不给**：工作区 / 租户 id（平台那一侧的身份，产品的云端自己有）、目录授权
+    // （绝对路径）、审计。能往哪推进只给目标与「要不要人确认」—— 推进本身是写，
+    // 不在这一批。
+    if (method === "GET" && path === "/bridge/project") {
+      const view = await deps.runtime.openProject(scope.projectId);
+      const here = view.contract.states.items.find((s) => s.name === view.businessState);
+      send(res, 200, {
+        projectId: scope.projectId,
+        productId: scope.productId,
+        productVersion: view.meta.productVersion,
+        name: view.meta.name,
+        type: view.meta.projectType,
+        businessState: view.businessState,
+        transitions: (here?.transitions ?? []).map((t) => ({
+          to: t.to,
+          confirm: t.confirm === "human" ? "human" : "none",
+        })),
+        createdAt: view.meta.createdAt,
+      });
+      return;
+    }
+
+    // GET /bridge/tasks —— 这个项目的任务：哪一个、到哪一步了、在不在等人。
+    //
+    // **不给**：输入与选中的资料（带条目的本机路径）、确认的内容（工具参数里就是
+    // 路径）、对话（资料原文进过对话）、错误与暂停说明的原文（常带路径）。在等人时
+    // 只说在等**哪一类**确认 —— 确认的呈现与决定永远归 Runtime（接入指南 §6.3）。
+    if (method === "GET" && path === "/bridge/tasks") {
+      const instances = await deps.runtime.listTaskInstances(scope.projectId);
+      send(res, 200, {
+        projectId: scope.projectId,
+        tasks: instances.map((t) => ({
+          id: t.id,
+          taskId: t.taskId,
+          state: t.state,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+          waitingOn: t.checkpoints.filter((c) => !c.decision).map((c) => ({ kind: c.kind, raisedAt: c.raisedAt })),
+          hasResult: t.result !== undefined,
+        })),
+      });
+      return;
+    }
+
+    // GET /bridge/tasks/:id/result —— 一个任务的成果：内容、用了哪些资料（条目 id）、
+    // 出处、校验结论。
+    //
+    // 内容给：那是**产品自己的能力面**生成的，产品本来就见过它；成果展示本来就是产品
+    // 界面的事（§6.3）。资料只给条目 id，不给条目本身（本机路径、文件名）。校验只给
+    // 类别与结论，不给评审意见的原文 —— 那是人写给 Runtime 的。
+    //
+    // 任务不在这个项目里 → 404，**与不存在同一个回答**：不让凭据试探别的项目有什么。
+    const resultMatch = /^\/bridge\/tasks\/([^/]+)\/result$/.exec(path);
+    if (method === "GET" && resultMatch) {
+      const taskId = decodeURIComponent(resultMatch[1]!);
+      const instance = (await deps.runtime.listTaskInstances(scope.projectId)).find((t) => t.id === taskId);
+      if (!instance) {
+        send(res, 404, apiError("TASK_NOT_FOUND", "这个项目里没有这个任务"));
+        return;
+      }
+      if (!instance.result) {
+        send(res, 409, apiError("RESULT_NOT_READY", `任务还没有成果（状态：${instance.state}）`));
+        return;
+      }
+      send(res, 200, {
+        taskInstanceId: instance.id,
+        taskId: instance.taskId,
+        content: instance.result.content,
+        sources: instance.result.sources,
+        provenance: instance.result.provenance,
+        verification: instance.verification.map((v) => ({ id: v.id, kind: v.kind, status: v.status })),
+      });
+      return;
+    }
+
     send(res, 404, apiError("NOT_FOUND", `产品接入面没有这个地址：${method} ${path}`));
     return;
   }
