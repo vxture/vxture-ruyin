@@ -462,6 +462,33 @@ function errorStatus(cause: unknown): { status: number; body: unknown } {
   return { status: 500, body: apiError("INTERNAL", message, { retryable: true }) };
 }
 
+/**
+ * 把一个产品（不给 = 所有产品）的既有项目升到产品库里的生效版本（ADR-024：**直接升**）。
+ *
+ * 在产品库变了之后调（拉到新契约、装了新包、切了生效版本），守护进程启动时也调一次
+ * —— 上次因为任务没落定而没升成的，这时补上。每个项目各升各的：一个出错（比如快照坏了）
+ * 记一行日志、不打断其余。升了的发 `project` 事件，工作台与产品界面都重问一次。
+ */
+export async function upgradeProjects(
+  deps: Pick<LocalApiDeps, "runtime" | "registry" | "events">,
+  productId?: string,
+): Promise<void> {
+  for (const meta of await deps.runtime.listProjects()) {
+    if (productId && meta.productId !== productId) continue;
+    const next = deps.registry.contractOf(meta.productId);
+    if (!next) continue;
+    try {
+      const outcome = await deps.runtime.upgradeProject(meta.id, next);
+      if (outcome.status === "upgraded") {
+        console.log(`[ruyin] project ${meta.id} upgraded ${outcome.from} -> ${outcome.to}`);
+        deps.events?.publish({ kind: "project", projectId: meta.id });
+      }
+    } catch (cause) {
+      console.error(`[ruyin] project ${meta.id} upgrade check failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  }
+}
+
 export function createLocalApi(deps: LocalApiDeps): Server {
   /**
    * 产品级凭据表**一台服务器一份**（ADR-022 §3.2）。
@@ -1011,6 +1038,7 @@ async function handle(
         requireSignature: deps.requireSignedPackages !== false,
       });
       deps.registry.rescan();
+      await upgradeProjects(deps, result.productId);
       send(res, 201, {
         productId: result.productId,
         version: result.version,
@@ -1422,6 +1450,7 @@ async function handle(
         requireSignature: deps.requireSignedPackages !== false,
       });
       deps.registry.rescan();
+      await upgradeProjects(deps, result.productId);
       send(res, 201, {
         productId: result.productId,
         version: result.version,
@@ -1461,7 +1490,10 @@ async function handle(
     try {
       const outcome = await deps.fetchContract(segments[1]!);
       // 只有真落了新版本才需要重扫；current/offline 没动过库。
-      if (outcome.status === "fetched") deps.registry.rescan();
+      if (outcome.status === "fetched") {
+        deps.registry.rescan();
+        await upgradeProjects(deps, segments[1]!);
+      }
       send(res, outcome.status === "fetched" ? 201 : 200, outcome);
     } catch (cause) {
       // 契约本身不可接受 —— 产品的问题，说清楚是哪一条不过。
@@ -1500,6 +1532,8 @@ async function handle(
       );
       return;
     }
+    // 切了生效版本：往上切的，项目跟着升；往下切（回滚）的不把项目退回去（ADR-024 §2.1）。
+    await upgradeProjects(deps, segments[1]!);
     send(res, 200, deps.registry.list().find((p) => p.id === segments[1]));
     return;
   }
@@ -1789,6 +1823,15 @@ async function handle(
     }
 
     if (method === "GET" && segments.length === 2) {
+      // 打开项目时顺手看一眼能不能升（ADR-024）：补上次因为任务没落定而没升成的。升不了
+      // 是因为新版本删了东西的，把原因带给界面写明 —— 不静默，否则用户会以为新功能坏了。
+      let upgradeBlocked: { version: string; breaks: Array<{ path: string; change: string }> } | undefined;
+      const latest = projectMeta ? deps.registry.contractOf(projectMeta.productId) : undefined;
+      if (latest) {
+        const outcome = await deps.runtime.upgradeProject(projectId, latest);
+        if (outcome.status === "upgraded") deps.events?.publish({ kind: "project", projectId });
+        else if (outcome.reason === "incompatible") upgradeBlocked = { version: outcome.to, breaks: outcome.breaks };
+      }
       const view = await deps.runtime.openProject(projectId);
       send(res, 200, {
         meta: view.meta,
@@ -1809,6 +1852,7 @@ async function handle(
         // 这个产品的项目能做哪些容器操作（契约 project.operations，缺省 create / open）。
         // 界面据此决定给不给「归档」「恢复」按钮 —— 给了点下去却被拒，比不给更糟。
         operations: view.contract.project.operations ?? ["create", "open"],
+        ...(upgradeBlocked ? { upgradeBlocked } : {}),
       });
       return;
     }

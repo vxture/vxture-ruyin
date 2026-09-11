@@ -48,7 +48,7 @@ import {
   type CommercialEnvelope,
   type SubscriptionFacts,
 } from "./product-registry.js";
-import { createLocalApi } from "./server.js";
+import { createLocalApi, upgradeProjects } from "./server.js";
 import { TaskRunner } from "./task-runner.js";
 import { contextBudgetFromEnv } from "./context-budget-config.js";
 import { resourceLimitsFromEnv } from "./resource-limits.js";
@@ -730,6 +730,9 @@ server.listen(port, "127.0.0.1", () => {
   });
 
   console.log(`[ruyin] local runtime ${VERSION}`);
+  // 既有项目跟上产品库的生效版本（ADR-024：直接升）。上次因为任务没落定而没升成的，
+  // 这时补上。不等它 —— 升级是后台的事，打开项目时也会顺手再看一眼。
+  void upgradeProjects({ runtime, registry, events });
   console.log(`[ruyin] data dir: ${dataDir}`);
   // 已经在用的数据目录落在系统位置上（手改过指针、或者早于这份清单就设好了）：
   // **说一句，但不拦着起**。拒绝启动的话，应用会变成一个既打不开、也没法在界面

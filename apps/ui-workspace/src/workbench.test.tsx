@@ -157,8 +157,11 @@ function fakeApi(over: Partial<Api> = {}): Api {
 // ~9-10s to transform, well past the 5s default - not a hang, just a big
 // module graph the first time. Every test here does that import. Under
 // --coverage (v8 instrumentation) plus full-suite worker contention this has
-// been observed stretching past 20s once, so 30s for margin.
-vi.setConfig({ testTimeout: 30_000 });
+// been observed stretching past 20s once, so 30s for margin - and on
+// 2026-09-12 past 34s, consistently, on the dev machine (the first test pays
+// the cold import; run alone the whole file passes). Raised to 60s: a hang
+// would still fail, just later; a slow machine should not.
+vi.setConfig({ testTimeout: 60_000 });
 
 beforeEach(() => {
   // 地址是路由的权威，所以它也是**测试之间会串味的状态**：上一个用例停在

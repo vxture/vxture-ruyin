@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ProjectPanel } from "./workspace";
+import { ProjectPanel, describeBreaks } from "./workspace";
 import {
   Api,
   type AuditEvent,
@@ -1245,4 +1245,41 @@ void test("归档：契约没声明 restore 时，入口旁说清归档是单向
   render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
   expect(await screen.findByText(/这个产品不支持恢复，归档是单向的/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "归档" })).toBeInTheDocument();
+});
+
+/* ---------------- 智能体新版本删了东西：项目留在旧版（ADR-024） ---------------- */
+
+/** 能升的项目守护进程已经直接升了；升不了的，概览顶上如实写一行，点名删了什么。 */
+void test("升级：新版本删了本项目在用的东西 → 顶上写明，项目继续用旧版", async () => {
+  const api = fakeApi({
+    workspace: vi.fn().mockResolvedValue(
+      projectView({
+        upgradeBlocked: {
+          version: "1.1.0",
+          breaks: [
+            { path: "tasks.generate_proposal", change: "removed" },
+            { path: "context.types.tender_doc", change: "narrowed" },
+          ],
+        },
+      }),
+    ),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
+  expect(
+    await screen.findByText(/智能体已有新版本 1\.1\.0，但它删去或改窄了本项目在用的内容（\s*任务 generate_proposal、资料类型 tender_doc）/),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/本项目继续用 1\.0\.0/)).toBeInTheDocument();
+});
+
+void test("describeBreaks：前三处点名，其余说「等 N 处」；认不出的段照原名", () => {
+  expect(
+    describeBreaks([
+      { path: "tasks.a", change: "removed" },
+      { path: "tools.b", change: "narrowed" },
+      { path: "states.draft->review", change: "removed" },
+      { path: "objects.c", change: "removed" },
+    ]),
+  ).toBe("任务 a、工具 b、阶段 draft->review 等 4 处");
+  expect(describeBreaks([{ path: "mystery.x", change: "removed" }])).toBe("mystery x");
+  expect(describeBreaks([{ path: "project.type", change: "narrowed" }])).toBe("项目形态 type");
 });

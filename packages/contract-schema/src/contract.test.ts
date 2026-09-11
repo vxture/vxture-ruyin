@@ -8,6 +8,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  compareContracts,
+  compareProductVersions,
   parseContract,
   validateContract,
   validateContractYaml,
@@ -565,4 +567,126 @@ test("product.ui (L1): the digest is 64 lowercase hex, and ui carries nothing el
     c.product.ui = {} as { sha256: string };
   });
   assert.ok(missing.errors.some((e) => e.rule === "L1" && e.path === "product.ui"));
+});
+
+// --- compareContracts：既有项目能不能直接升（ADR-024） -------------------------
+
+function upgraded(fn: (c: RuyinContract) => void): RuyinContract {
+  const next = structuredClone(base);
+  next.product.version = "1.1.0";
+  fn(next);
+  return next;
+}
+
+function breaksOf(next: RuyinContract): string[] {
+  return compareContracts(base, next).breaks.map((b) => `${b.change} ${b.path}`);
+}
+
+test("compareContracts: 只增的新版本 → 兼容（新任务、新类型、新状态、新工具都放行）", () => {
+  const next = upgraded((c) => {
+    c.tasks.push({ ...structuredClone(c.tasks[0]!), id: "price_check" });
+    c.context.types.push({ ...structuredClone(c.context.types[0]!), id: "price_sheet", required: false });
+    c.states.items.push({ name: "on_hold", transitions: [] });
+    c.states.items[0]!.transitions.push({ to: "on_hold" });
+    c.tools.push({ ...structuredClone(c.tools[0]!), id: "read_sheet" });
+    c.context.types[0]!.sources = [...c.context.types[0]!.sources, "lan"];
+  });
+  assert.deepEqual(compareContracts(base, next), { compatible: true, breaks: [] });
+});
+
+/** 放宽与改文案随升级生效，不在这里拦（owner：「无需这么重」）。 */
+test("compareContracts: 默认权限、敏感度、文案、initial 的变化不算不兼容", () => {
+  const next = upgraded((c) => {
+    tool(c, "read_file").default = "allow";
+    c.context.types[0]!.sensitivity = "low";
+    c.tasks[0]!.objective = "换一句话说";
+    c.states.initial = c.states.items[1]!.name;
+    for (const s of c.states.items) for (const t of s.transitions) delete t.confirm;
+  });
+  assert.equal(compareContracts(base, next).compatible, true);
+});
+
+test("compareContracts: 删任务、删类型、删状态、删转换、删工具、删能力、删对象 —— 逐条报出", () => {
+  const firstTask = base.tasks[0]!.id;
+  const firstType = base.context.types[0]!.id;
+  const withTransition = base.states.items.find((s) => s.transitions.length > 0)!;
+  const next = upgraded((c) => {
+    c.tasks = c.tasks.filter((t) => t.id !== firstTask);
+    c.context.types = c.context.types.filter((t) => t.id !== firstType);
+    const s = c.states.items.find((x) => x.name === withTransition.name)!;
+    s.transitions = s.transitions.slice(1);
+    c.tools = c.tools.filter((t) => t.id !== "read_file");
+    c.capabilities = c.capabilities.slice(1);
+    c.objects = c.objects.filter((o) => !o.primary || true).slice(0, -1);
+  });
+  const got = breaksOf(next);
+  assert.ok(got.includes(`removed tasks.${firstTask}`), got.join("\n"));
+  assert.ok(got.includes(`removed context.types.${firstType}`));
+  assert.ok(got.includes(`removed states.${withTransition.name}->${withTransition.transitions[0]!.to}`));
+  assert.ok(got.includes("removed tools.read_file"));
+  assert.ok(got.includes(`removed capabilities.${base.capabilities[0]!.id}`));
+  assert.ok(got.includes(`removed objects.${base.objects.at(-1)!.id}`));
+  // 删整个状态也报。
+  const noState = upgraded((c) => {
+    c.states.items = c.states.items.slice(0, -1);
+  });
+  assert.ok(breaksOf(noState).includes(`removed states.${base.states.items.at(-1)!.name}`));
+});
+
+test("compareContracts: 改窄 —— required 变真、删来源、改 class / kind / category / provider / 容器形态 / 主对象 / 挂载对象", () => {
+  const next = upgraded((c) => {
+    const optional = c.context.types.find((t) => !t.required);
+    if (optional) optional.required = true;
+    c.context.types[0]!.sources = [];
+    c.context.types[0]!.class = c.context.types[0]!.class === "source" ? "core" : "source";
+    c.capabilities[0]!.kind = c.capabilities[0]!.kind === "analysis" ? "generation" : "analysis";
+    tool(c, "read_file").category = "query";
+    tool(c, "read_file").provider = "connector";
+    c.project.type = c.project.type === "project" ? "continuous" : "project";
+    c.objects[0]!.primary = false;
+    c.states.object = "requirement";
+    c.tasks[0]!.output_types = [];
+  });
+  const got = breaksOf(next);
+  const firstType = base.context.types[0]!.id;
+  for (const expected of [
+    `narrowed context.types.${firstType}.sources`,
+    `narrowed context.types.${firstType}.class`,
+    `narrowed capabilities.${base.capabilities[0]!.id}.kind`,
+    "narrowed tools.read_file.category",
+    "narrowed tools.read_file.provider",
+    "narrowed project.type",
+    `narrowed objects.${base.objects[0]!.id}.primary`,
+    "narrowed states.object",
+    `removed tasks.${base.tasks[0]!.id}.output_types.${base.tasks[0]!.output_types[0]}`,
+  ]) {
+    assert.ok(got.includes(expected), `missing: ${expected}\n${got.join("\n")}`);
+  }
+  if (base.context.types.some((t) => !t.required)) {
+    assert.ok(got.some((g) => g.endsWith(".required")));
+  }
+  // 删关系。
+  const noRelation = upgraded((c) => {
+    c.objects[0]!.relations = [];
+  });
+  assert.ok(breaksOf(noRelation).some((g) => g.startsWith(`removed objects.${base.objects[0]!.id}.relations.`)));
+});
+
+/** 不信版本号标签：patch 号一样删了东西，照样不兼容。 */
+test("compareContracts: 看差异不看标签 —— 版本号只动了 patch 也照样拦", () => {
+  const next = structuredClone(base);
+  next.product.version = "1.0.1";
+  next.tasks = next.tasks.slice(1);
+  assert.equal(compareContracts(base, next).compatible, false);
+});
+
+test("compareProductVersions: 数字三段逐段比；同号时正式版大于预发布版", () => {
+  assert.ok(compareProductVersions("1.1.0", "1.0.9") > 0);
+  assert.ok(compareProductVersions("1.0.0", "1.0.0") === 0);
+  assert.ok(compareProductVersions("2.0.0", "10.0.0") < 0);
+  assert.ok(compareProductVersions("1.0.0", "1.0.0-beta.1") > 0);
+  assert.ok(compareProductVersions("1.0.0-beta.1", "1.0.0") < 0);
+  assert.ok(compareProductVersions("1.0.0-alpha", "1.0.0-beta") < 0);
+  assert.ok(compareProductVersions("1.0.0-beta", "1.0.0-alpha") > 0);
+  assert.ok(compareProductVersions("1.0", "1.0.0") === 0);
 });
