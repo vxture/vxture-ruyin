@@ -388,3 +388,41 @@ void test("ProductBridge: emit() 主动向产品界面投一个事件，不经�
     ORIGIN,
   );
 });
+
+/**
+ * **不注入 fetchImpl 时，桥要用得了真的 `fetch`。**
+ *
+ * 片二第一版把 `fetch` 直接存进字段、再以 `this.fetchImpl(...)` 调用 —— `fetch` 的
+ * `this` 于是是桥实例，真浏览器直接抛「Illegal invocation」，**一个请求都发不出去**。
+ * 本文件其余用例全部注入了 mock 的 fetchImpl，所以默认那条路从来没被走过；jsdom 的
+ * fetch 也不查 `this`，同样测不出来。片三 a 在真 Chromium 里才抓到。
+ *
+ * 这里用一个**会像 Chromium 一样查 `this`** 的替身，并且不注入 fetchImpl —— 走的
+ * 正是生产上那条路。
+ */
+test("ProductBridge: 不注入 fetchImpl 时照样发得出请求（fetch 不能被错的 this 调用）", async () => {
+  const strictFetch = vi.fn(function (this: unknown) {
+    if (this !== undefined && this !== globalThis && this !== window) {
+      throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+    }
+    return Promise.resolve(jsonResponse({ ok: true }));
+  });
+  vi.stubGlobal("fetch", strictFetch);
+  const source = { postMessage: vi.fn() } as unknown as Window;
+  const b = new ProductBridge({
+    getBridgeToken: vi.fn().mockResolvedValue({ token: "tok_1", expiresAt: Date.now() + 600_000 }),
+    source,
+    targetOrigin: ORIGIN,
+    // 故意不给 fetchImpl —— 那才是生产上的样子。
+  });
+  b.attach();
+  attached.push(b);
+
+  post(source, { ns: "ruyin.bridge", kind: "request", id: "r1", method: "GET", path: "/context" });
+  await vi.waitFor(() => expect(outboxOf(source)).toHaveLength(1));
+  const [reply] = outboxOf(source) as Array<{ ok: boolean; error?: { code: string } }>;
+  expect(reply?.error?.code).not.toBe("BRIDGE_NETWORK_ERROR");
+  expect(reply?.ok).toBe(true);
+  expect(strictFetch).toHaveBeenCalledTimes(1);
+  vi.unstubAllGlobals();
+});

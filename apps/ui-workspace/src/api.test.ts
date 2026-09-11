@@ -409,6 +409,12 @@ const WRAPPER_CASES: WrapperCase[] = [
     path: "/projects/prj_1/bridge-token",
   },
   {
+    name: "productSurface",
+    call: (api) => api.productSurface("prj_1"),
+    method: "GET",
+    path: "/projects/prj_1/product-surface",
+  },
+  {
     name: "entitlements",
     call: (api) => api.entitlements(["bidproposal", "vxture.crm"]),
     method: "GET",

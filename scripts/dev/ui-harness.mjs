@@ -43,6 +43,9 @@ const { MockAIGateway, nodeClock, nodeCrypto, nodeId } = await import(
 );
 const { ProductRegistry } = await import(`${ROOT}/apps/local-host/dist/product-registry.js`);
 const { createLocalApi } = await import(`${ROOT}/apps/local-host/dist/server.js`);
+const { createProductUiServer } = await import(
+  `${ROOT}/apps/local-host/dist/product-ui-server.js`
+);
 const { checkTarget, readLocation, writeLocation } = await import(
   `${ROOT}/apps/local-host/dist/data-location.js`
 );
@@ -67,6 +70,11 @@ const { BundledToolServers } = await import(`${ROOT}/apps/local-host/dist/tool-s
 const { readFileSync } = await import("node:fs");
 
 const PORT = Number(process.env.PORT ?? 17470);
+// 产品界面服务器（ADR-022 片三 a）：端口照守护进程的规矩 +1。根指向仓内的**测试包**
+// —— 观察台走不到的路就是没人验过的路（TD-054 / TD-056 的教训）。那个测试包会试着读
+// 工作台的会话令牌、摸父窗口的 DOM，再走一次片二的桥，把三样结果报回来。
+const PRODUCT_UI_PORT = PORT + 1;
+const PRODUCT_UI_ROOT = join(repoRoot, "scripts", "dev", "product-ui-fixture");
 const TOKEN = "uiharness";
 const repo = repoRoot.replaceAll("\\", "/").replace(/\/$/, "");
 const dataDir = mkdtempSync(join(tmpdir(), "ruyin-uiharness-"));
@@ -212,6 +220,7 @@ const events = new EventBus();
 let chromeTheme = "dark";
 const registry = new ProductRegistry(`${repo}/products`, dataDir);
 const server = createLocalApi({
+  productUi: { root: PRODUCT_UI_ROOT, port: PRODUCT_UI_PORT },
   runtime,
   registry,
   tasks: new TaskRunner(runtime, new Set(), events),
@@ -315,6 +324,14 @@ const server = createLocalApi({
     },
   },
 });
+createProductUiServer({
+  root: PRODUCT_UI_ROOT,
+  port: PRODUCT_UI_PORT,
+  workspaceOrigin: `http://127.0.0.1:${PORT}`,
+}).listen(PRODUCT_UI_PORT, "127.0.0.1", () =>
+  console.log(`[uiharness] product ui: <产品>.localhost:${PRODUCT_UI_PORT}`),
+);
+
 server.listen(PORT, "127.0.0.1", () => {
   // 端口取自**真的监听结果**，不是那个请求值：PORT=0 时两者不一样，而这一行就是
   // 观察台对外的全部接口 —— 人照它开浏览器，烟测照它发请求。印一个没在听的端口，

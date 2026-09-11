@@ -27,6 +27,12 @@ import {
   type ProjectFile,
 } from "./api";
 
+// 产品界面的沙箱宿主有自己的用例文件（product-surface.test.tsx）；这里只关心
+// 项目面板自己的编排，照 workbench.test 的做法桩掉子组件，而不是在每个项目面板用例
+// 里替它的网络调用补桩。
+vi.mock("./product-surface", () => ({
+  ProductSurface: () => null,
+}));
 vi.mock("./chain", () => ({
   verifyChain: vi.fn().mockResolvedValue(true),
 }));

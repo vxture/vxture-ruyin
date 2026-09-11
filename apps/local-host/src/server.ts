@@ -8,6 +8,8 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type { PermissionValue } from "@vxture/ruyin-contract-schema";
 import { BridgeTokens } from "./bridge-token.js";
+import { isInside } from "./path-guard.js";
+import { productOrigin } from "./product-ui-server.js";
 import type { StoredFile } from "./file-store.js";
 import { cloudIntakeRefusal } from "./cloud-sync.js";
 import { currentHost } from "./system-dirs.js";
@@ -251,6 +253,12 @@ export interface LocalApiDeps {
    * 能启动的，启动时不会再被拒。
    */
   supportsTool: (tool: string, provider?: ToolProvider) => boolean;
+  /**
+   * 产品界面的静态服务器（ADR-022 片三 a）。**可选**：没有它时，问「这个项目的产品
+   * 有没有界面」一律答没有 —— 默认就是没有界面的产品，工作台照常通用地渲染任务、
+   * 检查点、上下文与成果。
+   */
+  productUi?: { root: string; port: number };
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -341,9 +349,12 @@ const STATIC_MIME: Record<string, string> = {
 const UI_ROOT_FILES = new Set(["logo.svg", "favicon.ico"]);
 
 function serveStatic(res: ServerResponse, root: string, rel: string): void {
-  // Normalize and refuse traversal outside the UI root.
+  // 规整后拒绝落在根目录之外的路径。**用 isInside，不用 startsWith**：后者不带
+  // 分隔符比前缀，名字以根目录名开头的兄弟目录也会被放行（path-guard.ts）。对这个
+  // 端点今天其实打不穿（URL 解析先规整了 `..`，还有 `/assets/` 前缀挡着），但判断
+  // 本身是错的，不该留给下一个调用方当陷阱。
   const full = resolvePath(root, rel);
-  if (!full.startsWith(resolvePath(root)) || !existsSync(full)) {
+  if (!isInside(root, full) || !existsSync(full)) {
     send(res, 404, apiError("NOT_FOUND", "资源不存在"));
     return;
   }
@@ -1658,6 +1669,35 @@ async function handle(
         send(res, 200, { items: await deps.runtime.listToolPolicy(projectId) });
         return;
       }
+    }
+
+    // GET /projects/:id/product-surface —— 这个项目的产品有没有自己的界面、在哪个
+    // origin（ADR-022 片三 a）。
+    //
+    // 产品码**从项目记录取**，与 bridge-token 同一条理由：能从已有事实推出来的，不让
+    // 人传进来。origin 也由守护进程算 —— 工作台只拿来用，不自己拼。
+    //
+    // `available` 照实说：界面包不在就答 false，工作台据此**什么都不装**，而不是
+    // 装一个会 404 的 iframe。没有界面是默认，不是故障。
+    if (method === "GET" && segments.length === 3 && segments[2] === "product-surface") {
+      const metas = await deps.runtime.listProjects();
+      const meta = metas.find((m) => m.id === projectId);
+      if (!meta) {
+        send(res, 404, apiError("PROJECT_NOT_FOUND", `没有这个项目：${projectId}`));
+        return;
+      }
+      if (!deps.productUi) {
+        send(res, 200, { productId: meta.productId, available: false });
+        return;
+      }
+      const origin = productOrigin(meta.productId, deps.productUi.port);
+      const entry = joinPath(deps.productUi.root, meta.productId.toLowerCase(), "index.html");
+      send(res, 200, {
+        productId: meta.productId,
+        available: existsSync(entry),
+        origin,
+      });
+      return;
     }
 
     // POST /projects/:id/bridge-token —— 工作台为「这个项目里的这个产品」换一张

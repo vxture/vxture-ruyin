@@ -1884,3 +1884,74 @@ void test("bridge: /bridge/context 只回元数据，绝对路径不出现在回
     closeRig(rig);
   }
 });
+
+/**
+ * `GET /projects/:id/product-surface`（ADR-022 片三 a）：这个项目的产品有没有界面、
+ * 在哪个 origin。
+ *
+ * 三种情况各一条，**中间那条最要紧**：界面包不在时答 `available: false`，而不是
+ * 照样给一个 origin 让工作台去装一个会 404 的 iframe。没有界面是**缺省**，不是故障
+ * —— 工作台照常通用地渲染任务、检查点、上下文与成果。
+ */
+void test("product-surface: 没配产品界面服务器时一律答没有界面", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    const res = await fetch(`${rig.base}/projects/${projectId}/product-surface`, {
+      headers: rig.headers,
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { productId: "bidproposal", available: false });
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("product-surface: 界面包不在就答 available:false，在就给出该产品自己的 origin", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ruyin-pui-"));
+  const rig = await startServer({
+    platform: signedInTo("wsp_x"),
+    productUi: { root, port: 7421 },
+  });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    const ask = async () =>
+      (await (
+        await fetch(`${rig.base}/projects/${projectId}/product-surface`, { headers: rig.headers })
+      ).json()) as { productId: string; available: boolean; origin?: string };
+
+    const before = await ask();
+    assert.equal(before.available, false, "包还没放进来");
+    // origin 照样给：它是这个产品的身份，不取决于包在不在。
+    assert.equal(before.origin, "http://bidproposal.localhost:7421");
+
+    mkdirSync(join(root, "bidproposal"), { recursive: true });
+    writeFileSync(join(root, "bidproposal", "index.html"), "<p>ui</p>");
+    const after = await ask();
+    assert.equal(after.available, true);
+    assert.equal(after.productId, "bidproposal", "产品码从项目记录取，不是调用方给的");
+  } finally {
+    closeRig(rig);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** 这个端点在主面上 —— 桥凭据走不到这里（片一的第二条断言，换个端点再钉一次）。 */
+void test("product-surface: 产品级凭据问不了（只有会话令牌能问）", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    const minted = (await (
+      await fetch(`${rig.base}/projects/${projectId}/bridge-token`, {
+        method: "POST",
+        headers: rig.headers,
+      })
+    ).json()) as { token: string };
+    const res = await fetch(`${rig.base}/projects/${projectId}/product-surface`, {
+      headers: { authorization: `Bearer ${minted.token}` },
+    });
+    assert.equal(res.status, 401);
+  } finally {
+    closeRig(rig);
+  }
+});

@@ -755,6 +755,14 @@ export class Api {
       `/projects/${id}/bridge-token`,
       "POST",
     );
+  /**
+   * 这个项目的产品有没有自己的界面、在哪个 origin（ADR-022 片三 a）。origin 由守护
+   * 进程算，界面只拿来用、不自己拼 —— 拼错一个字符就是换了一个 origin。
+   */
+  productSurface = (id: string) =>
+    this.call<{ productId: string; available: boolean; origin?: string }>(
+      `/projects/${id}/product-surface`,
+    );
   workspace = (id: string) => this.call<ProjectView>(`/projects/${id}`);
   taskInstances = (id: string) =>
     this.call<TaskInstance[]>(`/projects/${id}/tasks`);

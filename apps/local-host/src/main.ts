@@ -38,6 +38,7 @@ import {
   bundledToolsDir as bundledToolsDirOf,
 } from "./bundled-layers.js";
 import { resolveCodeSigning } from "./build-info.js";
+import { createProductUiServer } from "./product-ui-server.js";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import {
@@ -404,7 +405,20 @@ const fileArea = {
  *  算两遍的话，播报说的和界面读的有一天会不一样，而那正是这类事实最难查的坏法。 */
 const codeSigning = resolveCodeSigning(dirname(fileURLToPath(import.meta.url)), process.env);
 
+/**
+ * 产品界面的静态服务器（ADR-022 片三 a）。**端口 = 守护进程端口 + 1**：开发 7421、
+ * 冒烟 17421，两套自动错开；而且**固定** —— 产品界面的 origin
+ * （`<产品>.localhost:<端口>`）要跨重启稳定，否则产品自己的存储每次重启都丢。
+ *
+ * 根缺省在数据目录下，今天是空的：界面包从哪来是片三 b 的题（契约里钉一个 UI 包 +
+ * sha256，像组件那样取回缓存）。在那之前这台服务器什么都不出，所有产品都是没有
+ * 界面的产品 —— 那本来就是缺省。
+ */
+const productUiPort = Number(process.env["RUYIN_PRODUCT_UI_PORT"] ?? port + 1);
+const productUiRoot = process.env["RUYIN_PRODUCT_UI_DIR"] ?? join(dataDir, "product-ui");
+
 const server = createLocalApi({
+  productUi: { root: productUiRoot, port: productUiPort },
   runtime,
   registry,
   tasks,
@@ -676,6 +690,20 @@ if (capabilityBase) {
     })
     .catch((cause) => console.error("[ruyin] skills: distributed refresh failed:", cause));
 }
+
+// 产品界面服务器与守护进程**分开监听**：它是另一个 origin，这正是它存在的理由。
+// 起不来不拖垮守护进程 —— 没有它，所有产品照常作为「没有界面的产品」工作。
+const productUiServer = createProductUiServer({
+  root: productUiRoot,
+  port: productUiPort,
+  workspaceOrigin: `http://127.0.0.1:${port}`,
+});
+productUiServer.on("error", (cause) =>
+  console.error(`[ruyin] product ui: 起不来（${(cause as Error).message}）—— 产品一律按没有界面处理`),
+);
+productUiServer.listen(productUiPort, "127.0.0.1", () =>
+  console.log(`[ruyin] product ui: <产品>.localhost:${productUiPort} (${productUiRoot})`),
+);
 
 server.listen(port, "127.0.0.1", () => {
   console.log(`[ruyin] local runtime ${VERSION}`);
