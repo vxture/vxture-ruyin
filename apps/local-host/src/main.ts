@@ -67,6 +67,7 @@ import { ToolRegistryView } from "./tool-registry.js";
 import { ComponentStore, readComponentSpecs } from "./component-store.js";
 import { BundledToolServers } from "./tool-servers.js";
 import { fetchContract } from "./contract-fetch.js";
+import { fetchUiAfterContract } from "./ui-fetch.js";
 import { EventBus } from "./events.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
@@ -486,12 +487,21 @@ const server = createLocalApi({
   // 可拉的地方，此时不注入——服务端据此如实回答，而不是静默无事发生。
   ...(capabilityBase
     ? {
-        fetchContract: (productId: string) =>
-          fetchContract(productId, {
+        // 契约落了盘就紧接着取它钉的界面包（ADR-023 §3.3）：桌面必然离线，等第一次
+        // 打开才发现取不回，就是在最需要的时候没有。界面取不成不影响契约那一半。
+        fetchContract: async (productId: string) => {
+          const opts = {
             baseUrl: capabilityBase,
             token: () => platform.bearerToken(),
             storeDir: registry.storeDir,
-          }),
+          };
+          const outcome = await fetchContract(productId, opts);
+          const ui = await fetchUiAfterContract(outcome, opts);
+          if (ui?.status === "unavailable") {
+            console.warn(`[ruyin] product ui unavailable: ${productId} ${ui.reason} - ${ui.detail}`);
+          }
+          return ui ? { ...outcome, ui } : outcome;
+        },
       }
     : {}),
   // 界面主题的中转值。内存里的一个词，重启即回到默认深色 —— 界面渲染第一帧
