@@ -184,7 +184,7 @@ export async function fetchUiBundle(contract: RuyinContract, opts: UiFetchOption
   // ---- 原子落盘 --------------------------------------------------------------
   const staging = `${dir}.staging-${pinned.slice(0, 8)}-${process.pid}`;
   try {
-    rmSync(staging, { recursive: true, force: true });
+    removeQuietly(staging);
     for (const [name, data] of entries) {
       const target = join(staging, ...name.split("/"));
       mkdirSync(dirname(target), { recursive: true });
@@ -193,12 +193,12 @@ export async function fetchUiBundle(contract: RuyinContract, opts: UiFetchOption
     mkdirSync(dirname(dir), { recursive: true });
     if (existsSync(join(dir, UI_ENTRY))) {
       // 同一个摘要被别的请求先落了盘 —— 按摘要寻址，那一份与这一份是同一串字节。
-      rmSync(staging, { recursive: true, force: true });
+      removeQuietly(staging);
       return { status: "present", productId, sha256: pinned, dir };
     }
     renameSync(staging, dir);
   } catch (cause) {
-    rmSync(staging, { recursive: true, force: true });
+    removeQuietly(staging);
     return unavailable("invalid_bundle", `could not store ui bundle: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   return { status: "fetched", productId, sha256: pinned, dir };
@@ -221,6 +221,22 @@ export async function fetchUiAfterContract(outcome: FetchOutcome, opts: UiFetchO
     return undefined;
   }
   return fetchUiBundle(contract, opts);
+}
+
+/**
+ * 清掉暂存目录。**清不掉就吞掉，不改变结论。**
+ *
+ * `rmSync(…, { force: true })` 的 force 只忽略「不存在」：路径中间有一段是文件时，
+ * Linux 报 ENOTDIR 照样抛，Windows 却当作不存在。第一版在 catch 里直接调它 ——
+ * 本地全绿，CI（Linux）上「落不了盘」那条用例抛了出来，**「从不抛错」只在 Windows
+ * 上成立**。清理是善后，善后失败不该把一个已经有结论的失败变成一次异常。
+ */
+function removeQuietly(path: string): void {
+  try {
+    rmSync(path, { recursive: true, force: true });
+  } catch {
+    // 见上。
+  }
 }
 
 /** 边收边数；超过上限立即停，不先收完再判断。 */
