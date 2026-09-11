@@ -57,6 +57,7 @@ import { NoticeBar } from "./notice-bar";
 import { groupCapabilities } from "./capability-groups";
 import { useHostChrome } from "./host-chrome";
 
+import { ThirdPartyNotices } from "./third-party-notices";
 const UI_VERSION = "0.2.0";
 
 /**
@@ -1296,6 +1297,7 @@ function AboutSection({
                 </a>
               ))}
             </div>
+            <ThirdPartyNotices />
           </div>
         </div>
       </div>

@@ -195,6 +195,13 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
+      # 随包第三方组件的许可声明（TD-058）：清单过期（依赖变了没重生成）、或有许可证不在
+      # 允许清单里（copyleft、缺许可证），就红。住在这里的理由同上：它要扫 node_modules。
+      - name: Third-party notices guardrail (shipped deps listed, licences allowed)
+        run: pnpm lint:third-party
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
   # -- Quality gate (aggregator; stable required-check name) ------------------
   quality-gate:
     name: quality-gate

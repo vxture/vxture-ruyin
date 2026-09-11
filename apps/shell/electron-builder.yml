@@ -23,6 +23,10 @@ extraResources:
   # Built Workspace UI, served by the daemon at /.
   - from: ../ui-workspace/dist
     to: ui
+  # 随包第三方组件的许可声明全文（TD-058），pack.mjs 在 deploy 之前由
+  # scripts/release/third-party.mjs --full 写出。关于页指向的就是这一份。
+  - from: out/THIRD-PARTY-NOTICES.txt
+    to: THIRD-PARTY-NOTICES.txt
   # Built-in products (transitional, TD-006). Contracts only - no source.
   - from: ../../products
     to: products
