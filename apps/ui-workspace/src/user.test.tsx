@@ -143,23 +143,8 @@ void test("UserSlot: shows the active workspace name when signed in with one", a
   expect(await screen.findByText("某工作区")).toBeInTheDocument();
 });
 
-void test("UserSlot: online before system info has loaded shows 运行中 without a version, not stuck on the offline label", async () => {
-  const api = fakeApi({ system: vi.fn((): Promise<SystemInfo> => new Promise(() => {})) });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
-  await openPopover();
-  expect(await screen.findByText(/^已就绪/)).toBeInTheDocument();
-});
-
-void test("UserSlot: non-DPAPI key protection reads 开发态, not left blank", async () => {
-  const api = fakeApi({
-    system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "plaintext" })),
-  });
-  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
-  await openPopover();
-  expect(await screen.findByText("开发态 · 主密钥明文")).toBeInTheDocument();
-});
-
-// --- login / logout / settings ---------------------------------------------
+// 「运行环境 · 已就绪」「数据加密 · 开发态」两条原本在这里；那三行环境事实 2026-09-11
+// 挪去了标题栏的 Runtime 下拉，用例一并搬到 runtime-menu.test.tsx。
 
 void test("UserSlot: the login button is disabled while offline", async () => {
   globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
@@ -323,7 +308,13 @@ void test("UserSlot: collapsed hides the name/sub text but keeps the accessible 
   expect(screen.queryByText("郭彦豪", { selector: ".user-chip-name" })).not.toBeInTheDocument();
 });
 
-void test("UserSlot panel: the three environment rows mirror the home page word for word, and 订阅 is gone", async () => {
+/**
+ * 那三行环境事实**挪走了**（owner 2026-09-11）—— 去了标题栏的 Runtime 下拉。
+ *
+ * 钉「不在这里」而不只是删掉旧断言：同一组事实此前在首页与这一格各显示一遍，再在
+ * Runtime 下拉放一份就是第三份各自漂的副本。这条断言防的是有人好心把它们「补回来」。
+ */
+void test("UserSlot panel: 环境三行已挪去 Runtime 下拉，这一格只剩身份与账户；订阅也不在", async () => {
   const api = fakeApi({
     session: vi.fn().mockResolvedValue(session({ signedIn: true, workspace: { name: "某工作区" } })),
     system: vi.fn().mockResolvedValue(systemInfo({ version: "0.1.0", keyProtection: "dpapi" })),
@@ -331,14 +322,12 @@ void test("UserSlot panel: the three environment rows mirror the home page word 
   render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /账户/ }));
-  expect(await screen.findByText("运行环境")).toBeInTheDocument();
-  expect(screen.getByText("已就绪 · Runtime 0.1.0")).toBeInTheDocument();
-  expect(screen.getByText("数据加密")).toBeInTheDocument();
-  expect(screen.getByText("已加密 · SQLCipher")).toBeInTheDocument();
-  expect(screen.getByText("平台连接")).toBeInTheDocument();
-  expect(screen.getByText("已连接 · 某工作区")).toBeInTheDocument();
-  expect(screen.queryByText("订阅")).not.toBeInTheDocument();
-  expect(screen.queryByText("Runtime")).not.toBeInTheDocument();
+  // 等到面板真的展开，再断言那三行不在 —— 否则是在断言一个还没渲染的空面板。
+  // 锚点用「退出登录」：它只在面板里；「已登录」徽标与副标题各有一处，不唯一。
+  expect(await screen.findByText("退出登录")).toBeInTheDocument();
+  for (const gone of ["运行环境", "数据加密", "平台连接", "订阅"]) {
+    expect(screen.queryByText(gone)).not.toBeInTheDocument();
+  }
 });
 
 void test("UserSlot: the platform's avatar picture is used when the session carries one", async () => {

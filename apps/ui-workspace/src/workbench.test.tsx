@@ -93,6 +93,18 @@ vi.mock("./pending", () => ({
   ),
 }));
 
+/**
+ * 搜索收成了标题栏右侧的一个图标（owner 2026-09-11，header-search.tsx）：先点开，
+ * 才有输入框。**每次打字前都重新点开** —— 选中一条结果之后浮层会收起，先前抓住的
+ * 那个输入框已经不在了。
+ */
+async function openSearch(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+  if (!screen.queryByPlaceholderText("搜索项目、产品与动作…")) {
+    await user.click(screen.getByRole("button", { name: "搜索（Ctrl K）" }));
+  }
+  return screen.findByPlaceholderText("搜索项目、产品与动作…");
+}
+
 function product(over: Partial<ProductInfo> = {}): ProductInfo {
   return {
     id: "bidproposal",
@@ -341,7 +353,7 @@ void test("Workbench: search filters across projects, products, and actions by t
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
-  await user.type(screen.getByPlaceholderText("搜索项目、产品与动作…"), "储能");
+  await user.type(await openSearch(user), "储能");
 
   // "某储能电站投标"同时出现在侧栏项目导航与搜索结果列表里，都是预期
   // 行为——结果列表（cmdk，role="option"/"listbox"）才是这条断言要盯的地方。
@@ -360,7 +372,7 @@ void test("Workbench: search surfaces a matching action, and selecting it naviga
   // "空查询也能看到默认动作"这个前提本身不成立——真实组件里，输入框一旦清空
   // 弹层立刻关。这里改成断言真实行为：查询词只命中动作标签时，只有它出现。
   const user = userEvent.setup();
-  await user.type(screen.getByPlaceholderText("搜索项目、产品与动作…"), "设置");
+  await user.type(await openSearch(user), "设置");
 
   const results = within(await screen.findByRole("listbox"));
   expect(await results.findByText("打开设置")).toBeInTheDocument();
@@ -444,7 +456,7 @@ void test("Workbench: selecting a project from search results opens it", async (
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
-  await user.type(screen.getByPlaceholderText("搜索项目、产品与动作…"), "储能");
+  await user.type(await openSearch(user), "储能");
   const results = within(await screen.findByRole("listbox"));
   await user.click(await results.findByText("某储能电站投标"));
 
@@ -459,19 +471,18 @@ void test("Workbench: search results for a product and for 回到首页 both nav
   render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
   const user = userEvent.setup();
-  const box = screen.getByPlaceholderText("搜索项目、产品与动作…");
 
   // 产品搜索结果的 onSelect。
   await user.click(screen.getByRole("button", { name: "设置" }));
   await screen.findByTestId("settings-stub");
-  await user.type(box, "标书");
+  await user.type(await openSearch(user), "标书");
   await user.click(await within(await screen.findByRole("listbox")).findByText("标书编写"));
   await screen.findByTestId("home-stub");
 
   // "回到首页"动作的 onSelect —— 和上面是两处不同的闭包，各自要摸到。
   await user.click(screen.getByRole("button", { name: "设置" }));
   await screen.findByTestId("settings-stub");
-  await user.type(box, "首页");
+  await user.type(await openSearch(user), "首页");
   await user.click(await within(await screen.findByRole("listbox")).findByText("回到首页"));
   expect(await screen.findByTestId("home-stub")).toBeInTheDocument();
 });
@@ -571,7 +582,7 @@ void test("Workbench: search also matches a project by its productId, not just i
   await screen.findByTestId("home-stub");
 
   const user = userEvent.setup();
-  await user.type(screen.getByPlaceholderText("搜索项目、产品与动作…"), "bidproposal");
+  await user.type(await openSearch(user), "bidproposal");
   const results = within(await screen.findByRole("listbox"));
   expect(await results.findByText("无关名字")).toBeInTheDocument();
 });

@@ -1,8 +1,9 @@
 /**
  * User slot - the sidebar-footer identity strip. Built from the DS ShellPanel
  * loose parts (the docs' "散件" path): a full-width identity chip triggers a
- * ShellPanelContent popover carrying identity, runtime facts, subscription
- * and account actions. Identity is live (C1: PKCE via the system browser,
+ * ShellPanelContent popover carrying identity and account actions. (The
+ * runtime facts moved to the header's Runtime menu on 2026-09-11 —
+ * runtime-menu.tsx.) Identity is live (C1: PKCE via the system browser,
  * tokens stay in the daemon; the UI only ever sees the session summary).
  */
 
@@ -21,7 +22,7 @@ import {
   ShellPanelSection,
   StatusBadge,
 } from "@vxture/design-system";
-import { Api, type SessionInfo, type SystemInfo } from "./api";
+import { Api, type SessionInfo } from "./api";
 
 /** Poll /auth/session until signedIn flips (login completes in the browser). */
 const LOGIN_POLL_MS = 2000;
@@ -50,7 +51,6 @@ export function UserSlot({
    */
   onSignedOut: () => void;
 }) {
-  const [system, setSystem] = useState<SystemInfo | null>(null);
   const [online, setOnline] = useState(false);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,10 +81,6 @@ export function UserSlot({
     };
     void poll();
     const timer = setInterval(() => void poll(), 5000);
-    api
-      .system()
-      .then((s) => alive && setSystem(s))
-      .catch(() => {});
     void refreshSession();
     return () => {
       alive = false;
@@ -93,9 +89,10 @@ export function UserSlot({
     };
   }, [api, refreshSession]);
 
-  // 订阅那一行已去掉（owner 2026-09-03 定）：产品级的订阅事实在首页的产品卡上，
-  // 面板只说环境的三件事，与首页第一板块逐字一致。productIds 仍在签名里，
-  // 是为了不动 workbench 的调用；这里不再用它。
+  // 订阅那一行已去掉（owner 2026-09-03 定）：产品级的订阅事实在首页的产品卡上。
+  // 环境那三件事原本也在这一格，2026-09-11 挪去了标题栏的 Runtime 下拉 —— 这一格
+  // 如今只管身份与账户。productIds 仍在签名里，是为了不动 workbench 的调用；
+  // 这里不再用它。
   void productIds;
 
   const startLogin = async () => {
@@ -167,23 +164,9 @@ export function UserSlot({
       ? "请重新登录以继续"
       : "未连接";
 
-  /**
-   * 三行环境事实，**与首页第一板块逐字一致**（名称、结论、细节都同一套词，
-   * 中文不夹英文）：
-   *   运行环境  就绪 · 版本 / 未连接
-   *   数据加密  已加密 · DPAPI / 开发态 · 明文
-   *   平台连接  已连接 · 工作区 / 未登录
-   */
-  const runtimeLine = online ? `已就绪${system?.version ? ` · Runtime ${system.version}` : ""}` : "未连接";
-  // 与首页逐字一致；DPAPI 是主密钥的保护，不是加密算法（见 home.tsx 同处注释）。
-  const encryptionLine = system
-    ? system.keyProtection === "dpapi"
-      ? "已加密 · SQLCipher"
-      : "开发态 · 主密钥明文"
-    : "…";
-  const platformLine = signedIn
-    ? `已连接${session?.workspace?.name ? ` · ${session.workspace.name}` : ""}`
-    : "未登录";
+  // 运行环境 / 数据加密 / 平台连接三行**挪到标题栏的 Runtime 下拉里了**（runtime-menu.tsx，
+  // owner 2026-09-11）。它们是运行时的事实，不是账户的事实；留在这里就是第三份
+  // 与首页各自漂的副本。这一格只管身份与账户。
   const avatarSrc = signedIn ? session?.profile?.picture : undefined;
 
   return (
@@ -240,11 +223,6 @@ export function UserSlot({
                 : []),
             ]}
           />
-          <ShellPanelSection>
-            <ShellPanelRow icon="cpu" label="运行环境" value={runtimeLine} />
-            <ShellPanelRow icon="shield-check" label="数据加密" value={encryptionLine} />
-            <ShellPanelRow icon="buildings" label="平台连接" value={platformLine} />
-          </ShellPanelSection>
           {!signedIn && (
             <ShellPanelSection>
               <Button
