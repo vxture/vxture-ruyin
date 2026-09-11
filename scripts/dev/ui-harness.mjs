@@ -26,7 +26,8 @@
  * 例：起一个每回合几秒的本地假能力面，再把上限压到 1，排队就看得见了 ——
  * 用 mock 看排队，看到的会是「没有排队」，而那不是因为上限生效，是没人排。
  */
-import { existsSync, mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -46,6 +47,9 @@ const { createLocalApi } = await import(`${ROOT}/apps/local-host/dist/server.js`
 const { createProductUiServer, productUiPortFor } = await import(
   `${ROOT}/apps/local-host/dist/product-ui-server.js`
 );
+const { fetchUiBundle } = await import(`${ROOT}/apps/local-host/dist/ui-fetch.js`);
+// 只用它把测试包打成 zip —— 运行时从不写包，这段只在观察台与测试里出现。
+const { makeTestZip } = await import(`${ROOT}/apps/local-host/dist/pkg-testkit.js`);
 const { checkTarget, readLocation, writeLocation } = await import(
   `${ROOT}/apps/local-host/dist/data-location.js`
 );
@@ -70,16 +74,16 @@ const { BundledToolServers } = await import(`${ROOT}/apps/local-host/dist/tool-s
 const { readFileSync } = await import("node:fs");
 
 const PORT = Number(process.env.PORT ?? 17470);
-// 产品界面服务器（ADR-022 片三 a）：端口照守护进程的规矩 +1。根指向仓内的**测试包**
-// —— 观察台走不到的路就是没人验过的路（TD-054 / TD-056 的教训）。那个测试包会试着读
-// 工作台的会话令牌、摸父窗口的 DOM，再走一次片二的桥，把三样结果报回来。
-const PRODUCT_UI_ROOT = join(repoRoot, "scripts", "dev", "product-ui-fixture");
-// port 在产品界面服务器真正绑上之后回填：冒烟用 PORT=0，第一版写的「+1」请求的是
-// **端口 1**，Linux 上直接 EACCES（Windows 不管这个，所以本地一路绿）。
-const productUi = { root: PRODUCT_UI_ROOT, port: 0 };
 const TOKEN = "uiharness";
 const repo = repoRoot.replaceAll("\\", "/").replace(/\/$/, "");
 const dataDir = mkdtempSync(join(tmpdir(), "ruyin-uiharness-"));
+// 产品界面服务器（ADR-022 片三 a）：端口照守护进程的规矩 +1。**根是产品库**，与装机
+// 态同一处（ADR-023）：测试包不再直接放进某个目录，而是**真的走一遍取回管线**落到
+// 这里（见下面 fetchUiBundle 那一段）—— 观察台走不到的路就是没人验过的路（TD-054 /
+// TD-056 的教训）。port 在服务器真正绑上之后回填：冒烟用 PORT=0，第一版写的「+1」
+// 请求的是**端口 1**，Linux 上直接 EACCES（Windows 不管这个，所以本地一路绿）。
+const PRODUCT_STORE = join(dataDir, "products");
+const productUi = { root: PRODUCT_STORE, port: 0 };
 // 指针文件放在数据目录**之外**（与装机态同一条道理：它不能跟着数据搬走）。
 const locationFile = join(tmpdir(), `ruyin-uiharness-location-${process.pid}.json`);
 let harnessLocation = readLocation(locationFile);
@@ -162,10 +166,36 @@ const runtime = new ProjectRuntime({
   contextBudgetBytes: contextBudget.bytes,
 });
 
+// ---- 产品界面：真的走一遍 ADR-023 的取回管线 ------------------------------------
+//
+// 仓内测试包（scripts/dev/product-ui-fixture/bidproposal）打成 zip、算摘要，钉进一份
+// **观察台专用**的 0.2 契约（products/bidproposal 那份夹具本身不带界面，TD-033）。
+// 然后交给真实的 fetchUiBundle：摘要校验、护栏解包、原子落盘一步不少，**只换掉
+// 运输** —— 字节从内存来，不从网络来。项目用这份契约建，快照里就钉着这个摘要。
+// 那个测试包会试着读工作台的会话令牌、摸父窗口的 DOM，再走一次片二的桥，把三样
+// 结果报回来。
+const fixtureUiDir = join(repoRoot, "scripts", "dev", "product-ui-fixture", "bidproposal");
+const uiZip = makeTestZip(
+  readdirSync(fixtureUiDir).map((name) => ({ name, data: readFileSync(join(fixtureUiDir, name)), deflate: true })),
+);
+const bidWithUi = structuredClone(bid);
+bidWithUi.contract = "0.2";
+bidWithUi.product.ui = { sha256: createHash("sha256").update(uiZip).digest("hex") };
+const landed = await fetchUiBundle(bidWithUi, {
+  baseUrl: "http://observatory.invalid",
+  storeDir: PRODUCT_STORE,
+  fetchImpl: async () => new Response(uiZip),
+});
+if (landed.status !== "fetched" && landed.status !== "present") {
+  // 管线在观察台上走不通，就是在装机态上也走不通 —— 当场停，不带病起来。
+  throw new Error(`[uiharness] product ui pipeline failed: ${JSON.stringify(landed)}`);
+}
+console.log(`[uiharness] product ui landed via fetchUiBundle: ${landed.sha256.slice(0, 12)}…`);
+
 const names = ["某储能电站 EPC 投标", "城市轨道信号系统投标", "数据中心机电总包投标"];
 let first;
 for (const name of names) {
-  const meta = await runtime.createProject(bid, name, "wsp_demo");
+  const meta = await runtime.createProject(bidWithUi, name, "wsp_demo");
   first ??= meta.id;
   await runtime.addGrant(meta.id, work, "readwrite");
 }
@@ -332,7 +362,7 @@ server.listen(PORT, "127.0.0.1", () => {
   // 带走了；产品界面起不来时，观察台其余部分照样该能用。
   const workspacePort = server.address().port;
   const productUiServer = createProductUiServer({
-    root: PRODUCT_UI_ROOT,
+    root: PRODUCT_STORE,
     workspaceOrigin: `http://127.0.0.1:${workspacePort}`,
   });
   productUiServer.on("error", (cause) =>

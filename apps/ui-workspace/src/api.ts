@@ -756,13 +756,18 @@ export class Api {
       "POST",
     );
   /**
-   * 这个项目的产品有没有自己的界面、在哪个 origin（ADR-022 片三 a）。origin 由守护
-   * 进程算，界面只拿来用、不自己拼 —— 拼错一个字符就是换了一个 origin。
+   * 这个项目的产品有没有自己的界面、装哪个地址（ADR-022 片三 a；ADR-023）。地址由
+   * 守护进程算，界面只拿来用、不自己拼 —— 拼错一个字符就是换了一个 origin。
+   * `entry` 只在 `available` 时给；不可用时 `reason` 说为什么。
    */
   productSurface = (id: string) =>
-    this.call<{ productId: string; available: boolean; origin?: string }>(
-      `/projects/${id}/product-surface`,
-    );
+    this.call<{
+      productId: string;
+      available: boolean;
+      origin?: string;
+      entry?: string;
+      reason?: "no_ui_server" | "not_declared" | "not_fetched";
+    }>(`/projects/${id}/product-surface`);
   workspace = (id: string) => this.call<ProjectView>(`/projects/${id}`);
   taskInstances = (id: string) =>
     this.call<TaskInstance[]>(`/projects/${id}/tasks`);

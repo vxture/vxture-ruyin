@@ -1,5 +1,5 @@
 /**
- * 产品界面静态服务器（product-ui-server.ts，ADR-022 片三 a）。
+ * 产品界面静态服务器（product-ui-server.ts，ADR-022 片三 a；ADR-023 片 3b-3 起按摘要出）。
  *
  * 这台服务器存在的理由是**给每个产品一个自己的 origin**：
  *   - 与工作台不同 → 碰不到工作台 `localStorage` 里的会话令牌；
@@ -28,6 +28,9 @@ import {
 } from "./product-ui-server.js";
 
 const WORKSPACE = "http://127.0.0.1:7420";
+/** 两份界面包的摘要。服务器不重算摘要（目录在 = 取回时校验过），所以这里用固定串。 */
+const SHA_A = "a".repeat(64);
+const SHA_B = "b".repeat(64);
 
 interface Reply {
   status: number;
@@ -54,13 +57,18 @@ function get(port: number, host: string, path: string, method = "GET"): Promise<
 }
 
 async function withServer(body: (port: number) => Promise<void>): Promise<void> {
+  // 布局与真实的产品库一致（ADR-023）：<root>/<产品>/ui/<摘要>/…，旁边是版本目录。
   const root = mkdtempSync(join(tmpdir(), "ruyin-product-ui-"));
-  mkdirSync(join(root, "bidproposal", "assets"), { recursive: true });
-  writeFileSync(join(root, "bidproposal", "index.html"), "<p>bid</p>");
-  writeFileSync(join(root, "bidproposal", "assets", "app.js"), "console.log(1)");
+  const a = join(root, "bidproposal", "ui", SHA_A);
+  mkdirSync(join(a, "assets"), { recursive: true });
+  writeFileSync(join(a, "index.html"), "<p>bid</p>");
+  writeFileSync(join(a, "assets", "app.js"), "console.log(1)");
+  // 同一个产品目录下的契约与来源记录：**界面的 origin 上一个都不该取得到**。
+  mkdirSync(join(root, "bidproposal", "1.0.0"), { recursive: true });
+  writeFileSync(join(root, "bidproposal", "1.0.0", "ruyin.product.yaml"), "CONTRACT-NOT-FOR-THE-UI");
   // 另一个产品。名字以 bidproposal 开头 —— 第一版正是在这个形状上漏的。
-  mkdirSync(join(root, "bidproposal2"), { recursive: true });
-  writeFileSync(join(root, "bidproposal2", "secret.js"), "SECRET-OF-ANOTHER-PRODUCT");
+  mkdirSync(join(root, "bidproposal2", "ui", SHA_B), { recursive: true });
+  writeFileSync(join(root, "bidproposal2", "ui", SHA_B, "secret.js"), "SECRET-OF-ANOTHER-PRODUCT");
 
   // 端口交给系统分配 —— 服务器按**实际绑到的**端口认 Host，不需要事先知道是几。
   const server: Server = createProductUiServer({ root, workspaceOrigin: WORKSPACE });
@@ -84,17 +92,59 @@ void test("产品界面服务器: 每个产品一个 origin —— 不同产品�
   assert.notEqual(b, WORKSPACE);
 });
 
-void test("产品界面服务器: 按 Host 出该产品自己的文件，缺省是 index.html", async () => {
+void test("产品界面服务器: 按 Host 与摘要出该产品那一份界面包，缺省是 index.html", async () => {
   await withServer(async (port) => {
     const host = `bidproposal.localhost:${port}`;
-    const index = await get(port, host, "/");
+    const index = await get(port, host, `/${SHA_A}/`);
     assert.equal(index.status, 200);
     assert.equal(index.body, "<p>bid</p>");
     assert.match(String(index.headers["content-type"]), /text\/html/);
 
-    const js = await get(port, host, "/assets/app.js");
+    const js = await get(port, host, `/${SHA_A}/assets/app.js`);
     assert.equal(js.status, 200);
     assert.match(String(js.headers["content-type"]), /javascript/);
+  });
+});
+
+/** 不带摘要的地址一律没有：界面只从校验过的那一份出。 */
+void test("产品界面服务器: 路径第一段不是摘要 → 404（包括根）", async () => {
+  await withServer(async (port) => {
+    const host = `bidproposal.localhost:${port}`;
+    for (const path of ["/", "/index.html", "/assets/app.js", `/${SHA_A.slice(1)}/`, `/${SHA_A.toUpperCase()}/`]) {
+      assert.equal((await get(port, host, path)).status, 404, path);
+    }
+    // 摘要格式对、但本地没有这一份 → 404，不回退到别的摘要。
+    assert.equal((await get(port, host, `/${"c".repeat(64)}/`)).status, 404);
+  });
+});
+
+/** `/<摘要>` 不带斜杠时包里的相对引用会按 `/` 解析、全部落空 —— 补上斜杠。 */
+void test("产品界面服务器: /<摘要> 补斜杠（308），相对引用才解析得对", async () => {
+  await withServer(async (port) => {
+    const res = await get(port, `bidproposal.localhost:${port}`, `/${SHA_A}`);
+    assert.equal(res.status, 308);
+    assert.equal(res.headers["location"], `/${SHA_A}/`);
+    assert.match(String(res.headers["content-security-policy"] ?? ""), /connect-src 'none'/);
+  });
+});
+
+/**
+ * **同一个产品目录下的契约，界面的 origin 上取不到。** 判断「在不在里面」对着的是
+ * 那一份界面包的目录，不是产品目录 —— 否则 `/<摘要>/../../1.0.0/ruyin.product.yaml`
+ * 这类路径离契约只差一次规整。
+ */
+void test("产品界面服务器: 界面包之外的东西（同产品的契约）取不到", async () => {
+  await withServer(async (port) => {
+    const host = `bidproposal.localhost:${port}`;
+    for (const path of [
+      `/${SHA_A}/../../1.0.0/ruyin.product.yaml`,
+      `/${SHA_A}/%2e%2e/%2e%2e/1.0.0/ruyin.product.yaml`,
+      `/${SHA_A}/..%2f..%2f1.0.0%2fruyin.product.yaml`,
+      "/1.0.0/ruyin.product.yaml",
+    ]) {
+      const res = await get(port, host, path);
+      assert.ok(!res.body.includes("CONTRACT-NOT-FOR-THE-UI"), `${path} 漏出了契约`);
+    }
   });
 });
 
@@ -107,12 +157,16 @@ void test("产品界面服务器: 按 Host 出该产品自己的文件，缺省�
 void test("产品界面服务器: A 的 origin 下取不到 B 的文件（名字前缀相同也不行）", async () => {
   await withServer(async (port) => {
     const hostA = `bidproposal.localhost:${port}`;
-    for (const path of ["/secret.js", "/../bidproposal2/secret.js", "/%2e%2e/bidproposal2/secret.js"]) {
+    for (const path of [
+      `/${SHA_B}/secret.js`,
+      `/${SHA_A}/../../../bidproposal2/ui/${SHA_B}/secret.js`,
+      `/${SHA_A}/%2e%2e/%2e%2e/%2e%2e/bidproposal2/ui/${SHA_B}/secret.js`,
+    ]) {
       const res = await get(port, hostA, path);
       assert.ok(!res.body.includes("SECRET-OF-ANOTHER-PRODUCT"), `${path} 漏出了别的产品的文件`);
     }
     // 对照：用 B 自己的 origin 就取得到 —— 证明上面拦住的是「跨产品」，不是「文件不存在」。
-    const own = await get(port, `bidproposal2.localhost:${port}`, "/secret.js");
+    const own = await get(port, `bidproposal2.localhost:${port}`, `/${SHA_B}/secret.js`);
     assert.equal(own.status, 200);
   });
 });
@@ -134,7 +188,7 @@ void test("产品界面服务器: 形状不对的 Host 一律 404", async () => 
       `a.bidproposal.localhost:${port}`,
       `-bad.localhost:${port}`,
     ]) {
-      const res = await get(port, host, "/");
+      const res = await get(port, host, `/${SHA_A}/`);
       assert.equal(res.status, 404, host);
     }
   });
@@ -170,8 +224,8 @@ void test("产品界面服务器: 没有任何 API；写方法 405", async () =>
 void test("产品界面服务器: 成功与失败的回应都带 CSP，且锁死外连与嵌入方", async () => {
   await withServer(async (port) => {
     const cases: Array<[string, string]> = [
-      [`bidproposal.localhost:${port}`, "/"],
-      [`bidproposal.localhost:${port}`, "/missing.js"],
+      [`bidproposal.localhost:${port}`, `/${SHA_A}/`],
+      [`bidproposal.localhost:${port}`, `/${SHA_A}/missing.js`],
       [`127.0.0.1:${port}`, "/"],
     ];
     for (const [host, path] of cases) {
@@ -203,7 +257,7 @@ void test("productUiPortFor: 固定端口 +1；端口 0 仍是 0；显式给了�
 void test("产品界面服务器: 端口由系统分配时照样认得出自己的 Host", async () => {
   await withServer(async (port) => {
     assert.ok(port > 0);
-    const res = await get(port, `bidproposal.localhost:${port}`, "/");
+    const res = await get(port, `bidproposal.localhost:${port}`, `/${SHA_A}/`);
     assert.equal(res.status, 200);
   });
 });

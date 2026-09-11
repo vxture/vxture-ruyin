@@ -412,11 +412,12 @@ const codeSigning = resolveCodeSigning(dirname(fileURLToPath(import.meta.url)), 
  * 冒烟 17421，两套自动错开；而且**固定** —— 产品界面的 origin
  * （`<产品>.localhost:<端口>`）要跨重启稳定，否则产品自己的存储每次重启都丢。
  *
- * 根缺省在数据目录下，今天是空的：界面包从哪来是片三 b 的题（契约里钉一个 UI 包 +
- * sha256，像组件那样取回缓存）。在那之前这台服务器什么都不出，所有产品都是没有
- * 界面的产品 —— 那本来就是缺省。
+ * **根就是产品库**（ADR-023）：界面包按摘要落在 `<产品库>/<产品>/ui/<sha256>/`，由
+ * 契约拉取之后的 `fetchUiAfterContract` 取回、校验、落盘。**没有别的放文件的口子**
+ * —— 原先的 `RUYIN_PRODUCT_UI_DIR` 已经拿掉：留着它，就有一条不经摘要校验就能让
+ * 这台服务器出文件的路。
  */
-const productUiRoot = process.env["RUYIN_PRODUCT_UI_DIR"] ?? join(dataDir, "product-ui");
+const productUiRoot = registry.storeDir;
 /**
  * 交给服务端的那一份。**`port` 在产品界面服务器真正绑上之后才回填** —— 请求的端口
  * 可能是 0（系统分配），那时只有绑上之后才知道是几。服务端每次问 origin 时读它，

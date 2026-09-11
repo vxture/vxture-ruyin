@@ -1,5 +1,5 @@
 /**
- * 产品界面的沙箱宿主（product-surface.tsx，ADR-022 片三 a）。
+ * 产品界面的沙箱宿主（product-surface.tsx，ADR-022 片三 a；ADR-023 起装守护进程给的入口）。
  *
  * 这里钉的是**配置**，因为这个组件失守的方式都是「配错了，但照常能用」：
  * - sandbox 属性多一项就多一条出路，少了 `allow-same-origin` 桥就静默失效；
@@ -14,7 +14,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import type { Api } from "./api";
 import { PRODUCT_SANDBOX, ProductSurface, sameOrigin } from "./product-surface";
 
-function fakeApi(surface: { productId: string; available: boolean; origin?: string }): Api {
+const SHA = "a".repeat(64);
+const ORIGIN = "http://bidproposal.localhost:7421";
+const ENTRY = `${ORIGIN}/${SHA}/`;
+
+function fakeApi(surface: { productId: string; available: boolean; origin?: string; entry?: string }): Api {
   return {
     productSurface: vi.fn().mockResolvedValue(surface),
     bridgeToken: vi.fn().mockResolvedValue({ token: "t", expiresAt: Date.now() + 60_000, productId: "p" }),
@@ -34,21 +38,35 @@ test("PRODUCT_SANDBOX: 恰好这三项，一项不多一项不少", () => {
   );
 });
 
-test("ProductSurface: 有界面时装一个 iframe，src 是产品自己的 origin，sandbox 照常量给", async () => {
-  const api = fakeApi({ productId: "bidproposal", available: true, origin: "http://bidproposal.localhost:7421" });
+test("ProductSurface: 有界面时装一个 iframe，src 是守护进程给的入口（按摘要），sandbox 照常量给", async () => {
+  const api = fakeApi({ productId: "bidproposal", available: true, origin: ORIGIN, entry: ENTRY });
   render(<ProductSurface api={api} projectId="prj_1" />);
   const frame = (await screen.findByTitle("产品界面")) as HTMLIFrameElement;
-  expect(frame.getAttribute("src")).toBe("http://bidproposal.localhost:7421/");
+  expect(frame.getAttribute("src")).toBe(ENTRY);
   expect(frame.getAttribute("sandbox")).toBe(PRODUCT_SANDBOX);
   expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
 });
 
 /** 没有界面是缺省 —— 什么都不装，而不是装一个会 404 的 iframe。 */
 test("ProductSurface: 守护进程说没有界面时什么都不渲染", async () => {
-  const api = fakeApi({ productId: "bidproposal", available: false, origin: "http://bidproposal.localhost:7421" });
+  const api = fakeApi({ productId: "bidproposal", available: false, origin: ORIGIN });
   const { container } = render(<ProductSurface api={api} projectId="prj_1" />);
   await waitFor(() => expect(api.productSurface).toHaveBeenCalled());
   expect(container.querySelector("iframe")).toBeNull();
+});
+
+/** 说可用却不给入口、或入口不是地址：不自己拼一个，按没有界面处理。 */
+test("ProductSurface: 没有入口或入口解析不了时不装（不自己拼地址）", async () => {
+  for (const surface of [
+    { productId: "bidproposal", available: true, origin: ORIGIN },
+    { productId: "bidproposal", available: true, origin: ORIGIN, entry: "not a url" },
+  ]) {
+    const api = fakeApi(surface);
+    const { container, unmount } = render(<ProductSurface api={api} projectId="prj_1" />);
+    await waitFor(() => expect(api.productSurface).toHaveBeenCalled());
+    expect(container.querySelector("iframe")).toBeNull();
+    unmount();
+  }
 });
 
 /**
@@ -60,7 +78,28 @@ test("ProductSurface: 守护进程说没有界面时什么都不渲染", async (
  * 产品界面挪到工作台同一个端口上。
  */
 test("ProductSurface: 产品 origin 与工作台同源时拒绝渲染 iframe", async () => {
-  const api = fakeApi({ productId: "bidproposal", available: true, origin: window.location.origin });
+  const api = fakeApi({
+    productId: "bidproposal",
+    available: true,
+    origin: window.location.origin,
+    entry: `${window.location.origin}/${SHA}/`,
+  });
+  const { container } = render(<ProductSurface api={api} projectId="prj_1" />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("同源");
+  expect(container.querySelector("iframe")).toBeNull();
+});
+
+/**
+ * **核的是真正要装的那个地址，不是旁边的 origin 字段。** 两个字段说法不一时，按
+ * 入口算 —— 否则 origin 字段写着一个子域、入口却指回工作台，拦截就被绕过去了。
+ */
+test("ProductSurface: 同源拦截看入口地址本身，不看 origin 字段", async () => {
+  const api = fakeApi({
+    productId: "bidproposal",
+    available: true,
+    origin: ORIGIN,
+    entry: `${window.location.origin}/${SHA}/`,
+  });
   const { container } = render(<ProductSurface api={api} projectId="prj_1" />);
   expect(await screen.findByRole("alert")).toHaveTextContent("同源");
   expect(container.querySelector("iframe")).toBeNull();
@@ -92,8 +131,8 @@ test("ProductSurface: 问不到守护进程时按没有界面处理，不炸", a
  * 由这里把正确的窗口喂进去。
  */
 test("ProductSurface: 桥只认这扇 iframe 的消息，并为这个项目换凭据", async () => {
-  const origin = "http://bidproposal.localhost:7421";
-  const api = fakeApi({ productId: "bidproposal", available: true, origin });
+  const origin = ORIGIN;
+  const api = fakeApi({ productId: "bidproposal", available: true, origin, entry: ENTRY });
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })),
