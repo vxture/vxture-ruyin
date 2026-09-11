@@ -64,6 +64,11 @@ export interface ProductIdentity {
   version: string;
   publisher: string;
   runtime: { minimum: string };
+  /**
+   * 产品自己的界面（ADR-023，contract ≥ 0.2）。不写 = 这个产品没有自己的界面 ——
+   * 那是缺省，不是缺陷。取回、校验、装载都按这一个摘要。
+   */
+  ui?: { sha256: string };
 }
 
 export interface ProjectDefinition {

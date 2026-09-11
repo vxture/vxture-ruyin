@@ -502,3 +502,67 @@ test("skills: an Agent Skills name is kebab-case, at most 64 characters (L1)", (
   });
   assert.ok(!good.errors.some((e) => e.path.includes("skills")));
 });
+
+// --- product.ui / R17 (ADR-023) ----------------------------------------------
+
+const DIGEST = "3f2a".padEnd(64, "0");
+
+test("product.ui: a 0.2 contract may pin a UI bundle by digest", () => {
+  const r = mutate((c) => {
+    c.contract = "0.2";
+    c.product.ui = { sha256: DIGEST };
+  });
+  assert.deepEqual(r.errors, []);
+});
+
+test("product.ui: 0.2 without ui is still a product without its own UI, not an error", () => {
+  const r = mutate((c) => {
+    c.contract = "0.2";
+  });
+  assert.deepEqual(r.errors, []);
+});
+
+/**
+ * 0.1 的契约带 ui：新运行时读得懂、旧运行时报一句莫名的结构错误 —— 同一份字节
+ * 按谁来读意思不同。字段得跟着版本走，所以拒。
+ */
+test("R17: product.ui in a 0.1 contract is refused, naming the version it needs", () => {
+  const r = mutate((c) => {
+    c.product.ui = { sha256: DIGEST };
+  });
+  assert.deepEqual(rules(r), ["R17"]);
+  assert.equal(r.errors[0]?.path, "product.ui");
+  assert.match(r.errors[0]?.message ?? "", /needs contract "0\.2" or later/);
+});
+
+test("R17: a later major version is not mistaken for an older one", () => {
+  // "1.0" 是不受支持的版本（R1 管），但不能被 R17 当成比 0.2 老 —— 两条规则各说各的。
+  const r = mutate((c) => {
+    c.contract = "1.0";
+    c.product.ui = { sha256: DIGEST };
+  });
+  assert.deepEqual(rules(r), ["R1"]);
+});
+
+test("product.ui (L1): the digest is 64 lowercase hex, and ui carries nothing else", () => {
+  for (const bad of [DIGEST.toUpperCase(), DIGEST.slice(1), `${DIGEST}0`, "not-a-digest"]) {
+    const r = mutate((c) => {
+      c.contract = "0.2";
+      c.product.ui = { sha256: bad };
+    });
+    assert.ok(r.errors.some((e) => e.rule === "L1" && e.path === "product.ui.sha256"), bad);
+  }
+  // 地址、入口都不收：契约钉摘要不钉地址，入口固定为 index.html。
+  for (const extra of ["url", "entry"]) {
+    const r = mutate((c) => {
+      c.contract = "0.2";
+      c.product.ui = { sha256: DIGEST, [extra]: "x" } as { sha256: string };
+    });
+    assert.ok(r.errors.some((e) => e.rule === "L1" && e.path === "product.ui"), extra);
+  }
+  const missing = mutate((c) => {
+    c.contract = "0.2";
+    c.product.ui = {} as { sha256: string };
+  });
+  assert.ok(missing.errors.some((e) => e.rule === "L1" && e.path === "product.ui"));
+});

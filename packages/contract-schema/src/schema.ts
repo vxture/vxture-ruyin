@@ -6,7 +6,12 @@
  * is what structurally enforces R6 (no model/provider binding keys).
  */
 
-export const SUPPORTED_CONTRACT_VERSIONS = ["0.1"];
+/**
+ * 0.2 只多一个可选字段 `product.ui`（ADR-023）。为一个可选字段升版本，是因为
+ * `product` 是 `additionalProperties: false`：0.1 的运行时见到 `ui` 报一句莫名的
+ * 结构错误；升了版本，它报「契约版本不受支持」—— 说的是真话。
+ */
+export const SUPPORTED_CONTRACT_VERSIONS = ["0.1", "0.2"];
 
 const ID = { type: "string", pattern: "^[a-z][a-z0-9_]*$" };
 /**
@@ -85,6 +90,15 @@ export const contractJsonSchema = {
           additionalProperties: false,
           required: ["minimum"],
           properties: { minimum: SEMVER },
+        },
+        // ADR-023：契约钉界面包的摘要，不钉地址。只有这一个字段 —— 入口固定为包根
+        // 的 index.html，不开配置项（少一个可配置项就少一种路径穿越的写法）。
+        // 「只能出现在 0.2 起」是 R17，不在这里：那是跨字段的判断。
+        ui: {
+          type: "object",
+          additionalProperties: false,
+          required: ["sha256"],
+          properties: { sha256: { type: "string", pattern: "^[0-9a-f]{64}$" } },
         },
       },
     },

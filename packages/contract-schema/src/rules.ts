@@ -418,7 +418,34 @@ const r16: Rule = (c, errors) => {
   });
 };
 
-const RULES: Rule[] = [r1, r3, r4, r5, r7, r8, r9, r10, r11, r13, r14, r15, r16];
+/**
+ * R17 - `product.ui` (ADR-023) only in a contract that knows about it (≥ 0.2).
+ *
+ * A 0.1 contract carrying `ui` would load on a new runtime and be refused with
+ * an opaque structural error on an old one - the same bytes meaning two things
+ * depending on who reads them. The version is how a contract says which fields
+ * it may use, so the field has to follow the version.
+ *
+ * Only the static half lives here. Whether the fetched bytes match the digest
+ * and carry an index.html is a load-time check (L3) in the host, and a failure
+ * there means "this product has no UI for now" - never "reject the contract".
+ */
+const UI_SINCE = [0, 2] as const;
+const r17: Rule = (c, errors) => {
+  if (c.product.ui === undefined) return;
+  const [major = 0, minor = 0] = c.contract.split(".").map((x) => Number.parseInt(x, 10));
+  if (major < UI_SINCE[0] || (major === UI_SINCE[0] && minor < UI_SINCE[1])) {
+    err(
+      errors,
+      "R17",
+      "product.ui",
+      `product.ui needs contract "${UI_SINCE.join(".")}" or later (this contract says "${c.contract}") - ` +
+        `an older runtime cannot read the field, so the contract has to say it uses it`,
+    );
+  }
+};
+
+const RULES: Rule[] = [r1, r3, r4, r5, r7, r8, r9, r10, r11, r13, r14, r15, r16, r17];
 
 export function runRules(contract: RuyinContract): ValidationError[] {
   const errors: ValidationError[] = [];
