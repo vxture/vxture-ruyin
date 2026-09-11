@@ -1236,3 +1236,13 @@ void test("归档：契约没声明 restore 就不给恢复按钮", async () => 
   await screen.findByText(/项目已归档/);
   expect(screen.queryByRole("button", { name: "恢复项目" })).not.toBeInTheDocument();
 });
+
+/** 契约声明了 archive 没声明 restore：入口照给，但先说清归档是单向的。 */
+void test("归档：契约没声明 restore 时，入口旁说清归档是单向的", async () => {
+  const api = fakeApi({
+    workspace: vi.fn().mockResolvedValue(projectView({ operations: ["create", "open", "archive"] })),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
+  expect(await screen.findByText(/这个产品不支持恢复，归档是单向的/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "归档" })).toBeInTheDocument();
+});

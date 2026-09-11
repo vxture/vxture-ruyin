@@ -885,3 +885,23 @@ void test("project 事件：重拉侧栏的项目列表；是打开着的那个�
   act(() => listener?.({ kind: "pending" }));
   expect((api.projects as ReturnType<typeof vi.fn>).mock.calls.length).toBe(listsBefore + 2);
 });
+
+/** 搜索里归档的项目照样找得到，但标明「已归档」—— 点进去是只读的，不该让人以为是在用的。 */
+void test("搜索：归档的项目照样找得到，描述里标「已归档」", async () => {
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({
+    projects: vi.fn().mockResolvedValue(
+      projectList([
+        workspace({ id: "prj_live", name: "储能在用" }),
+        workspace({ id: "prj_old", name: "储能归档", archivedAt: "2026-09-11T10:00:00Z" }),
+      ]),
+    ),
+  });
+  render(<Workbench api={api} onSignedOut={() => {}} />);
+  await screen.findByTestId("home-stub");
+  const user = userEvent.setup();
+  await user.type(await openSearch(user), "储能");
+  const results = within(await screen.findByRole("listbox"));
+  expect(await results.findByText(/· 已归档/)).toBeInTheDocument();
+  expect(results.getAllByText(/bidproposal · project/)).toHaveLength(2);
+});
