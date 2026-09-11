@@ -28,9 +28,11 @@
  * 真正装进 iframe 的是它，要核的也就是它，不是旁边另一个字段说的 origin。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@vxture/design-system";
 import type { Api } from "./api";
 import { ProductBridge } from "./product-bridge";
+import { declaresUi, type SurfaceInfo } from "./product-surface-info";
 
 /**
  * 沙箱允许的能力，**逐项写死**。多给一项就多一条出路：
@@ -50,8 +52,7 @@ export function sameOrigin(a: string, b: string): boolean {
   }
 }
 
-type Surface =
-  | { state: "loading" }
+type Frame =
   | { state: "none" }
   | { state: "refused"; origin: string }
   | { state: "ready"; origin: string; entry: string };
@@ -65,43 +66,32 @@ function originOf(url: string): string | undefined {
   }
 }
 
-export function ProductSurface({ api, projectId }: { api: Api; projectId: string }) {
-  const [surface, setSurface] = useState<Surface>({ state: "loading" });
-  const frame = useRef<HTMLIFrameElement>(null);
+/** 从守护进程的回答推出该装什么。纯函数：同一个回答永远是同一个结论。 */
+function frameOf(s: SurfaceInfo): Frame {
+  const origin = s.available && s.entry ? originOf(s.entry) : undefined;
+  if (!s.entry || origin === undefined) return { state: "none" };
+  // 兜底拦截：同源就不装（见文件头第 1、2 条的依赖关系）。
+  if (sameOrigin(origin, window.location.origin)) return { state: "refused", origin };
+  return { state: "ready", origin, entry: s.entry };
+}
 
-  useEffect(() => {
-    let alive = true;
-    api
-      .productSurface(projectId)
-      .then((s) => {
-        if (!alive) return;
-        const origin = s.available && s.entry ? originOf(s.entry) : undefined;
-        if (!s.entry || origin === undefined) {
-          setSurface({ state: "none" });
-          return;
-        }
-        // 兜底拦截：同源就不装（见文件头第 1、2 条的依赖关系）。
-        if (sameOrigin(origin, window.location.origin)) {
-          setSurface({ state: "refused", origin });
-          return;
-        }
-        setSurface({ state: "ready", origin, entry: s.entry });
-      })
-      .catch(() => alive && setSurface({ state: "none" }));
-    return () => {
-      alive = false;
-    };
-  }, [api, projectId]);
+/**
+ * 沙箱宿主本身：把守护进程给的入口装进 iframe、接上桥。**不自己去问**有没有界面
+ * —— 那份回答侧栏也要用（列不列这一格、默认进哪），由上层问一次传下来。
+ */
+export function ProductSurface({ api, projectId, surface }: { api: Api; projectId: string; surface: SurfaceInfo }) {
+  const frameState = useMemo(() => frameOf(surface), [surface]);
+  const frame = useRef<HTMLIFrameElement>(null);
 
   // iframe 装好之后才接桥：`source` 必须是**这一扇**窗口，片二的桥只认它。
   useEffect(() => {
-    if (surface.state !== "ready") return;
+    if (frameState.state !== "ready") return;
     const win = frame.current?.contentWindow;
     if (!win) return;
     const bridge = new ProductBridge({
       getBridgeToken: () => api.bridgeToken(projectId),
       source: win,
-      targetOrigin: surface.origin,
+      targetOrigin: frameState.origin,
     });
     // **构造不等于在听。** 桥的监听器挂在 attach() 里，不在构造函数里 —— 第一版
     // 这里只构造、卸载时 detach()，唯独没 attach()：桥对象在、看起来接好了，却一个
@@ -109,13 +99,13 @@ export function ProductSurface({ api, projectId }: { api: Api; projectId: string
     // 一条」的用例抓住的；只断言「iframe 装上了」的话，它会一路全绿。
     bridge.attach();
     return () => bridge.detach();
-  }, [surface, api, projectId]);
+  }, [frameState, api, projectId]);
 
-  if (surface.state === "loading" || surface.state === "none") return null;
-  if (surface.state === "refused") {
+  if (frameState.state === "none") return null;
+  if (frameState.state === "refused") {
     return (
       <p className="error-box" role="alert">
-        产品界面的来源与工作台同源，出于安全原因没有加载（{surface.origin}）。
+        产品界面的来源与工作台同源，出于安全原因没有加载（{frameState.origin}）。
       </p>
     );
   }
@@ -124,9 +114,80 @@ export function ProductSurface({ api, projectId }: { api: Api; projectId: string
       ref={frame}
       className="product-surface"
       title="产品界面"
-      src={surface.entry}
+      src={frameState.entry}
       sandbox={PRODUCT_SANDBOX}
       referrerPolicy="no-referrer"
     />
+  );
+}
+
+/**
+ * 项目里「产品界面」那一格（owner 2026-09-11：侧栏单独一格，有界面时排第一、默认
+ * 进它）。**这一格的内容区归产品，这一格的外框归 Runtime**：未决确认与项目摘要
+ * 钉在所有分区之上，产品界面盖不住；界面不可用时，说明文字由 Runtime 写。
+ *
+ * 三种情况：
+ * - 可用 → iframe 占满内容区（云端产品独占一整页，本地也给整块，不是一条缝）；
+ * - 声明了但还没取回 → 如实说「暂时不可用，其余功能照常」，给一个重新获取；
+ * - 没声明 → 侧栏本来不列这一格；直接敲地址进来的，说这个产品没有自己的界面。
+ */
+export function ProductTab({
+  api,
+  projectId,
+  productId,
+  surface,
+  onReload,
+}: {
+  api: Api;
+  projectId: string;
+  productId: string;
+  surface: SurfaceInfo | null | undefined;
+  onReload: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  if (surface === undefined) {
+    return <p className="text-body-md text-muted-foreground">加载中……</p>;
+  }
+  if (surface?.available) {
+    return <ProductSurface api={api} projectId={projectId} surface={surface} />;
+  }
+  if (!declaresUi(surface)) {
+    return (
+      <p className="text-body-md text-muted-foreground">
+        这个产品没有自己的界面。任务、上下文与成果在左侧各分区里。
+      </p>
+    );
+  }
+
+  const retry = async () => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      // 取契约的同时会紧接着取它钉的界面包（ADR-023 §3.3）；取回之后再问一遍。
+      await api.fetchProduct(productId);
+      onReload();
+    } catch (e) {
+      setFailure(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="notice-box" role="status">
+      <div className="flex flex-col gap-2xs">
+        <strong>产品界面暂时不可用</strong>
+        <span className="text-body-sm text-muted-foreground">
+          这个产品的界面包不在本机：可能还没取回（离线时取不到），也可能取回的与契约
+          钉的不符。产品的其余功能照常可用 —— 任务、上下文与成果在左侧各分区里。
+        </span>
+        {failure && <span className="text-body-sm text-destructive-text">{failure}</span>}
+      </div>
+      <Button onClick={() => void retry()} disabled={busy}>
+        {busy ? "获取中…" : "重新获取"}
+      </Button>
+    </div>
   );
 }

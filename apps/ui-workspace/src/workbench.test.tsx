@@ -652,6 +652,98 @@ void test("Header workspace control: icon + name only (no 工作区 label); open
   expect(after(trigger, settings)).toBe(true);
 });
 
+/* ---------------- 产品界面那一格（ADR-023；owner 2026-09-11 定位置） ---------------- */
+
+const SURFACE_OK = { productId: "bidproposal", available: true, origin: "http://bidproposal.localhost:7421", entry: "http://bidproposal.localhost:7421/x/" };
+
+function sidebarItems(): string[] {
+  return Array.from(document.querySelectorAll(".app-sidebar nav a")).map((a) => a.textContent ?? "");
+}
+
+/**
+ * **有产品界面：侧栏第一格是它（用产品自己的名字），进项目默认落在它上面。**
+ * 地址被改写成带分区的那一个 —— 返回键回到进项目之前的那一页，不是一个没决定的中间态。
+ */
+void test("产品界面：契约声明了界面 → 侧栏第一格是产品名，进项目默认进它", async () => {
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({
+    products: vi.fn().mockResolvedValue([product()]),
+    projects: vi.fn().mockResolvedValue(projectList([workspace({ id: "prj_ui", name: "有界面的项目" })])),
+    productSurface: vi.fn().mockResolvedValue(SURFACE_OK),
+  });
+  render(<Workbench api={api} onSignedOut={() => {}} />);
+  await userEvent.setup().click(await screen.findByText("有界面的项目"));
+
+  expect(await screen.findByTestId("project-panel-stub")).toHaveTextContent("project:prj_ui:product");
+  expect(window.location.hash).toBe("#ws/prj_ui/product");
+  expect(sidebarItems()[0]).toBe("标书编写");
+  expect(sidebarItems().slice(1, 5)).toEqual(["概览", "上下文", "任务", "审计"]);
+  expect(api.productSurface).toHaveBeenCalledWith("prj_ui");
+});
+
+/** **声明了但还没取回：那一格照样在**，由 Runtime 在里面如实说 —— 不悄悄藏起来。 */
+void test("产品界面：声明了但还没取回 → 那一格照样列出，也照样默认进它", async () => {
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({
+    products: vi.fn().mockResolvedValue([product()]),
+    projects: vi.fn().mockResolvedValue(projectList([workspace({ id: "prj_nf", name: "还没取回的" })])),
+    productSurface: vi.fn().mockResolvedValue({ productId: "bidproposal", available: false, reason: "not_fetched" }),
+  });
+  render(<Workbench api={api} onSignedOut={() => {}} />);
+  await userEvent.setup().click(await screen.findByText("还没取回的"));
+  expect(await screen.findByTestId("project-panel-stub")).toHaveTextContent("project:prj_nf:product");
+  expect(sidebarItems()[0]).toBe("标书编写");
+});
+
+/** **没声明（缺省）：一格都不多**，还是四个控制面，默认进概览。不放空壳。 */
+void test("产品界面：没声明 → 不列那一格，默认进概览", async () => {
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({
+    products: vi.fn().mockResolvedValue([product()]),
+    projects: vi.fn().mockResolvedValue(projectList([workspace({ id: "prj_plain", name: "没界面的项目" })])),
+    productSurface: vi.fn().mockResolvedValue({ productId: "bidproposal", available: false, reason: "not_declared" }),
+  });
+  render(<Workbench api={api} onSignedOut={() => {}} />);
+  await userEvent.setup().click(await screen.findByText("没界面的项目"));
+  expect(await screen.findByTestId("project-panel-stub")).toHaveTextContent("project:prj_plain:overview");
+  expect(window.location.hash).toBe("#ws/prj_plain/overview");
+  expect(sidebarItems().slice(0, 4)).toEqual(["概览", "上下文", "任务", "审计"]);
+  expect(screen.queryByRole("link", { name: "标书编写" })).not.toBeInTheDocument();
+});
+
+/**
+ * 地址里写明了分区，就照地址走 —— 有产品界面也不改道。默认只管「没说进哪」的那一种。
+ * 也不因为等回答而先显示「加载中」：分区已经定了。
+ */
+void test("产品界面：地址写明了分区就照地址走，不被默认规则改道", async () => {
+  window.location.hash = "#ws/prj_ui/tasks";
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({
+    products: vi.fn().mockResolvedValue([product()]),
+    projects: vi.fn().mockResolvedValue(projectList([workspace({ id: "prj_ui", name: "有界面的项目" })])),
+    productSurface: vi.fn().mockResolvedValue(SURFACE_OK),
+  });
+  render(<Workbench api={api} onSignedOut={() => {}} />);
+  expect(await screen.findByTestId("project-panel-stub")).toHaveTextContent("project:prj_ui:tasks");
+  // 回答到了、侧栏列出那一格之后，分区仍是 tasks。
+  await screen.findByRole("link", { name: "标书编写" });
+  expect(screen.getByTestId("project-panel-stub")).toHaveTextContent("project:prj_ui:tasks");
+  expect(window.location.hash).toBe("#ws/prj_ui/tasks");
+});
+
+/** 问不到守护进程：按没有界面处理，进概览 —— 不因为这一问卡在「加载中」。 */
+void test("产品界面：问不到 → 按没有界面处理，进概览", async () => {
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({
+    products: vi.fn().mockResolvedValue([product()]),
+    projects: vi.fn().mockResolvedValue(projectList([workspace({ id: "prj_down", name: "问不到的" })])),
+    productSurface: vi.fn().mockRejectedValue(new Error("down")),
+  });
+  render(<Workbench api={api} onSignedOut={() => {}} />);
+  await userEvent.setup().click(await screen.findByText("问不到的"));
+  expect(await screen.findByTestId("project-panel-stub")).toHaveTextContent("project:prj_down:overview");
+});
+
 void test("Sidebar 最近工作: capped at 8, newest first; no 总览 group; domain row has no 工作台 text on home", async () => {
   const { Workbench } = await import("./workbench");
   const many = Array.from({ length: 12 }, (_, i) =>
@@ -663,7 +755,8 @@ void test("Sidebar 最近工作: capped at 8, newest first; no 总览 group; dom
   const links = Array.from(document.querySelectorAll(".app-sidebar nav a")).map((a) => a.getAttribute("href"));
   const recent = links.filter((h) => h?.startsWith("#ws/"));
   expect(recent).toHaveLength(8); // RECENT cap
-  expect(recent[0]).toBe("#ws/prj_11/overview");
+  // 不写死分区：进哪一格由「有没有产品界面」决定（owner 2026-09-11）。
+  expect(recent[0]).toBe("#ws/prj_11");
   expect(screen.queryByText("总览")).not.toBeInTheDocument();
   expect(screen.queryByText("工作台", { exact: true })).not.toBeInTheDocument();
 });

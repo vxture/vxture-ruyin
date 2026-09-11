@@ -31,7 +31,12 @@ import {
 // 项目面板自己的编排，照 workbench.test 的做法桩掉子组件，而不是在每个项目面板用例
 // 里替它的网络调用补桩。
 vi.mock("./product-surface", () => ({
-  ProductSurface: () => null,
+  ProductTab: (props: { productId: string; surface: unknown; onReload: () => void }) => (
+    <div data-testid="product-tab-stub">
+      product-tab:{props.productId}:{JSON.stringify(props.surface)}
+      <button onClick={() => props.onReload()}>product-tab-stub-reload</button>
+    </div>
+  ),
 }));
 vi.mock("./chain", () => ({
   verifyChain: vi.fn().mockResolvedValue(true),
@@ -1083,4 +1088,45 @@ void test("ProjectPanel/Context: a connector granted but no longer installed sti
   await user.type(screen.getByPlaceholderText("资源 URI 前缀（如 crm://accounts/）"), "x://");
   await user.click(screen.getByRole("button", { name: "绑定并索引" }));
   expect(api.setBinding).toHaveBeenCalledWith("prj_1", "tender_doc", "x://", { connector: "gone", source: "lan" });
+});
+
+/* ---------------- 产品界面那一格（ADR-023；owner 2026-09-11 定位置） ---------------- */
+
+/**
+ * 产品界面在自己那一格里，**不在概览里**：原先临时挂在概览末尾，一条 150px 的缝。
+ * 那一格拿到的是上层（侧栏）问过的同一份回答，产品码从项目记录取。
+ */
+void test("产品界面：只在「产品界面」那一格出现，用上层传下来的回答；概览里不再有它", async () => {
+  const surface = { productId: "bidproposal", available: true, entry: "http://bidproposal.localhost:7421/x/" };
+  const onReloadSurface = vi.fn();
+  const { unmount } = render(
+    <ProjectPanel api={fakeApi()} id="prj_1" tab="product" surface={surface} onReloadSurface={onReloadSurface} />,
+  );
+  const stub = await screen.findByTestId("product-tab-stub");
+  expect(stub).toHaveTextContent("product-tab:bidproposal:");
+  expect(stub).toHaveTextContent('"available":true');
+  await userEvent.setup().click(screen.getByRole("button", { name: "product-tab-stub-reload" }));
+  expect(onReloadSurface).toHaveBeenCalledTimes(1);
+  unmount();
+
+  render(<ProjectPanel api={fakeApi()} id="prj_1" tab="overview" surface={surface} />);
+  await screen.findByText("标书编写 1.0.0");
+  expect(screen.queryByTestId("product-tab-stub")).not.toBeInTheDocument();
+});
+
+/**
+ * **人的决定压过产品界面。** 未决确认钉在所有分区之上 —— 包括产品界面那一格：
+ * 产品界面盖不住它，也没法让它从屏幕上消失。
+ */
+void test("产品界面：未决确认仍钉在最上面，产品界面在它下面", async () => {
+  const api = fakeApi({
+    taskInstances: vi.fn().mockResolvedValue([
+      taskInstance({ id: "ti_verify", state: "waiting_human", checkpoints: [] }),
+    ]),
+  });
+  render(<ProjectPanel api={api} id="prj_1" tab="product" surface={null} />);
+  const card = await screen.findByText('任务「draft_section」的成果等待人工评审');
+  const stub = screen.getByTestId("product-tab-stub");
+  // 文档顺序：确认卡在前（DOCUMENT_POSITION_FOLLOWING = 4 表示 stub 在 card 之后）。
+  expect(card.compareDocumentPosition(stub) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
