@@ -398,6 +398,16 @@ const WRAPPER_CASES: WrapperCase[] = [
     method: "GET",
     path: "/auth/end-session-url",
   },
+  // 片二（ADR-022）：工作台拿会话令牌换产品级凭据。这一行原本漏了 —— 片二是在
+  // 一个拿不到 @vxture 私有包的环境里写的，只验了 product-bridge.ts 自己 100%，
+  // 没跑全套，于是没看见 api.ts 新加的这两行不在这张表里。ui-workspace 的门是
+  // **全局** 100% 行覆盖，漏一行就红 —— #206 踩过同一个坑。
+  {
+    name: "bridgeToken",
+    call: (api) => api.bridgeToken("prj_1"),
+    method: "POST",
+    path: "/projects/prj_1/bridge-token",
+  },
   {
     name: "entitlements",
     call: (api) => api.entitlements(["bidproposal", "vxture.crm"]),
