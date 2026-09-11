@@ -531,6 +531,12 @@ export interface ProjectMeta {
    * supported state. Nothing new may reach disk without this field.
    */
   workspaceId?: string;
+  /**
+   * 归档的时刻；没有 = 在用。归档的项目**只读**：看、导出照常，任何改动都被内核拒
+   * （`ProjectArchivedError`）—— 数据主权底线「任何状态下本地数据可访问、可导出」
+   * 不因归档打折（30-contract-schema §18.5）。恢复即清掉这个字段。
+   */
+  archivedAt?: string;
 }
 
 /**

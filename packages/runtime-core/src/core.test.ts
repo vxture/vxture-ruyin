@@ -34,6 +34,8 @@ import {
   TransientError,
   NoWorkspaceError,
   AlreadyAttributedError,
+  ProjectArchivedError,
+  ProjectLifecycleError,
   buildProjectExport,
   type Harness,
   type CapabilityTurnRequest,
@@ -2289,4 +2291,78 @@ test("skills: checkResourcePath keeps reads inside references/ and assets/", () 
   for (const bad of ["", "SKILL.md", "references", "/etc/passwd", "C:/x", "references/../SKILL.md", "assets//x", "scripts/run.py"]) {
     assert.equal(checkResourcePath(bad).ok, false, bad);
   }
+});
+
+// --- 项目的归档与恢复（契约 project.operations 的 archive / restore） ---------------
+
+/**
+ * **归档的项目只读，由内核拒，不靠宿主记得拦。** 七个会改项目的动作一个都过不去；
+ * 看与导出照常 —— 数据主权底线不因归档打折。恢复之后一切照旧。
+ */
+test("archive: 归档后七个改动一律被内核拒；看与导出照常；恢复后照旧能改", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  const archived = await runtime.archiveProject(meta.id);
+  assert.ok(archived.archivedAt);
+  assert.ok((await runtime.listProjects()).find((m) => m.id === meta.id)?.archivedAt);
+
+  const attempts: Array<[string, () => Promise<unknown>]> = [
+    ["transition", () => runtime.transitionBusinessState(meta.id, "planning")],
+    ["toolPolicy", () => runtime.setToolPolicy(meta.id, "read_file", "allow")],
+    ["grant", () => runtime.addGrant(meta.id, "/tmp/x", "read")],
+    ["connectorGrant", () => runtime.addConnectorGrant(meta.id, "fake")],
+    ["binding", () => runtime.setBinding(meta.id, { type: "tender_document", root: "/tmp/x" })],
+    ["harness", () => runtime.createHarness(meta.id)],
+    ["import", () => runtime.importProject(meta.id, "wsp_other")],
+  ];
+  for (const [what, attempt] of attempts) {
+    await assert.rejects(attempt(), ProjectArchivedError, what);
+  }
+  // 看、导出照常。
+  assert.equal((await runtime.openProject(meta.id)).businessState, "draft");
+  assert.ok(await runtime.exportProject(meta.id, { runtimeVersion: "test" }));
+
+  await runtime.restoreProject(meta.id);
+  assert.equal((await runtime.openProject(meta.id)).meta.archivedAt, undefined);
+  assert.equal(await runtime.transitionBusinessState(meta.id, "planning"), "planning");
+
+  const actions = (await runtime.listAuditEvents(meta.id))
+    .filter((e) => "action" in e)
+    .map((e) => (e as { action: string }).action);
+  assert.ok(actions.includes("project.archived") && actions.includes("project.restored"));
+});
+
+/**
+ * 契约没声明 archive 的产品，Runtime 不替它归档 —— 容器能做什么由产品的契约定。
+ * 声明了 archive 没声明 restore：归档是单向的。
+ */
+test("archive: 契约没声明 archive / restore 就不做", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const none = structuredClone(bidContract) as RuyinContract;
+  none.project.operations = ["create", "open"];
+  const a = await runtime.createProject(none, "no-archive", "wsp_test");
+  await assert.rejects(runtime.archiveProject(a.id), ProjectLifecycleError);
+
+  const oneWay = structuredClone(bidContract) as RuyinContract;
+  oneWay.project.operations = ["create", "open", "archive"];
+  const b = await runtime.createProject(oneWay, "one-way", "wsp_test");
+  await runtime.archiveProject(b.id);
+  await assert.rejects(runtime.restoreProject(b.id), ProjectLifecycleError);
+});
+
+/**
+ * 还有任务没落定就不归档：归档之后一切改动都被拒，跑到一半的任务会停在一个谁都推
+ * 不动、也取消不了的地方。重复归档、恢复一个没归档的，也都说清楚拒。
+ */
+test("archive: 有没落定的任务不归档；重复归档、恢复没归档的都拒", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  const harness = await runtime.createHarness(meta.id);
+  await harness.startTask("analyze_tender");
+  await assert.rejects(runtime.archiveProject(meta.id), /1 task\(s\) have not settled yet/);
+
+  const clean = await runtime.createProject(bidContract, "clean", "wsp_test");
+  await assert.rejects(runtime.restoreProject(clean.id), /is not archived/);
+  await runtime.archiveProject(clean.id);
+  await assert.rejects(runtime.archiveProject(clean.id), /already archived/);
 });

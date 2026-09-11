@@ -211,6 +211,21 @@ export function Workbench({
   }, [refreshSidebar]);
 
   /**
+   * 项目本身变了（归档、恢复、推进阶段）：侧栏的项目列表与「有没有产品界面」都要重问
+   * 一次。只在打开项目那一刻问过的话，归档之后「最近工作」里它还在、产品界面那一格也
+   * 还挂着 —— 观察台里实点时就是这样（2026-09-11）。
+   */
+  useEffect(
+    () =>
+      api.subscribe((event) => {
+        if (event.kind !== "project") return;
+        void refreshSidebar();
+        if (event.projectId === openId) reloadSurface();
+      }),
+    [api, refreshSidebar, openId, reloadSurface],
+  );
+
+  /**
    * 窗口重新获得焦点时立刻拉一次订阅（TD-014 D5）。
    *
    * **这一刻正是用户付完款回到应用的那一刻**——订阅轮询是 5 分钟一次，让他对着
@@ -345,9 +360,11 @@ export function Workbench({
         items: [{ href: "#home", label: "首页", icon: "home" }],
       },
     ];
+    // 归档的项目不进「最近工作」—— 那一栏回答的是「我刚才在做什么」；它们另起一组。
     const mine = workspaces.filter(
-      (w) => w.workspaceId && (!selectedProductId || w.productId === selectedProductId),
+      (w) => w.workspaceId && !w.archivedAt && (!selectedProductId || w.productId === selectedProductId),
     );
+    const archived = workspaces.filter((w) => w.workspaceId && w.archivedAt);
     // 归属为空的另起一组：它们不是普通项目，是一份**待导入队列**（ADR-015）。
     // 混在一起会让「这是个不该长期存在的状态」这件事消失。
     const pendingImport = workspaces.filter((w) => !w.workspaceId);
@@ -388,6 +405,19 @@ export function Workbench({
         })),
       });
     }
+    // 归档的项目：只读，但要找得回来（恢复入口在项目页里）。放在最后，不与在用的混排。
+    if (archived.length > 0) {
+      list.push({
+        title: "已归档",
+        dividerBefore: true,
+        items: archived.map((w) => ({
+          href: `#ws/${w.id}`,
+          label: w.name,
+          subLabel: products.find((p) => p.id === w.productId)?.name ?? w.productId,
+          icon: "archive" as const,
+        })),
+      });
+    }
     if (pendingImport.length > 0) {
       list.push({
         title: "待导入工作区",
@@ -412,8 +442,8 @@ export function Workbench({
       .map((w) => ({
         key: w.id,
         label: w.name,
-        description: `${w.productId} · ${w.projectType}`,
-        icon: "cube" as const,
+        description: `${w.productId} · ${w.projectType}${w.archivedAt ? " · 已归档" : ""}`,
+        icon: (w.archivedAt ? "archive" : "cube") as "cube",
         onSelect: () => navigate(`#ws/${w.id}`),
       }));
     if (wsItems.length > 0) {
@@ -561,7 +591,7 @@ export function Workbench({
   const productSections: ShellNavSection[] = useMemo(() => {
     if (view.kind !== "workspace") return [];
     const siblings = workspaces.filter(
-      (w) => w.productId === openProjectMeta?.productId && w.id !== view.id,
+      (w) => w.productId === openProjectMeta?.productId && w.id !== view.id && !w.archivedAt,
     );
     const list: ShellNavSection[] = [
       {

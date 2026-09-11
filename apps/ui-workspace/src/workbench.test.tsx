@@ -15,9 +15,9 @@
  */
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Api, type ProductInfo, type ProjectList, type ProjectMeta } from "./api";
+import { Api, type ProductInfo, type ProjectList, type ProjectMeta, type RuntimeEvent } from "./api";
 
 vi.mock("./home", () => ({
   HomePage: (props: {
@@ -147,6 +147,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
     products: vi.fn().mockResolvedValue([]),
     projects: vi.fn().mockResolvedValue(projectList([])),
     refreshEntitlements: vi.fn().mockResolvedValue([]),
+    subscribe: vi.fn().mockReturnValue(() => {}),
     ...over,
   } as unknown as Api;
 }
@@ -822,4 +823,65 @@ void test("Workbench: 侧栏拉不到时顶部报一条，且那条提醒可以�
   // 关掉之后不再占着内容区顶部；它讲的是刚才那次拉取，不是这一页的状态。
   await userEvent.setup().click(screen.getByRole("button", { name: "关闭提醒" }));
   expect(screen.queryByText("daemon unreachable")).not.toBeInTheDocument();
+});
+
+/**
+ * 归档的项目不进「最近工作」（那一栏回答「我刚才在做什么」），另起一组「已归档」 ——
+ * 找得回来，但不与在用的混排。同产品的其他项目里也不列它。
+ */
+void test("Sidebar: 归档的项目不进最近工作，另在「已归档」一组", async () => {
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({
+    products: vi.fn().mockResolvedValue([product()]),
+    projects: vi.fn().mockResolvedValue(
+      projectList([
+        workspace({ id: "prj_live", name: "在用的项目" }),
+        workspace({ id: "prj_old", name: "归档的项目", archivedAt: "2026-09-11T10:00:00Z" }),
+      ]),
+    ),
+  });
+  render(<Workbench api={api} onSignedOut={() => {}} />);
+  await screen.findByText("在用的项目");
+  expect(screen.getByText("已归档")).toBeInTheDocument();
+  const links = Array.from(document.querySelectorAll(".app-sidebar nav a")).map((a) => [a.textContent, a.getAttribute("href")]);
+  const liveAt = links.findIndex(([t]) => t?.includes("在用的项目"));
+  const oldAt = links.findIndex(([t]) => t?.includes("归档的项目"));
+  expect(liveAt).toBeGreaterThanOrEqual(0);
+  expect(oldAt).toBeGreaterThan(liveAt);
+  expect(links[oldAt]?.[1]).toBe("#ws/prj_old");
+});
+
+/**
+ * 项目本身变了（归档 / 恢复 / 推进）的事件到了：侧栏的项目列表与「有没有产品界面」都
+ * 重问一次 —— 只在打开项目那一刻问过的话，归档之后侧栏与产品界面那一格都还是旧的。
+ */
+void test("project 事件：重拉侧栏的项目列表；是打开着的那个项目时，重问产品界面", async () => {
+  const { Workbench } = await import("./workbench");
+  let listener: ((e: RuntimeEvent) => void) | undefined;
+  const api = fakeApi({
+    products: vi.fn().mockResolvedValue([product()]),
+    projects: vi.fn().mockResolvedValue(projectList([workspace({ id: "prj_ui", name: "有界面的项目" })])),
+    productSurface: vi.fn().mockResolvedValue(SURFACE_OK),
+    subscribe: vi.fn((fn: (e: RuntimeEvent) => void) => {
+      listener = fn;
+      return () => {};
+    }),
+  });
+  render(<Workbench api={api} onSignedOut={() => {}} />);
+  await userEvent.setup().click(await screen.findByText("有界面的项目"));
+  await screen.findByTestId("project-panel-stub");
+  const listsBefore = (api.projects as ReturnType<typeof vi.fn>).mock.calls.length;
+  const surfacesBefore = (api.productSurface as ReturnType<typeof vi.fn>).mock.calls.length;
+
+  act(() => listener?.({ kind: "project", projectId: "prj_other" }));
+  await vi.waitFor(() => expect((api.projects as ReturnType<typeof vi.fn>).mock.calls.length).toBe(listsBefore + 1));
+  expect((api.productSurface as ReturnType<typeof vi.fn>).mock.calls.length).toBe(surfacesBefore);
+
+  act(() => listener?.({ kind: "project", projectId: "prj_ui" }));
+  await vi.waitFor(() =>
+    expect((api.productSurface as ReturnType<typeof vi.fn>).mock.calls.length).toBe(surfacesBefore + 1),
+  );
+  // 别的事件不触发。
+  act(() => listener?.({ kind: "pending" }));
+  expect((api.projects as ReturnType<typeof vi.fn>).mock.calls.length).toBe(listsBefore + 2);
 });

@@ -87,6 +87,8 @@ export interface ProjectMeta {
    * 队列**而非一种受支持的状态。新建的项目一律有值。
    */
   workspaceId?: string;
+  /** 归档的时刻；没有 = 在用。归档的项目只读，看与导出照常。 */
+  archivedAt?: string;
 }
 
 /**
@@ -202,6 +204,8 @@ export interface ProjectView {
   product: { id: string; name: string; version: string };
   tasks: TaskDef[];
   states?: { object: string; initial: string; items: StateItem[] };
+  /** 契约声明的容器操作（create / open / archive / restore）。 */
+  operations: string[];
 }
 
 export interface ContextItemMeta {
@@ -780,7 +784,7 @@ export class Api {
       available: boolean;
       origin?: string;
       entry?: string;
-      reason?: "no_ui_server" | "not_declared" | "not_fetched";
+      reason?: "no_ui_server" | "not_declared" | "not_fetched" | "archived";
     }>(`/projects/${id}/product-surface`);
   workspace = (id: string) => this.call<ProjectView>(`/projects/${id}`);
   taskInstances = (id: string) =>
@@ -806,6 +810,10 @@ export class Api {
       to,
       humanConfirmed,
     });
+  /** 归档：只读，看与导出照常。有没落定的任务、或契约没声明 archive 时守护进程回 409。 */
+  archiveProject = (id: string) => this.call<ProjectMeta>(`/projects/${id}/archive`, "POST");
+  /** 恢复一个归档的项目（契约得声明 restore）。 */
+  restoreProject = (id: string) => this.call<ProjectMeta>(`/projects/${id}/restore`, "POST");
   /** 产品界面提出、等人确认的推进；没有就是 null（ADR-022 片四）。 */
   stateRequest = (id: string) =>
     this.call<{ pending: StateRequest | null }>(`/projects/${id}/state-request`);

@@ -12,7 +12,7 @@
  * 呈现全部走 DS：SectionHeader、StatusBadge、Table 族。
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Button,
   EmptyState,
@@ -266,6 +266,21 @@ export function ProjectPanel({
         </div>
       )}
 
+      {/* 归档的项目：只读。说清楚是什么、能做什么，恢复入口就在这里（契约声明了 restore 时）。 */}
+      {view.meta.archivedAt && (
+        <div className="notice-box">
+          <div className="flex flex-col gap-2xs">
+            <strong>项目已归档（{shortTime(view.meta.archivedAt)}）</strong>
+            <span className="text-body-sm text-muted-foreground">
+              归档的项目只读：不能发起任务、推进阶段、改授权与资料。记录照常可看、可导出。
+            </span>
+          </div>
+          {view.operations.includes("restore") && (
+            <Button onClick={() => void guard(() => api.restoreProject(id))}>恢复项目</Button>
+          )}
+        </div>
+      )}
+
       {/* 产品提出的推进：与任务确认同一个位置、同一种分量 —— 人的决定压过导航，也压过
           产品界面（它就钉在产品界面那一格的上方）。 */}
       {stateRequest && (
@@ -292,6 +307,7 @@ export function ProjectPanel({
           view={view}
           instances={instances}
           onTransition={(to, c) => void guard(() => api.transition(id, to, c))}
+          onArchive={() => void guard(() => api.archiveProject(id))}
         />
       )}
       {/* 产品自己的界面（ADR-023；owner 2026-09-11 定位置：侧栏单独一格）。未决确认
@@ -306,6 +322,7 @@ export function ProjectPanel({
         />
       )}
       {tab === "context" && (
+        <ReadOnlyWhenArchived archived={!!view.meta.archivedAt}>
         <ContextTab
           api={api}
           projectId={id}
@@ -320,8 +337,10 @@ export function ProjectPanel({
             )
           }
         />
+        </ReadOnlyWhenArchived>
       )}
       {tab === "tasks" && (
+        <ReadOnlyWhenArchived archived={!!view.meta.archivedAt}>
         <TasksTab
           view={view}
           instances={instances}
@@ -329,6 +348,7 @@ export function ProjectPanel({
             void guard(() => api.startTask(id, task, inputs))
           }
         />
+        </ReadOnlyWhenArchived>
       )}
       {tab === "audit" && <AuditTab audit={audit} chainOk={chainOk} />}
     </div>
@@ -424,18 +444,23 @@ function OverviewTab({
   view,
   instances,
   onTransition,
+  onArchive,
 }: {
   api: Api;
   projectId: string;
   view: ProjectView;
   instances: TaskInstance[];
   onTransition: (to: string, humanConfirmed: boolean) => void;
+  onArchive: () => void;
 }) {
   const recent = [...instances].reverse().slice(0, 5);
+  const archived = !!view.meta.archivedAt;
   return (
     <>
       {/* 没有标题：阶段名就写在阶梯上，再加一行「业务阶段」四个字是纯损耗。 */}
-      <StateStepper view={view} onTransition={onTransition} />
+      <ReadOnlyWhenArchived archived={archived}>
+        <StateStepper view={view} onTransition={onTransition} />
+      </ReadOnlyWhenArchived>
       <SectionHeader level={2} title="最近任务" icon="clock-counter-clockwise" />
       {recent.length === 0 && (
         <EmptyState icon="list-checks" title="尚无任务执行记录" />
@@ -453,7 +478,34 @@ function OverviewTab({
       ))}
       <SectionHeader level={2} title="导出项目记录" icon="folder-open" />
       <ExportCard api={api} projectId={projectId} />
+      {/* 归档入口：契约声明了 archive 才有（容器能做什么由产品的契约定）。 */}
+      {!archived && view.operations.includes("archive") && (
+        <>
+          <SectionHeader level={2} title="归档项目" icon="archive" />
+          <div className="card flex items-center justify-between gap-md">
+            <span className="text-body-sm text-muted-foreground">
+              归档后项目只读：不能再发起任务、推进阶段、改授权与资料；记录照常可看、可导出
+              {view.operations.includes("restore") ? "，随时可以恢复" : "。这个产品不支持恢复，归档是单向的"}
+              。还有任务没落定时不能归档。
+            </span>
+            <Button onClick={onArchive}>归档</Button>
+          </div>
+        </>
+      )}
     </>
+  );
+}
+
+/**
+ * 归档时把这一块里的每个控件都禁掉 —— `<fieldset disabled>` 原生地禁用它里面所有的按钮
+ * 与输入框，不必给每个分区挨个传「只读」。守护进程与内核照样会拒（这里只是不让人去点
+ * 一个注定被拒的按钮）；导出与恢复不在这一块里。
+ */
+function ReadOnlyWhenArchived({ archived, children }: { archived: boolean; children: ReactNode }) {
+  return (
+    <fieldset disabled={archived} className="flex flex-col gap-lg border-0 p-0 m-0 min-w-0">
+      {children}
+    </fieldset>
   );
 }
 

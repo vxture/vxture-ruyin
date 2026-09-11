@@ -403,6 +403,10 @@ test("HTTP POST /registry/install: 503 when the index is unreachable, 404 for an
 });
 
 function closeRig(rig: Rig): void {
+  // 连同还开着的连接一起断：事件流（SSE）是长连接，server.close() 只停止接新连接、
+  // 不断旧的。一条该被收掉却没收掉的流（正是事件流用例要抓的那种坏法），会让整个测试
+  // 进程挂住直到超时 —— 失败的样子就不是「红」，而是「卡」。
+  rig.server.closeAllConnections();
   rig.server.close();
   rig.storage.closeAll();
   rmSync(rig.dataDir, { recursive: true, force: true });
@@ -2378,6 +2382,99 @@ void test("bridge 事件: 凭据过期后流被收掉 —— 有事件时当场�
     assert.equal(q.ended, true, "没有事件：下一次心跳时收掉");
   } finally {
     t.mock.timers.reset();
+    closeRig(rig);
+  }
+});
+
+/* ---------------- 项目的归档与恢复 ---------------- */
+
+async function post(rig: Rig, path: string, body: unknown = {}): Promise<Response> {
+  return fetch(`${rig.base}${path}`, {
+    method: "POST",
+    headers: { ...rig.headers, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * **归档的项目只读，宿主自己管的那部分也拦。** 内核拒它自己管的改动；收进项目的文件、
+ * 为产品界面换凭据这两样是宿主的，归档守卫一并挡。导出不挡 —— 数据主权底线。
+ */
+void test("archive: 归档后发起任务、推进、收文件、换产品凭据一律 409；导出不被归档挡；恢复后照旧", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    const archived = await post(rig, `/projects/${projectId}/archive`);
+    assert.equal(archived.status, 200);
+    assert.ok(((await archived.json()) as { archivedAt?: string }).archivedAt);
+
+    for (const [path, body] of [
+      [`/projects/${projectId}/tasks`, { task: "analyze_tender" }],
+      [`/projects/${projectId}/state`, { to: "planning" }],
+      [`/projects/${projectId}/files`, { path: "D:/x.pdf" }],
+      [`/projects/${projectId}/bridge-token`, {}],
+      [`/projects/${projectId}/grants`, { path: "D:/x" }],
+    ] as const) {
+      const res = await post(rig, path, body);
+      assert.equal(res.status, 409, path);
+      assert.equal(((await res.json()) as { code: string }).code, "PROJECT_ARCHIVED", path);
+    }
+    // 导出：不是被归档挡下的（它自己的前提 —— 授权目录 —— 另说）。
+    const exported = await post(rig, `/projects/${projectId}/export`, { path: "D:/nowhere" });
+    assert.notEqual(((await exported.json()) as { code?: string }).code, "PROJECT_ARCHIVED");
+    // 看照常。
+    assert.equal((await fetch(`${rig.base}/projects/${projectId}`, { headers: rig.headers })).status, 200);
+
+    assert.equal((await post(rig, `/projects/${projectId}/restore`)).status, 200);
+    assert.equal((await post(rig, `/projects/${projectId}/state`, { to: "planning" })).status, 200);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
+ * **归档即作废产品级凭据**（TD-059 等的钩子）：拿着旧凭据的桥面立刻 401，开着的事件流
+ * 被收掉；挂着的推进请求一并撤掉；产品界面不再装（reason: archived）。
+ */
+void test("archive: 作废产品凭据、收掉事件流、撤掉挂着的推进请求、不再装产品界面", async () => {
+  const events = new EventBus();
+  const rig = await startServer({ platform: signedInTo("wsp_x"), events, productUi: { root: tmpdir(), port: 7421 } });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    for (const s of ["planning", "writing", "review"]) await rig.runtime.transitionBusinessState(projectId, s);
+    const token = await bridgeTokenFor(rig, projectId);
+    await bridgePost(rig, token, "/bridge/project/transition", { to: "submitted" });
+    const stream = await fetch(`${rig.base}/bridge/events`, { headers: { authorization: `Bearer ${token}` } });
+    const reading = readEvents(stream, 99);
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.equal((await post(rig, `/projects/${projectId}/archive`)).status, 200);
+
+    const after = await fetch(`${rig.base}/bridge/project`, { headers: { authorization: `Bearer ${token}` } });
+    assert.equal(after.status, 401, "旧凭据在归档后必须失效");
+    const { ended } = await reading;
+    assert.equal(ended, true, "开着的事件流必须被收掉");
+    const pending = (await (await fetch(`${rig.base}/pending`, { headers: rig.headers })).json()) as Array<{ kind: string }>;
+    assert.ok(!pending.some((r) => r.kind === "state_transition"), "挂着的推进请求要撤掉");
+    const surface = (await (
+      await fetch(`${rig.base}/projects/${projectId}/product-surface`, { headers: rig.headers })
+    ).json()) as { available: boolean; reason?: string };
+    assert.deepEqual([surface.available, surface.reason], [false, "archived"]);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("archive: 还有没落定的任务 → 409 PROJECT_LIFECYCLE，项目不动", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const projectId = await projectIn(rig, "wsp_x");
+    await putTask(rig, projectId); // waiting_human
+    const res = await post(rig, `/projects/${projectId}/archive`);
+    assert.equal(res.status, 409);
+    assert.equal(((await res.json()) as { code: string }).code, "PROJECT_LIFECYCLE");
+    assert.equal((await rig.runtime.openProject(projectId)).meta.archivedAt, undefined);
+  } finally {
     closeRig(rig);
   }
 });
