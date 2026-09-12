@@ -49,6 +49,7 @@ import {
   PlatformNotConfiguredError,
   type PlatformService,
 } from "./platform.js";
+import type { PlatformSession } from "./platform-session.js";
 
 // Compiled test runs from dist/, so ../../../ is the repo root (same
 // convention as integration.test.ts).
@@ -470,36 +471,79 @@ void test("HTTP: 页面直接引用的根级资源不经令牌闸门 —— 带 
   }
 });
 
-void test("HTTP /auth/session, /auth/login, /auth/logout wire straight through to PlatformService", async () => {
+void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 PlatformService（令牌）", async () => {
+  /*
+   * 2026-09-12：登录改走平台会话（rpsid）。ruyin 是 RFC 8252 公共客户端，
+   * 持不住密钥，所以不该自己持令牌——令牌留在 console-bff 服务端，本机只拿一个
+   * 不透明会话号。详见 platform-session.ts 的文件头。
+   *
+   * 这条测试原本钉的是「直通 PlatformService」，那条线已经不存在了。
+   * 现在钉三件，每一件都是上面那个决定的可观测后果：
+   */
   let loginCalls = 0;
   let logoutCalls = 0;
-  const platform = signedInTo("wsp_x", {
-    beginLogin: async () => {
+  const platformSession = {
+    status: () => ({ signedIn: true, expiresAt: Date.now() + 3600_000 }),
+    beginLogin: () => {
       loginCalls++;
-      return "https://accounts.vxture.com/authorize?state=abc";
+      return "https://console.vxture.com/api/auth/login?surface=native&handle=abc";
     },
+    completeLogin: async () => {},
     logout: async () => {
       logoutCalls++;
     },
-  });
-  const rig = await startServer({ platform });
-  try {
-    const session = (await (
-      await fetch(`${rig.base}/auth/session`, { headers: rig.headers })
-    ).json()) as { signedIn: boolean };
-    assert.equal(session.signedIn, true);
+  } as unknown as PlatformSession;
 
-    const login = await fetch(`${rig.base}/auth/login`, { method: "POST", headers: rig.headers });
-    assert.equal(login.status, 200);
+  const rig = await startServer({ platform: signedInTo("wsp_x"), platformSession });
+  try {
+    // ① /auth/session 给 UI 的**只有状态**，没有会话号
+    const raw = await (
+      await fetch(`${rig.base}/auth/session`, { headers: rig.headers })
+    ).text();
+    const session = JSON.parse(raw) as { signedIn: boolean };
+    assert.equal(session.signedIn, true);
     assert.equal(
-      ((await login.json()) as { authorizeUrl: string }).authorizeUrl,
-      "https://accounts.vxture.com/authorize?state=abc",
+      /rpsid|sess[-_]/i.test(raw),
+      false,
+      "给 UI 的响应里出现了会话号——browser-zero-token 被破了",
     );
+
+    // ② /auth/login 回的地址指向 console-bff，且带 surface=native
+    const login = await fetch(`${rig.base}/auth/login`, {
+      method: "POST",
+      headers: rig.headers,
+    });
+    assert.equal(login.status, 200);
+    const url = ((await login.json()) as { authorizeUrl: string }).authorizeUrl;
+    assert.match(url, /console\.vxture\.com/);
+    assert.match(url, /surface=native/);
     assert.equal(loginCalls, 1);
 
-    const logout = await fetch(`${rig.base}/auth/logout`, { method: "POST", headers: rig.headers });
+    // ③ 登出走新会话
+    const logout = await fetch(`${rig.base}/auth/logout`, {
+      method: "POST",
+      headers: rig.headers,
+    });
     assert.equal(logout.status, 200);
     assert.equal(logoutCalls, 1);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("未配置 platformSession 时 /auth/login 回 503，而不是假装成功", async () => {
+  /* 静默失败在这里尤其糟：用户点了登录、什么都没发生、也没有任何提示。 */
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const res = await fetch(`${rig.base}/auth/login`, {
+      method: "POST",
+      headers: rig.headers,
+    });
+    assert.equal(res.status, 503);
+    assert.equal(
+      ((await res.json()) as { code: string }).code,
+      "PLATFORM_SESSION_NOT_CONFIGURED",
+    );
   } finally {
     closeRig(rig);
   }

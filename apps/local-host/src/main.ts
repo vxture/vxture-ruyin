@@ -11,8 +11,10 @@
  *                       ui-workspace/dist when it exists; dev console at /dev)
  *   RUYIN_ACCOUNTS_ISSUER    OIDC issuer (default https://accounts.vxture.com)
  *   RUYIN_OIDC_CLIENT_ID     public client id (default ruyin; beta: ruyin-beta)
- *   RUYIN_PLATFORM_API_BASE  entitlements API base (unset = C2 disabled)
- *   RUYIN_CONSOLE_BASE       console deep-link base (default https://vxture.com)
+ *   RUYIN_PLATFORM_API_BASE  旧 C2 基址（tailnet-only，用户设备够不着）——
+ *                            登录改走平台会话之后已不再需要，留着只为回滚
+ *   RUYIN_CONSOLE_BASE       订阅深链用的官网基址（default https://vxture.com）
+ *   RUYIN_CONSOLE_API_BASE   **平台会话与 C2 读**（default https://console.vxture.com）
  *   RUYIN_UPDATE_FEED        update feed base (default: stable channel on dl)
  *   RUYIN_REGISTRY_BASE      static product registry base (default: products dir on dl)
  *   RUYIN_CAPABILITY_BASE    business-product capability surface (unset = mock);
@@ -71,6 +73,7 @@ import { fetchUiAfterContract } from "./ui-fetch.js";
 import { EventBus } from "./events.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
+import { PlatformSession } from "./platform-session.js";
 import { FolderPick } from "./folder-pick.js";
 import {
   startMigrationServer,
@@ -342,6 +345,31 @@ for (const failure of registry.failures) {
 }
 
 const platform = new PlatformService(platformConfigFromEnv(port), keys, dataDir);
+/*
+ * 平台会话（rpsid）——登录与带凭据调用的唯一入口。
+ *
+ * 与上面的 `platform` 并存一段：`platform` 只剩权益读那一半，OIDC/令牌那一半在
+ * 切换实测通过后一并删掉。**现在不删**是为了留回滚余地——回滚只需改这里一处接线。
+ *
+ * 基址复用 `RUYIN_CONSOLE_BASE`（已有，原本用于订阅深链）：桌面端要调的读接口
+ * 就挂在 console-bff 上，不新增第二处存主机名的地方。
+ */
+const platformSession = new PlatformSession(
+  {
+    /*
+     * **不要复用 `RUYIN_CONSOLE_BASE`。** 那一个是「去订阅」深链的落点，指向官网
+     * （`https://vxture.com`）；而会话与 C2 读要打的是 console-bff
+     * （`https://console.vxture.com`）——两个不同的主机，用途也不同。
+     *
+     * 第一版我图省事复用了它，结果默认值把会话请求指向官网，而那只会得到一个
+     * 404 页面：**登录看起来"失败了"，但没有任何一处说得出为什么**。
+     */
+    consoleBase:
+      process.env["RUYIN_CONSOLE_API_BASE"] ?? "https://console.vxture.com",
+  },
+  keys,
+  dataDir,
+);
 // Config values are env-derived - keep them out of logs (issuer/client are
 // inspectable via GET /auth/session); log only readiness facts.
 console.log(
@@ -470,6 +498,7 @@ const server = createLocalApi({
   ...(capabilityBase ? { refreshDistributedSkills: refreshAllDistributed } : {}),
   uiDir,
   platform,
+  platformSession,
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
   requireSignedPackages: process.env["RUYIN_ALLOW_UNSIGNED_PACKAGES"] !== "1",
   events,
