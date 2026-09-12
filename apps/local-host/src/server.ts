@@ -939,6 +939,33 @@ async function handle(
       send(res, 200, { authorizeUrl });
       return;
     }
+    /*
+     * 平台读（C2）。**新增,不是改名** —— 旧的 `/platform/entitlements` 走
+     * `deps.platform`（旧 OIDC 半条路径 + `RUYIN_PLATFORM_API_BASE`），仍在原处,
+     * 这两条走会话路径。
+     *
+     * 两者回答的不是同一个问题,所以不能互相替代:旧的按传入的 product 列表批量查,
+     * 新的问「这个工作区有什么」——**工作区不再由我们声明**,服务端从会话里知道。
+     *
+     * 为什么现在才接:`PlatformSession` 的这两个方法写完、测完,却一个调用方都没有。
+     * 联调时才发现——**方法有、路由无,从外面看就是「平台对接没做」**。
+     */
+    if (method === "GET" && path === "/platform/subscribed-products") {
+      if (!deps.platformSession) {
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
+        return;
+      }
+      send(res, 200, await deps.platformSession.subscribedProducts());
+      return;
+    }
+    if (method === "GET" && path === "/platform/entitlements") {
+      if (!deps.platformSession) {
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
+        return;
+      }
+      send(res, 200, await deps.platformSession.entitlements());
+      return;
+    }
     if (method === "POST" && path === "/auth/logout") {
       await deps.platformSession?.logout();
       send(res, 200, { ok: true });

@@ -486,9 +486,11 @@ void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 Plat
     status: () => ({ signedIn: true, expiresAt: Date.now() + 3600_000 }),
     beginLogin: () => {
       loginCalls++;
-      return "https://console.vxture.com/api/auth/login?surface=native&handle=abc";
+      return "https://console.vxture.com/auth/login?surface=native&handle=abc";
     },
     completeLogin: async () => {},
+    subscribedProducts: async () => [{ productCode: "vxtpl" }],
+    entitlements: async () => [{ productCode: "vxtpl", tier: "starter" }],
     logout: async () => {
       logoutCalls++;
     },
@@ -526,6 +528,41 @@ void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 Plat
     });
     assert.equal(logout.status, 200);
     assert.equal(logoutCalls, 1);
+
+    /* ④ 两条平台读**接到了 HTTP 上**。
+     *
+     * 这一条看着琐碎，但它钉的是一个真实发生过的缺陷:`PlatformSession` 的
+     * `subscribedProducts()` / `entitlements()` 写完、测完、零调用方——方法全都在，
+     * 而**一条路由都没接**。单元测试直接调方法，所以一路绿；从外面看则是
+     * 「平台对接没做」。**方法有不等于路由有**，得从 HTTP 这一侧问一次。 */
+    for (const ep of ["subscribed-products", "entitlements"]) {
+      const res = await fetch(`${rig.base}/platform/${ep}`, {
+        headers: rig.headers,
+      });
+      assert.equal(res.status, 200, `/platform/${ep} 没接上`);
+      const body = (await res.json()) as Array<{ productCode: string }>;
+      assert.equal(body[0]?.productCode, "vxtpl");
+    }
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("未配置 platformSession 时平台读回 503，而不是空数组", async () => {
+  /* 回空数组会被界面渲染成「你没有任何订阅」——一句确定的假话。
+     503 才说得出实情:这台机器还没接上平台。 */
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    for (const ep of ["subscribed-products", "entitlements"]) {
+      const res = await fetch(`${rig.base}/platform/${ep}`, {
+        headers: rig.headers,
+      });
+      assert.equal(res.status, 503);
+      assert.equal(
+        ((await res.json()) as { code: string }).code,
+        "PLATFORM_SESSION_NOT_CONFIGURED",
+      );
+    }
   } finally {
     closeRig(rig);
   }
