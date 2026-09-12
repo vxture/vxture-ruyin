@@ -54,6 +54,7 @@ import {
   PlatformNotConfiguredError,
   type PlatformService,
 } from "./platform.js";
+import type { PlatformSession } from "./platform-session.js";
 
 /** server.ts 只依赖这几个动作；实现见 connector-registry.ts。 */
 export interface ConnectorRegistryLike {
@@ -181,6 +182,12 @@ export interface LocalApiDeps {
   /** Vxture platform integration (C1 identity + C2 entitlements); absent in
    *  tests that exercise the runtime surface only. */
   platform?: PlatformService;
+  /**
+   * 平台会话（rpsid）。与上面的 `platform` 并存一段：接线切过去、实测通了之后，
+   * 再把 `platform` 里 OIDC/令牌那一半删掉。**不要同时依赖两者做同一件事**——
+   * 并存期间 `platformSession` 是唯一的登录入口，`platform` 只剩权益读那一半。
+   */
+  platformSession?: PlatformSession;
   /**
    * 是否要求安装包经 Vxture Registry 副署（§18.2）。缺省 true（安全默认）；
    * 仅开发模式显式置 false 才允许装未签名包。
@@ -912,15 +919,28 @@ async function handle(
   // --- Vxture platform: C1 identity + C2 entitlements (liaison L3) ---
   if (deps.platform) {
     if (method === "GET" && path === "/auth/session") {
-      send(res, 200, deps.platform.session());
+      /* 给 UI 的**只有状态**，没有会话号——取凭据是 `rpsid()`，两者刻意不重名。
+         这是本仓 browser-zero-token 的底线：渲染层从来拿不到能调平台的东西。 */
+      send(res, 200, deps.platformSession?.status() ?? { signedIn: false });
       return;
     }
     if (method === "POST" && path === "/auth/login") {
-      send(res, 200, { authorizeUrl: await deps.platform.beginLogin() });
+      if (!deps.platformSession) {
+        send(res, 503, { code: "PLATFORM_SESSION_NOT_CONFIGURED" });
+        return;
+      }
+      /* 返回地址给 UI 去开系统浏览器；随即在后台轮询领取。
+         **不等它**——领取要等用户输密码，最长 5 分钟，HTTP 请求不该挂那么久。 */
+      const authorizeUrl = deps.platformSession.beginLogin();
+      void deps.platformSession.completeLogin().catch(() => {
+        /* 超时或被拒：本地会话保持未登录，UI 轮询 /auth/session 自然看得到。
+           这里不记日志——用户放弃登录是正常行为，不是异常。 */
+      });
+      send(res, 200, { authorizeUrl });
       return;
     }
     if (method === "POST" && path === "/auth/logout") {
-      await deps.platform.logout();
+      await deps.platformSession?.logout();
       send(res, 200, { ok: true });
       return;
     }

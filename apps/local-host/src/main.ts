@@ -71,6 +71,7 @@ import { fetchUiAfterContract } from "./ui-fetch.js";
 import { EventBus } from "./events.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
+import { PlatformSession } from "./platform-session.js";
 import { FolderPick } from "./folder-pick.js";
 import {
   startMigrationServer,
@@ -342,6 +343,20 @@ for (const failure of registry.failures) {
 }
 
 const platform = new PlatformService(platformConfigFromEnv(port), keys, dataDir);
+/*
+ * 平台会话（rpsid）——登录与带凭据调用的唯一入口。
+ *
+ * 与上面的 `platform` 并存一段：`platform` 只剩权益读那一半，OIDC/令牌那一半在
+ * 切换实测通过后一并删掉。**现在不删**是为了留回滚余地——回滚只需改这里一处接线。
+ *
+ * 基址复用 `RUYIN_CONSOLE_BASE`（已有，原本用于订阅深链）：桌面端要调的读接口
+ * 就挂在 console-bff 上，不新增第二处存主机名的地方。
+ */
+const platformSession = new PlatformSession(
+  { consoleBase: process.env["RUYIN_CONSOLE_BASE"] ?? "https://vxture.com" },
+  keys,
+  dataDir,
+);
 // Config values are env-derived - keep them out of logs (issuer/client are
 // inspectable via GET /auth/session); log only readiness facts.
 console.log(
@@ -470,6 +485,7 @@ const server = createLocalApi({
   ...(capabilityBase ? { refreshDistributedSkills: refreshAllDistributed } : {}),
   uiDir,
   platform,
+  platformSession,
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
   requireSignedPackages: process.env["RUYIN_ALLOW_UNSIGNED_PACKAGES"] !== "1",
   events,
