@@ -176,6 +176,11 @@ export class PlatformSession {
    * 未登录状态下任何 prompt 值的回应都一样，探针判定不了）。平台已在同批实现并
    * 公布 `prompt_values_supported`，所以现在它真的生效。
    */
+  /** 实际在用的会话/读接口基址。启动播报要按这条说话，不按退役变量说话。 */
+  get baseUrl(): string {
+    return this.config.consoleBase;
+  }
+
   beginLogin(): string {
     const deviceSecret = randomBytes(32).toString("hex");
     const handle = createHash("sha256").update(deviceSecret).digest("hex");

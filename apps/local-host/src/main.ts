@@ -370,11 +370,20 @@ const platformSession = new PlatformSession(
   keys,
   dataDir,
 );
-// Config values are env-derived - keep them out of logs (issuer/client are
-// inspectable via GET /auth/session); log only readiness facts.
+/*
+ * Config values are env-derived - keep them out of logs (issuer/client are
+ * inspectable via GET /auth/session); log only readiness facts.
+ *
+ * 这一行原来只播报 `platformApiBase`（旧 C2，tailnet-only）。登录改走平台会话之后
+ * 那个变量已不再需要，于是**正常配置下启动时会打出「entitlements api NOT
+ * configured」**——一行准确但完全误导的话：它说的是退役变量，而读接口其实是通的。
+ * 联调的人看到它只会得出一个结论:平台对接没开。
+ *
+ * 播报现在按**实际会走的那条路**说话，旧基址只在真设了的时候才提一句。
+ */
 console.log(
-  `[ruyin] platform: oidc client ready, entitlements api ${
-    platform.config.platformApiBase ? "configured" : "NOT configured"
+  `[ruyin] platform: oidc client ready, 会话与权益读 → ${platformSession.baseUrl}${
+    platform.config.platformApiBase ? "（另设了旧 C2 基址，仅回滚用）" : ""
   }`,
 );
 
