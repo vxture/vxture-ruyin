@@ -22,6 +22,7 @@ import {
   NotSignedInError,
   PlatformSession,
   type PlatformSessionConfig,
+  PLATFORM_PATHS,
 } from "./platform-session.js";
 import type { KeyManager } from "./keys.js";
 
@@ -73,12 +74,40 @@ describe("platform-session", () => {
   });
   after(() => restores.forEach((r) => r()));
 
+  /*
+   * 这一条查的是**性质**，不是字面。
+   *
+   * 原来这里写的是 `assert.equal(url.pathname, "/api/auth/login")`——和实现里那个
+   * 写错的常量一模一样，于是两边一样地错，测试永远绿。比对型断言抓不到这种错：
+   * 它只能证明两份一致，证明不了它们对。
+   *
+   * 真正的不变式来自平台侧：console-bff 的 `AuthMiddleware` 挂在 `api/*` 上，而会话
+   * 端点必须在它之外——它们是**用来拿会话的**，不可能自带会话。落进 `api/` 的后果不是
+   * 404 而是 **401**，而 401 会被读成「凭据错了」：登录起不来，轮询当场放弃，症状指向
+   * 认证而病因在路由前缀。
+   */
+  it("所有平台端点都在 api/ 之外——落进去会被中间件挡成 401", () => {
+    const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    const paths = [new URL(s.beginLogin()).pathname];
+    /* claim 与 logout 不经 beginLogin 暴露，从源码常量表取，避免在这里再抄一遍。 */
+    for (const p of Object.values(PLATFORM_PATHS)) paths.push(p);
+
+    for (const p of paths) {
+      assert.ok(p.startsWith("/"), `${p} 不是绝对路径`);
+      assert.equal(
+        p.startsWith("/api/"),
+        false,
+        `${p} 落在 AuthMiddleware 覆盖的 /api/ 下，线上会永远回 401`,
+      );
+    }
+  });
+
   it("登录地址里只有哈希，没有 deviceSecret", () => {
     const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
     const url = new URL(s.beginLogin());
 
     assert.equal(url.origin, CONSOLE);
-    assert.equal(url.pathname, "/api/auth/login");
+    assert.equal(url.pathname, "/auth/login");
     assert.equal(url.searchParams.get("surface"), "native");
     assert.equal(url.searchParams.get("prompt"), "select_account");
 
@@ -247,7 +276,7 @@ describe("platform-session", () => {
 
     assert.equal(s.signedIn(), false);
     assert.equal(existsSync(join(dir, "platform", "session.bin")), false);
-    assert.match(f.calls.at(-1)!.url, /\/api\/auth\/logout$/);
+    assert.match(f.calls.at(-1)!.url, /\/auth\/logout$/);
   });
 
   it("status() 给 UI 的东西里没有 rpsid——这是 browser-zero-token 的底线", async () => {

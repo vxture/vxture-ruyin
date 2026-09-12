@@ -76,6 +76,29 @@ export class NotSignedInError extends Error {
 export const CLAIM_POLL_INTERVAL_MS = 1500;
 export const CLAIM_TIMEOUT_MS = 300_000;
 
+/**
+ * console-bff 上的会话端点。**注意没有 `/api` 前缀。**
+ *
+ * console-bff 的 `AuthMiddleware` 挂在 `api/*path` 上，而会话端点必须在它之外：
+ * 它们是**用来拿会话的**，不可能自带会话。平台侧为此把整个 RP 族放在 `/auth/*`，
+ * 并在 `oidc-auth.router.ts` 的文件头写明了这一点。
+ *
+ * 第一版这三条各自内联，并且都多带了一个 `/api`。后果不是「404 找不到」——
+ * 是 **401**：请求落进 `api/*` 被中间件挡下，于是
+ *
+ *   · `/api/auth/login`        → 401，登录根本起不来
+ *   · `/api/auth/native/claim` → 401，轮询把它当成「凭据错了」当场放弃
+ *
+ * 而单元测试全绿：mock server 注册的是同一个写错的常量，**两边一样地错**，
+ * 比对型断言看不见这种错。集中到一处不能防住写错前缀，但至少让它只错一次、
+ * 只需改一处——真正拦住它的是下面 `completeLogin` 里对 401 的判读。
+ */
+export const PLATFORM_PATHS = {
+  login: "/auth/login",
+  claim: "/auth/native/claim",
+  logout: "/auth/logout",
+} as const;
+
 // ============================================================================
 // Service
 // ============================================================================
@@ -158,7 +181,7 @@ export class PlatformSession {
     const handle = createHash("sha256").update(deviceSecret).digest("hex");
     this.pending = { deviceSecret, startedAt: Date.now() };
 
-    const u = new URL("/api/auth/login", this.config.consoleBase);
+    const u = new URL(PLATFORM_PATHS.login, this.config.consoleBase);
     u.searchParams.set("surface", "native");
     u.searchParams.set("handle", handle);
     u.searchParams.set("prompt", "select_account");
@@ -175,7 +198,7 @@ export class PlatformSession {
     if (!pending) throw new NotSignedInError("no login in progress");
 
     const deadline = pending.startedAt + CLAIM_TIMEOUT_MS;
-    const url = new URL("/api/auth/native/claim", this.config.consoleBase);
+    const url = new URL(PLATFORM_PATHS.claim, this.config.consoleBase);
 
     while (Date.now() < deadline) {
       const res = await fetch(url, {
@@ -200,7 +223,21 @@ export class PlatformSession {
          （比如 secret 太短）会被埋在轮询日志里看不见。 */
       if (res && res.status !== 404) {
         this.pending = undefined;
-        throw new NotSignedInError(`claim failed (HTTP ${res.status})`);
+        /*
+         * 401 要单独说。claim 是**公开**端点——它就是用来拿会话的，不可能要求
+         * 先有会话。所以它回 401 不表示「凭据错了」，只表示这个请求根本没打到
+         * 它身上：基址指错了主机，或者路径落进了带鉴权的前缀。
+         *
+         * 不区分的话，用户看到的是「登录失败」，然后去查密码、查 MFA、查平台，
+         * 唯独查不到真正的原因——那正是这个缺陷第一次发生时的样子。
+         */
+        throw new NotSignedInError(
+          res.status === 401
+            ? `claim 收到 401。它是公开端点，401 只可能是请求没打到它身上——` +
+              `检查 RUYIN_CONSOLE_API_BASE（当前 ${this.config.consoleBase}）` +
+              `以及路径 ${PLATFORM_PATHS.claim} 是否落进了带鉴权的前缀。`
+            : `claim failed (HTTP ${res.status})`,
+        );
       }
       await new Promise((r) => setTimeout(r, CLAIM_POLL_INTERVAL_MS));
     }
@@ -339,7 +376,7 @@ export class PlatformSession {
     if (!rpsid) return;
     /* 通知服务端销毁那条会话。收不掉也不该让登出失败——本地已经清了，
        服务端那份到 TTL 自己会走。 */
-    await fetch(new URL("/api/auth/logout", this.config.consoleBase), {
+    await fetch(new URL(PLATFORM_PATHS.logout, this.config.consoleBase), {
       method: "POST",
       headers: { "x-vxture-session": rpsid },
     }).catch(() => undefined);
