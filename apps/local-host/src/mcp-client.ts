@@ -12,8 +12,15 @@
  * Why not the official SDK: it drags express / hono / cors / jose and friends
  * into a daemon that **ships inside the installer**, for a client that uses
  * four methods. The subset is small enough to test end to end against a fake
- * server (see fake-mcp-server.ts). If HTTP transport or a wider surface is
- * ever needed, this file is what gets replaced - nothing else knows JSON-RPC.
+ * server (see fake-mcp-server.ts).
+ *
+ * Streamable HTTP (workplan "通路二 E") landed as a sibling file,
+ * mcp-http-client.ts, not a branch in this one - the two frame the same
+ * JSON-RPC vocabulary too differently (pipes vs request/response, no session
+ * vs a session header, no SSE parsing vs SSE parsing) for one class to carry
+ * both without every method branching on transport. `McpClient` below is the
+ * seam `connector-mcp.ts` programs against; it does not know which file it
+ * got. TD-035 tracks the self-implement-vs-SDK trade-off for both.
  *
  * Failure posture: a request either resolves with the server's `result`, or
  * rejects with a `McpError` naming the method - transport gone, server said
@@ -80,6 +87,26 @@ export class McpError extends Error {
   }
 }
 
+/**
+ * The shape `connector-mcp.ts` programs against - deliberately just the
+ * methods a read-only context connector plus batch D's tool calls need.
+ * `McpStdioClient` (this file) and `McpHttpClient` (mcp-http-client.ts,
+ * batch E) both implement it; nothing above this line cares which transport
+ * carried a given call.
+ */
+export interface McpClient {
+  readonly serverInfo: McpServerInfo | undefined;
+  readonly running: boolean;
+  readonly diagnostics: string;
+  start(): Promise<McpServerInfo>;
+  stop(): Promise<void>;
+  ping(): Promise<void>;
+  listResources(): Promise<McpResource[]>;
+  listTools(): Promise<McpTool[]>;
+  callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult>;
+  readResource(uri: string): Promise<McpResourceContent[]>;
+}
+
 interface Pending {
   method: string;
   resolve: (value: unknown) => void;
@@ -100,7 +127,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 /** Pages of resources/list we will follow before giving up on a runaway server. */
 const MAX_LIST_PAGES = 50;
 
-export class McpStdioClient {
+export class McpStdioClient implements McpClient {
   private child: ChildProcess | undefined;
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();

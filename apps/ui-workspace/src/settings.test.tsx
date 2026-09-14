@@ -485,6 +485,7 @@ void test("Settings/连接器: 添加是独立一页；必须先测通才能启�
   await user.click(screen.getByRole("button", { name: "测试连接" }));
   expect(testConnector).toHaveBeenCalledWith({
     id: "crm",
+    transport: "stdio",
     command: "node",
     args: ["crm.js", "--port", "1"],
   });
@@ -494,6 +495,7 @@ void test("Settings/连接器: 添加是独立一页；必须先测通才能启�
   await user.click(screen.getByRole("button", { name: "暂存（不启用）" }));
   expect(installConnector).toHaveBeenLastCalledWith({
     id: "crm",
+    transport: "stdio",
     command: "node",
     args: ["crm.js", "--port", "1"],
     source: "private",
@@ -511,10 +513,50 @@ void test("Settings/连接器: 添加是独立一页；必须先测通才能启�
   await user.click(screen.getByRole("button", { name: "添加并启用" }));
   expect(installConnector).toHaveBeenLastCalledWith({
     id: "crm",
+    transport: "stdio",
     command: "node",
     args: [],
     source: "lan",
   });
+});
+
+void test("Settings/连接器: 传输方式切到 Streamable HTTP 后走地址，不走命令；切回去表单也换回来", async () => {
+  const testConnector = vi.fn().mockResolvedValue({ ok: true, tools: ["crm_search"] });
+  const installConnector = vi.fn().mockResolvedValue(crmView);
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({ items: [] }),
+    testConnector,
+    installConnector,
+  });
+  renderRouted("connectors", api);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "添加连接器" }));
+  await user.type(screen.getByPlaceholderText("如 crm"), "crm");
+  await user.selectOptions(screen.getByLabelText("传输方式"), "streamable_http");
+
+  // 换了传输方式，命令那两行不该还在 —— 它们讲的是另一条连接细节。
+  expect(screen.queryByPlaceholderText(/^如 node/)).not.toBeInTheDocument();
+  await user.type(screen.getByPlaceholderText(/^http:\/\/127\.0\.0\.1/), "http://127.0.0.1:8931/mcp");
+  await user.click(screen.getByRole("button", { name: "测试连接" }));
+  expect(testConnector).toHaveBeenCalledWith({
+    id: "crm",
+    transport: "streamable_http",
+    url: "http://127.0.0.1:8931/mcp",
+  });
+  expect(await screen.findByText(/连接成功/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "添加并启用" }));
+  expect(installConnector).toHaveBeenLastCalledWith({
+    id: "crm",
+    transport: "streamable_http",
+    url: "http://127.0.0.1:8931/mcp",
+    source: "lan",
+  });
+
+  // 切回 stdio：地址字段消失，测试结果也不该带着上一种传输的痕迹。
+  await user.selectOptions(screen.getByLabelText("传输方式"), "stdio");
+  expect(screen.queryByPlaceholderText(/^http:\/\/127\.0\.0\.1/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/连接成功/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "添加并启用" })).toBeDisabled();
 });
 
 void test("Settings/连接器: 测通了但对方没报工具，说清楚 —— 契约里的 connector 工具会接不上", async () => {
@@ -605,7 +647,13 @@ void test("Settings/连接器: a generic failure to list is shown as a failure (
   await screen.findByText(/连接成功/);
   await user.click(screen.getByRole("button", { name: "添加并启用" }));
   // id 两端的空格要修掉：用户不该因为多按了一下空格而装出一个别的 id。
-  expect(api.installConnector).toHaveBeenCalledWith({ id: "crm", command: "node", args: [], source: "lan" });
+  expect(api.installConnector).toHaveBeenCalledWith({
+    id: "crm",
+    transport: "stdio",
+    command: "node",
+    args: [],
+    source: "lan",
+  });
   // 添加成功后回到列表，而且列表是重新拉过的。
   expect(await screen.findByText("运行中")).toBeInTheDocument();
   expect(screen.queryByPlaceholderText("如 crm")).not.toBeInTheDocument();

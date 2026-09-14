@@ -23,7 +23,8 @@ import type {
   ContextItem,
   ContextItemMeta,
 } from "@vxture/ruyin-core";
-import { McpStdioClient, type McpResource, type McpServerSpec } from "./mcp-client.js";
+import { McpStdioClient, type McpClient, type McpResource, type McpServerSpec } from "./mcp-client.js";
+import { McpHttpClient, type McpHttpServerSpec } from "./mcp-http-client.js";
 import { DEFAULT_RESOURCE_LIMITS, type ResourceLimits } from "./resource-limits.js";
 
 /** Mirrors local-fs: what one text item may bring into a turn. */
@@ -33,10 +34,19 @@ const MAX_BINARY_BYTES = 20_000_000;
 /** Mirrors local-fs's MAX_FILES: an item list is a selection input, not a dump. */
 const MAX_ITEMS = 500;
 
-export interface McpConnectorSpec extends McpServerSpec {
+export interface McpConnectorStdioSpec extends McpServerSpec {
   /** Connector id the host registers it under; items carry it (ADR-005 seam ②). */
   id: string;
+  transport?: "stdio";
 }
+
+export interface McpConnectorHttpSpec extends McpHttpServerSpec {
+  id: string;
+  transport: "streamable_http";
+}
+
+/** Which client (mcp-client.ts / mcp-http-client.ts) a spec picks is the `transport` tag. */
+export type McpConnectorSpec = McpConnectorStdioSpec | McpConnectorHttpSpec;
 
 function describe(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -64,7 +74,7 @@ export interface ConnectorToolOutcome {
 
 export class McpConnector implements ConnectorPort {
   readonly id: string;
-  private readonly client: McpStdioClient;
+  private readonly client: McpClient;
   private toolNames: string[] = [];
 
   constructor(
@@ -72,12 +82,22 @@ export class McpConnector implements ConnectorPort {
     private readonly options: { timeoutMs?: number; limits?: ResourceLimits } = {},
   ) {
     this.id = spec.id;
-    const { id: _id, ...server } = spec;
-    this.client = new McpStdioClient(server, {
-      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-      maxLineBytes: (options.limits ?? DEFAULT_RESOURCE_LIMITS).maxServerLineBytes,
-      clientInfo: { name: "ruyin", version: "0.1.0" },
-    });
+    const clientInfo = { name: "ruyin", version: "0.1.0" };
+    if (spec.transport === "streamable_http") {
+      const { id: _id, transport: _t, ...server } = spec;
+      this.client = new McpHttpClient(server, {
+        ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+        maxResponseBytes: (options.limits ?? DEFAULT_RESOURCE_LIMITS).maxServerLineBytes,
+        clientInfo,
+      });
+    } else {
+      const { id: _id, transport: _t, ...server } = spec;
+      this.client = new McpStdioClient(server, {
+        ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+        maxLineBytes: (options.limits ?? DEFAULT_RESOURCE_LIMITS).maxServerLineBytes,
+        clientInfo,
+      });
+    }
   }
 
   async start(): Promise<void> {

@@ -14,6 +14,7 @@ import {
 import { BundledToolServers } from "./tool-servers.js";
 import { DEFAULT_RESOURCE_LIMITS } from "./resource-limits.js";
 import { mkdirSync } from "node:fs";
+import { startFakeMcpHttpServer } from "./fake-mcp-http-server.js";
 
 const FAKE = fileURLToPath(new URL("./fake-mcp-server.js", import.meta.url));
 
@@ -387,4 +388,92 @@ test("上限：工具服务器起到上限就不再起，**并说出正占着的
 
   await registry.stopAll();
   rmSync(dataDir, { recursive: true, force: true });
+});
+
+/**
+ * Streamable HTTP（workplan「通路二 E」，TD-035）：同一个 `install`/`probe`
+ * 入口，换一条 discriminant。协议本身（发现/读/工具截断）已经在
+ * connector-mcp-http.test.ts 证过；这里只需要证注册表这一层的接线 —— 落盘
+ * 形状、地址校验、试连不落盘 —— 真的到得了一个真实的 HTTP 服务器。
+ */
+
+test("registry (streamable_http): install starts the connector, persists url/headers, health reaches a real server", async () => {
+  const server = await startFakeMcpHttpServer({});
+  try {
+    const { registry, dataDir, lookup } = fresh();
+    const view = await registry.install({
+      id: "crm",
+      transport: "streamable_http",
+      url: server.url,
+      headers: { authorization: "Bearer x" },
+      source: "lan",
+    });
+    assert.equal(view.health.ok, true);
+    assert.ok(lookup.has("crm"));
+    const manifest = JSON.parse(readFileSync(join(dataDir, CONNECTORS_FILE), "utf8")) as {
+      items: Array<{ id: string; transport: string; url: string; headers?: Record<string, string> }>;
+    };
+    assert.deepEqual(manifest.items.map((i) => [i.id, i.transport, i.url]), [["crm", "streamable_http", server.url]]);
+    assert.deepEqual(manifest.items[0]!.headers, { authorization: "Bearer x" });
+
+    const listed = await registry.list();
+    assert.equal(listed[0]!.health.ok, true);
+    assert.deepEqual((listed[0] as { tools: string[] }).tools, ["lookup_account"]);
+
+    await registry.stopAll();
+    rmSync(dataDir, { recursive: true, force: true });
+  } finally {
+    await server.close();
+  }
+});
+
+test("registry (streamable_http): rejects a missing/invalid/non-http(s) url before ever touching the network", async () => {
+  const { registry, dataDir } = fresh();
+  await assert.rejects(
+    registry.install({ id: "crm", transport: "streamable_http", url: "", source: "lan" }),
+    /地址不能为空/,
+  );
+  await assert.rejects(
+    registry.install({ id: "crm", transport: "streamable_http", url: "not a url", source: "lan" }),
+    /不是合法的 URL/,
+  );
+  await assert.rejects(
+    registry.install({ id: "crm", transport: "streamable_http", url: "ftp://example.com/mcp", source: "lan" }),
+    /必须是 http 或 https/,
+  );
+  assert.ok(!existsSync(join(dataDir, CONNECTORS_FILE)));
+  rmSync(dataDir, { recursive: true, force: true });
+});
+
+test("registry (streamable_http): probe tests without registering, same posture as stdio", async () => {
+  const server = await startFakeMcpHttpServer({});
+  try {
+    const { registry, dataDir, lookup } = fresh();
+    const ok = await registry.probe({ id: "crm", transport: "streamable_http", url: server.url });
+    assert.equal(ok.ok, true);
+    assert.deepEqual(ok.tools, ["lookup_account"]);
+    assert.equal(lookup.size, 0, "probe 不注册");
+    assert.ok(!existsSync(join(dataDir, CONNECTORS_FILE)), "probe 不落盘");
+
+    const bad = await registry.probe({ id: "crm", transport: "streamable_http", url: "http://127.0.0.1:1" });
+    assert.equal(bad.ok, false);
+    assert.ok(bad.detail);
+    rmSync(dataDir, { recursive: true, force: true });
+  } finally {
+    await server.close();
+  }
+});
+
+test("registry (streamable_http): a stdio and an http connector run side by side, each counted the same way against the server limit", async () => {
+  const server = await startFakeMcpHttpServer({});
+  try {
+    const { registry, dataDir } = fresh();
+    await registry.install({ id: "http-one", transport: "streamable_http", url: server.url, source: "lan" });
+    await registry.install({ id: "stdio-one", command: process.execPath, args: [FAKE], source: "lan" });
+    assert.deepEqual(registry.runningServers.sort(), ["http-one", "stdio-one"]);
+    await registry.stopAll();
+    rmSync(dataDir, { recursive: true, force: true });
+  } finally {
+    await server.close();
+  }
 });

@@ -106,3 +106,41 @@ id 相同即接通，category / risk / default 仍归契约，R15 限 `query` /
 `external_send`。「安全边界」一节四条的现状：来源受限与签名验证仍受 TD-012
 阻（TD-036，生产拒装）；显式安装与项目为界的授权已落地。Streamable HTTP
 传输见 TD-035。
+
+**2026-09-14 · E 落地（TD-035 关闭，仍自实现，未换 SDK）。** `apps/local-host`
+新增 `mcp-http-client.ts`：与 stdio 客户端并列的第二个 `McpClient` 实现，走
+MCP 的 Streamable HTTP 传输——单个端点接 POST，回应或是一段 JSON，或是一条
+SSE 流；`initialize` 应答里的 `Mcp-Session-Id` 记下来，往后每次请求原样带回，
+`stop()` 用 DELETE 收尾（best-effort，服务器自己也会把闲置会话超时收掉）。
+两个客户端共享的只是 `McpClient` 这一份接口（`mcp-client.ts` 里新增导出）：
+JSON-RPC 的方法名与分页协议两边各写一份而不是抽成公共基类——管道 vs
+请求/响应、没有会话概念 vs 会话头、不必解析流 vs 要解析 SSE，差异大到共享
+会带来比复制更高的耦合，`connector-mcp.ts` 只认接口，不知道背后是哪个文件。
+
+`connector-mcp.ts` / `connector-registry.ts` 的连接细节从「只有 stdio 一种
+形状」改成按 `transport` 区分的 discriminated union（`InstalledConnector` /
+`ConnectorView` 现在是 `stdio | streamable_http` 的联合，不是单一形状）；
+`probe`/`install` 走同一个入口，两条分支共用同一段收尾逻辑
+（`probeConnector`）。`server.ts` 的 `ConnectorRegistryLike` 直接引用
+`connector-registry.ts` 导出的入参类型，不重复定义一份、也就不会漂开。
+`apps/ui-workspace` 的添加连接器页加了传输方式选择，换传输方式清空上一次
+的测试结果（那是对着另一条连接细节测的，不该带着）。
+
+**上限（TD-046）照旧套用，换了度量口径**：stdio 那条「一条 JSON-RPC 消息的
+字节上限」在 HTTP 这边变成「一次响应体（含 SSE 事件缓冲）的字节上限」，
+同一个数、同一个环境变量。同时在跑的连接器数（`maxToolServers`）统一计数：
+HTTP 连接器没有子进程，但一样占着这台机器上的一个活跃连接。
+
+**信任模型不因传输换了而改变**：来源受限（TD-036，生产拒装未签名安装）、
+显式安装（POST）、项目为界的授权（ConnectorGrant）三条对 HTTP 连接器原样
+成立——地址本身只做「是不是合法的 http(s) URL」这一层校验，不做额外的网络
+访问控制，因为真正的信任边界从来不在传输层，在安装口的签名门。
+
+测试：`fake-mcp-http-server.ts`（与 `fake-mcp-server.ts` 并列的测试替身，
+**不作为子进程跑**——HTTP 没有 stdio 那样的进程边界要跨，跑在测试进程里即可）
++ `mcp-http-client.test.ts`（单/JSON 与 SSE 两种应答模式各跑一遍协议全集、
+会话过期、超时、连接断开、上限收摊等失败路径）+
+`connector-mcp-http.test.ts` / `connector-registry.test.ts` 里追加的
+streamable_http 用例。自实现 vs 官方 SDK 的取舍：这一批的体量与 stdio 那批
+相当（一个新文件，仍然只认这个客户端需要的四五个方法），没有推到需要换 SDK
+的地步——TD-035 因此关闭为「自实现，保持」，不是「换 SDK 待办」。

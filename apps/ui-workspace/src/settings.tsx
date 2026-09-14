@@ -620,7 +620,10 @@ function ConnectorsSection({ api }: { api: Api }) {
         <ul className="row-list" aria-label="已安装的连接器">
           {items.map((c) => (
             <li key={c.id} className="row-item">
-              <code className="row-main" title={`${c.command} ${c.args.join(" ")}`}>
+              <code
+                className="row-main"
+                title={c.transport === "streamable_http" ? c.url : `${c.command} ${c.args.join(" ")}`}
+              >
                 {c.id}
               </code>
               <span className="row-tag">{c.source === "bundled" ? "预置" : c.source}</span>
@@ -679,22 +682,35 @@ function ConnectorsSection({ api }: { api: Api }) {
  */
 function AddConnectorPage({ api }: { api: Api }) {
   const [id, setId] = useState("");
+  const [transport, setTransport] = useState<"stdio" | "streamable_http">("stdio");
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
+  const [url, setUrl] = useState("");
   const [source, setSource] = useState<"lan" | "private">("lan");
   const [busy, setBusy] = useState<"test" | "save" | null>(null);
   const [probe, setProbe] = useState<{ ok: boolean; tools: string[]; detail?: string } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
   const argv = () => (args.trim() ? args.trim().split(/\s+/) : []);
-  const ready = id.trim().length > 0 && command.trim().length > 0;
+  const ready =
+    id.trim().length > 0 && (transport === "streamable_http" ? url.trim().length > 0 : command.trim().length > 0);
+  // 换传输方式时，上一种的测试结果不该跟着 —— 那是对着另一条连接细节测的。
+  const switchTransport = (next: "stdio" | "streamable_http") => {
+    setTransport(next);
+    setProbe(null);
+    setFailed(null);
+  };
+  const connectionInput = () =>
+    transport === "streamable_http"
+      ? ({ id: id.trim(), transport: "streamable_http", url: url.trim() } as const)
+      : ({ id: id.trim(), transport: "stdio", command: command.trim(), args: argv() } as const);
 
   const test = async () => {
     setBusy("test");
     setFailed(null);
     setProbe(null);
     try {
-      setProbe(await api.testConnector({ id: id.trim(), command: command.trim(), args: argv() }));
+      setProbe(await api.testConnector(connectionInput()));
     } catch (e) {
       setFailed(String((e as Error).message));
     } finally {
@@ -707,10 +723,7 @@ function AddConnectorPage({ api }: { api: Api }) {
     setFailed(null);
     try {
       await api.installConnector({
-        id: id.trim(),
-        command: command.trim(),
-        // 空格分参数够用了：这是开发态的口子，真正的安装走签名包（TD-036）。
-        args: argv(),
+        ...connectionInput(),
         source,
         ...(stashed ? { state: "stashed" as const } : {}),
       });
@@ -726,8 +739,8 @@ function AddConnectorPage({ api }: { api: Api }) {
   return (
     <SettingsBlock
       icon="plugs-connected"
-      title="添加连接器（stdio）"
-      desc="一个 MCP 服务器的启动命令。先测一次，再决定启用还是暂存"
+      title="添加连接器"
+      desc="一个 MCP 服务器：本机启动命令（stdio），或已经在跑的地址（Streamable HTTP）。先测一次，再决定启用还是暂存"
       aside={
         <Button variant="ghost" size="sm" onClick={() => go("#settings/connectors")}>
           返回列表
@@ -737,16 +750,38 @@ function AddConnectorPage({ api }: { api: Api }) {
       <Row label="连接器 id">
         <Input value={id} onChange={(e) => setId(e.target.value)} placeholder="如 crm" />
       </Row>
-      <Row label="命令">
-        <Input
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          placeholder="如 node，或 MCP 服务器可执行文件的完整路径"
-        />
+      <Row label="传输方式">
+        <NativeSelect
+          aria-label="传输方式"
+          value={transport}
+          onChange={(e) => switchTransport(e.target.value === "streamable_http" ? "streamable_http" : "stdio")}
+        >
+          <option value="stdio">stdio · 本机启动命令</option>
+          <option value="streamable_http">streamable_http · 已在跑的地址</option>
+        </NativeSelect>
       </Row>
-      <Row label="参数" note="空格分隔，可以留空。">
-        <Input value={args} onChange={(e) => setArgs(e.target.value)} placeholder="--port 8931" />
-      </Row>
+      {transport === "streamable_http" ? (
+        <Row label="地址" note="http 或 https；这条服务要实现 MCP 的 Streamable HTTP 传输。">
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="http://127.0.0.1:8931/mcp"
+          />
+        </Row>
+      ) : (
+        <>
+          <Row label="命令">
+            <Input
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              placeholder="如 node，或 MCP 服务器可执行文件的完整路径"
+            />
+          </Row>
+          <Row label="参数" note="空格分隔，可以留空。">
+            <Input value={args} onChange={(e) => setArgs(e.target.value)} placeholder="--port 8931" />
+          </Row>
+        </>
+      )}
       <Row label="来源种类" note="契约里声明 lan / private 的上下文类型才能绑到它。">
         <NativeSelect
           aria-label="来源种类"
@@ -794,7 +829,8 @@ function AddConnectorPage({ api }: { api: Api }) {
       )}
       {failed && <div className="update-line update-line--warn">{failed}</div>}
       <p className="set-note">
-        签名信任锚就位前，正式版会拒绝安装并说明原因（TD-036）；测试本身不落盘，起一下就结束。
+        签名信任锚就位前，正式版会拒绝安装并说明原因（TD-036）；测试本身不落盘，
+        {transport === "streamable_http" ? "只是发一次握手请求。" : "起一下就结束。"}
       </p>
     </SettingsBlock>
   );

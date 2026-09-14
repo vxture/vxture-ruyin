@@ -44,7 +44,12 @@ import { AlreadyAttributedError } from "@vxture/ruyin-core";
 import { apiError, REJECTION } from "./errors.js";
 import type { ToolProvider } from "@vxture/ruyin-contract-schema";
 import { ComponentError } from "./component-store.js";
-import { ConnectorBundledError, ConnectorInstallRefusedError } from "./connector-registry.js";
+import {
+  ConnectorBundledError,
+  ConnectorInstallRefusedError,
+  type ConnectorInstallInput,
+  type ConnectorProbeInput,
+} from "./connector-registry.js";
 import { RegistryError, downloadPackage, fetchRegistryIndex } from "./registry-client.js";
 import { join as joinPath } from "node:path";
 import type { EventBus } from "./events.js";
@@ -56,24 +61,17 @@ import {
 } from "./platform.js";
 import type { PlatformSession } from "./platform-session.js";
 
-/** server.ts 只依赖这几个动作；实现见 connector-registry.ts。 */
+/**
+ * server.ts 只依赖这几个动作；实现见 connector-registry.ts。`install`/`probe`
+ * 的入参就是那边导出的 discriminated union（stdio 命令行 / Streamable HTTP
+ * 地址，workplan「通路二 E」）—— 这里不重复定义一份形状，两边一旦漂开，
+ * TypeScript 会在这个文件报错，而不是留到运行时才发现某个字段传不过去。
+ */
 export interface ConnectorRegistryLike {
   list(): Promise<unknown[]>;
-  install(input: {
-    id: string;
-    command: string;
-    args?: string[];
-    env?: Record<string, string>;
-    source: string;
-    state?: string;
-  }): Promise<unknown>;
+  install(input: ConnectorInstallInput): Promise<unknown>;
   /** 试连一次，不落盘（添加页在写下任何东西之前先问一句）。 */
-  probe(input: {
-    id: string;
-    command: string;
-    args?: string[];
-    env?: Record<string, string>;
-  }): Promise<{ ok: boolean; tools: string[]; detail?: string }>;
+  probe(input: ConnectorProbeInput): Promise<{ ok: boolean; tools: string[]; detail?: string }>;
   /** 启用一个暂存的连接器：重新试，通了才转 active。 */
   activate(id: string): Promise<unknown>;
   /** 停用：停进程、从内核名单拿掉；用户装的转暂存，预置的记回状态。 */
@@ -403,6 +401,31 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   const text = Buffer.concat(chunks).toString("utf8");
   if (text.trim().length === 0) return {};
   return JSON.parse(text) as Record<string, unknown>;
+}
+
+/**
+ * `/connectors` 与 `/connectors/test` 共用的连接细节解析（不含 `source` / `state`，
+ * 那两个字段只有 install 要，probe 不要）。`transport: "streamable_http"` 走地址，
+ * 否则按 stdio 的老样子走命令行 —— 两者都不传时缺省 stdio，旧请求体不必改。
+ */
+function connectorInputFrom(body: Record<string, unknown>): ConnectorProbeInput {
+  const id = String(body["id"] ?? "");
+  if (body["transport"] === "streamable_http") {
+    return {
+      id,
+      transport: "streamable_http",
+      url: String(body["url"] ?? ""),
+      ...(body["headers"] && typeof body["headers"] === "object"
+        ? { headers: body["headers"] as Record<string, string> }
+        : {}),
+    };
+  }
+  return {
+    id,
+    command: String(body["command"] ?? ""),
+    ...(Array.isArray(body["args"]) ? { args: body["args"].map(String) } : {}),
+    ...(body["env"] && typeof body["env"] === "object" ? { env: body["env"] as Record<string, string> } : {}),
+  };
 }
 
 function errorStatus(cause: unknown): { status: number; body: unknown } {
@@ -1245,21 +1268,10 @@ async function handle(
       send(res, 200, { items: await deps.connectors.list() });
       return;
     }
-    // POST /connectors/test —— 只问「这条命令通不通」，不写任何东西。
+    // POST /connectors/test —— 只问「这条命令/地址通不通」，不写任何东西。
     if (method === "POST" && segments.length === 2 && segments[1] === "test") {
       const body = await readJson(req);
-      send(
-        res,
-        200,
-        await deps.connectors.probe({
-          id: String(body["id"] ?? ""),
-          command: String(body["command"] ?? ""),
-          ...(Array.isArray(body["args"]) ? { args: body["args"].map(String) } : {}),
-          ...(body["env"] && typeof body["env"] === "object"
-            ? { env: body["env"] as Record<string, string> }
-            : {}),
-        }),
-      );
+      send(res, 200, await deps.connectors.probe(connectorInputFrom(body)));
       return;
     }
     // POST /connectors/:id/deactivate —— 停进程；用户装的转暂存，预置的记为未启用。
@@ -1303,12 +1315,7 @@ async function handle(
       const body = await readJson(req);
       try {
         const view = await deps.connectors.install({
-          id: String(body["id"] ?? ""),
-          command: String(body["command"] ?? ""),
-          ...(Array.isArray(body["args"]) ? { args: body["args"].map(String) } : {}),
-          ...(body["env"] && typeof body["env"] === "object"
-            ? { env: body["env"] as Record<string, string> }
-            : {}),
+          ...connectorInputFrom(body),
           source: String(body["source"] ?? ""),
           ...(body["state"] === "stashed" ? { state: "stashed" } : {}),
         });
