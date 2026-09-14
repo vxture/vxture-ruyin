@@ -455,6 +455,24 @@ void test("Settings/连接器: lists installed connectors with live health, and 
   expect(api.removeConnector).toHaveBeenCalledWith("crm");
 });
 
+void test("Settings/连接器: a streamable_http connector shows its url, not a command/args tooltip", async () => {
+  const httpView = {
+    state: "active" as const,
+    id: "crm-http",
+    transport: "streamable_http" as const,
+    url: "http://127.0.0.1:8931/mcp",
+    source: "lan" as const,
+    installedAt: "2026-09-14T00:00:00.000Z",
+    health: { ok: true, checkedAt: "2026-09-14T00:00:00.000Z" },
+    tools: ["lookup_account"],
+  };
+  const api = fakeApi({ connectors: vi.fn().mockResolvedValue({ items: [httpView] }) });
+  renderRouted("connectors", api);
+  const list = await screen.findByLabelText("已安装的连接器");
+  const code = within(list).getByText("crm-http");
+  expect(code).toHaveAttribute("title", "http://127.0.0.1:8931/mcp");
+});
+
 void test("Settings/连接器: 添加是独立一页；必须先测通才能启用，测不通可以暂存", async () => {
   const testConnector = vi
     .fn()
