@@ -23,6 +23,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
+import { parseUiSelfCheck } from "./pack-smoke.mjs";
+
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const shellDir = join(repoRoot, "apps", "shell");
 const daemonOut = join(shellDir, "out", "daemon");
@@ -105,7 +107,8 @@ run(
 // win.certificateFile / certificateSubjectName。
 //
 // **加了新的签名机制就要回来改这里**，否则包签了而界面还在喊未签名。
-// `pack.test.mjs` 逐个钉住下面这几个来源。
+// 下面这几个来源不自测（TD-053：pack 明确不补，由 packaged-smoke 端到端走）；
+// 冒烟输出的判读另有自测（pack-smoke.test.mjs）。
 // ---------------------------------------------------------------------------
 const builderYml = readFileSync(join(shellDir, "electron-builder.yml"), "utf8");
 const certInYml = /^\s*(certificateFile|certificateSubjectName|certificateSha1):/m.test(builderYml);
@@ -304,11 +307,28 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
   if (skillPull && !line[1].startsWith("ok")) {
     console.error(
       "[pack] FAILED: 种过 Python 半边，包里却没有一个能试的 uvx 服务器 —— 看 electron-builder.yml 的 resources/uv 与清单的 pythonRuntime.seed。",
-        "       的 resources/uv 与清单的 pythonRuntime.seed。",
     );
     process.exit(1);
   }
   console.log(`[pack] uvx self-check: ${line[1]}`);
+}
+
+// 工作台界面真的被守护进程端出来了（TD-061）—— 装进包不等于端得出来。
+//
+// 壳的 --smoke 在 openWindow() 之前就退出（apps/shell/src/main.ts），窗口要加载的那个
+// `/` 在冒烟里从没被请求过；../ui-workspace/dist 不在时 electron-builder 一声不吭地
+// 跳过（同上面预置技能层那条）；RUYIN_UI_DIR 指向不存在的目录时守护进程照样起来、
+// /health 照样 200，只有 `/` 是 404。所以守护进程在冒烟里自己请求一次 `/`，把页面引用
+// 的每个文件都取一遍（apps/local-host/src/ui-self-check.ts），端不出来就退出 1 ——
+// 那种情形上面 [shell-smoke] OK 那一关已经拦下；这里断言它报了 ok。**不按 skillPull
+// 放宽**：pack 每次都 `pnpm -r build`，界面必然构建过，「没有可端的界面」在这里不成立。
+{
+  const ui = parseUiSelfCheck(smokeOut);
+  if (!ui.ok) {
+    console.error(ui.message);
+    process.exit(1);
+  }
+  console.log(`[pack] 工作台界面落位核对: ${ui.detail}`);
 }
 
 // 打包形态下主密钥必须由 DPAPI 保护。

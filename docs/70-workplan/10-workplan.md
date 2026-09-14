@@ -450,7 +450,7 @@
 `lint:tech-debt`（登记册可解析、自计数一致）· `lint:brand-assets` ·
 `lint:versions`（内容改了版本必须升，基线 = 最近的 packages-v* tag）；
 （2026-09-03 更正：此处此前写「六道」，后几道加上后没改）
-CI 另加 `packaged-smoke`（windows-latest，真启动 + 真排一份 PDF + 断言 DPAPI）。
+CI 另加 `packaged-smoke`（windows-latest，真启动 + 真排一份 PDF + 端出工作台界面 + 断言 DPAPI）。
 
 **已提为第六个必需检查（2026-09-02，#73）** —— owner 定：ruyin 是桌面分发仓，平台模板明文不适用，
 本仓自决、不等平台标准；CLAUDE.md「Required checks」是权威。**2026-09-03 更正**：此处此前写着
