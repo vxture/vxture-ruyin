@@ -143,6 +143,18 @@ export function describeTreeWrites(diff) {
  */
 export function canWrite(dir) {
   const probe = join(dir, `.ruyin-write-probe-${process.pid}`);
+  if (process.platform === "win32") {
+    // **不能用 Node 自己探。** libuv 在 Windows 上打开文件一律带 FILE_FLAG_BACKUP_SEMANTICS，
+    // 而令牌里 SeBackupPrivilege / SeRestorePrivilege 处于启用状态时（GitHub 的 Windows
+    // runner 就是），带这个标志的打开会**绕过 ACL** —— 拒绝项摆在那儿，Node 照样写进去
+    // （#244 第一次在 CI 上跑就是这样红的）。cmd 的重定向走普通 CreateFile，没有那个标志，
+    // 探出来的才是 uv（Rust，也没有那个标志）和普通用户会遇到的答案。
+    const r = spawnSync("cmd.exe", ["/d", "/c", `echo probe> "${probe}" && del /q "${probe}"`], {
+      encoding: "utf8",
+      windowsVerbatimArguments: true,
+    });
+    return r.status === 0;
+  }
   try {
     writeFileSync(probe, "probe");
   } catch {
@@ -172,22 +184,24 @@ export function canWrite(dir) {
  *
  * @param {string} dir 要锁的树根
  * @param {string[]} [probeDirs] 拒绝之后探哪些目录（默认只探树根；传一个深处的子目录能顺便验继承）
- * @returns {{ effective: boolean, how: string, restore: () => void }}
+ * @returns {{ effective: boolean, how: string, log: string, restore: () => void }} log 是锁那条命令的输出（icacls 会说处理了几个文件），给 pack 打进日志
  */
 export function denyWrites(dir, probeDirs = [dir]) {
   const run = (cmd, args) => {
     const r = spawnSync(cmd, args, { encoding: "utf8" });
     if (r.error) throw new Error(`${cmd} ${args.join(" ")}: ${r.error.message}`);
     if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} 退出 ${r.status}：${r.stdout ?? ""}${r.stderr ?? ""}`);
+    return `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
   };
   const stillLocked = () => probeDirs.filter((d) => !canWrite(d));
   let how;
+  let log;
   let undo;
   if (process.platform === "win32") {
     const user = process.env["USERNAME"];
     if (!user) throw new Error("denyWrites: 拿不到 USERNAME，没法给当前用户加拒绝 ACE");
     const rights = "(OI)(CI)(DE,DC,WD,AD,WEA,WA)";
-    run("icacls", [dir, "/deny", `${user}:${rights}`]);
+    log = run("icacls", [dir, "/deny", `${user}:${rights}`]);
     // 打出来的那一句不带用户名：它来自 process.env，CodeQL 把「环境变量进日志」一律当
     // 明文泄露（#244 三条 high）。用占位符 —— 这句话的用途是让人看懂锁的是什么。
     how = `icacls /deny %USERNAME%:${rights}`;
@@ -202,7 +216,7 @@ export function denyWrites(dir, probeDirs = [dir]) {
       }
     };
   } else {
-    run("chmod", ["-R", "a-w", dir]);
+    log = run("chmod", ["-R", "a-w", dir]);
     how = "chmod -R a-w";
     undo = () => {
       run("chmod", ["-R", "u+w", dir]);
@@ -210,7 +224,7 @@ export function denyWrites(dir, probeDirs = [dir]) {
       if (left.length) throw new Error(`只读演练恢复失败：${left.join("、")} 仍然写不了。手动恢复：chmod -R u+w "${dir}"`);
     };
   }
-  return { effective: stillLocked().length === probeDirs.length, how, restore: undo };
+  return { effective: stillLocked().length === probeDirs.length, how, log, restore: undo };
 }
 
 /**
