@@ -76,6 +76,11 @@ each push to main) keeps the installer it just built and launched as an
 Actions artifact for 14 days: open the run, download
 `ruyin-installer-<pr-N|main>-<run>` (NSIS setup + blockmap + latest.yml).
 That is the same tree the smoke check started, not a separate build.
+It is unsigned (TD-001). On a machine with Smart App Control on, a
+downloaded unsigned installer is blocked silently - double-click does
+nothing. For a test install, strip the download mark first:
+`Unblock-File .\Ruyin-Setup-0.1.0.exe` in PowerShell. Local builds are
+not marked and are not affected.
 
 The better-sqlite3-multiple-ciphers prebuilt binding also downloads from
 GitHub releases. If install falls back to node-gyp and fails, fetch the
