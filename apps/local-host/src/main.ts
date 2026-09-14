@@ -739,6 +739,7 @@ async function toolsSelfCheck(): Promise<void> {
   }
   const plan = bundledTools.plan(candidate.id);
   if (!plan.ok) throw new Error(`${candidate.id}: ${plan.reason}`);
+  await plan.prepare?.();
   const probe = await connectorRegistry.probe({ id: candidate.id, command: plan.command, args: plan.args, env: plan.env });
   if (!probe.ok) throw new Error(`${candidate.id}: ${probe.detail ?? "did not come up"}`);
   console.log(`[ruyin] tools self-check: ok (${candidate.id}, ${probe.tools.length} tool(s))`);
@@ -749,7 +750,8 @@ async function toolsSelfCheck(): Promise<void> {
  *
  * 与 node 形态是两条完全不同的链：随包的 uv.exe 要在**这台机器上**跑起来、
  * 预取的 CPython 要能被它认出来、缓存要真的够解析出那个包 —— 少一样都只在
- * 装机之后才现形。构建时 `seed-uv-cache.mjs` 已经在一个空的 UV_TOOL_DIR 里
+ * 装机之后才现形。缓存不在包里用，而是 `prepare()` 首次种到数据目录再用
+ * （TD-062）：这一跑也顺便证明种得出来、种出来的够用。构建时 `seed-uv-cache.mjs` 已经在一个空的 UV_TOOL_DIR 里
  * 断网起过一次，但那是**构建机**；这一跑证明的是 electron-builder 把这棵树
  * 拷进包之后它还成立。
  */
@@ -763,6 +765,7 @@ async function uvxSelfCheck(): Promise<void> {
   }
   const plan = bundledTools.plan(candidate.id);
   if (!plan.ok) throw new Error(`${candidate.id}: ${plan.reason}`);
+  await plan.prepare?.();
   const probe = await connectorRegistry.probe({ id: candidate.id, command: plan.command, args: plan.args, env: plan.env });
   if (!probe.ok) throw new Error(`${candidate.id}: ${probe.detail ?? "did not come up"}`);
   console.log(`[ruyin] uvx self-check: ok (${candidate.id}, ${probe.tools.length} tool(s))`);

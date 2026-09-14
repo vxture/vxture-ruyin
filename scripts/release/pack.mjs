@@ -23,7 +23,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
-import { parseUiSelfCheck } from "./pack-smoke.mjs";
+import { describeTreeWrites, diffTree, parseUiSelfCheck, snapshotTree } from "./pack-smoke.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const shellDir = join(repoRoot, "apps", "shell");
@@ -164,6 +164,9 @@ run(
 //
 // The unpacked tree is produced by both modes, so this runs either way.
 const packagedExe = join(shellDir, "release", "win-unpacked", "Ruyin.exe");
+// 冒烟前的 resources/ 快照：冒烟不许往安装目录里写（断言在下面，TD-062）。
+const resourcesDir = join(shellDir, "release", "win-unpacked", "resources");
+const resourcesBefore = snapshotTree(resourcesDir);
 console.log(`[pack] smoke: ${packagedExe} --smoke`);
 const smoke = spawnSync(packagedExe, ["--smoke"], {
   cwd: shellDir,
@@ -203,6 +206,22 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
       " see the output above.",
   );
   process.exit(1);
+}
+
+// 冒烟不许往安装目录里写（TD-062）。
+//
+// uvx 形态曾把 uv 的缓存指向随包的 resources/uv/cache，一次冒烟往里写一万多个文件 ——
+// 在可写的 CI 工作区里一切正常，装到 Program Files（nsis 允许用户改安装目录）之后
+// 非提权进程写不进去，首次用 Python 形态的服务器就在 --offline 下失败，没有回退。
+// 「装到只读位置起不起得来」这件事 CI 的可写工作区永远看不到，所以换个问法：冒烟
+// 前后 resources/ 一个字节都不该变。变了，就是有东西该落在数据目录却落在了包里。
+{
+  const writes = describeTreeWrites(diffTree(resourcesBefore, snapshotTree(resourcesDir)));
+  if (writes) {
+    console.error(writes);
+    process.exit(1);
+  }
+  console.log(`[pack] 安装目录核对: 冒烟前后 resources/ 未变（${resourcesBefore.size} 个条目）`);
 }
 
 // 构建印真的到了打包产物里，而且守护进程**找得到**它。

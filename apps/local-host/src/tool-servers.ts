@@ -16,7 +16,9 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cp } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 
 import type { ComponentStore } from "./component-store.js";
@@ -70,10 +72,22 @@ export interface BundledServer {
 export interface ToolsIndex {
   generatedAt?: string;
   servers: BundledServer[];
+  /** 清单里的 Python 引导件描述，pull-tools 照抄进来；这里只用它算可写缓存的种子键。 */
+  pythonRuntime?: unknown;
 }
 
 export type LaunchPlan =
-  | { ok: true; command: string; args: string[]; env: Record<string, string> }
+  | {
+      ok: true;
+      command: string;
+      args: string[];
+      env: Record<string, string>;
+      /**
+       * spawn 之前要做的准备（uvx 形态：首次把随包缓存种到数据目录）。计划本身是纯的 ——
+       * 列表页也会算计划，不能一算就复制两百兆；真要起进程的人调这个。没有就不用等。
+       */
+      prepare?: () => Promise<void>;
+    }
   | {
       ok: false;
       reason: string;
@@ -263,8 +277,15 @@ export class BundledToolServers {
    *   - `--offline`，**不留联网回退** —— 有回退，首次运行就可能悄悄偏离钉死的版本，
    *     而它成功的时候什么都不会说。冷缓存 + `--offline` 的失败是干净的
    *     （"Packages were unavailable because the network was disabled"），可诊断；
-   *   - `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` 指向随包的那两份，
-   *     `UV_PYTHON_DOWNLOADS=never`。
+   *   - `UV_PYTHON_INSTALL_DIR` 指向随包的 CPython，`UV_PYTHON_DOWNLOADS=never`；
+   *     `UV_CACHE_DIR` 指向**数据目录下的可写副本**（`<dataDir>/tools/uv-cache`），
+   *     由 `prepare()` 在首次起进程前从随包的 `<uv>/cache` 种过去（TD-062）。
+   *
+   * 为什么缓存不能直接用随包那份：uvx 每次都往缓存里写 —— 临时环境、按解释器路径
+   * 重算的解析结果、锁文件，一次冒烟就是一万多个文件。装到 Program Files 这类非提权
+   * 不可写的位置（nsis 允许用户改安装目录），首次用 Python 形态的服务器就会在
+   * `--offline` 下失败，且没有回退。随包那份从此只是种子。CPython 目录**可以**只读：
+   * 实测 uv 检视解释器时的临时文件也写在缓存目录里，随包 python 一个字节不动。
    */
   private uvxPlan(launch: LaunchSpec, userEnv: Record<string, string>): LaunchPlan {
     const bundled = this.uvHome();
@@ -282,11 +303,13 @@ export class BundledToolServers {
         };
       }
     }
-    const cache = bundled ? join(bundled, "cache") : undefined;
+    const cache = bundled ? join(this.options.dataDir, "tools", "uv-cache") : undefined;
     const python = bundled ? join(bundled, "python") : undefined;
+    const seed = bundled ? join(bundled, "cache") : undefined;
     return {
       ok: true,
       command: uvExe ?? "uvx",
+      ...(cache && seed ? { prepare: () => this.seedUvCache(seed, cache) } : {}),
       args: [
         ...(uvExe ? ["tool", "run"] : []),
         "--offline",
@@ -307,6 +330,89 @@ export class BundledToolServers {
         ...userEnv,
       },
     };
+  }
+
+  /** 同一时刻只种一次：两个 uvx 服务器一起启用时，第二个等第一个种完。 */
+  private seeding: Promise<void> | undefined;
+
+  /**
+   * 把随包的 uv 缓存种到数据目录（TD-062）。
+   *
+   * 三条纪律：
+   *   - **跳过软链**：种子里 wheels-v5 下的目录是指向 archive-v0 的链接，指的还是构建机
+   *     的绝对路径。实测 uv 不走它们（按 archive id 从 .http/.msgpack 指针重解析），
+   *     而 Windows 上建符号链接要特权，所以一律不带；
+   *   - **重置权限**：cpSync 会把源文件的只读位一起搬过来，uv 打开缓存里的文件写就会
+   *     被拒（实测栽在 sdists-v9/.git 上），目录也一样 —— 根目录忘了会栽在临时文件上；
+   *   - **先种到临时目录再原子改名**：复制到一半被杀，下次启动看到的是没有这个目录，
+   *     而不是一份缺东西的缓存。
+   *
+   * 种子键：随包的 pythonRuntime + 全部 uvx 形态的「包==版本」。安装包升级换了 uv 或
+   * 加了新的 Python 工具，键就变，整份缓存重种 —— 否则 `--offline` 会对新版本干净地
+   * 失败，而那台机器上没人知道缓存是旧的。
+   */
+  private seedUvCache(seed: string, cache: string): Promise<void> {
+    if (!this.seeding) {
+      this.seeding = this.seedUvCacheOnce(seed, cache).finally(() => {
+        this.seeding = undefined;
+      });
+    }
+    return this.seeding;
+  }
+
+  private uvSeedKey(): string {
+    const index = this.readIndex();
+    const uvx = index.servers
+      .map((s) => s.launch)
+      .filter((l): l is LaunchSpec => !!l && l.runtime === "uvx")
+      .map((l) => `${l.package}==${l.version}`)
+      .sort();
+    return createHash("sha256")
+      .update(JSON.stringify({ pythonRuntime: index.pythonRuntime ?? null, uvx }))
+      .digest("hex");
+  }
+
+  private async seedUvCacheOnce(seed: string, cache: string): Promise<void> {
+    if (!existsSync(seed)) {
+      this.options.log?.(`[ruyin] uv cache: 随包没有种子（${seed}），uvx 形态只能靠已有的 ${cache}`);
+      return;
+    }
+    const key = this.uvSeedKey();
+    const marker = join(cache, ".ruyin-seed.json");
+    try {
+      const have = JSON.parse(readFileSync(marker, "utf8")) as { key?: string };
+      if (have.key === key) return;
+      this.options.log?.(`[ruyin] uv cache: 随包种子变了（安装包升级），重种 ${cache}`);
+    } catch {
+      // 没有标记 = 没种过（或种到一半）：整份重来。
+    }
+    const started = Date.now();
+    const staging = `${cache}.seeding-${process.pid}`;
+    rmSync(staging, { recursive: true, force: true });
+    let files = 0;
+    await cp(seed, staging, {
+      recursive: true,
+      force: true,
+      filter: (src) => {
+        const st = lstatSync(src);
+        if (st.isSymbolicLink()) return false;
+        if (st.isFile()) files++;
+        return true;
+      },
+    });
+    const writable = (dir: string): void => {
+      chmodSync(dir, 0o755);
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) writable(full);
+        else chmodSync(full, 0o644);
+      }
+    };
+    writable(staging);
+    writeFileSync(join(staging, ".ruyin-seed.json"), JSON.stringify({ key, from: seed, seededAt: new Date().toISOString() }));
+    rmSync(cache, { recursive: true, force: true });
+    renameSync(staging, cache);
+    this.options.log?.(`[ruyin] uv cache: seeded ${files} file(s) from ${seed} -> ${cache} (${Date.now() - started} ms)`);
   }
 
   /** 随包的 uv 在哪（`<resources>/uv`）。没有就是这一版没装进来。 */
