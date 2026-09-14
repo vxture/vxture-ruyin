@@ -12,6 +12,8 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdirSync, symlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import { fixtureRepo } from "./fixture-repo.mjs";
 
@@ -97,4 +99,117 @@ void test("token 包没装时**明说自己跳过了**，不装作检查过", ()
   assert.equal(r.code, 0, "没装依赖不该当场红");
   assert.match(r.out, /design tokens not installed - skipping/);
   assert.doesNotMatch(r.out, /OK - every var/, "**绝不能报成检查通过**");
+});
+
+/**
+ * ---------------------------------------------------------------------------
+ * 下面这几条钉的是**它怎么找到 token 包**（2026-09-14 修）。
+ *
+ * 原来的找法是按前缀在 `.pnpm` 里取第一个匹配目录。真实仓库里同时躺着两个版本
+ * 时——比如一次失败的安装留下的空壳——它取的是目录名排序的第一个，与 lockfile
+ * 说的那个毫无关系。当天实测：空壳排在前面，于是 app.css 里每一个 var() 都被报成
+ * 「设计系统没有定义」，四十多条假红。**反过来也成立**：旧版本留在仓库里、而新
+ * 版本删掉了某个 token，它会假绿——假绿没有人会去查。
+ *
+ * 所以这几条测的都是同一件事的不同侧面：**用的必须是真实安装关系铺出来的那一份，
+ * 并且它得说出来用的是哪一份。**
+ */
+
+/** 在假仓库里铺一棵 pnpm 形状的 node_modules（软链 + 同级依赖），返回 repo。 */
+function pnpmLayout(repo, { stale = true } = {}) {
+  const store = "node_modules/.pnpm";
+  const dsHome = `${store}/@vxture+design-system@12.7.0/node_modules/@vxture`;
+  // 传递依赖：pnpm 把它铺在锚点包的**同级**。
+  repo.json(`${dsHome}/design-tokens/package.json`, { name: "@vxture/design-tokens", version: "3.2.0" });
+  repo.write(`${dsHome}/design-tokens/src/styles/tokens.css`, ":root { --real-only: 2px; }");
+  repo.json(`${dsHome}/design-system/package.json`, { name: "@vxture/design-system", version: "12.7.0" });
+  repo.write(`${dsHome}/design-system/src/styles/globals.css`, ":root { --ds-local: 1px; }");
+  // 仓库里另躺着一个**排在前面**的旧版本——老找法会取到它。
+  if (stale) {
+    repo.json(`${store}/@vxture+design-tokens@0.0.1/node_modules/@vxture/design-tokens/package.json`, {
+      name: "@vxture/design-tokens",
+      version: "0.0.1",
+    });
+    repo.write(
+      `${store}/@vxture+design-tokens@0.0.1/node_modules/@vxture/design-tokens/src/styles/tokens.css`,
+      ":root { --stale-only: 9px; }",
+    );
+  }
+  // 直连依赖是软链——真实 pnpm 就是这个形状，也是 realpath 那一步要走的路。
+  const link = join(repo.root, "apps/ui-workspace/node_modules/@vxture/design-system");
+  mkdirSync(dirname(link), { recursive: true });
+  symlinkSync(join(repo.root, dsHome, "design-system"), link, "dir");
+  return repo;
+}
+
+void test("传递依赖顺着锚点包的同级找（pnpm 的真实形状），不是在 .pnpm 里按前缀挑", () => {
+  const repo = pnpmLayout(fixtureRepo("ruyin-csstok-"));
+  try {
+    repo.write(CSS, `.a { padding: var(--real-only); margin: var(--ds-local); }`);
+    const r = repo.run(GUARD);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /@vxture\/design-tokens@3\.2\.0/, "要报出用的是哪一个版本");
+  } finally {
+    repo.clean();
+  }
+});
+
+void test("**仓库里排在前面的旧版本不算数** —— 老找法会拿它当权威，于是假绿/假红", () => {
+  const repo = pnpmLayout(fixtureRepo("ruyin-csstok-"));
+  try {
+    repo.write(CSS, `.a { padding: var(--stale-only); }`);
+    const r = repo.run(GUARD);
+    assert.equal(r.code, 1, `残渣版本里的 token 必须被判为不存在\n${r.out}`);
+    assert.match(r.out, /--stale-only/);
+    assert.doesNotMatch(r.out, /0\.0\.1/, "更不该把残渣版本当成权威来源报出来");
+  } finally {
+    repo.clean();
+  }
+});
+
+void test("装了一半（有设计系统、没有 token 包）要红，并说清缺的是谁", () => {
+  const repo = fixtureRepo("ruyin-csstok-");
+  try {
+    repo.write("apps/ui-workspace/node_modules/@vxture/design-system/src/styles/globals.css", ":root { --ds-local: 1px; }");
+    repo.write(CSS, `.a { color: var(--foreground); }`);
+    const r = repo.run(GUARD);
+    assert.equal(r.code, 1, "**不能拿半套定义判全套引用** —— 那正是假红的形状");
+    assert.match(r.out, /@vxture\/design-tokens/, "要点名缺的是 token 包");
+    assert.doesNotMatch(r.out, /OK - every var/);
+  } finally {
+    repo.clean();
+  }
+});
+
+void test("目录在、里面一个定义都没有：报根因，不是把每个 var() 列成违规", () => {
+  const repo = fixtureRepo("ruyin-csstok-");
+  try {
+    // 残渣目录：路径在，CSS 一个字节都没有。
+    repo.write(`${TOKENS}/.keep`, "");
+    repo.write(CSS, `.a { color: var(--foreground); }\n.b { padding: var(--spacing-sm); }`);
+    const r = repo.run(GUARD);
+    assert.equal(r.code, 1);
+    assert.match(r.out, /没有任何自定义属性定义/, "要指向真正的根因：装歪了");
+    assert.doesNotMatch(r.out, /--foreground/, "**不该列成一长串「未定义」** —— 那份报告会把人带到 app.css 去改");
+  } finally {
+    repo.clean();
+  }
+});
+
+void test("通过时报出用的是哪一份（包名 + 版本 + 路径）", () => {
+  const repo = fixtureRepo("ruyin-csstok-");
+  try {
+    repo.json("apps/ui-workspace/node_modules/@vxture/design-tokens/package.json", {
+      name: "@vxture/design-tokens",
+      version: "3.2.0",
+    });
+    repo.write(`${TOKENS}/tokens.css`, ":root { --border: #ccc; }");
+    repo.write(CSS, `.a { border-color: var(--border); }`);
+    const r = repo.run(GUARD);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /权威来源/);
+    assert.match(r.out, /@vxture\/design-tokens@3\.2\.0/, "版本不对时，这一行是唯一能当场看出来的东西");
+  } finally {
+    repo.clean();
+  }
 });

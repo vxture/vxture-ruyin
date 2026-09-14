@@ -22,42 +22,105 @@
  * safety net for an older DS, not a licence to invent a name.
  */
 
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const appCss = join(repoRoot, "apps/ui-workspace/src/app.css");
+const consumerModules = join(repoRoot, "apps/ui-workspace/node_modules");
+
+const real = (p) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+};
+
+/**
+ * 一个包在本机的真实位置。
+ *
+ * **不按前缀在 .pnpm 里挑。** 先前这里是
+ * `readdirSync(store).find((d) => d.startsWith("@vxture+design-tokens@"))` ——
+ * 仓库里同时躺着两个版本时，它取的是**目录名排序的第一个**，与 lockfile 说的那
+ * 一个毫无关系。2026-09-14 实测：一次失败安装留下的 `@vxture+design-tokens@3.0.0`
+ * 空壳排在 `3.2.0` 前面，守卫于是拿一份没有任何定义的目录当权威，把 app.css 里
+ * 每一个 var() 都报成「设计系统没有定义」—— 四十多条假红。**反过来一样成立**：
+ * 仓库里留着旧版本、而新版本删掉了某个 token，它会假绿，而假绿没人会去查。
+ *
+ * 改成顺着**真实的安装关系**走：直连依赖看消费方的 node_modules（pnpm 的软链在
+ * 那儿），传递依赖看锚点包自己的同级目录（pnpm 把一个包的依赖铺在它旁边）。两条
+ * 都是 pnpm 按 lockfile 铺出来的，版本对不上的可能性不存在。
+ */
+function packageDir(pkg, anchor) {
+  const direct = join(consumerModules, pkg);
+  if (existsSync(direct)) return real(direct);
+  // anchor 形如 <...>/node_modules/@vxture/design-system，它的依赖是自己的同级。
+  if (anchor) {
+    const sibling = join(anchor, "..", "..", pkg);
+    if (existsSync(sibling)) return real(sibling);
+  }
+  return undefined;
+}
+
+const versionOf = (dir) => {
+  try {
+    return JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).version;
+  } catch {
+    return undefined;
+  }
+};
+
+/** 直连依赖，同时也是两个传递依赖的锚点。 */
+const designSystem = packageDir("@vxture/design-system");
 /**
  * 权威是 token 包本身（`@vxture/design-tokens` 的 src/styles），不是设计系统
  * 的 CSS —— 后者只 `@import` 它，变量一个都不写在那里。加上 design-system 与
  * design-ui 自己的样式，覆盖它们各自声明的少量局部变量。
  */
-const tokenRoots = [
-  "@vxture/design-tokens/src/styles",
-  "@vxture/design-system/src/styles",
-  "@vxture/design-ui/dist",
+const sources = [
+  { pkg: "@vxture/design-tokens", dir: packageDir("@vxture/design-tokens", designSystem), sub: "src/styles", authority: true },
+  { pkg: "@vxture/design-system", dir: designSystem, sub: "src/styles" },
+  { pkg: "@vxture/design-ui", dir: packageDir("@vxture/design-ui", designSystem), sub: "dist" },
 ]
-  .map((rel) => {
-    // pnpm 把包软链进 apps/ui-workspace/node_modules，也可能只在 .pnpm 仓库里。
-    const direct = join(repoRoot, "apps/ui-workspace/node_modules", rel);
-    if (existsSync(direct)) return direct;
-    const store = join(repoRoot, "node_modules/.pnpm");
-    if (!existsSync(store)) return undefined;
-    const [scope, name, ...tail] = rel.split("/");
-    // .pnpm 的目录名保留 scope 的 @：`@vxture+design-tokens@3.0.0_...`。
-    const prefix = `${scope}+${name}@`;
-    const dir = readdirSync(store).find((d) => d.startsWith(prefix));
-    if (!dir) return undefined;
-    const viaStore = join(store, dir, "node_modules", scope, name, ...tail);
-    return existsSync(viaStore) ? viaStore : undefined;
-  })
-  .filter((p) => p !== undefined);
+  .map((s) => (s.dir ? { ...s, styles: join(s.dir, s.sub) } : s))
+  .filter((s) => s.styles !== undefined && existsSync(s.styles));
 
-if (tokenRoots.length === 0) {
+if (sources.length === 0) {
   console.log("[css-tokens] design tokens not installed - skipping");
   process.exit(0);
 }
+
+/**
+ * **装了一半不许放行。**
+ *
+ * 只找到 design-system 就开查，等于拿半套定义判全套引用 —— 那正是上面那四十多条
+ * 假红的形状。「没装」是一回事（上一段已经跳过并说明了），「装歪了」是另一回事，
+ * 后者必须响：它和「一切正常」在 CI 上长得一模一样，而这道守卫存在的全部理由就是
+ * 不让「说 X、实际是 Y」的东西安静地过去。
+ */
+if (!sources.some((s) => s.authority)) {
+  console.error(
+    "[css-tokens] 找到了设计系统，却没找到 token 包（@vxture/design-tokens）——\n" +
+      "  变量定义全在 token 包里，缺了它这道检查只会把每个 var() 都报成未定义。\n" +
+      `  找到的：${sources.map((s) => s.pkg).join("、")}\n` +
+      "  多半是装了一半，或 node_modules 里留着旧版本残渣：重跑一次 pnpm install。",
+  );
+  process.exit(1);
+}
+
+const tokenRoots = sources.map((s) => s.styles);
+// **把用的是哪一份说出来。** 版本不对时，这一行是唯一能让人当场看出来的东西。
+console.log(
+  "[css-tokens] 权威来源：\n" +
+    sources
+      .map((s) => {
+        const where = s.styles.startsWith(repoRoot) ? s.styles.slice(repoRoot.length) : s.styles;
+        return `  - ${s.pkg}@${versionOf(s.dir) ?? "?"}  ${where}`;
+      })
+      .join("\n"),
+);
 
 /** Every custom property the DS (or Tailwind's theme layer) defines. */
 const defined = new Set();
@@ -73,6 +136,20 @@ const collect = (dir) => {
   }
 };
 for (const root of tokenRoots) collect(root);
+
+/**
+ * 目录在、里面一个定义都没有 —— 那是残渣目录或半截安装，不是「设计系统真的什么
+ * 都没定义」。照常往下走的话，下面会把 app.css 里每个 var() 都列成违规：报告长得
+ * 像一场灾难，根因却只是装歪了。**报告的形状要指向真正的根因。**
+ */
+if (defined.size === 0) {
+  console.error(
+    `[css-tokens] 取到了 token 目录，里面却没有任何自定义属性定义：\n` +
+      sources.map((s) => `  - ${s.pkg}@${versionOf(s.dir) ?? "?"}  ${s.styles}`).join("\n") +
+      "\n  这是残渣目录或半截安装，不是设计系统真的什么都没定义。重跑 pnpm install。",
+  );
+  process.exit(1);
+}
 
 /**
  * Tailwind v4 mirrors every `--x` in `@theme` as `--color-x` / `--spacing-x`
