@@ -52,16 +52,20 @@ export function assetRefs(html: string): string[] {
   const seen = new Set<string>();
   const refs: string[] = [];
   // 注释里的引用不算：首页源码里就有一大段说明性的 <!-- --> —— 今天里面没有 href，
-  // 但哪天有了，不该为一段注释去取一个并不存在的文件。查询串与片段也不处理：vite 不产出。
-  const markup = html.replace(/<!--[\s\S]*?-->/g, "");
-  // 负向后顾而不是 \b：`data-src=` 里 `-` 与 `s` 之间也算词边界，\b 挡不住它。
-  for (const m of markup.matchAll(/(?<![\w-])(?:src|href)="([^"]+)"/g)) {
-    const raw = m[1]!;
-    if (!raw.startsWith("/") || raw.startsWith("//")) continue;
-    const ref = raw.slice(1);
-    if (!ref || seen.has(ref)) continue;
-    seen.add(ref);
-    refs.push(ref);
+  // 但哪天有了，不该为一段注释去取一个并不存在的文件。做法是**按注释切段、只看注释
+  // 之外的片段**，而不是把注释 replace 掉：这里不是在清洗输入（CodeQL 会把「删一次
+  // <!-- … -->」判成不完整的清洗），只是在决定去哪些片段里找引用。查询串与片段也
+  // 不处理：vite 不产出。
+  for (const segment of html.split(/<!--[\s\S]*?-->/)) {
+    // 负向后顾而不是 \b：`data-src=` 里 `-` 与 `s` 之间也算词边界，\b 挡不住它。
+    for (const m of segment.matchAll(/(?<![\w-])(?:src|href)="([^"]+)"/g)) {
+      const raw = m[1]!;
+      if (!raw.startsWith("/") || raw.startsWith("//")) continue;
+      const ref = raw.slice(1);
+      if (!ref || seen.has(ref)) continue;
+      seen.add(ref);
+      refs.push(ref);
+    }
   }
   return refs;
 }
