@@ -41,6 +41,7 @@ import {
   bundledToolsDir as bundledToolsDirOf,
 } from "./bundled-layers.js";
 import { resolveCodeSigning } from "./build-info.js";
+import { getHardwareInfo } from "./hardware-info.js";
 import { createProductUiServer, productUiPortFor } from "./product-ui-server.js";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
@@ -470,6 +471,9 @@ const server = createLocalApi({
   token,
   version: VERSION,
   files: fileArea,
+  // 本机固件信息（关于页）。用无参调用 —— 生产路径永远接真探针,缓存在
+  // hardware-info.ts 那一层,不在这里重复。
+  hardwareInfo: () => getHardwareInfo(),
   reindex: (projectId, binding) => {
     // 按绑定记的连接器取，不再钉死 local-fs（ADR-005 接缝 ②）。
     const connector = connectors.get(binding.connector);

@@ -635,6 +635,29 @@ export interface SystemInfo {
   };
 }
 
+/**
+ * 关于页「本机固件信息」块（hardware-info.ts）。**不含序列号** —— 磁盘/主板
+ * 序列号是设备指纹级别的标识，这里只给「这是什么机器」，不给可唯一追踪的号码；
+ * 唯一 ID 只留 `machineId` 一处（供将来可能的设备维度授权绑定用）。每个字段
+ * 各自可能缺失：某一路查询在这台机器上读不到，不连累别的字段。
+ */
+export interface HardwareInfo {
+  cpu?: {
+    manufacturer?: string;
+    brand?: string;
+    cores?: number;
+    physicalCores?: number;
+    speedGHz?: number;
+  };
+  memoryTotalBytes?: number;
+  baseboard?: { manufacturer?: string; model?: string };
+  bios?: { vendor?: string; version?: string; releaseDate?: string };
+  os?: { distro?: string; release?: string; build?: string; kernel?: string };
+  disks?: Array<{ name?: string; vendor?: string; sizeBytes?: number }>;
+  macAddresses?: string[];
+  machineId?: string;
+}
+
 /** 目标目录能不能用。守护进程算，界面照抄 —— 只有它摸得到文件系统。 */
 export interface DataDirCheck {
   ok: boolean;
@@ -955,6 +978,11 @@ export class Api {
   contextItems = (id: string, type: string) =>
     this.call<ContextItemMeta[]>(`/projects/${id}/context/${type}`);
   system = () => this.call<SystemInfo>("/system");
+  /**
+   * 本机固件信息（关于页）。守护进程没接这一路时答 503（`ApiError`）——
+   * 调用方按「拿不到 = 不知道」处理，不是当成「查了，什么都没有」。
+   */
+  hardware = () => this.call<HardwareInfo>("/system/hardware");
   /** 目标目录能不能用。**没有副作用** —— 用户按确认之前先问这一句。 */
   checkDataDir = (target: string) =>
     this.call<DataDirCheck>("/system/data-dir/check", "POST", { target });

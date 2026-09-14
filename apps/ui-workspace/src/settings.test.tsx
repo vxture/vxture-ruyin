@@ -20,7 +20,7 @@ import { ThemeProvider } from "@vxture/design-system";
 import { useEffect, useState } from "react";
 import { SettingsView, type SectionId } from "./settings";
 import { resolveSection } from "./settings-sections";
-import { Api, type SystemInfo, type UpdateCheck, ApiError } from "./api";
+import { Api, type SystemInfo, type HardwareInfo, type UpdateCheck, ApiError } from "./api";
 
 function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
   return {
@@ -44,6 +44,9 @@ function fakeApi(over: Partial<Api> = {}): Api {
     activateConnector: vi.fn().mockResolvedValue({}),
     system: vi.fn().mockResolvedValue(systemInfo()),
     checkUpdate: vi.fn(),
+    // 缺省当作「守护进程没接这一路」（真实的常见状态：老版本守护进程、或装配
+    // 没配）—— 与 server.ts 那一路没配 hardwareInfo 时如实回的 503 一致。
+    hardware: vi.fn().mockRejectedValue(new ApiError(503, { code: "HARDWARE_INFO_NOT_CONFIGURED" })),
     ...over,
   } as unknown as Api;
 }
@@ -114,6 +117,60 @@ void test("AboutSection: shows version/platform/arch once system loads, placehol
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ version: "0.2.0", platform: "win32", arch: "x64" })) });
   renderSection("about", api);
   expect(await screen.findByText("Runtime 0.2.0 · win32-x64")).toBeInTheDocument();
+});
+
+/**
+ * 「本机固件信息」块（关于页）：采集成功时逐项展示。不新开一张卡 ——
+ * 嵌在身份卡里的 `.about-hardware` 子块（见 AboutSection 里的说明）。
+ */
+void test("AboutSection: 本机固件信息 —— 采集成功时逐项展示", async () => {
+  const hardware: HardwareInfo = {
+    cpu: { manufacturer: "GenuineIntel", brand: "Intel(R) Core(TM) i7", cores: 16 },
+    memoryTotalBytes: 34359738368,
+    baseboard: { manufacturer: "ASUS", model: "ROG STRIX" },
+    bios: { vendor: "American Megatrends", version: "2.10" },
+    os: { distro: "Windows 11 Pro", build: "22631" },
+    disks: [{ name: "Samsung SSD 980", sizeBytes: 1000204886016 }],
+    macAddresses: ["AA:BB:CC:DD:EE:01"],
+    machineId: "4C4C4544-0033-3210-8031-B9C04F503332",
+  };
+  const api = fakeApi({ hardware: vi.fn().mockResolvedValue(hardware) });
+  renderSection("about", api);
+  expect(await screen.findByText("Intel(R) Core(TM) i7 · 16 核")).toBeInTheDocument();
+  expect(screen.getByText("32.0 GB")).toBeInTheDocument();
+  expect(screen.getByText("ASUS ROG STRIX")).toBeInTheDocument();
+  expect(screen.getByText("American Megatrends · 2.10")).toBeInTheDocument();
+  expect(screen.getByText("Windows 11 Pro · build 22631")).toBeInTheDocument();
+  expect(screen.getByText("Samsung SSD 980 · 931.5 GB")).toBeInTheDocument();
+  expect(screen.getByText("AA:BB:CC:DD:EE:01")).toBeInTheDocument();
+  expect(screen.getByText("4C4C4544-0033-3210-8031-B9C04F503332")).toBeInTheDocument();
+});
+
+/** 字段缺失或为空各有各的理由（没读到 / 读到了但是空）——两种都要落到「—」，不报错。 */
+void test("AboutSection: 本机固件信息 —— 字段缺失或为空时逐项显示占位，不报错", async () => {
+  const hardware: HardwareInfo = {
+    cpu: {},
+    memoryTotalBytes: 0,
+    bios: {},
+    disks: [],
+    macAddresses: undefined,
+    machineId: undefined,
+  };
+  const api = fakeApi({ hardware: vi.fn().mockResolvedValue(hardware) });
+  const { container } = renderSection("about", api);
+  await screen.findByText("本机固件信息");
+  const rows = container.querySelectorAll(".about-hardware .fact-row");
+  expect(rows).toHaveLength(8);
+  for (const row of rows) {
+    expect(row.querySelector(".fact-empty")).toBeInTheDocument();
+  }
+});
+
+/** 守护进程没接这一路（旧版本 / 装配没配）：如实说不可用，不是空着或报错崩页。 */
+void test("AboutSection: 本机固件信息 —— 守护进程未接这一路时如实说不可用", async () => {
+  renderSection("about"); // fakeApi() 缺省就是 503（HARDWARE_INFO_NOT_CONFIGURED）
+  expect(await screen.findByText(/本机固件信息暂不可用/)).toBeInTheDocument();
+  expect(screen.queryByText("处理器")).not.toBeInTheDocument();
 });
 
 /**

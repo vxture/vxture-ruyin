@@ -728,6 +728,28 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
 .account-email { color: var(--muted-foreground); font-size: var(--body-sm-font-size); }
 
 .about-block { text-align: center; padding: var(--spacing-lg) 0; }
+/* 本机固件信息：单独一块披露信息，嵌在身份卡里而不是新开一张卡 —— 这一页
+   刻意只留一张卡（owner 2026-09-10：四张卡 → 两块 → 去掉「须知」，settings.test.tsx
+   钉着 `.set-block` 数目为 0）。`.about-block` 整体居中，这一块是行列事实，
+   转回左对齐、用一条分隔线与上面的身份信息隔开。 */
+.about-hardware {
+  margin-top: var(--space-row-sm);
+  padding-top: var(--space-row-sm);
+  border-top: 1px solid var(--border);
+  text-align: left;
+}
+.about-hardware-title {
+  text-align: center;
+  font-weight: 600;
+  font-size: var(--body-md-font-size);
+  margin-bottom: var(--spacing-2xs);
+}
+.about-hardware-desc {
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  margin-bottom: var(--spacing-sm);
+}
 .logo-cn { font-weight: 700; font-size: var(--title-xl-font-size, 20px); }
 .logo-en { color: var(--muted-foreground); letter-spacing: 0.18em; }
 /* 品牌字标与标语：RUYIN 大写、字距拉开；Intelligent Workbench 弱化一档跟在后面。 */

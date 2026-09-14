@@ -15,6 +15,7 @@ import { productOrigin } from "./product-ui-server.js";
 import type { StoredFile } from "./file-store.js";
 import { cloudIntakeRefusal } from "./cloud-sync.js";
 import { currentHost } from "./system-dirs.js";
+import type { HardwareInfo } from "./hardware-info.js";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import {
@@ -314,6 +315,13 @@ export interface LocalApiDeps {
     };
     startedAt: string;
   };
+  /**
+   * 本机固件/硬件信息（关于页「本机固件信息」块，hardware-info.ts）。**缺省 =
+   * 这套装配不答这一路** —— `GET /system/hardware` 如实回 503，不是拿一份假数据
+   * 冒充「问过了」。查询本身较慢（BIOS 这一路在部分平台上要几百毫秒），真实装配
+   * 传的是一个带缓存的函数，不在每次请求里现查。
+   */
+  hardwareInfo?: () => Promise<HardwareInfo>;
 }
 
 /**
@@ -936,6 +944,16 @@ async function handle(
   // GET /system - runtime transparency for the settings panel
   if (method === "GET" && path === "/system") {
     send(res, 200, deps.systemInfo);
+    return;
+  }
+
+  // GET /system/hardware - 本机固件信息（关于页），懒加载、装配没接就如实 503。
+  if (method === "GET" && path === "/system/hardware") {
+    if (!deps.hardwareInfo) {
+      send(res, 503, { code: "HARDWARE_INFO_NOT_CONFIGURED" });
+      return;
+    }
+    send(res, 200, await deps.hardwareInfo());
     return;
   }
 
