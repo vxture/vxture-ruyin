@@ -224,7 +224,9 @@ export function describeIdentity(dir) {
  */
 export function denyWrites(dir, probeDirs = [dir]) {
   const run = (cmd, args) => {
-    const r = spawnSync(cmd, args, { encoding: "utf8" });
+    // /T 的 icacls 会给两万多个条目各打一行「processed file」，默认 1 MB 的缓冲一撑就
+    // ENOBUFS，子进程还会被半路杀掉（#244 第五轮）。带 /T 的调用都加 /Q 闭嘴，缓冲也放大。
+    const r = spawnSync(cmd, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
     if (r.error) throw new Error(`${cmd} ${args.join(" ")}: ${r.error.message}`);
     if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} 退出 ${r.status}：${r.stdout ?? ""}${r.stderr ?? ""}`);
     return `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
@@ -251,7 +253,14 @@ export function denyWrites(dir, probeDirs = [dir]) {
     const notes = [];
     let applied;
     for (const st of strategies) {
-      const out = run("icacls", [dir, "/deny", `${st.who}:${st.perm}`, "/T"]);
+      let out;
+      try {
+        out = run("icacls", [dir, "/deny", `${st.who}:${st.perm}`, "/T", "/Q"]);
+      } catch (e) {
+        // 半路失败的 /T 可能已经锁了一部分；先尽力撤掉再抛，别把树留成半只读。
+        spawnSync("icacls", [dir, "/remove:d", st.who, "/T", "/Q"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+        throw e;
+      }
       const left = stillLocked();
       notes.push(
         `${st.label}: ${oneLine(out)} -> ` +
@@ -262,17 +271,17 @@ export function denyWrites(dir, probeDirs = [dir]) {
         break;
       }
       notes.push(`  锁着时的 ACL: ${oneLine(run("icacls", [dir]))}`);
-      run("icacls", [dir, "/remove:d", st.who, "/T"]);
+      run("icacls", [dir, "/remove:d", st.who, "/T", "/Q"]);
     }
     log = notes.join("\n");
     how = applied ? `icacls /deny ${applied.who}:${applied.perm}` : "icacls /deny（四种写法都没挡住）";
     undo = () => {
       if (!applied) return;
-      run("icacls", [dir, "/remove:d", applied.who, "/T"]);
+      run("icacls", [dir, "/remove:d", applied.who, "/T", "/Q"]);
       const left = stillLocked();
       if (left.length) {
         throw new Error(
-          `只读演练恢复失败：${left.join("、")} 仍然写不了。手动恢复：icacls "${dir}" /remove:d ${applied.who} /T`,
+          `只读演练恢复失败：${left.join("、")} 仍然写不了。手动恢复：icacls "${dir}" /remove:d ${applied.who} /T /Q`,
         );
       }
     };
