@@ -232,24 +232,51 @@ export function denyWrites(dir, probeDirs = [dir]) {
   let log;
   let undo;
   if (process.platform === "win32") {
-    // 拒绝项按**令牌里的 SID** 写，不按 USERNAME：#244 第二次在 CI 上红就是这里 ——
-    // icacls 报「处理成功」，探针照样写得进去，也就是拒绝的名字对不上跑作业的那个身份
-    // （runner 的环境变量说 runneradmin，令牌未必是）。whoami 读的是令牌本身；SID 前
-    // 加 * 是 icacls 的写法。顺带避开了 USERNAME 进日志被 CodeQL 判成明文泄露那一条。
+    // 拒绝项按**令牌里的 SID** 写，不按 USERNAME：whoami 读的是令牌本身；SID 前加 * 是
+    // icacls 的写法。顺带避开了 USERNAME 进日志被 CodeQL 判成明文泄露那一条。
+    //
+    // **几种写法按顺序试，第一种挡得住的算数。** #244 在 CI 上红了三轮：icacls 报「处理
+    // 成功」，令牌确是 runneradmin（内置 Administrator，RID 500），备份特权关着，cmd 的
+    // 重定向照样写得进去 —— 在 Linux 上推不出为什么，只能让 runner 自己说：每种写法
+    // 挡没挡住、锁着时的 ACL 长什么样，全部留在 log 里。
     const sid = tokenSid();
-    const rights = "(OI)(CI)(DE,DC,WD,AD,WEA,WA)";
-    log = run("icacls", [dir, "/deny", `*${sid}:${rights}`]);
-    how = `icacls /deny *${sid}:${rights}`;
+    const strategies = [
+      { who: `*${sid}`, perm: "(OI)(CI)(DE,DC,WD,AD,WEA,WA)", label: "令牌 SID · 具体权限" },
+      { who: `*${sid}`, perm: "(OI)(CI)W", label: "令牌 SID · W" },
+      { who: "*S-1-5-32-544", perm: "(OI)(CI)W", label: "Administrators 组 · W" },
+      { who: "*S-1-1-0", perm: "(OI)(CI)W", label: "Everyone · W" },
+    ];
+    const oneLine = (text) => text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join(" | ");
+    const notes = [];
+    let applied;
+    for (const st of strategies) {
+      const out = run("icacls", [dir, "/deny", `${st.who}:${st.perm}`]);
+      const left = stillLocked();
+      notes.push(
+        `${st.label}: ${oneLine(out)} -> ` +
+          probeDirs.map((d) => `${relative(dir, d) || "."} ${left.includes(d) ? "写不了" : "能写"}`).join("，"),
+      );
+      if (left.length === probeDirs.length) {
+        applied = st;
+        break;
+      }
+      notes.push(`  锁着时的 ACL: ${oneLine(run("icacls", [dir]))}`);
+      run("icacls", [dir, "/remove:d", st.who]);
+    }
+    log = notes.join("\n");
+    how = applied ? `icacls /deny ${applied.who}:${applied.perm}` : "icacls /deny（四种写法都没挡住）";
     undo = () => {
-      run("icacls", [dir, "/remove:d", `*${sid}`]);
-      if (stillLocked().length) run("icacls", [dir, "/remove:d", `*${sid}`, "/T"]);
+      if (!applied) return;
+      run("icacls", [dir, "/remove:d", applied.who]);
+      if (stillLocked().length) run("icacls", [dir, "/remove:d", applied.who, "/T"]);
       const left = stillLocked();
       if (left.length) {
         throw new Error(
-          `只读演练恢复失败：${left.join("、")} 仍然写不了。手动恢复：icacls "${dir}" /remove:d *${sid} /T`,
+          `只读演练恢复失败：${left.join("、")} 仍然写不了。手动恢复：icacls "${dir}" /remove:d ${applied.who} /T`,
         );
       }
     };
+    return { effective: Boolean(applied), how, log, restore: undo };
   } else {
     log = run("chmod", ["-R", "a-w", dir]);
     how = "chmod -R a-w";

@@ -52,6 +52,35 @@ function run(cmd, args, cwd) {
   }
 }
 
+// 只读演练的锁先在一个空目录上自证一次（TD-062 第 2 条）。
+//
+// 真正的演练要在 8 分钟的安装 / 构建 / 打包之后才跑到；锁在这台 runner 上根本锁不住的
+// 话（#244 在 CI 上红了三轮才看清是这件事），8 分钟后才知道太贵。空目录放在 release/
+// 旁边，与解包树同一个卷 —— ACL 的行为是卷的事，换到 %TEMP%（C:）验了不算。Windows 上
+// 锁不住就红，并把每种写法、锁着时的 ACL、身份与特权一起打出来；POSIX 上以 root 跑如实
+// 说 SKIPPED（真演练那一步也会跳过）。
+{
+  const scratch = join(shellDir, "release", `.ro-selftest-${process.pid}`);
+  mkdirSync(join(scratch, "sub"), { recursive: true });
+  let lock;
+  try {
+    lock = denyWrites(scratch, [scratch, join(scratch, "sub")]);
+    lock.restore();
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+  console.log(`[pack] 只读演练自证:\n${lock.log}`);
+  if (!lock.effective) {
+    if (process.platform === "win32") {
+      console.error(`[pack] FAILED: 只读演练的锁在这台机器上锁不住 —— 真演练没法做。\n${describeIdentity(join(shellDir, "release"))}`);
+      process.exit(1);
+    }
+    console.log(`[pack] 只读演练自证 SKIPPED: ${lock.how} 挡不住当前身份（多半是 root）`);
+  } else {
+    console.log(`[pack] 只读演练自证: ${lock.how} 锁得住、恢复得回`);
+  }
+}
+
 // Ensure a full dev install first (a previous run's deploy step may have
 // left the workspace production-pruned).
 run("pnpm", ["install", "--prefer-offline"], repoRoot);
