@@ -48,7 +48,6 @@ import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import {
   ProductRegistry,
   projectSubscriptionFacts,
-  type CommercialEnvelope,
   type SubscriptionFacts,
 } from "./product-registry.js";
 import { createLocalApi, upgradeProjects } from "./server.js";
@@ -619,17 +618,39 @@ const server = createLocalApi({
 // 环境仍在）。订阅数据面未接通时 refreshEntitlements 保持「未知」，不锁用户。
 // 信封 -> SubscriptionFacts 的投影本身在 product-registry.ts（projectSubscriptionFacts），
 // 挨着它产出的类型放，也因此能脱离整个守护进程启动被单独测试。
+//
+// 走的是会话读（`platformSession.entitlements()` → console-bff
+// `/api/subscription/entitlements`），不是 `platform.entitlements(ids)`
+// 那条旧路径——旧路径要 `RUYIN_PLATFORM_API_BASE`（tailnet-only，用户设备
+// 够不着，vxture-platform#272），生产环境默认不设，会一直失败。新路径工作区
+// 从会话解出，不需要这个变量，且已生产验证过（b8a83fe）。
+//
+// **一个已知缺口**：console-bff 目前那一路只给 {tier, status, bundled}，
+// 不给 trial_ends_at / current_period_end / cancel_at_period_end——上游数据
+// 其实有这三项（`ProductEntitlementView extends SubscriptionFacts`），是
+// console-bff 的 `subscription.router.ts` 组装返回值时没转发。缺这三项时
+// `projectSubscriptionFacts` 按其缺省语义处理（trialEndsAt/currentPeriodEnd
+// = null，cancelAtPeriodEnd = false）——一个「已订阅但设置了到期不续订」的
+// 工作区，在这条路径补齐前会被判成「一切正常」，不会提示续费。平台侧补上
+// 这三项之后，这里不需要跟着改：字段名对得上，会自动生效。
 async function syncEntitlements(): Promise<void> {
   await registry.refreshEntitlements(async (ids) => {
-    const batch = (await platform.entitlements(ids)) as {
-      entitlements?: Record<string, CommercialEnvelope>;
-    } | null;
-    if (!batch?.entitlements) return null;
+    const rows = (await platformSession.entitlements()) as Array<{
+      productCode: string;
+      tier: string | null;
+      status: string | null;
+      bundled: boolean;
+    }>;
+    const byId = new Map(rows.map((r) => [r.productCode, r]));
     const out: Record<string, SubscriptionFacts> = {};
     for (const id of ids) {
-      const env = batch.entitlements![id];
-      if (!env) continue; // 平台没给这个产品的信封 = 未知，别当成「没有」
-      out[id] = projectSubscriptionFacts(env);
+      const row = byId.get(id);
+      if (!row) continue; // 平台没给这个产品的信封 = 未知，别当成「没有」
+      out[id] = projectSubscriptionFacts({
+        status: row.status,
+        tier: row.tier,
+        bundled: row.bundled,
+      });
     }
     return out;
   });
