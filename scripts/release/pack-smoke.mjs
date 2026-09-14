@@ -10,10 +10,14 @@
  *
  * 另外两支（snapshotTree / diffTree）给「冒烟不许往安装目录里写」那条断言用：只读
  * 文件系统，不写；判定本身是纯的。
+ *
+ * 只读演练那三支（denyWrites / parseUvSeed / judgeReadOnlySmoke）给「装到只读位置也
+ * 起得来」那条用：denyWrites 会改 ACL / 权限位并回一个 restore，其余两支是纯的。
  */
 
-import { lstatSync, readdirSync, readlinkSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { spawnSync } from "node:child_process";
+import { lstatSync, readdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { join, posix, relative, sep, win32 } from "node:path";
 
 /**
  * 工作台界面自检那一行（TD-061）。
@@ -126,4 +130,160 @@ export function describeTreeWrites(diff) {
     parts.join("；") +
     "。装到只读位置（Program Files）首次使用就会失败（TD-062）。可写的东西应落在数据目录（apps/local-host/src/tool-servers.ts 的 uvx 缓存那一段）。"
   );
+}
+
+/**
+ * 能不能往这个目录里建文件 —— 建一个探针再删掉。
+ *
+ * 只读演练全靠它说真话：拒绝写入没生效（POSIX 上 root 无视权限位、Windows 上 ACE
+ * 没传播到子目录）的演练是在演戏。所以拒绝之后探一次、恢复之后再探一次。
+ *
+ * @param {string} dir
+ * @returns {boolean}
+ */
+export function canWrite(dir) {
+  const probe = join(dir, `.ruyin-write-probe-${process.pid}`);
+  try {
+    writeFileSync(probe, "probe");
+  } catch {
+    return false;
+  }
+  try {
+    rmSync(probe, { force: true });
+  } catch {
+    /* 建得了删不了（Windows 上只拒了 DE 的情形）：算能写，探针留着也无害 */
+  }
+  return true;
+}
+
+/**
+ * 让一棵树对当前用户拒绝写入，回一个 restore()。装到 Program Files 的那台机器就是
+ * 这个样子（TD-062）：非提权进程对安装目录只有读。
+ *
+ * - Windows：目录的只读位挡不住建文件，走 ACL —— 给当前用户加一条**拒绝**写 / 建 /
+ *   删的 ACE，(OI)(CI) 让子孙继承。拒绝优先于允许，管理员组的 Allow 也压不过它，
+ *   所以 CI 的 runneradmin 上照样生效。不带 /T：继承的 ACE 由系统传播到整棵树，
+ *   带 /T 会给两万多个文件各写一条显式 ACE，恢复时也得各删一遍。
+ * - POSIX：`chmod -R a-w`。root 无视权限位 —— 那正是 `effective` 存在的理由。
+ *
+ * restore 之后再探一次每个 probeDirs：还写不了的话 Windows 上再退一步用 /T 逐个
+ * 删；还不行就抛，并把手动命令放进报错 —— 那棵树接下来还要给 upload-artifact 和
+ * 开发者自己用，不能悄悄留成只读。
+ *
+ * @param {string} dir 要锁的树根
+ * @param {string[]} [probeDirs] 拒绝之后探哪些目录（默认只探树根；传一个深处的子目录能顺便验继承）
+ * @returns {{ effective: boolean, how: string, restore: () => void }}
+ */
+export function denyWrites(dir, probeDirs = [dir]) {
+  const run = (cmd, args) => {
+    const r = spawnSync(cmd, args, { encoding: "utf8" });
+    if (r.error) throw new Error(`${cmd} ${args.join(" ")}: ${r.error.message}`);
+    if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} 退出 ${r.status}：${r.stdout ?? ""}${r.stderr ?? ""}`);
+  };
+  const stillLocked = () => probeDirs.filter((d) => !canWrite(d));
+  let how;
+  let undo;
+  if (process.platform === "win32") {
+    const user = process.env["USERNAME"];
+    if (!user) throw new Error("denyWrites: 拿不到 USERNAME，没法给当前用户加拒绝 ACE");
+    const ace = `${user}:(OI)(CI)(DE,DC,WD,AD,WEA,WA)`;
+    run("icacls", [dir, "/deny", ace]);
+    how = `icacls /deny ${ace}`;
+    undo = () => {
+      run("icacls", [dir, "/remove:d", user]);
+      if (stillLocked().length) run("icacls", [dir, "/remove:d", user, "/T"]);
+      const left = stillLocked();
+      if (left.length) {
+        throw new Error(
+          `只读演练恢复失败：${left.join("、")} 仍然写不了。手动恢复：icacls "${dir}" /remove:d ${user} /T`,
+        );
+      }
+    };
+  } else {
+    run("chmod", ["-R", "a-w", dir]);
+    how = "chmod -R a-w";
+    undo = () => {
+      run("chmod", ["-R", "u+w", dir]);
+      const left = stillLocked();
+      if (left.length) throw new Error(`只读演练恢复失败：${left.join("、")} 仍然写不了。手动恢复：chmod -R u+w "${dir}"`);
+    };
+  }
+  return { effective: stillLocked().length === probeDirs.length, how, restore: undo };
+}
+
+/**
+ * uv 种子那一行：`[ruyin] uv cache: seeded N file(s) from <种子> -> <缓存> (M ms)`
+ * （apps/local-host/src/tool-servers.ts 的 seedUvCacheOnce）。第二次起、或随包没种子，
+ * 都没有这一行 —— 返回 undefined。路径段用 `(.+?)` 收到 ` -> ` / ` (` 之前，Windows
+ * 路径的反斜杠、空格、括号都在里面；`\r` 跟在收尾的 `)` 之后，不会被收进去。
+ *
+ * @param {string} smokeOut
+ * @returns {{ files: number, from: string, to: string, ms: number } | undefined}
+ */
+export function parseUvSeed(smokeOut) {
+  const m = /\[ruyin\] uv cache: seeded (\d+) file\(s\) from (.+?) -> (.+?) \((\d+) ms\)/.exec(smokeOut);
+  if (!m) return undefined;
+  return { files: Number(m[1]), from: m[2], to: m[3], ms: Number(m[4]) };
+}
+
+/**
+ * 只读演练那一轮冒烟的判读（TD-062 的第 2 条）。
+ *
+ * 这一轮的条件照 Program Files 那台机器摆：安装目录拒绝写入、数据目录是个空的临时
+ * 目录。所以判据比第一轮多两条：uvx 自检必须 ok（Python 半边正是当初写进包里的那
+ * 一支），而且守护进程必须报了「uv cache: seeded」且种到了这一轮的数据目录之下 ——
+ * 空数据目录里没有种子却 ok，只可能是缓存又指回了包里（在可写工作区里那也能过）。
+ * 种子落在别处多半是守护进程按它自己的规则钉住了老数据目录（data-location.ts：老位置
+ * 有数据就不搬），那是这台机器的状态，不是包的问题 —— 报错里把落点写出来。
+ *
+ * `expectUvx` 为 false（RUYIN_SKIP_SKILL_PULL=1，没种 Python 半边）时只看壳的 OK。
+ *
+ * @param {{ smokeOut: string, dataDir: string, expectUvx: boolean }} x
+ * @returns {{ ok: true, detail: string } | { ok: false, message: string }}
+ */
+export function judgeReadOnlySmoke({ smokeOut, dataDir, expectUvx }) {
+  if (!smokeOut.includes("[shell-smoke] OK")) {
+    return {
+      ok: false,
+      message:
+        "[pack] FAILED: 安装目录只读时应用起不来 —— 有东西在往包里写（看上面这一轮的输出）。" +
+        "装到 Program Files 的用户看到的就是这个（TD-062）。",
+    };
+  }
+  if (!expectUvx) return { ok: true, detail: "壳 OK（没种 Python 半边，uvx 与种子不在这一轮的判据里）" };
+  const uvx = /\[ruyin\] uvx self-check: ([^\r\n]*)/.exec(smokeOut);
+  if (!uvx || !uvx[1].startsWith("ok")) {
+    return {
+      ok: false,
+      message:
+        `[pack] FAILED: 安装目录只读时 uvx 自检没过（${uvx?.[1] ?? "没报"}）—— Python 半边还在依赖包里可写` +
+        "（apps/local-host/src/tool-servers.ts 的 uvxPlan / seedUvCacheOnce）。",
+    };
+  }
+  const seed = parseUvSeed(smokeOut);
+  if (!seed) {
+    return {
+      ok: false,
+      message:
+        "[pack] FAILED: 只读演练用的是空数据目录，守护进程却没报「uv cache: seeded」—— 种子没从只读的包里种过去，" +
+        "那 uvx 是靠什么起来的？多半是 UV_CACHE_DIR 又指回了包里（在可写工作区里那也能过，所以才有这一轮）。",
+    };
+  }
+  // 两个路径来自同一台机器；按形状挑 API —— 判读本身要能在 Linux 上被 Windows 形状的
+  // 样本钉住（自测跑在 ubuntu），而 win32 的 relative 顺带不分大小写。
+  const P = /^[A-Za-z]:[\\/]/.test(dataDir) ? win32 : posix;
+  const rel = P.relative(dataDir, seed.to);
+  if (rel === "" || rel.startsWith("..") || P.isAbsolute(rel)) {
+    return {
+      ok: false,
+      message:
+        `[pack] FAILED: uv 种子落在了 ${seed.to}，不在这一轮的数据目录 ${dataDir} 之下。` +
+        "多半是守护进程钉住了这台机器的老数据目录（apps/local-host/src/data-location.ts：老位置有数据就不搬）；" +
+        "CI 的 runner 上不会有老数据，本机跑到这一条要先看 %APPDATA%\\Ruyin\\data。",
+    };
+  }
+  return {
+    ok: true,
+    detail: `壳 OK；uvx ${uvx[1]}；种子 ${seed.files} 个文件从只读的包里种到 ${seed.to}（${seed.ms} ms）`,
+  };
 }
