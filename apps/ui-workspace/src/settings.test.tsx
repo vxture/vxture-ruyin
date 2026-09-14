@@ -46,7 +46,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
     checkUpdate: vi.fn(),
     // 缺省当作「守护进程没接这一路」（真实的常见状态：老版本守护进程、或装配
     // 没配）—— 与 server.ts 那一路没配 hardwareInfo 时如实回的 503 一致。
-    hardware: vi.fn().mockRejectedValue(new ApiError(503, { code: "HARDWARE_INFO_NOT_CONFIGURED" })),
+    hardware: vi.fn().mockRejectedValue(new ApiError(503, { error: "HARDWARE_INFO_NOT_CONFIGURED" })),
     ...over,
   } as unknown as Api;
 }
@@ -130,7 +130,12 @@ void test("AboutSection: 本机固件信息 —— 采集成功时逐项展示",
     baseboard: { manufacturer: "ASUS", model: "ROG STRIX" },
     bios: { vendor: "American Megatrends", version: "2.10" },
     os: { distro: "Windows 11 Pro", build: "22631" },
-    disks: [{ name: "Samsung SSD 980", sizeBytes: 1000204886016 }],
+    // 两块磁盘各自缺一边（一块没 vendor、一块没 name）——`d.name ?? d.vendor`
+    // 两条分支都要有真的走过，不能只靠其中一块顶两条。
+    disks: [
+      { name: "Samsung SSD 980", sizeBytes: 536870912000 },
+      { vendor: "WD", sizeBytes: 2147483648 },
+    ],
     macAddresses: ["AA:BB:CC:DD:EE:01"],
     machineId: "4C4C4544-0033-3210-8031-B9C04F503332",
   };
@@ -141,21 +146,40 @@ void test("AboutSection: 本机固件信息 —— 采集成功时逐项展示",
   expect(screen.getByText("ASUS ROG STRIX")).toBeInTheDocument();
   expect(screen.getByText("American Megatrends · 2.10")).toBeInTheDocument();
   expect(screen.getByText("Windows 11 Pro · build 22631")).toBeInTheDocument();
-  expect(screen.getByText("Samsung SSD 980 · 931.5 GB")).toBeInTheDocument();
+  expect(screen.getByText("Samsung SSD 980 · 500.0 GB；WD · 2.0 GB")).toBeInTheDocument();
   expect(screen.getByText("AA:BB:CC:DD:EE:01")).toBeInTheDocument();
   expect(screen.getByText("4C4C4544-0033-3210-8031-B9C04F503332")).toBeInTheDocument();
 });
 
-/** 字段缺失或为空各有各的理由（没读到 / 读到了但是空）——两种都要落到「—」，不报错。 */
-void test("AboutSection: 本机固件信息 —— 字段缺失或为空时逐项显示占位，不报错", async () => {
+/**
+ * 字段缺失各有各的理由——**整块没读到**（主板/BIOS/磁盘/网卡/机器 ID/内存，
+ * 落到「—」）和**读到了但缺子字段**（CPU 有型号没核数、系统有发行版没 build 号，
+ * 落到只显示那半），两种都要落实，不报错也不假装有数据。
+ */
+void test("AboutSection: 本机固件信息 —— 缺整块的落「—」，缺子字段的只显示那半", async () => {
   const hardware: HardwareInfo = {
-    cpu: {},
-    memoryTotalBytes: 0,
-    bios: {},
-    disks: [],
-    macAddresses: undefined,
-    machineId: undefined,
+    cpu: { brand: "Test CPU" }, // 没有 cores
+    os: { distro: "Windows 11 Pro" }, // 没有 build
+    // baseboard / bios / disks / macAddresses / machineId / memoryTotalBytes 全不给
   };
+  const api = fakeApi({ hardware: vi.fn().mockResolvedValue(hardware) });
+  const { container } = renderSection("about", api);
+  await screen.findByText("Test CPU");
+  expect(screen.getByText("Windows 11 Pro")).toBeInTheDocument();
+  const rows = container.querySelectorAll(".about-hardware .fact-row");
+  expect(rows).toHaveLength(8);
+  const emptyRows = [...rows].filter((r) => r.querySelector(".fact-empty"));
+  // 8 行里，处理器与操作系统那两行有值（型号/发行版），其余 6 行落「—」。
+  expect(emptyRows).toHaveLength(6);
+});
+
+/**
+ * 上一条钉的是「有 cpu/os 对象、里面缺字段」；这一条钉的是「压根没有 cpu/os
+ * 对象」——两件事在 AboutSection 里走的是同一个三元表达式的外层和内层，
+ * 只测其中一种会把另一种漏在覆盖率外面。
+ */
+void test("AboutSection: 本机固件信息 —— CPU/操作系统整块都没读到时也落「—」", async () => {
+  const hardware: HardwareInfo = {};
   const api = fakeApi({ hardware: vi.fn().mockResolvedValue(hardware) });
   const { container } = renderSection("about", api);
   await screen.findByText("本机固件信息");
