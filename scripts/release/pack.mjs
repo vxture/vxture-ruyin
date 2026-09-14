@@ -470,8 +470,8 @@ if (process.platform === "win32") {
       console.error(verdict.message);
       process.exit(1);
     }
-    // 这一轮也不许往包里写。ACL 拒绝项挡得住 uv 和普通用户，挡不住带备份语义、且令牌里备份
-    // 特权已启用的 Node（见 pack-smoke.mjs 的 canWrite）—— 所以 Node 那半边仍由快照来判。
+    // 这一轮也不许往包里写。ACL 只在「写会被拒」这件事上作证；Node 那半边（壳与守护进程）
+    // 有没有往包里写，不靠 ACL 猜，仍由快照来判 —— 两条证据各说各的。
     const roWrites = describeTreeWrites(diffTree(resourcesBefore, snapshotTree(resourcesDir)));
     if (roWrites) {
       console.error(roWrites.replace("冒烟往安装目录", "只读演练那一轮往安装目录"));

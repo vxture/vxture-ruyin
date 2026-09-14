@@ -144,11 +144,12 @@ export function describeTreeWrites(diff) {
 export function canWrite(dir) {
   const probe = join(dir, `.ruyin-write-probe-${process.pid}`);
   if (process.platform === "win32") {
-    // **不能用 Node 自己探。** libuv 在 Windows 上打开文件一律带 FILE_FLAG_BACKUP_SEMANTICS，
-    // 而令牌里 SeBackupPrivilege / SeRestorePrivilege 处于启用状态时（GitHub 的 Windows
-    // runner 就是），带这个标志的打开会**绕过 ACL** —— 拒绝项摆在那儿，Node 照样写进去
-    // （#244 第一次在 CI 上跑就是这样红的）。cmd 的重定向走普通 CreateFile，没有那个标志，
-    // 探出来的才是 uv（Rust，也没有那个标志）和普通用户会遇到的答案。
+    // 探针走 cmd 的重定向，不走 Node 自己的 writeFileSync：libuv 在 Windows 上打开文件带
+    // FILE_FLAG_BACKUP_SEMANTICS，令牌里备份 / 还原特权一旦启用就能绕过 ACL；cmd 走普通
+    // CreateFile，与 uv（Rust）和普通用户同一条路，探出来的才是他们会遇到的答案。（#244
+    // 一度把这条当成 CI 上红的原因，runner 的 whoami 证明那儿的备份特权是关着的 —— 真正
+    // 的原因是 icacls 不带 /T 时继承项落不到已有子孙上；探针仍照这条走，只是别再把它当
+    // 那次红的解释。）
     // 判据是「文件在不在」，不是 cmd 的退出码 —— 重定向失败时它的 errorlevel 不可靠。
     spawnSync("cmd.exe", ["/d", "/c", `echo probe> "${probe}"`], { encoding: "utf8", windowsVerbatimArguments: true });
     if (!existsSync(probe)) return false;
