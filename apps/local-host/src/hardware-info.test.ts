@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { collectHardwareInfo, getHardwareInfo, type HardwareProbe } from "./hardware-info.js";
+import type { Systeminformation } from "systeminformation";
 
 /** 探针的字段按需覆盖，其余用「拒绝」占位 —— 逼每条测试只声明它关心的那几路。 */
 function fakeProbe(overrides: Partial<HardwareProbe>): HardwareProbe {
@@ -59,7 +60,7 @@ void test("collectHardwareInfo: 全部查询正常时，逐个字段照实映射
         { iface: "Ethernet", mac: "AA:BB:CC:DD:EE:01", internal: false, virtual: false },
         { iface: "Loopback", mac: "00:00:00:00:00:00", internal: true, virtual: false },
         { iface: "VMware NAT", mac: "AA:BB:CC:DD:EE:02", internal: false, virtual: true },
-      ] as Awaited<ReturnType<HardwareProbe["networkInterfaces"]>>,
+      ] as Systeminformation.NetworkInterfacesData[],
     uuid: async () =>
       ({ hardware: "4C4C4544-0033-3210-8031-B9C04F503332", os: "" }) as Awaited<
         ReturnType<HardwareProbe["uuid"]>
@@ -127,9 +128,9 @@ void test("collectHardwareInfo: 机器 ID 缺硬件 UUID 时落到 os UUID", () 
 void test("collectHardwareInfo: 网卡全被过滤掉时 macAddresses 是 undefined，不是空数组", async () => {
   const probe = fakeProbe({
     networkInterfaces: async () =>
-      [{ iface: "Loopback", mac: "00:00:00:00:00:00", internal: true, virtual: false }] as Awaited<
-        ReturnType<HardwareProbe["networkInterfaces"]>
-      >,
+      [
+        { iface: "Loopback", mac: "00:00:00:00:00:00", internal: true, virtual: false },
+      ] as Systeminformation.NetworkInterfacesData[],
   });
   const info = await collectHardwareInfo(probe);
   assert.equal(info.macAddresses, undefined);

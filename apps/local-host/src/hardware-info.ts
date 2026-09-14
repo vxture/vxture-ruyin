@@ -17,6 +17,7 @@
  */
 
 import si from "systeminformation";
+import type { Systeminformation } from "systeminformation";
 
 export interface HardwareInfo {
   cpu?: {
@@ -65,7 +66,11 @@ export interface HardwareProbe {
   bios: typeof si.bios;
   osInfo: typeof si.osInfo;
   diskLayout: typeof si.diskLayout;
-  networkInterfaces: typeof si.networkInterfaces;
+  /**
+   * 只声明无参这一路的签名（不是 `typeof si.networkInterfaces` 整个重载集合）：
+   * 我们只用得到这一种调用方式，窄类型让测试探针不必应付另外三种签名。
+   */
+  networkInterfaces: () => Promise<Systeminformation.NetworkInterfacesData[]>;
   uuid: typeof si.uuid;
 }
 
@@ -103,10 +108,9 @@ export async function collectHardwareInfo(
     tryProbe(() => probe.uuid()),
   ]);
 
-  const nicList = Array.isArray(nics) ? nics : nics ? [nics] : [];
   const macAddresses = [
     ...new Set(
-      nicList
+      (nics ?? [])
         .filter((n) => !n.internal && !n.virtual && n.mac)
         .map((n) => n.mac)
         .filter((mac): mac is string => Boolean(mac) && mac !== "00:00:00:00:00:00"),
