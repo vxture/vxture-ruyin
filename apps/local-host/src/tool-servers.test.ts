@@ -4,7 +4,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -324,4 +324,110 @@ test("浏览器梯子：取到了 headless shell 就用它", () => {
     assert.equal(plan.args[1], "--executable-path");
     assert.match(String(plan.args[2]), /headless\.exe$/);
   }
+});
+
+/**
+ * uvx 形态的缓存（TD-062）：随包那份只是种子，可写的副本在数据目录。这里把「计划怎么
+ * 指」和「prepare 怎么种」各钉一遍 —— 随包目录只读时起不起得来，是装到 Program Files
+ * 之后才会现形的事，CI 的可写工作区永远看不到。
+ */
+function uvRig() {
+  const r = rig({ ...INDEX, pythonRuntime: { uv: { version: "0.12.10" }, cpython: { version: "3.13.15" } } });
+  // uvHome() 找的是 toolsDir 的兄弟目录 <base>/uv，里面要有 uv 可执行文件才算随包。
+  const uvHome = join(r.base, "uv");
+  mkdirSync(join(uvHome, "cache", "wheels-v5", "pypi", "x"), { recursive: true });
+  mkdirSync(join(uvHome, "cache", "archive-v0", "abc"), { recursive: true });
+  mkdirSync(join(uvHome, "python"), { recursive: true });
+  writeFileSync(join(uvHome, process.platform === "win32" ? "uv.exe" : "uv"), "");
+  writeFileSync(join(uvHome, "cache", "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55");
+  writeFileSync(join(uvHome, "cache", "archive-v0", "abc", "file.py"), "print(1)");
+  writeFileSync(join(uvHome, "cache", "wheels-v5", "pypi", "x", "1.0.http"), "{}");
+  // 种子里的目录软链（指向构建机的绝对路径）—— 建得了就建，Windows 上没特权就跳过那一支。
+  let link = false;
+  try {
+    symlinkSync(join(uvHome, "cache", "archive-v0", "abc"), join(uvHome, "cache", "wheels-v5", "pypi", "x", "1.0"), "dir");
+    link = true;
+  } catch {
+    /* 没特权 */
+  }
+  // 种子文件只读：装在 Program Files 里就是这个样子。
+  chmodSync(join(uvHome, "cache", "archive-v0", "abc", "file.py"), 0o444);
+  return { ...r, uvHome, link };
+}
+
+test("plan(uvx, 随包 uv): UV_CACHE_DIR 指向数据目录的副本，UV_PYTHON_INSTALL_DIR 仍指随包 python；计划本身不碰磁盘", () => {
+  const { servers, uvHome, dataDir } = uvRig();
+  const plan = servers.plan("py.markitdown");
+  assert.ok(plan.ok);
+  if (!plan.ok) return;
+  assert.equal(plan.command, join(uvHome, process.platform === "win32" ? "uv.exe" : "uv"));
+  assert.deepEqual(plan.args.slice(0, 3), ["tool", "run", "--offline"]);
+  assert.equal(plan.env["UV_CACHE_DIR"], join(dataDir, "tools", "uv-cache"));
+  assert.equal(plan.env["UV_PYTHON_INSTALL_DIR"], join(uvHome, "python"));
+  assert.equal(plan.env["UV_TOOL_DIR"], join(dataDir, "tools", "uv-tools"));
+  assert.equal(typeof plan.prepare, "function", "起进程之前要有准备这一步");
+  // 只算计划不种：列表页也会算计划，一算就复制两百兆不行。
+  assert.equal(existsSync(join(dataDir, "tools", "uv-cache")), false);
+});
+
+test("prepare(): 首次把随包缓存种到数据目录 —— 跳过软链、文件可写、留种子标记；第二次不动", async () => {
+  const { servers, dataDir, link } = uvRig();
+  const plan = servers.plan("py.markitdown");
+  assert.ok(plan.ok && plan.prepare);
+  if (!plan.ok || !plan.prepare) return;
+  await plan.prepare();
+  const cache = join(dataDir, "tools", "uv-cache");
+  assert.ok(existsSync(join(cache, "CACHEDIR.TAG")));
+  assert.ok(existsSync(join(cache, "archive-v0", "abc", "file.py")));
+  assert.ok(existsSync(join(cache, "wheels-v5", "pypi", "x", "1.0.http")));
+  if (link) assert.equal(existsSync(join(cache, "wheels-v5", "pypi", "x", "1.0")), false, "软链不带过去");
+  // 权限重置：种子是只读的，副本必须可写，否则 uv 一写就被拒（实测栽在 sdists-v9/.git）。
+  if (process.platform !== "win32") {
+    assert.ok(statSync(join(cache, "archive-v0", "abc", "file.py")).mode & 0o200, "文件要可写");
+    assert.ok(statSync(cache).mode & 0o200, "根目录也要可写 —— uv 在根下建临时文件");
+  }
+  const marker = JSON.parse(readFileSync(join(cache, ".ruyin-seed.json"), "utf8")) as { key: string };
+  assert.match(marker.key, /^[0-9a-f]{64}$/);
+  assert.equal(existsSync(`${cache}.seeding-${process.pid}`), false, "临时目录要改名走，不留");
+
+  // 第二次：键没变，一个字节不动（拿标记的 mtime 当证据）。
+  const before = statSync(join(cache, ".ruyin-seed.json")).mtimeMs;
+  await plan.prepare();
+  assert.equal(statSync(join(cache, ".ruyin-seed.json")).mtimeMs, before);
+});
+
+test("prepare(): 随包种子变了（安装包升级）就整份重种 —— 旧缓存对新版本会在 --offline 下干净地失败", async () => {
+  const { servers, dataDir, uvHome, toolsDir } = uvRig();
+  const first = servers.plan("py.markitdown");
+  assert.ok(first.ok && first.prepare);
+  if (!first.ok || !first.prepare) return;
+  await first.prepare();
+  const cache = join(dataDir, "tools", "uv-cache");
+  const oldKey = (JSON.parse(readFileSync(join(cache, ".ruyin-seed.json"), "utf8")) as { key: string }).key;
+
+  // 升级：uv 换了版本，种子里多了一个文件。
+  writeFileSync(join(toolsDir, "index.json"), JSON.stringify({ ...INDEX, pythonRuntime: { uv: { version: "0.13.0" } } }));
+  writeFileSync(join(uvHome, "cache", "archive-v0", "abc", "new.py"), "print(2)");
+  servers.refresh();
+  const second = servers.plan("py.markitdown");
+  assert.ok(second.ok && second.prepare);
+  if (!second.ok || !second.prepare) return;
+  await second.prepare();
+  const newKey = (JSON.parse(readFileSync(join(cache, ".ruyin-seed.json"), "utf8")) as { key: string }).key;
+  assert.notEqual(newKey, oldKey);
+  assert.ok(existsSync(join(cache, "archive-v0", "abc", "new.py")), "重种后新文件在");
+});
+
+test("prepare(): 随包没有 cache 目录时不算失败 —— 只说一句，uvx 照旧按 --offline 冷缓存的样子干净地失败", async () => {
+  const lines: string[] = [];
+  const r = rig({ ...INDEX, pythonRuntime: {} }, { log: (l) => lines.push(l) });
+  const uvHome = join(r.base, "uv");
+  mkdirSync(uvHome, { recursive: true });
+  writeFileSync(join(uvHome, process.platform === "win32" ? "uv.exe" : "uv"), "");
+  const plan = r.servers.plan("py.markitdown");
+  assert.ok(plan.ok && plan.prepare);
+  if (!plan.ok || !plan.prepare) return;
+  await plan.prepare();
+  assert.equal(existsSync(join(r.dataDir, "tools", "uv-cache")), false);
+  assert.ok(lines.some((l) => /随包没有种子/.test(l)));
 });
