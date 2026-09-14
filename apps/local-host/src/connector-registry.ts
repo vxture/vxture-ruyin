@@ -35,16 +35,14 @@ export const CONNECTORS_FILE = "connectors.json";
 /** Ids follow the contract's id grammar plus dashes; never local-fs. */
 const CONNECTOR_ID = /^[a-z][a-z0-9_-]{0,63}$/;
 
-export interface InstalledConnector {
+/** 公共字段，两种传输各自的连接细节不同（stdio 的命令行 vs HTTP 的地址）。 */
+interface InstalledConnectorBase {
   id: string;
-  transport: "stdio";
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
   /**
    * Which contract source kind this connector serves (lan / private) —— 或
    * `bundled`：随安装包预置的 MCP 服务器（ADR-018 §2.2，tool-servers.ts），
    * 不在 connectors.json 里，启用状态记在 <dataDir>/tools/state.json。
+   * 预置服务器只有 stdio 形态。
    */
   source: Extract<ContextSource, "lan" | "private"> | "bundled";
   installedAt: string;
@@ -60,13 +58,31 @@ export interface InstalledConnector {
   state: "active" | "stashed";
 }
 
-export interface ConnectorView extends InstalledConnector {
+export interface InstalledStdioConnector extends InstalledConnectorBase {
+  transport: "stdio";
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+}
+
+/** Streamable HTTP（工作计划「通路二 E」）：没有子进程，连接细节是地址与请求头。 */
+export interface InstalledHttpConnector extends InstalledConnectorBase {
+  transport: "streamable_http";
+  url: string;
+  /** 目标服务要的鉴权头之类；不落 UI 之外的地方，也不进审计。 */
+  headers?: Record<string, string>;
+  source: Extract<ContextSource, "lan" | "private">;
+}
+
+export type InstalledConnector = InstalledStdioConnector | InstalledHttpConnector;
+
+export type ConnectorView = InstalledConnector & {
   health: ConnectorHealth;
   /** Tools the running server exposes (tools/list at start); empty when not running. */
   tools: string[];
   /** 预置服务器才有：怎么起、现在为什么起不了（没 uv / 缺环境变量 / 没随包）。 */
   bundled?: { runtime: string; blocked?: string; note?: string };
-}
+};
 
 export class ConnectorInstallRefusedError extends Error {}
 /** 预置的服务器不能卸载 —— 它随安装包来，只能停用。 */
@@ -84,6 +100,47 @@ export interface ConnectorProbe {
   tools: string[];
   /** 没连上的原因，照原样转达。 */
   detail?: string;
+}
+
+/** `probe()` 的入参：两种传输各自的连接细节，由 `transport` 挑。缺省 = stdio（早于 E 批就有的调用方不必改）。 */
+export type ConnectorProbeInput =
+  | { id: string; transport?: "stdio"; command: string; args?: string[]; env?: Record<string, string> }
+  | { id: string; transport: "streamable_http"; url: string; headers?: Record<string, string> };
+
+/** `install()` 的入参，同一条 discriminant。 */
+export type ConnectorInstallInput =
+  | {
+      id: string;
+      transport?: "stdio";
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      source: string;
+      /** `stashed` = 存下来但不启用（测试没通过时用户选择先留着）。 */
+      state?: string;
+    }
+  | {
+      id: string;
+      transport: "streamable_http";
+      url: string;
+      headers?: Record<string, string>;
+      source: string;
+      state?: string;
+    };
+
+/** `undefined` = 地址没问题；否则是给用户看的原因。 */
+function invalidHttpUrl(url: string): string | undefined {
+  if (!url || typeof url !== "string") return "地址不能为空";
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return `地址不是合法的 URL："${url}"`;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return `地址必须是 http 或 https，收到 "${parsed.protocol}"`;
+  }
+  return undefined;
 }
 
 interface Manifest {
@@ -278,18 +335,32 @@ export class ConnectorRegistry implements ConnectorToolSource {
    * trust anchor exists - see the file header.
    */
   /**
-   * 试连一次：起进程 → 握手 → 读工具清单 → 关掉。**什么都不落盘**，也不进
-   * `lookup` —— 添加页要在写下任何东西之前先告诉用户「这条命令通不通」。
+   * 试连一次：起进程（或发一次握手请求）→ 握手 → 读工具清单 → 关掉。
+   * **什么都不落盘**，也不进 `lookup` —— 添加页要在写下任何东西之前先告诉用户
+   * 「这条命令/地址通不通」。
    *
-   * 拒装规则（未签名，TD-036）不管这里：测试不让任何第三方代码留在机器上，
-   * 它起一下就结束。生产上仍然装不进去，界面照实说。
+   * 拒装规则（未签名，TD-036）不管这里：测试不让任何第三方代码留在机器上
+   * （stdio 起一下就结束；HTTP 本来就不落地任何东西），生产上仍然装不进去，
+   * 界面照实说。
    */
-  async probe(input: {
-    id: string;
-    command: string;
-    args?: string[];
-    env?: Record<string, string>;
-  }): Promise<ConnectorProbe> {
+  async probe(input: ConnectorProbeInput): Promise<ConnectorProbe> {
+    if (input.transport === "streamable_http") {
+      const invalid = invalidHttpUrl(input.url);
+      if (invalid) return { ok: false, tools: [], detail: invalid };
+      const connector = new McpConnector(
+        {
+          id: input.id || "probe",
+          transport: "streamable_http",
+          url: input.url,
+          ...(input.headers ? { headers: input.headers } : {}),
+        },
+        {
+          ...(this.options.timeoutMs !== undefined ? { timeoutMs: this.options.timeoutMs } : {}),
+          limits: this.options.limits ?? DEFAULT_RESOURCE_LIMITS,
+        },
+      );
+      return this.probeConnector(connector);
+    }
     if (!input.command) return { ok: false, tools: [], detail: "命令不能为空" };
     const connector = new McpConnector(
       {
@@ -306,6 +377,11 @@ export class ConnectorRegistry implements ConnectorToolSource {
         limits: this.options.limits ?? DEFAULT_RESOURCE_LIMITS,
       },
     );
+    return this.probeConnector(connector);
+  }
+
+  /** 试连的收尾：起、问健康、**一定**收摊 —— 留下一个孤儿进程比测试失败糟得多。 */
+  private async probeConnector(connector: McpConnector): Promise<ConnectorProbe> {
     try {
       await connector.start();
       const health = await connector.health();
@@ -319,20 +395,11 @@ export class ConnectorRegistry implements ConnectorToolSource {
         detail: cause instanceof Error ? cause.message : String(cause),
       };
     } finally {
-      // 测完一定要收摊：留下一个孤儿进程比测试失败糟得多。
       await connector.stop().catch(() => {});
     }
   }
 
-  async install(input: {
-    id: string;
-    command: string;
-    args?: string[];
-    env?: Record<string, string>;
-    source: string;
-    /** `stashed` = 存下来但不启用（测试没通过时用户选择先留着）。 */
-    state?: string;
-  }): Promise<ConnectorView> {
+  async install(input: ConnectorInstallInput): Promise<ConnectorView> {
     if (!this.options.allowUnsigned) {
       throw new ConnectorInstallRefusedError(
         "connector installation is refused until connectors arrive signed (TD-012); " +
@@ -345,23 +412,38 @@ export class ConnectorRegistry implements ConnectorToolSource {
     if (this.lookup.has(input.id)) {
       throw new Error(`connector "${input.id}" is already installed`);
     }
-    if (!input.command || typeof input.command !== "string") {
-      throw new Error("connector command is required");
-    }
     if (input.source !== "lan" && input.source !== "private") {
       throw new Error(`connector source must be lan or private, got "${input.source}"`);
     }
     const stashed = input.state === "stashed";
-    const spec: InstalledConnector = {
-      id: input.id,
-      transport: "stdio",
-      command: input.command,
-      args: Array.isArray(input.args) ? input.args.map(String) : [],
-      ...(input.env ? { env: input.env } : {}),
-      source: input.source,
-      installedAt: new Date().toISOString(),
-      state: stashed ? "stashed" : "active",
-    };
+    let spec: InstalledConnector;
+    if (input.transport === "streamable_http") {
+      const invalid = invalidHttpUrl(input.url);
+      if (invalid) throw new Error(invalid);
+      spec = {
+        id: input.id,
+        transport: "streamable_http",
+        url: input.url,
+        ...(input.headers ? { headers: input.headers } : {}),
+        source: input.source,
+        installedAt: new Date().toISOString(),
+        state: stashed ? "stashed" : "active",
+      };
+    } else {
+      if (!input.command || typeof input.command !== "string") {
+        throw new Error("connector command is required");
+      }
+      spec = {
+        id: input.id,
+        transport: "stdio",
+        command: input.command,
+        args: Array.isArray(input.args) ? input.args.map(String) : [],
+        ...(input.env ? { env: input.env } : {}),
+        source: input.source,
+        installedAt: new Date().toISOString(),
+        state: stashed ? "stashed" : "active",
+      };
+    }
     // Start before persisting: a connector that cannot even initialize is
     // not installed, it is a typo the user should see now.
     //
@@ -512,16 +594,18 @@ export class ConnectorRegistry implements ConnectorToolSource {
   }
 
   private async bringUp(spec: InstalledConnector): Promise<void> {
-    const { id, command, args, env } = spec;
-    // 上限（TD-046）。每个工具服务器都是一个完整的解释器进程，而这是用户自己
-    // 的电脑 —— 不是可以随手扩容的服务器。已经在跑的那个再启用一次不算新占
-    // 名额（activate 会走到这里，但它复用同一个 id）。
+    const { id } = spec;
+    // 上限（TD-046）。每个 stdio 工具服务器都是一个完整的解释器进程；HTTP 连接器
+    // 没有子进程，但一样占着这台机器上的一个活跃连接，同一张表统一数——已经在
+    // 跑的那个再启用一次不算新占名额（activate 会走到这里，但它复用同一个 id）。
     const max = this.options.limits?.maxToolServers ?? DEFAULT_RESOURCE_LIMITS.maxToolServers;
     if (!this.live.has(id) && this.live.size >= max) {
       throw new Error(overLimitMessage("同时运行的工具服务器", max, this.runningServers));
     }
     const connector = new McpConnector(
-      { id, command, args, ...(env ? { env } : {}), cwd: this.workDirFor(id) },
+      spec.transport === "streamable_http"
+        ? { id, transport: "streamable_http", url: spec.url, ...(spec.headers ? { headers: spec.headers } : {}) }
+        : { id, command: spec.command, args: spec.args, ...(spec.env ? { env: spec.env } : {}), cwd: this.workDirFor(id) },
       {
         ...(this.options.timeoutMs !== undefined ? { timeoutMs: this.options.timeoutMs } : {}),
         limits: this.options.limits ?? DEFAULT_RESOURCE_LIMITS,

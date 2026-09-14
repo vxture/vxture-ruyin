@@ -339,13 +339,18 @@ export function isConnectorGrant(grant: Grant): grant is ConnectorGrant {
 }
 
 /** 宿主上装了哪些进程外连接器（daemon /connectors）。健康是问出来的，不是记的。 */
-export interface ConnectorView {
+export type ConnectorView = (
+  | {
+      transport: "stdio";
+      command: string;
+      args: string[];
+      /** bundled = 随安装包预置的 MCP 服务器（能力平台里的「工具」），不能卸载只能停用。 */
+      source: "lan" | "private" | "bundled";
+    }
+  /** Streamable HTTP（工作计划「通路二 E」）：没有子进程，连接细节是地址。 */
+  | { transport: "streamable_http"; url: string; headers?: Record<string, string>; source: "lan" | "private" }
+) & {
   id: string;
-  transport: "stdio";
-  command: string;
-  args: string[];
-  /** bundled = 随安装包预置的 MCP 服务器（能力平台里的「工具」），不能卸载只能停用。 */
-  source: "lan" | "private" | "bundled";
   installedAt: string;
   /** 本机生效态（通则 B-3）。`stashed` = 存下来但没启用（添加时没连上）。 */
   state: "active" | "stashed";
@@ -354,7 +359,7 @@ export interface ConnectorView {
   tools: string[];
   /** 预置服务器才有：怎么起、现在为什么起不了。 */
   bundled?: { runtime: string; blocked?: string; note?: string };
-}
+};
 
 /** 技能来源的四层（ADR-018 §2.3），近者优先。 */
 export type SkillLayer = "bundled" | "distributed" | "user" | "project";
@@ -917,20 +922,23 @@ export class Api {
   cancelComponent = (id: string) =>
     this.call<{ cancelled: boolean }>(`/components/${encodeURIComponent(id)}/cancel`, "POST");
   removeComponent = (id: string) => this.call<{ removed: string }>(`/components/${encodeURIComponent(id)}`, "DELETE");
-  installConnector = (input: {
-    id: string;
-    command: string;
-    args: string[];
-    source: "lan" | "private";
-    /** `stashed` = 存下来但不启用（测试没通过时用户选择先留着）。 */
-    state?: "stashed";
-  }) => this.call<ConnectorView>("/connectors", "POST", input);
+  installConnector = (
+    input: (
+      | { transport?: "stdio"; command: string; args: string[] }
+      | { transport: "streamable_http"; url: string; headers?: Record<string, string> }
+    ) & {
+      id: string;
+      source: "lan" | "private";
+      /** `stashed` = 存下来但不启用（测试没通过时用户选择先留着）。 */
+      state?: "stashed";
+    },
+  ) => this.call<ConnectorView>("/connectors", "POST", input);
   /** 试连一次（添加页的第一步）。不写任何东西，也不注册。 */
-  testConnector = (input: {
-    id: string;
-    command: string;
-    args?: string[];
-  }) =>
+  testConnector = (
+    input:
+      | { id: string; transport?: "stdio"; command: string; args?: string[] }
+      | { id: string; transport: "streamable_http"; url: string; headers?: Record<string, string> },
+  ) =>
     this.call<{ ok: boolean; tools: string[]; detail?: string }>(
       "/connectors/test",
       "POST",

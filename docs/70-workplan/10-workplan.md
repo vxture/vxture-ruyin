@@ -495,7 +495,20 @@ CI 另加 `packaged-smoke`（windows-latest，真启动 + 真排一份 PDF + 断
       连接器暴露时任务启动前就被拒并点名。审计 `tool.executed` 记连接器。MCP 客户端
       补 `tools/list` / `tools/call`，非文本内容点名省略而不是静默丢掉；设置页列出
       每个连接器暴露的工具名。
-- [ ] **E · Streamable HTTP 传输**：stdio 之外的第二种标准传输。
+- [x] **E · Streamable HTTP 传输**（2026-09-14，TD-035 关闭）：stdio 之外的
+      第二种标准传输。`mcp-http-client.ts` 与 stdio 客户端并列实现同一个
+      `McpClient` 接口——单端点 POST，应答或一段 JSON 或一条 SSE 流，
+      `initialize` 应答的 `Mcp-Session-Id` 记下来往后原样带回，`stop()` 用
+      DELETE 收尾。`InstalledConnector` / `ConnectorView` / `probe` / `install`
+      从「只有 stdio 一种形状」改成按 `transport` 区分的 discriminated
+      union；`server.ts` 与 `apps/ui-workspace` 的添加连接器页随之接上传输
+      选择。TD-046 的字节上限与并发连接数上限原样套用（HTTP 连接器没有子
+      进程，但按同一张表计数）；信任模型（来源受限、显式安装、项目为界授权）
+      不因传输换了而改变。**自实现 vs 官方 SDK 的重评：留自实现**——这一批
+      的体量与 stdio 那批相当，没有推到换 SDK 的地步。测试：
+      `fake-mcp-http-server.ts`（跑在测试进程里，HTTP 没有 stdio 那样的进程
+      边界要跨）+ 单/JSON 与 SSE 两种应答模式的协议全集、会话过期、超时、
+      连接断开、上限收摊等失败路径。详见 ADR-005 记录。
 
 **不采用 MCP 官方 SDK 的理由（B，2026-09-03）**：它把 express / hono / cors /
 jose 等一整套服务端依赖带进**随安装包发出**的守护进程，而本仓只做客户端、只用
