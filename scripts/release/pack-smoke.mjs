@@ -206,10 +206,12 @@ export function describeIdentity(dir) {
  * 让一棵树对当前用户拒绝写入，回一个 restore()。装到 Program Files 的那台机器就是
  * 这个样子（TD-062）：非提权进程对安装目录只有读。
  *
- * - Windows：目录的只读位挡不住建文件，走 ACL —— 给当前用户加一条**拒绝**写 / 建 /
+ * - Windows：目录的只读位挡不住建文件，走 ACL —— 给当前身份加一条**拒绝**写 / 建 /
  *   删的 ACE，(OI)(CI) 让子孙继承。拒绝优先于允许，管理员组的 Allow 也压不过它，
- *   所以 CI 的 runneradmin 上照样生效。不带 /T：继承的 ACE 由系统传播到整棵树，
- *   带 /T 会给两万多个文件各写一条显式 ACE，恢复时也得各删一遍。
+ *   所以 CI 的 runneradmin 上照样生效。**必须带 /T**：#244 在 CI 上红了四轮才由自证
+ *   看清 —— 不带 /T 时 icacls 只改树根，已有的子孙一个都不落（「. 写不了，sub 能写」），
+ *   而 uv 写的正是 resources/uv/ 深处。/T 给两万多个条目各写一条显式 ACE，恢复时同样
+ *   /T 各删一遍，各花几十秒，是这条演练的固定开销。
  * - POSIX：`chmod -R a-w`。root 无视权限位 —— 那正是 `effective` 存在的理由。
  *
  * restore 之后再探一次每个 probeDirs：还写不了的话 Windows 上再退一步用 /T 逐个
@@ -235,10 +237,9 @@ export function denyWrites(dir, probeDirs = [dir]) {
     // 拒绝项按**令牌里的 SID** 写，不按 USERNAME：whoami 读的是令牌本身；SID 前加 * 是
     // icacls 的写法。顺带避开了 USERNAME 进日志被 CodeQL 判成明文泄露那一条。
     //
-    // **几种写法按顺序试，第一种挡得住的算数。** #244 在 CI 上红了三轮：icacls 报「处理
-    // 成功」，令牌确是 runneradmin（内置 Administrator，RID 500），备份特权关着，cmd 的
-    // 重定向照样写得进去 —— 在 Linux 上推不出为什么，只能让 runner 自己说：每种写法
-    // 挡没挡住、锁着时的 ACL 长什么样，全部留在 log 里。
+    // **几种写法按顺序试，第一种挡得住的算数。** 第一种就够（自证里它锁得住树根），
+    // 后面几种是给下一台不一样的机器留的退路；每种写法挡没挡住、锁着时的 ACL 长什么样，
+    // 全部留在 log 里，再出问题不用猜。
     const sid = tokenSid();
     const strategies = [
       { who: `*${sid}`, perm: "(OI)(CI)(DE,DC,WD,AD,WEA,WA)", label: "令牌 SID · 具体权限" },
@@ -250,7 +251,7 @@ export function denyWrites(dir, probeDirs = [dir]) {
     const notes = [];
     let applied;
     for (const st of strategies) {
-      const out = run("icacls", [dir, "/deny", `${st.who}:${st.perm}`]);
+      const out = run("icacls", [dir, "/deny", `${st.who}:${st.perm}`, "/T"]);
       const left = stillLocked();
       notes.push(
         `${st.label}: ${oneLine(out)} -> ` +
@@ -261,14 +262,13 @@ export function denyWrites(dir, probeDirs = [dir]) {
         break;
       }
       notes.push(`  锁着时的 ACL: ${oneLine(run("icacls", [dir]))}`);
-      run("icacls", [dir, "/remove:d", st.who]);
+      run("icacls", [dir, "/remove:d", st.who, "/T"]);
     }
     log = notes.join("\n");
     how = applied ? `icacls /deny ${applied.who}:${applied.perm}` : "icacls /deny（四种写法都没挡住）";
     undo = () => {
       if (!applied) return;
-      run("icacls", [dir, "/remove:d", applied.who]);
-      if (stillLocked().length) run("icacls", [dir, "/remove:d", applied.who, "/T"]);
+      run("icacls", [dir, "/remove:d", applied.who, "/T"]);
       const left = stillLocked();
       if (left.length) {
         throw new Error(
