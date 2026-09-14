@@ -16,7 +16,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { join, posix, relative, sep, win32 } from "node:path";
 
 /**
@@ -149,11 +149,15 @@ export function canWrite(dir) {
     // runner 就是），带这个标志的打开会**绕过 ACL** —— 拒绝项摆在那儿，Node 照样写进去
     // （#244 第一次在 CI 上跑就是这样红的）。cmd 的重定向走普通 CreateFile，没有那个标志，
     // 探出来的才是 uv（Rust，也没有那个标志）和普通用户会遇到的答案。
-    const r = spawnSync("cmd.exe", ["/d", "/c", `echo probe> "${probe}" && del /q "${probe}"`], {
-      encoding: "utf8",
-      windowsVerbatimArguments: true,
-    });
-    return r.status === 0;
+    // 判据是「文件在不在」，不是 cmd 的退出码 —— 重定向失败时它的 errorlevel 不可靠。
+    spawnSync("cmd.exe", ["/d", "/c", `echo probe> "${probe}"`], { encoding: "utf8", windowsVerbatimArguments: true });
+    if (!existsSync(probe)) return false;
+    try {
+      rmSync(probe, { force: true });
+    } catch {
+      /* 探针留着也无害 */
+    }
+    return true;
   }
   try {
     writeFileSync(probe, "probe");
@@ -166,6 +170,36 @@ export function canWrite(dir) {
     /* 建得了删不了（Windows 上只拒了 DE 的情形）：算能写，探针留着也无害 */
   }
   return true;
+}
+
+/**
+ * 当前进程令牌的用户 SID（Windows）：`whoami /user /fo csv /nh` 的最后一列。
+ *
+ * @returns {string}
+ */
+export function tokenSid() {
+  const r = spawnSync("whoami", ["/user", "/fo", "csv", "/nh"], { encoding: "utf8" });
+  const m = /"(S-1-[\d-]+)"\s*$/.exec((r.stdout ?? "").trim());
+  if (!m) throw new Error(`tokenSid: 读不出令牌 SID：${r.stdout ?? ""}${r.stderr ?? ""}`);
+  return m[1];
+}
+
+/**
+ * 只读演练没生效时给人看的诊断：跑作业的身份、令牌里启用的特权、树根现在的 ACL。
+ * 全部来自子进程输出，不经 process.env。
+ *
+ * @param {string} dir
+ * @returns {string}
+ */
+export function describeIdentity(dir) {
+  const out = (cmd, args) => {
+    const r = spawnSync(cmd, args, { encoding: "utf8" });
+    return `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
+  };
+  if (process.platform === "win32") {
+    return [`whoami /user /priv:`, out("whoami", ["/user", "/priv"]), `icacls ${dir}:`, out("icacls", [dir])].join("\n");
+  }
+  return [`id:`, out("id", []), `ls -ld ${dir}:`, out("ls", ["-ld", dir])].join("\n");
 }
 
 /**
@@ -198,20 +232,21 @@ export function denyWrites(dir, probeDirs = [dir]) {
   let log;
   let undo;
   if (process.platform === "win32") {
-    const user = process.env["USERNAME"];
-    if (!user) throw new Error("denyWrites: 拿不到 USERNAME，没法给当前用户加拒绝 ACE");
+    // 拒绝项按**令牌里的 SID** 写，不按 USERNAME：#244 第二次在 CI 上红就是这里 ——
+    // icacls 报「处理成功」，探针照样写得进去，也就是拒绝的名字对不上跑作业的那个身份
+    // （runner 的环境变量说 runneradmin，令牌未必是）。whoami 读的是令牌本身；SID 前
+    // 加 * 是 icacls 的写法。顺带避开了 USERNAME 进日志被 CodeQL 判成明文泄露那一条。
+    const sid = tokenSid();
     const rights = "(OI)(CI)(DE,DC,WD,AD,WEA,WA)";
-    log = run("icacls", [dir, "/deny", `${user}:${rights}`]);
-    // 打出来的那一句不带用户名：它来自 process.env，CodeQL 把「环境变量进日志」一律当
-    // 明文泄露（#244 三条 high）。用占位符 —— 这句话的用途是让人看懂锁的是什么。
-    how = `icacls /deny %USERNAME%:${rights}`;
+    log = run("icacls", [dir, "/deny", `*${sid}:${rights}`]);
+    how = `icacls /deny *${sid}:${rights}`;
     undo = () => {
-      run("icacls", [dir, "/remove:d", user]);
-      if (stillLocked().length) run("icacls", [dir, "/remove:d", user, "/T"]);
+      run("icacls", [dir, "/remove:d", `*${sid}`]);
+      if (stillLocked().length) run("icacls", [dir, "/remove:d", `*${sid}`, "/T"]);
       const left = stillLocked();
       if (left.length) {
         throw new Error(
-          `只读演练恢复失败：${left.join("、")} 仍然写不了。手动恢复：icacls "${dir}" /remove:d %USERNAME% /T`,
+          `只读演练恢复失败：${left.join("、")} 仍然写不了。手动恢复：icacls "${dir}" /remove:d *${sid} /T`,
         );
       }
     };

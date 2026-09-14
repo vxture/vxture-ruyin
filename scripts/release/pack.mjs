@@ -26,6 +26,7 @@ import { join } from "node:path";
 
 import {
   denyWrites,
+  describeIdentity,
   describeTreeWrites,
   diffTree,
   judgeReadOnlySmoke,
@@ -399,7 +400,8 @@ if (process.platform === "win32") {
     lock.restore();
     if (process.platform === "win32") {
       console.error(
-        `[pack] FAILED: 只读演练没生效 —— ${lock.how} 之后当前用户照样能往 ${unpacked} 里写，这一轮验不了 TD-062。`,
+        `[pack] FAILED: 只读演练没生效 —— ${lock.how} 之后当前身份照样能往 ${unpacked} 里写，这一轮验不了 TD-062。\n` +
+          describeIdentity(unpacked),
       );
       process.exit(1);
     }
