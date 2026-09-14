@@ -15,7 +15,16 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describeTreeWrites, diffTree, parseUiSelfCheck, snapshotTree } from "./pack-smoke.mjs";
+import {
+  canWrite,
+  denyWrites,
+  describeTreeWrites,
+  diffTree,
+  judgeReadOnlySmoke,
+  parseUiSelfCheck,
+  parseUvSeed,
+  snapshotTree,
+} from "./pack-smoke.mjs";
 
 /** 一段形状真实的冒烟输出：界面那一行排最前（真实顺序），由用例自己决定给不给；后面是三条既有自检 + 壳的 OK。 */
 function transcript(uiLine, eol = "\n") {
@@ -114,4 +123,108 @@ void test("describeTreeWrites: clean 时无话可说；有写入时点名前几�
   assert.match(msg, /改动 1 个：uv\/python\/\.lock/);
   assert.match(msg, /Program Files/, "要说清后果：装到只读位置首次使用就会失败");
   assert.match(msg, /tool-servers\.ts/, "要指向该改的地方");
+});
+
+// ---------------------------------------------------------------------------
+// 只读演练（TD-062 第 2 条）
+// ---------------------------------------------------------------------------
+
+const RO_DATA = "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\ruyin-ro-smoke-abc123";
+const SEED_LINE = `[ruyin] uv cache: seeded 11678 file(s) from D:\\a\\Program Files (x86)\\Ruyin\\resources\\uv\\cache -> ${RO_DATA}\\tools\\uv-cache (28745 ms)`;
+
+/** 只读那一轮的形状：种子行在壳的 OK 之后（真实顺序：Electron 只在退出后才把子进程的 stderr 冲出来）。 */
+function roTranscript({ ok = true, uvx = "ok (haris-musa.excel-mcp-server, 25 tool(s))", seed = SEED_LINE, eol = "\n" } = {}) {
+  return [
+    "[ruyin] listening on http://127.0.0.1:17420",
+    "[ruyin] ui self-check: ok (3 asset(s), 1190431 bytes, D:\\x\\resources\\ui)",
+    "[ruyin] tools self-check: ok (microsoft.playwright-mcp, 24 tool(s))",
+    `[ruyin] uvx self-check: ${uvx}`,
+    "[ruyin] pdf self-check: ok (8171 bytes)",
+    ...(ok ? ["[shell-smoke] OK: daemon healthy, shell wiring verified"] : ["[ruyin] smoke self-check failed: uvx: server exited (code 2)"]),
+    ...(seed ? [seed] : []),
+  ].join(eol);
+}
+
+void test("parseUvSeed: 数字、种子目录、落点都带出来 —— Windows 路径含括号与空格，行尾 \\r\\n 也不把 \\r 收进落点", () => {
+  const r = parseUvSeed(roTranscript({ eol: "\r\n" }));
+  assert.deepEqual(r, {
+    files: 11678,
+    from: "D:\\a\\Program Files (x86)\\Ruyin\\resources\\uv\\cache",
+    to: `${RO_DATA}\\tools\\uv-cache`,
+    ms: 28745,
+  });
+  assert.equal(parseUvSeed(roTranscript({ seed: null })), undefined, "第二次起没有这一行，要如实说没有");
+});
+
+void test("judgeReadOnlySmoke: 壳没 OK 就红，并说清这就是装到 Program Files 的样子", () => {
+  const r = judgeReadOnlySmoke({ smokeOut: roTranscript({ ok: false }), dataDir: RO_DATA, expectUvx: true });
+  assert.equal(r.ok, false);
+  assert.match(r.message, /Program Files/);
+  assert.match(r.message, /TD-062/);
+});
+
+void test("judgeReadOnlySmoke: 壳 OK 但 uvx 没过也红 —— Python 半边正是当初写进包里的那一支", () => {
+  const r = judgeReadOnlySmoke({
+    smokeOut: roTranscript({ uvx: "no seeded uvx server to try" }),
+    dataDir: RO_DATA,
+    expectUvx: true,
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.message, /no seeded uvx server to try/, "要把守护进程实际报的那句带出来");
+  assert.match(r.message, /tool-servers\.ts/);
+});
+
+void test("judgeReadOnlySmoke: 空数据目录却没有种子行也红 —— 那说明缓存又指回了包里，可写工作区看不出来", () => {
+  const r = judgeReadOnlySmoke({ smokeOut: roTranscript({ seed: null }), dataDir: RO_DATA, expectUvx: true });
+  assert.equal(r.ok, false);
+  assert.match(r.message, /UV_CACHE_DIR/);
+});
+
+void test("judgeReadOnlySmoke: 种子落在这一轮的数据目录之外也红，并把落点与最可能的原因（钉住了老数据目录）写出来", () => {
+  const elsewhere = SEED_LINE.replace(`${RO_DATA}\\tools\\uv-cache`, "C:\\Users\\x\\AppData\\Roaming\\Ruyin\\data\\tools\\uv-cache");
+  const r = judgeReadOnlySmoke({ smokeOut: roTranscript({ seed: elsewhere }), dataDir: RO_DATA, expectUvx: true });
+  assert.equal(r.ok, false);
+  assert.match(r.message, /Roaming\\Ruyin\\data\\tools\\uv-cache/);
+  assert.match(r.message, /data-location\.ts/);
+});
+
+void test("judgeReadOnlySmoke: 全对就过，detail 把 uvx 结果、种子数与落点带出来；行尾 \\r\\n 一样", () => {
+  const r = judgeReadOnlySmoke({ smokeOut: roTranscript({ eol: "\r\n" }), dataDir: RO_DATA, expectUvx: true });
+  assert.equal(r.ok, true, r.ok ? "" : r.message);
+  assert.match(r.detail, /11678 个文件/);
+  assert.match(r.detail, /uvx ok \(haris-musa\.excel-mcp-server, 25 tool\(s\)\)/);
+});
+
+void test("judgeReadOnlySmoke: 没种 Python 半边（expectUvx=false）时只看壳的 OK，不去要种子", () => {
+  const r = judgeReadOnlySmoke({
+    smokeOut: roTranscript({ uvx: "no seeded uvx server to try", seed: null }),
+    dataDir: RO_DATA,
+    expectUvx: false,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(judgeReadOnlySmoke({ smokeOut: roTranscript({ ok: false }), dataDir: RO_DATA, expectUvx: false }).ok, false);
+});
+
+void test("denyWrites: 锁完 effective 说的是真话（非 root 就锁得住，root 就如实说锁不住），restore 之后树根与子目录都写得回来", () => {
+  const { root } = tree();
+  const sub = join(root, "uv", "cache");
+  try {
+    assert.equal(canWrite(root) && canWrite(sub), true, "起点：临时树可写");
+    const lock = denyWrites(root, [root, sub]);
+    try {
+      assert.equal(typeof lock.effective, "boolean");
+      assert.match(lock.how, /icacls|chmod/);
+      const privileged = process.platform !== "win32" && typeof process.getuid === "function" && process.getuid() === 0;
+      if (!privileged) {
+        assert.equal(lock.effective, true, `${lock.how} 之后当前用户不该还能写`);
+        assert.equal(canWrite(sub), false, "拒绝要传到子目录");
+      }
+    } finally {
+      lock.restore();
+    }
+    assert.equal(canWrite(root), true, "恢复之后树根要写得回来");
+    assert.equal(canWrite(sub), true, "恢复之后子目录也要写得回来");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

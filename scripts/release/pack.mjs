@@ -19,11 +19,20 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
-import { describeTreeWrites, diffTree, parseUiSelfCheck, snapshotTree } from "./pack-smoke.mjs";
+import {
+  denyWrites,
+  describeIdentity,
+  describeTreeWrites,
+  diffTree,
+  judgeReadOnlySmoke,
+  parseUiSelfCheck,
+  snapshotTree,
+} from "./pack-smoke.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const shellDir = join(repoRoot, "apps", "shell");
@@ -40,6 +49,35 @@ function run(cmd, args, cwd) {
   if (res.status !== 0) {
     console.error(`[pack] FAILED: ${cmd} ${args.join(" ")}`);
     process.exit(res.status ?? 1);
+  }
+}
+
+// 只读演练的锁先在一个空目录上自证一次（TD-062 第 2 条）。
+//
+// 真正的演练要在 8 分钟的安装 / 构建 / 打包之后才跑到；锁在这台 runner 上根本锁不住的
+// 话（#244 在 CI 上红了三轮才看清是这件事），8 分钟后才知道太贵。空目录放在 release/
+// 旁边，与解包树同一个卷 —— ACL 的行为是卷的事，换到 %TEMP%（C:）验了不算。Windows 上
+// 锁不住就红，并把每种写法、锁着时的 ACL、身份与特权一起打出来；POSIX 上以 root 跑如实
+// 说 SKIPPED（真演练那一步也会跳过）。
+{
+  const scratch = join(shellDir, "release", `.ro-selftest-${process.pid}`);
+  mkdirSync(join(scratch, "sub"), { recursive: true });
+  let lock;
+  try {
+    lock = denyWrites(scratch, [scratch, join(scratch, "sub")]);
+    lock.restore();
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+  console.log(`[pack] 只读演练自证:\n${lock.log}`);
+  if (!lock.effective) {
+    if (process.platform === "win32") {
+      console.error(`[pack] FAILED: 只读演练的锁在这台机器上锁不住 —— 真演练没法做。\n${describeIdentity(join(shellDir, "release"))}`);
+      process.exit(1);
+    }
+    console.log(`[pack] 只读演练自证 SKIPPED: ${lock.how} 挡不住当前身份（多半是 root）`);
+  } else {
+    console.log(`[pack] 只读演练自证: ${lock.how} 锁得住、恢复得回`);
   }
 }
 
@@ -367,6 +405,79 @@ if (process.platform === "win32") {
         "       机器没有 DPAPI」，而每一个新安装都会拿到一把明文主密钥。",
     );
     process.exit(1);
+  }
+}
+
+// 装到只读位置真的起得来（TD-062 的第 2 条；#242 只做了上面快照那一半）。
+//
+// 「resources/ 未变」证明的是冒烟**没往包里写**，证明不了**包写不了时也起得来**：探一下
+// 可写再分岔的代码（uv 自己就这么干）、只在首次种子时才碰包的路径，快照一概看不见。
+// 所以再冒一次，条件照 Program Files 那台机器摆：整棵解包树对当前用户拒绝写入（Windows
+// 上目录的只读位挡不住建文件，走 ACL；POSIX 走 chmod），数据目录换成一个空的临时目录、
+// 指针文件指到一个不存在的位置，让种子不得不从只读的包里重种。判据：壳照样 OK、uvx 自检
+// 照样 ok、种子那一行落在临时目录之下（pack-smoke.mjs 的 judgeReadOnlySmoke，配自测）。
+//
+// 先探一次「拒绝真的生效了吗」：拒绝没生效的演练是在演戏。Windows 上生效不了就红；
+// POSIX 上以 root 跑到这里（本仓的 Linux 等价演练）如实说 SKIPPED。做完无论成败都把
+// ACL 恢复回来，恢复不了 denyWrites 会抛、并把手动命令放进报错 —— 这棵树接下来还要给
+// upload-artifact 和开发者自己用。
+{
+  const unpacked = join(shellDir, "release", "win-unpacked");
+  const lock = denyWrites(unpacked, [unpacked, resourcesDir]);
+  if (lock.log) console.log(`[pack] 只读演练锁定: ${lock.log.split(/\r?\n/).join(" | ")}`);
+  if (!lock.effective) {
+    lock.restore();
+    if (process.platform === "win32") {
+      console.error(
+        `[pack] FAILED: 只读演练没生效 —— ${lock.how} 之后当前身份照样能往 ${unpacked} 里写，这一轮验不了 TD-062。\n` +
+          describeIdentity(unpacked),
+      );
+      process.exit(1);
+    }
+    console.log(`[pack] 只读演练 SKIPPED: ${lock.how} 挡不住当前身份（多半是 root）；这一条由 CI 的 packaged-smoke 在 Windows 上验。`);
+  } else {
+    const roDataDir = mkdtempSync(join(tmpdir(), "ruyin-ro-smoke-"));
+    console.log(`[pack] 只读演练: ${lock.how} ${unpacked}；空数据目录 ${roDataDir}`);
+    let ro;
+    try {
+      ro = spawnSync(packagedExe, ["--smoke"], {
+        cwd: shellDir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          RUYIN_DATA_DIR: roDataDir,
+          RUYIN_LOCATION_FILE: join(roDataDir, "location.json"),
+        },
+      });
+    } finally {
+      lock.restore();
+    }
+    const roOut = `${ro.stdout ?? ""}${ro.stderr ?? ""}`;
+    process.stdout.write(roOut);
+    // 这一轮种出来的缓存两百兆，用完即弃。删不掉（Windows 上偶有句柄未释放）只提醒：
+    // 演练本身已经做完，临时目录留在 %TEMP% 里不该把绿的结果变红。
+    try {
+      rmSync(roDataDir, { recursive: true, force: true });
+    } catch (e) {
+      console.warn(`[pack] 只读演练的临时数据目录没删干净（${e instanceof Error ? e.message : String(e)}）：${roDataDir}`);
+    }
+    if (ro.error) {
+      console.error(`[pack] FAILED: 只读演练里应用没能被执行：${ro.error.message}`);
+      process.exit(1);
+    }
+    const verdict = judgeReadOnlySmoke({ smokeOut: roOut, dataDir: roDataDir, expectUvx: skillPull });
+    if (!verdict.ok) {
+      console.error(verdict.message);
+      process.exit(1);
+    }
+    // 这一轮也不许往包里写。ACL 只在「写会被拒」这件事上作证；Node 那半边（壳与守护进程）
+    // 有没有往包里写，不靠 ACL 猜，仍由快照来判 —— 两条证据各说各的。
+    const roWrites = describeTreeWrites(diffTree(resourcesBefore, snapshotTree(resourcesDir)));
+    if (roWrites) {
+      console.error(roWrites.replace("冒烟往安装目录", "只读演练那一轮往安装目录"));
+      process.exit(1);
+    }
+    console.log(`[pack] 只读演练核对: ${verdict.detail}；resources/ 仍未变`);
   }
 }
 
