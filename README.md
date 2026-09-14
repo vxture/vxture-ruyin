@@ -71,6 +71,12 @@ node scripts/release/make-manifest.mjs beta 0.1.0
 ./apps/shell/release/win-unpacked/Ruyin.exe --smoke   # packaged smoke check
 ```
 
+No Windows toolchain at hand? Every CI run of `packaged-smoke` (each PR and
+each push to main) keeps the installer it just built and launched as an
+Actions artifact for 14 days: open the run, download
+`ruyin-installer-<pr-N|main>-<run>` (NSIS setup + blockmap + latest.yml).
+That is the same tree the smoke check started, not a separate build.
+
 The better-sqlite3-multiple-ciphers prebuilt binding also downloads from
 GitHub releases. If install falls back to node-gyp and fails, fetch the
 prebuild through a GitHub proxy (e.g. ghfast.top) and extract it into the
