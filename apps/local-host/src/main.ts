@@ -9,6 +9,10 @@
  *   RUYIN_TOKEN         session token override (default: random per launch)
  *   RUYIN_UI_DIR        built Workspace UI dir (default: sibling
  *                       ui-workspace/dist when it exists; dev console at /dev)
+ *                       The env value is taken as given, never existence-checked:
+ *                       a wrong dir means / is 404 while /health stays 200.
+ *   RUYIN_SMOKE=1       run the smoke self-checks after listen (ui -> tools ->
+ *                       uvx -> pdf; pdf last, the shell exits on its marker)
  *   RUYIN_ACCOUNTS_ISSUER    OIDC issuer (default https://accounts.vxture.com)
  *   RUYIN_OIDC_CLIENT_ID     public client id (default ruyin; beta: ruyin-beta)
  *   RUYIN_PLATFORM_API_BASE  旧 C2 基址（tailnet-only，用户设备够不着）——
@@ -58,6 +62,7 @@ import { currentHost, systemDirRefusal } from "./system-dirs.js";
 import { mediaTypeOf } from "./file-store.js";
 import { cloudSyncRefusal } from "./cloud-sync.js";
 import { LocalFsConnector } from "./connector-fs.js";
+import { checkWorkspaceUi } from "./ui-self-check.js";
 import { ConnectorRegistry } from "./connector-registry.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
 import { shellPdfRenderer } from "./pdf.js";
@@ -697,6 +702,27 @@ async function pdfSelfCheck(): Promise<void> {
 }
 
 /**
+ * 工作台界面真的被端出来了（TD-061）。
+ *
+ * 壳的 `--smoke` 在开窗之前就退出，窗口要加载的 `/` 在冒烟里从没被请求过；而
+ * `/health` 在 resources/ui 缺席时照样 200。这里由守护进程自己当一次浏览器：取 `/`，
+ * 再把页面引用的每个文件取一遍（ui-self-check.ts）—— 端不出来就抛，原因指向根因。
+ *
+ * 没有 uiDir 时如实说，不算失败：那是守护进程自己决定端 Dev Console 的情形（上面
+ * uiDir 的解析），开发态只装了壳和守护进程的 smoke 也该能跑。**在打包冒烟里拒绝这一
+ * 句的是 pack.mjs，不是这里** —— 与 toolsSelfCheck 那句「no vendored node server to try」
+ * 同一种分工：守护进程说实话，打包链决定实话够不够。
+ */
+async function uiSelfCheck(baseUrl: string): Promise<void> {
+  if (!uiDir) {
+    console.log("[ruyin] ui self-check: no built workspace ui to serve");
+    return;
+  }
+  const { assets, bytes } = await checkWorkspaceUi(baseUrl);
+  console.log(`[ruyin] ui self-check: ok (${assets.length} asset(s), ${bytes} bytes, ${uiDir})`);
+}
+
+/**
  * 打包冒烟时真的起一个 vendored 的 MCP 服务器（ADR-018 §2.2，TD-042）。
  *
  * 装进包不等于起得来：入口路径、Electron 当 Node 用（ELECTRON_RUN_AS_NODE）、
@@ -869,14 +895,30 @@ server.listen(port, "127.0.0.1", () => {
     // **顺序有意义，不是风格。** 壳等的是 PDF 那条自检的标记，等到就宣布通过并退出
     // （ADR-017）。所以 PDF 必须排在最后：并发跑的话，慢的那条还没打印，进程就没了 ——
     // CI 上就是这么丢掉 uvx 自检那一行的（uv 要现搭一个临时环境，比另外两条都慢）。
+    // 界面那条排最前：它只是几次本机 HTTP，与工具层无关，resources/ui 缺席时先于 uvx
+    // 花几秒搭环境之前就退出，原因也是日志里第一眼看到的东西。
+    //
+    // 端口用 workspacePort（server.address() 的真实结果），不用 port：RUYIN_PORT=0 时
+    // 后者是 0。
     void (async () => {
       try {
+        await uiSelfCheck(`http://127.0.0.1:${workspacePort}`);
         await toolsSelfCheck();
         await uvxSelfCheck();
         await pdfSelfCheck();
       } catch (cause) {
-        console.error("[ruyin] smoke self-check failed:", cause);
-        process.exit(1);
+        // stdio is a pipe under the shell's utilityProcess: flush before exiting,
+        // or the message is lost with the process（与上面 sqlite 那条 FATAL 同一个坑）——
+        // pack 那边就只剩一句「did not start」，而原因本来就在这一行里。
+        //
+        // 刷完再等一小会儿才退：Electron 在收到 utilityProcess 的退出通知时会直接摘掉
+        // stdout/stderr 的监听器、不排空管道，壳那边 app.exit(1) 又是同步的 —— 最后
+        // 几行和退出通知是两条独立的异步路，谁先到没有保证。留 150 ms 给壳把管道读完，
+        // 这条路只在冒烟失败时走，代价可以忽略。
+        process.stderr.write(
+          `[ruyin] smoke self-check failed: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+          () => setTimeout(() => process.exit(1), 150),
+        );
       }
     })();
   }

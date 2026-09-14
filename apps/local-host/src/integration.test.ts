@@ -30,6 +30,7 @@ import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { loadProducts } from "./products.js";
 import { ProductRegistry } from "./product-registry.js";
 import { createLocalApi } from "./server.js";
+import { checkWorkspaceUi } from "./ui-self-check.js";
 import type { PlatformService } from "./platform.js";
 import { TaskRunner } from "./task-runner.js";
 import { EventBus } from "./events.js";
@@ -558,6 +559,71 @@ test("daemon serves the built workspace ui with traversal guard", async () => {
     assert.match(await dev.text(), /Ruyin Dev Console/);
   } finally {
     await new Promise<void>((ok) => server.close(() => ok()));
+    storage.closeAll();
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(uiDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * ui-self-check.ts 对着**真的路由**跑一次：它的单测用的是假服务器，假服务器和
+ * server.ts 漂移了单测照样绿。这里把三种真实形状各钉一下 —— 有 uiDir 时过；uiDir 指向
+ * 不存在的目录时是 404 而不是 Dev Console（守护进程对 RUYIN_UI_DIR 不查存在性，这条
+ * 此前没有任何用例说过）；没有 uiDir 时是 Dev Console。
+ */
+test("ui-self-check: 对着真的路由 —— 有 uiDir 时过；uiDir 指向不存在的目录时是 404 不是 Dev Console；没有 uiDir 时是 Dev Console", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-uisc-"));
+  const uiDir = mkdtempSync(join(tmpdir(), "ruyin-uisc-dist-"));
+  const { ports, storage } = await makePorts(dataDir);
+  const uiRuntime = new ProjectRuntime(ports);
+  const api = (dir: string | undefined) =>
+    createLocalApi({
+      runtime: uiRuntime,
+      registry: new ProductRegistry(join(uiDir, "no-products"), dataDir),
+      tasks: new TaskRunner(uiRuntime),
+      token: "t",
+      version: "test",
+      writeArtifact: (p: string, b: Uint8Array, g: FolderGrant[]) =>
+        new LocalToolExecutor().writeArtifact(p, b, g),
+      supportsTool: (t: string) => new LocalToolExecutor().supports(t),
+      systemInfo: testSystemInfo,
+      reindex: async () => ({ indexed: 0, skipped: 0 }),
+      uiDir: dir,
+    });
+  writeFileSync(
+    join(uiDir, "index.html"),
+    '<!doctype html><html><head><link rel="icon" href="/logo.svg" /><title>RUYIN</title>' +
+      '<script type="module" src="/assets/index-abc.js"></script><link rel="stylesheet" href="/assets/index-def.css"></head><body></body></html>',
+  );
+  writeFileSync(join(uiDir, "logo.svg"), "<svg/>");
+  mkdirSync(join(uiDir, "assets"));
+  writeFileSync(join(uiDir, "assets", "index-abc.js"), "//js");
+  writeFileSync(join(uiDir, "assets", "index-def.css"), "body{}");
+  const runOn = async (dir: string | undefined, probe: (base: string) => Promise<void>) => {
+    const server = api(dir);
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    try {
+      await probe(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+    } finally {
+      await new Promise<void>((ok) => server.close(() => ok()));
+    }
+  };
+  try {
+    await runOn(uiDir, async (base) => {
+      const r = await checkWorkspaceUi(base);
+      assert.deepEqual(r.assets, ["logo.svg", "assets/index-abc.js", "assets/index-def.css"]);
+    });
+    await runOn(join(uiDir, "no-such-dir"), async (base) => {
+      await assert.rejects(checkWorkspaceUi(base), (e: unknown) => {
+        assert.match((e as Error).message, /404/);
+        assert.doesNotMatch((e as Error).message, /Dev Console/, "指错目录是 404，不是回落到 Dev Console");
+        return true;
+      });
+    });
+    await runOn(undefined, async (base) => {
+      await assert.rejects(checkWorkspaceUi(base), /Dev Console/);
+    });
+  } finally {
     storage.closeAll();
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(uiDir, { recursive: true, force: true });
