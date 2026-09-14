@@ -365,6 +365,30 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
+      # 把刚编译出来的安装器留下来（owner 2026-09-14）。在这之前它跑完冒烟就随
+      # runner 一起消失：想在真机上装一次 PR 里的东西，只能打 beta tag 走一遍
+      # release，或者本机自己攒一套 Windows 打包工具链。现在每次 CI 都在
+      # Actions 页面的 Artifacts 里挂一个 zip，里面是 NSIS 安装器、blockmap 和
+      # 更新源清单（latest.yml），装出来的就是 packaged-smoke 刚启动过的那一份。
+      #
+      # `!cancelled()` 而不是缺省：冒烟红了的时候安装器恰恰最有用 —— 它就是
+      # 「本机复现 CI 那个失败」要装的东西。pack.mjs 在 electron-builder 之前
+      # 就炸的话没有产物可传，`if-no-files-found: ignore` 让这一步安静过去，
+      # 不把上一步的失败原因盖住。
+      # 只留 14 天：一份安装器几百 MB，这是 PR 期间的试装件，不是发布物 —— 要
+      # 长期留存的走 release.yml 的 GitHub Releases。
+      - name: Keep the installer (Actions artifact, 14 days)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ruyin-installer-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}-${{ github.run_number }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            apps/shell/release/Ruyin-Setup-*.exe
+            apps/shell/release/Ruyin-Setup-*.exe.blockmap
+            apps/shell/release/latest.yml
+
       # 预置工具名对照表（TD-034 / TD-042）：契约作者照它写 provider: connector 的
       # 工具声明，所以过期的对照表比没有更糟 —— 照着一个不存在的工具名写的契约，会在
       # 任务启动前被按名拒绝，而作者手里那份文档说它存在。

@@ -255,13 +255,15 @@ export class ConnectorRegistry implements ConnectorToolSource {
     }
     // 预置层：用户启用过的起来；起不了的（没 uv、缺环境变量）只记日志，界面里如实标。
     for (const id of this.options.bundled?.enabledIds() ?? []) {
+      const plan = this.options.bundled!.plan(id);
       const spec = this.bundledSpec(id);
-      if (!spec) {
-        const plan = this.options.bundled!.plan(id);
+      if (!plan.ok || !spec) {
         this.options.log?.(`[ruyin] bundled tool server "${id}" not started: ${plan.ok ? "?" : plan.reason}`);
         continue;
       }
       try {
+        // 起进程之前的准备（uvx 形态：首次把随包缓存种到数据目录）。
+        await plan.prepare?.();
         await this.bringUp(spec);
       } catch (cause) {
         this.options.log?.(
@@ -505,6 +507,7 @@ export class ConnectorRegistry implements ConnectorToolSource {
     if (!plan.ok) throw new Error(`bundled tool server "${id}" cannot start: ${plan.reason}`);
     const spec = this.bundledSpec(id)!;
     try {
+      await plan.prepare?.();
       await this.bringUp(spec);
       const health = await this.healthOf(id);
       if (health.ok) {
