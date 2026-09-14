@@ -520,7 +520,7 @@ void test("Settings/连接器: 添加是独立一页；必须先测通才能启�
   });
 });
 
-void test("Settings/连接器: 传输方式切到 Streamable HTTP 后走地址，不走命令；切回去表单也换回来", async () => {
+void test("Settings/连接器: 传输方式切到 Streamable HTTP 后走地址，不走命令；测试与安装都带上地址而不是命令", async () => {
   const testConnector = vi.fn().mockResolvedValue({ ok: true, tools: ["crm_search"] });
   const installConnector = vi.fn().mockResolvedValue(crmView);
   const api = fakeApi({
@@ -551,11 +551,28 @@ void test("Settings/连接器: 传输方式切到 Streamable HTTP 后走地址�
     url: "http://127.0.0.1:8931/mcp",
     source: "lan",
   });
+});
 
-  // 切回 stdio：地址字段消失，测试结果也不该带着上一种传输的痕迹。
+void test("Settings/连接器: 换传输方式会清空上一次的测试结果 —— 那是对着另一条连接细节测的", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({ items: [] }),
+    testConnector: vi.fn().mockResolvedValue({ ok: true, tools: ["crm_search"] }),
+  });
+  renderRouted("connectors", api);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "添加连接器" }));
+  await user.type(screen.getByPlaceholderText("如 crm"), "crm");
+  await user.selectOptions(screen.getByLabelText("传输方式"), "streamable_http");
+  await user.type(screen.getByPlaceholderText(/^http:\/\/127\.0\.0\.1/), "http://127.0.0.1:8931/mcp");
+  await user.click(screen.getByRole("button", { name: "测试连接" }));
+  expect(await screen.findByText(/连接成功/)).toBeInTheDocument();
+
+  // 切回 stdio：地址字段消失、命令字段回来，测试结果不该带着上一种传输的痕迹。
   await user.selectOptions(screen.getByLabelText("传输方式"), "stdio");
   expect(screen.queryByPlaceholderText(/^http:\/\/127\.0\.0\.1/)).not.toBeInTheDocument();
+  expect(screen.getByPlaceholderText(/^如 node/)).toBeInTheDocument();
   expect(screen.queryByText(/连接成功/)).not.toBeInTheDocument();
+  // 没测过（这一次是对着 stdio 测的，命令还是空的）：主按钮该关着。
   expect(screen.getByRole("button", { name: "添加并启用" })).toBeDisabled();
 });
 
