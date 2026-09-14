@@ -32,9 +32,12 @@
  *
  * ## 这套用例**不会让覆盖率数字变好看**
  *
- * 守护进程是**子进程**，而 Node 的覆盖率收集在父进程里 —— 所以跑完之后 `main.js`
- * 仍然不出现在覆盖表里，`all files` 那一行也一动不动（实测：加这套之前之后都是
- * 95.99%）。
+ * 守护进程是**子进程**，这里明确不让它参与覆盖率（`startDaemon` 里给子进程
+ * `NODE_V8_COVERAGE=""`）—— 所以跑完之后 `main.js` 仍然不出现在覆盖表里，`all files`
+ * 那一行也一动不动。**不是因为收集天然收不到子进程**：一个正常 exit 的子进程会把自己
+ * 那份交给父进程的收集器，只是被 kill 掉的不会 —— 2026-09-14 加「冒烟退出 1」那条
+ * 用例时踩到了这一点，`main.js` 以只跑了启动的样子进入分母，把函数覆盖率从 92% 拉到
+ * 87%。细节见 `startDaemon` 里那段注释。
  *
  * 这不是缺陷，是这条路的代价，写在这儿是**免得下一个人把它当成缺陷去修**：为了让
  * 数字变好看而把 735 行装配线拆开重构，风险比它挡下的多。要的是「接线断了会有人
@@ -44,7 +47,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
@@ -72,6 +75,8 @@ interface Daemon {
   log: () => string;
   get: (path: string) => Promise<Response>;
   post: (path: string, body: unknown) => Promise<Response>;
+  /** 子进程的退出码；还在跑就是 null。冒烟那两条用例要等它自己退出。 */
+  exitCode: () => number | null;
   stop: () => Promise<void>;
 }
 
@@ -88,9 +93,18 @@ async function startDaemon(env: NodeJS.ProcessEnv = {}): Promise<Daemon> {
   const token = "wiring-test-token";
   let out = "";
 
+  // 子进程**不参与**覆盖率：头注释说 main.js 不在分母里，那是因为被 kill 掉的子进程
+  // 不写覆盖率文件；而一个正常 exit 的子进程（下面「退出 1」那条用例）会把自己那份
+  // 交给父进程的收集器 —— 于是 main.js 以「只跑了启动」的样子进入分母，把 all files
+  // 的函数覆盖率从 92% 拉到 87%、跌破门槛。
+  //
+  // **删键没用，要给空串**：Node 的 child_process 会把父进程的 NODE_V8_COVERAGE 主动
+  // 补给任何 env 里没有这个键的子进程（实测：delete 之后子进程照样拿到目录）；键在而
+  // 值为空，它就不补，而空值也不会启用覆盖率。两种退出方式于是一视同仁。
   const child: ChildProcess = spawn(process.execPath, [MAIN], {
     env: {
       ...process.env,
+      NODE_V8_COVERAGE: "",
       RUYIN_DATA_DIR: dataDir,
       RUYIN_LOCATION_FILE: locationFile,
       RUYIN_PRODUCTS_DIR: PRODUCTS,
@@ -123,6 +137,7 @@ async function startDaemon(env: NodeJS.ProcessEnv = {}): Promise<Daemon> {
     base,
     token,
     log: () => out,
+    exitCode: () => child.exitCode,
     get: (path) => fetch(base + path, { headers }),
     post: (path, body) =>
       fetch(base + path, {
@@ -337,5 +352,89 @@ void test("装配线：令牌真的在把门 —— 不带令牌的请求进不�
     assert.equal(wrong.status, 401);
   } finally {
     await d.stop();
+  }
+});
+
+/**
+ * 冒烟自检那一段（`RUYIN_SMOKE=1`）也是接线：界面自检要真的跑，**而且要排在 PDF 自检
+ * 之前** —— 壳一见 PDF 标记就退出并杀掉守护进程，排在后面的那一行会丢，pack.mjs 对
+ * 「缺行」判红。这个顺序只写在 main.ts 的一段注释里，这里把它钉成用例。
+ *
+ * 装配：一个 Vite 形状的假界面目录（首页 + 根级图标 + 两份带哈希的资产）当
+ * RUYIN_UI_DIR；RUYIN_TOOLS_DIR 指到空目录，让工具 / uvx 两条自检如实说「没有可试的」
+ * 而不是去起 vendored 服务器；没有壳，PDF 那条会说「no shell attached」并返回。
+ */
+function fakeViteDist(): string {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-fake-dist-"));
+  writeFileSync(
+    join(dir, "index.html"),
+    '<!doctype html><html><head><link rel="icon" href="/logo.svg" type="image/svg+xml" /><title>RUYIN</title>' +
+      '<script type="module" crossorigin src="/assets/index-abc123.js"></script>' +
+      '<link rel="stylesheet" crossorigin href="/assets/index-def456.css"></head><body><div id="root"></div></body></html>',
+  );
+  writeFileSync(join(dir, "logo.svg"), "<svg/>");
+  mkdirSync(join(dir, "assets"));
+  writeFileSync(join(dir, "assets", "index-abc123.js"), "console.log(1)");
+  writeFileSync(join(dir, "assets", "index-def456.css"), "body{}");
+  return dir;
+}
+
+/** 等一行日志。期限比 --test-timeout 短，这样超时时抛出的是带日志的那个错，不是运行器那句「timed out」。 */
+async function waitFor(d: Daemon, pattern: RegExp, ms = 30_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!pattern.test(d.log())) {
+    if (d.exitCode() !== null) return; // 已退出：让用例自己看退出码与日志
+    if (Date.now() > deadline) throw new Error(`等不到 ${pattern}：\n${d.log()}`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+void test("装配线：RUYIN_SMOKE=1 时界面自检真的跑，且排在 PDF 自检之前 —— 壳一见 PDF 标记就退出，排后面的那行会丢", async () => {
+  const dist = fakeViteDist();
+  const tools = mkdtempSync(join(tmpdir(), "ruyin-no-tools-"));
+  let d: Daemon | undefined;
+  try {
+    d = await startDaemon({ RUYIN_SMOKE: "1", RUYIN_UI_DIR: dist, RUYIN_TOOLS_DIR: tools });
+    await waitFor(d, /\[ruyin\] pdf self-check:/);
+    const log = d.log();
+    assert.equal(d.exitCode(), null, `冒烟自检不该让守护进程退出：\n${log}`);
+    // 三个文件：根级图标 + 两份资产；字节数是四个文件之和。
+    assert.match(log, /\[ruyin\] ui self-check: ok \(3 asset\(s\), \d+ bytes, /);
+    assert.ok(
+      log.indexOf("[ruyin] ui self-check:") < log.indexOf("[ruyin] pdf self-check:"),
+      `界面自检必须在 PDF 自检之前打印 —— 这是 pack.mjs 依赖的顺序：\n${log}`,
+    );
+    // 另外两条如实说「没有可试的」，而不是去起任何服务器。
+    assert.match(log, /tools self-check: no vendored node server to try/);
+    assert.match(log, /uvx self-check: no seeded uvx server to try/);
+  } finally {
+    await d?.stop();
+    rmSync(dist, { recursive: true, force: true });
+    rmSync(tools, { recursive: true, force: true });
+  }
+});
+
+void test("装配线：RUYIN_UI_DIR 指向不存在的目录时冒烟退出 1，第一条就红、原因指向根因", async () => {
+  const tools = mkdtempSync(join(tmpdir(), "ruyin-no-tools-"));
+  const missing = join(tmpdir(), `ruyin-no-such-ui-${process.pid}-${Date.now()}`);
+  let d: Daemon | undefined;
+  try {
+    d = await startDaemon({ RUYIN_SMOKE: "1", RUYIN_UI_DIR: missing, RUYIN_TOOLS_DIR: tools });
+    const deadline = Date.now() + 30_000;
+    while (d.exitCode() === null) {
+      if (Date.now() > deadline) throw new Error(`守护进程没有因界面自检失败而退出：\n${d.log()}`);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.equal(d.exitCode(), 1);
+    // 原因要在日志里。**这条在这里是弱断言**：本机（Linux）上管道写是异步的但短行几乎
+    // 从不丢，所以它钉不住 main.ts 里「刷完再退」那条路 —— 那条只在壳的 utilityProcess
+    // 下（packaged-smoke，windows-latest）才真被走到。这里钉的是退出码、原因文本与
+    // 「第一条就红」。
+    assert.match(d.log(), /smoke self-check failed: GET \/ 返回 404/);
+    assert.match(d.log(), /RUYIN_UI_DIR/, "要点名打包态最可能的根因");
+    assert.doesNotMatch(d.log(), /\[ruyin\] pdf self-check:/, "第一条就红，后面的自检不该再跑");
+  } finally {
+    await d?.stop();
+    rmSync(tools, { recursive: true, force: true });
   }
 });
