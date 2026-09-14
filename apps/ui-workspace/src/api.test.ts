@@ -404,6 +404,7 @@ const WRAPPER_CASES: WrapperCase[] = [
     path: "/projects/prj_1/context/tender_doc",
   },
   { name: "system", call: (api) => api.system(), method: "GET", path: "/system" },
+  { name: "hardware", call: (api) => api.hardware(), method: "GET", path: "/system/hardware" },
   { name: "session", call: (api) => api.session(), method: "GET", path: "/auth/session" },
   { name: "login", call: (api) => api.login(), method: "POST", path: "/auth/login" },
   { name: "logout", call: (api) => api.logout(), method: "POST", path: "/auth/logout" },

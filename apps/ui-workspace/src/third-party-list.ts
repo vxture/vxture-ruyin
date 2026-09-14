@@ -217,6 +217,7 @@ export const THIRD_PARTY: ThirdPartyEntry[] = [
   { name: "string_decoder", version: "1.3.0", license: "MIT", usedBy: ["daemon"] },
   { name: "stringify-entities", version: "4.0.4", license: "MIT", usedBy: ["daemon"] },
   { name: "strip-json-comments", version: "2.0.1", license: "MIT", usedBy: ["daemon"] },
+  { name: "systeminformation", version: "5.33.10", license: "MIT", usedBy: ["daemon"] },
   { name: "tailwind-merge", version: "3.6.0", license: "MIT", usedBy: ["ui"] },
   { name: "tailwindcss-animate", version: "1.0.7", license: "MIT", usedBy: ["ui"] },
   { name: "tar-fs", version: "2.1.5", license: "MIT", usedBy: ["daemon"] },

@@ -44,6 +44,7 @@ import {
   type ComponentState,
   type ToolView,
   type DataDirCheck,
+  type HardwareInfo,
   type SessionInfo,
   type SystemInfo,
   type UpdateCheck,
@@ -101,7 +102,7 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
       {view === "skills" && <SkillsSection api={api} />}
       {view === "database" && <DatabaseSection />}
       {view === "updates" && <UpdatesSection system={system} api={api} />}
-      {view === "about" && <AboutSection system={system} session={session} />}
+      {view === "about" && <AboutSection system={system} session={session} api={api} />}
     </div>
   );
 }
@@ -1285,15 +1286,34 @@ const LEGAL_LINKS: Array<{ path: string; label: string }> = [
  * 缺失 ≠ 否定，同 `capabilitySurface` 的纪律。要在开发态看这一支，
  * 设 `RUYIN_CODE_SIGNING=unsigned`。
  */
+/** 字节 -> GB，一位小数；没有值时不显示单位，交给 FactRow 的「—」。 */
+function gb(bytes?: number): string | undefined {
+  return typeof bytes === "number" && bytes > 0 ? `${(bytes / 1073741824).toFixed(1)} GB` : undefined;
+}
+
 function AboutSection({
   system,
   session,
+  api,
 }: {
   system: SystemInfo | null;
   session: SessionInfo | null;
+  api: Api;
 }) {
   // 未登录时也要能看条款 —— 落到与登录页同一个缺省，不是空链接。
   const consoleBase = session?.consoleBase || "https://vxture.com";
+
+  // 本机固件信息：懒加载（只在关于页问一次），拿不到就如实说「不可用」而不是
+  // 空着——守护进程没接这一路是正常状态（旧版本、或装配没配），不是错误。
+  const [hardware, setHardware] = useState<HardwareInfo | null>(null);
+  const [hardwareUnavailable, setHardwareUnavailable] = useState(false);
+  useEffect(() => {
+    api
+      .hardware()
+      .then(setHardware)
+      .catch(() => setHardwareUnavailable(true));
+  }, [api]);
+
   return (
     <div className="about-page">
       <div className="about-main">
@@ -1334,6 +1354,104 @@ function AboutSection({
               ))}
             </div>
             <ThirdPartyNotices />
+
+            {/* 独立信息块：本机固件信息。**不新开一张卡** —— 这一页刻意只留一张
+                （owner 2026-09-10：四张卡 → 两块 → 去掉「须知」，settings.test.tsx
+                钉着 `.set-block` 数目为 0，多一张卡这条就会红）。用一条分隔线与
+                上面的身份信息隔开，回答一个不同的问题：「Ruyin 凭什么要读我这台
+                机器」，不是「这是什么产品」。 */}
+            <div className="about-hardware">
+              <p className="about-hardware-title">本机固件信息</p>
+              <p className="about-hardware-desc">
+                为保障处理过程中的数据不出域，Ruyin
+                在本机构建沙箱执行分析与计算——以下信息用于确定沙箱运行在什么机器上，仅本机读取、本机展示，不上传、不计费、不进遥测
+              </p>
+              {hardwareUnavailable ? (
+                <p className="text-body-sm text-muted-foreground">
+                  本机固件信息暂不可用（守护进程未提供这一项，不影响其它功能）。
+                </p>
+              ) : (
+                <>
+                  <FactRow
+                    label="处理器"
+                    value={
+                      hardware?.cpu
+                        ? [
+                            hardware.cpu.brand,
+                            hardware.cpu.cores ? `${hardware.cpu.cores} 核` : undefined,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")
+                        : hardware
+                          ? undefined
+                          : "…"
+                    }
+                  />
+                  <FactRow label="内存" value={hardware ? gb(hardware.memoryTotalBytes) : "…"} />
+                  <FactRow
+                    label="主板"
+                    value={
+                      hardware?.baseboard
+                        ? [hardware.baseboard.manufacturer, hardware.baseboard.model]
+                            .filter(Boolean)
+                            .join(" ")
+                        : hardware
+                          ? undefined
+                          : "…"
+                    }
+                  />
+                  <FactRow
+                    label="BIOS / UEFI"
+                    value={
+                      hardware?.bios
+                        ? [hardware.bios.vendor, hardware.bios.version].filter(Boolean).join(" · ")
+                        : hardware
+                          ? undefined
+                          : "…"
+                    }
+                  />
+                  <FactRow
+                    label="操作系统"
+                    value={
+                      hardware?.os
+                        ? [
+                            hardware.os.distro,
+                            hardware.os.build ? `build ${hardware.os.build}` : undefined,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")
+                        : hardware
+                          ? undefined
+                          : "…"
+                    }
+                  />
+                  <FactRow
+                    label="磁盘"
+                    value={
+                      hardware?.disks && hardware.disks.length > 0
+                        ? hardware.disks
+                            .map((d) =>
+                              [d.name ?? d.vendor, gb(d.sizeBytes)].filter(Boolean).join(" · "),
+                            )
+                            .join("；")
+                        : hardware
+                          ? undefined
+                          : "…"
+                    }
+                  />
+                  <FactRow
+                    label="网卡 MAC 地址"
+                    value={hardware?.macAddresses?.join("、") ?? (hardware ? undefined : "…")}
+                    mono
+                  />
+                  <FactRow
+                    label="机器 ID"
+                    value={hardware?.machineId ?? (hardware ? undefined : "…")}
+                    mono
+                  />
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>

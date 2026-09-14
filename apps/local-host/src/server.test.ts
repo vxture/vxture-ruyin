@@ -1273,6 +1273,43 @@ void test("HTTP GET /updates/check 只作答，不安装；已无 gate 字段", 
 });
 
 /**
+ * GET /system/hardware —— 关于页「本机固件信息」块背后的接口（这次改动新加）。
+ * 两条各自钉一半：装配没接这一路时如实 503（不是拿假数据冒充答过了），
+ * 接了的时候原样透传 hardwareInfo() 的结果。
+ */
+void test("HTTP GET /system/hardware：装配没接 hardwareInfo 时如实 503", async () => {
+  const rig = await startServer();
+  try {
+    const res = await fetch(`${rig.base}/system/hardware`, { headers: rig.headers });
+    assert.equal(res.status, 503);
+    assert.equal((await res.json()).code, "HARDWARE_INFO_NOT_CONFIGURED");
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("HTTP GET /system/hardware：接了就原样透传采集结果", async () => {
+  const rig = await startServer({
+    hardwareInfo: async () => ({
+      cpu: { manufacturer: "GenuineIntel", brand: "test-cpu", cores: 8 },
+      macAddresses: ["AA:BB:CC:DD:EE:01"],
+      machineId: "test-machine-id",
+    }),
+  });
+  try {
+    const res = await fetch(`${rig.base}/system/hardware`, { headers: rig.headers });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      cpu: { manufacturer: "GenuineIntel", brand: "test-cpu", cores: 8 },
+      macAddresses: ["AA:BB:CC:DD:EE:01"],
+      machineId: "test-machine-id",
+    });
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
  * 系统目录拒绝清单走完整条路（TD-039）。
  *
  * 上一条用例把 `dataMove` 整个换成了桩，钉的是**路由行为**。这一条相反：接真的
