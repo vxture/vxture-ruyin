@@ -31,8 +31,12 @@ export function ThirdPartyNotices({ entries = THIRD_PARTY }: { entries?: ThirdPa
   const [open, setOpen] = useState(false);
   return (
     <>
+      {/* 与「隐私政策」那三条同一行、同一个版式（owner 2026-09-15）：外观对齐，
+          但底层仍是 `<button>` —— 点了是就地展开这份清单，不是去别处，所以不该
+          伪装成链接。总数字**只在弹出面板里**说，这里不重复（第一眼先说清「这是
+          什么」，不是「有多少个」）。 */}
       <button type="button" className="about-third-party" onClick={() => setOpen(true)}>
-        随包第三方组件许可（{entries.length}）
+        三方许可
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="third-party-dialog">
@@ -49,6 +53,9 @@ export function ThirdPartyNotices({ entries = THIRD_PARTY }: { entries?: ThirdPa
             <Table>
               <TableHeader>
                 <TableRow>
+                  {/* 序号右对齐（owner 2026-09-15）：数字天然右对齐读起来才整齐，
+                      左对齐的话个位数与两位数对不齐左边缘。 */}
+                  <TableHead className="third-party-idx">#</TableHead>
                   <TableHead>组件</TableHead>
                   <TableHead>版本</TableHead>
                   <TableHead>许可证</TableHead>
@@ -56,8 +63,9 @@ export function ThirdPartyNotices({ entries = THIRD_PARTY }: { entries?: ThirdPa
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {entries.map((e) => (
+                {entries.map((e, i) => (
                   <TableRow key={`${e.name}@${e.version}`}>
+                    <TableCell className="mono text-muted-foreground third-party-idx">{i + 1}</TableCell>
                     <TableCell className="mono">{e.name}</TableCell>
                     <TableCell className="mono text-muted-foreground">{e.version}</TableCell>
                     <TableCell>{e.license}</TableCell>

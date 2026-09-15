@@ -11,14 +11,14 @@ import userEvent from "@testing-library/user-event";
 import { ThirdPartyNotices } from "./third-party-notices";
 import { THIRD_PARTY } from "./third-party-list";
 
-test("ThirdPartyNotices: 入口写着随包组件的数目，就是生成清单的条数", () => {
+test("ThirdPartyNotices: 入口只说是什么，不报数目——数目只在弹出面板里说", () => {
   render(<ThirdPartyNotices />);
-  expect(screen.getByRole("button", { name: `随包第三方组件许可（${THIRD_PARTY.length}）` })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "三方许可" })).toBeInTheDocument();
   expect(THIRD_PARTY.length).toBeGreaterThan(50);
   expect(THIRD_PARTY.some((e) => e.name.startsWith("@vxture/"))).toBe(false);
 });
 
-test("ThirdPartyNotices: 打开后逐条列出组件、版本、许可证与随哪一块；说清闭源与全文在哪", async () => {
+test("ThirdPartyNotices: 打开后逐条列出序号、组件、版本、许可证与随哪一块；说清闭源、全文在哪、总数在描述里", async () => {
   const entries = [
     { name: "react", version: "18.3.1", license: "MIT", usedBy: ["ui"] },
     { name: "jszip", version: "3.10.1", license: "(MIT OR GPL-3.0-or-later)", usedBy: ["daemon"] },
@@ -26,14 +26,17 @@ test("ThirdPartyNotices: 打开后逐条列出组件、版本、许可证与随�
     { name: "shared", version: "1.0.0", license: "ISC", usedBy: ["daemon", "ui"] },
   ];
   render(<ThirdPartyNotices entries={entries} />);
-  await userEvent.setup().click(screen.getByRole("button", { name: "随包第三方组件许可（4）" }));
+  await userEvent.setup().click(screen.getByRole("button", { name: "三方许可" }));
 
   const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByText(/以下 4 个是随安装包分发的第三方开源组件/)).toBeInTheDocument();
   expect(within(dialog).getByText(/RUYIN 本身是闭源商业软件/)).toBeInTheDocument();
   expect(within(dialog).getByText(/THIRD-PARTY-NOTICES\.txt/)).toBeInTheDocument();
   expect(within(dialog).getByText(/LICENSES\.chromium\.html/)).toBeInTheDocument();
   const rows = within(dialog).getAllByRole("row").slice(1); // 去掉表头
   expect(rows).toHaveLength(4);
+  expect(within(rows[0]!).getByText("1")).toBeInTheDocument();
+  expect(within(rows[3]!).getByText("4")).toBeInTheDocument();
   expect(within(rows[1]!).getByText("(MIT OR GPL-3.0-or-later)")).toBeInTheDocument();
   expect(within(rows[2]!).getByText("桌面壳")).toBeInTheDocument();
   expect(within(rows[3]!).getByText("运行时、界面")).toBeInTheDocument();
