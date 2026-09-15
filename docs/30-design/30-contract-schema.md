@@ -376,20 +376,20 @@ sync:
   default: local_only         # 未匹配数据的兜底策略
   classes:
     - class: source
-      policy: local_only      # local_only|cloud_only|bidirectional|manual|selective
+      policy: local_only      # 只收 local_only（R11，ADR-026）
     - class: core
-      policy: selective
+      policy: local_only
     - class: generated
-      policy: manual
+      policy: local_only
     - class: derived
       policy: local_only
     - class: temporary
-      policy: local_only      # temporary 固定 local_only（R11）
+      policy: local_only
 ```
 
 与 §9 的 `class` 字段联动：每个 Context Type 经由其 data class 获得同步策略。
 
-> **2026-09-15（ADR-026 §5）：Ruyin 不同步智能体数据。** 除 `local_only` 之外的策略在本机**没有任何效果**；本键将只收 `local_only`，并在下一次契约大版本删除。
+> **2026-09-15（ADR-026 §5）：Ruyin 不同步智能体数据。** `default` 与每一类的 `policy` **只收 `local_only`**（R11，L1）；`cloud_only` / `bidirectional` / `manual` / `selective` 仍在枚举里，只为给出点名 R11 的报错而不是一句笼统的枚举不符，写了即拒收。本键在下一次契约大版本删除。
 
 产品声明的是**能力与建议值**；用户策略永远拥有最终决定权（03 §19）。
 同步策略只约束持久化存储，推理传输不属于同步范畴（02 §15.2）。
@@ -410,7 +410,7 @@ sync:
 | R8 | task 的 input_types / output_types / capabilities / tools 全部可解析；output_types 的 class ∈ {generated, derived} | L2 |
 | R9 | 每个 task 至少一条 verification；含 generated 输出的 task 至少一条 human 验证 | L2 |
 | R10 | permissions 中 delete / external_send / sync_to_cloud 不得为 allow | L1 |
-| R11 | temporary 类同步策略固定 local_only | L1 |
+| R11 | 全部同步策略（`sync.default` 与每个 `sync.classes[].policy`）固定 local_only —— Ruyin 不同步智能体数据（ADR-026 §5；2026-09-15 由「temporary 类固定」扩为全部） | L1 |
 | R12 | 包签名有效且签名身份与 product.publisher 一致 | L4 |
 | R13 | `input_schema.required` 中每个名字均已声明；`local_read`/`local_write`/`export` 类工具至少标注一个 `x-ruyin-ref: path` 参数 | L2 |
 | R14 | 声明了 tools 的 task 必须至少声明一条 capability——工具只在能力回合内被调用，`capabilities: []` 的任务一个回合都不跑，声明的工具永远调不到 | L2 |
@@ -673,8 +673,8 @@ sync:
   default: local_only
   classes:
     - { class: source,    policy: local_only }
-    - { class: core,      policy: selective }
-    - { class: generated, policy: manual }
+    - { class: core,      policy: local_only }
+    - { class: generated, policy: local_only }
     - { class: derived,   policy: local_only }
     - { class: temporary, policy: local_only }
 ```
@@ -699,7 +699,7 @@ Vxture Cloud Runtime              Ruyin Local Runtime
 | context.sources: local / lan | 不可用（无绑定） | 连接器解析 |
 | context.sources: cloud | 云端直接访问 | 经授权拉取 / 缓存 |
 | capabilities | 云端 AI | 云端 AI（当前阶段） |
-| sync | 无操作（数据已在云） | 执行用户策略 |
+| sync | 无操作（数据已在云） | 无操作：智能体数据只在本机（ADR-026 §5） |
 
 可启动性语义：required 类型在当前运行时无有效绑定 → 依赖它的任务在该运行时不可启动，
 并明确报告缺失项。例如仅本地绑定的招标文件未同步时，`analyze_tender` 在 Cloud Runtime 不可用 —— 这是数据面差异的自然结果，不是缺陷。
