@@ -64,3 +64,6 @@ overrides:
   # plist <- @electron/osx-sign <- app-builder-lib (electron-builder 25, build-time
   # only, never shipped). Bounded to 0.x like the batch above.
   "@xmldom/xmldom@<0.9.12": ">=0.9.12 <1"
+
+patchedDependencies:
+  app-builder-lib@25.1.8: patches/app-builder-lib@25.1.8.patch

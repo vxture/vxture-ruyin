@@ -1,0 +1,27 @@
+diff --git a/templates/nsis/multiUser.nsh b/templates/nsis/multiUser.nsh
+index 3de631bf0ce5095d03062ba98a68c5249904911e..802e51bb3b05e13e9b862edead89202831d3fa04 100644
+--- a/templates/nsis/multiUser.nsh
++++ b/templates/nsis/multiUser.nsh
+@@ -31,12 +31,20 @@ Var installMode
+       System::Store S
+       # Win7 has a per-user programfiles known folder and this can be a non-default location
+       System::Call 'SHELL32::SHGetKnownFolderPath(g "${FOLDERID_UserProgramFiles}", i ${KF_FLAG_CREATE}, p 0, *p .r2)i.r1'
++      # ruyin patch (vxture-ruyin #19): the original read `*$2(&w${NSIS_MAX_STRLEN} .s)`
++      # copied a fixed 16384 bytes out of the short CoTaskMem buffer and crashed
++      # System.dll (0xc0000005 at +0x1581) on the wizard's first Next whenever no
++      # per-user install existed. Copy up to the terminator instead, and hand the
++      # result past System::Store L (which restores $0-$9) on the NSIS stack.
+       ${If} $1 == 0
+-        System::Call '*$2(&w${NSIS_MAX_STRLEN} .s)'
+-        StrCpy $0 $1
++        System::Call 'KERNEL32::lstrcpynW(w .r3, p r2, i ${NSIS_MAX_STRLEN})'
+         System::Call 'OLE32::CoTaskMemFree(p r2)'
++        Push $3
++      ${Else}
++        Push $0
+       ${endif}
+       System::Store L
++      Pop $0
+       StrCpy $INSTDIR "$0\${APP_FILENAME}"
+     ${endif}
+ 

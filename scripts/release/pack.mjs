@@ -20,9 +20,10 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   denyWrites,
@@ -130,6 +131,13 @@ run(
     // it. The app then starts and dies on "Cannot find package 'ajv'".
     // A tree with no links copies the same either way.
     "--config.node-linker=hoisted",
+    // The workspace patches app-builder-lib (#19, TD-068), a build-time
+    // dependency the daemon's production tree does not contain. pnpm treats a
+    // patch it cannot apply as an error (ERR_PNPM_UNUSED_PATCH), so without
+    // this the deploy fails. Relaxed here only: the regular install stays
+    // strict, and the template check before electron-builder below is what
+    // proves the patch is actually in the installer.
+    "--config.allow-unused-patches=true",
     daemonOut,
   ],
   repoRoot,
@@ -185,6 +193,33 @@ run(
   ],
   repoRoot,
 );
+
+// 安装向导「下一步」即崩溃的补丁（#19，TD-068）必须真的在 electron-builder 这一次
+// 要用的那份模板里。
+//
+// 原模板 multiUser.nsh 从 SHGetKnownFolderPath 的短缓冲区里固定读 16384 字节，
+// System.dll 在 +0x1581 访问违例 —— 只在「本机没有按用户安装记录」时触发，也就是
+// **每一个新用户的第一次安装**。CI 的冒烟走静默安装、runner 又每次都是新机器，
+// 却一直绿：静默安装不经过向导的离页回调。所以补丁悄悄丢了（升级 electron-builder、
+// 换了包管理器的补丁机制）不会有任何一项检查变红，只会在用户手里崩。这里在出包之前
+// 读一眼 electron-builder 实际解析到的那份模板，没打上就不出包。
+{
+  const builderMain = createRequire(join(shellDir, "package.json")).resolve("electron-builder");
+  const ablMain = createRequire(builderMain).resolve("app-builder-lib");
+  const multiUserNsh = join(dirname(ablMain), "..", "templates", "nsis", "multiUser.nsh");
+  const template = readFileSync(multiUserNsh, "utf8");
+  // 查的是**那条调用语句**，不是那个片段：补丁自己的注释里就引着原来的写法。
+  const overread = template.includes("System::Call '*$2(&w${NSIS_MAX_STRLEN}");
+  if (overread || !template.includes("ruyin patch (vxture-ruyin #19)")) {
+    console.error(
+      `[pack] FAILED: electron-builder 用的 multiUser.nsh 没有打上 #19 的补丁：${multiUserNsh}\n` +
+        "       不打补丁出的安装器，新用户第一次点「下一步」就崩（System.dll 0xc0000005）。\n" +
+        "       看 pnpm-workspace.yaml 的 patchedDependencies 与 patches/ 下的补丁是否还对得上当前版本（TD-068）。",
+    );
+    process.exit(1);
+  }
+  console.log("[pack] installer template: #19 known-folder patch present");
+}
 
 run(
   "pnpm",
