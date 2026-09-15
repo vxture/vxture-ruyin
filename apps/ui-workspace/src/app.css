@@ -616,6 +616,15 @@ select optgroup {
 /* （.settings / .settings-nav / .settings-content 已随页内那根竖直导航一并
    删除：设置有了自己的框架，分区在侧栏里。留着这些规则，下一个人会以为页面
    里还该有第二根导航。） */
+/* 设置页各板块用渐变底，不是纯色（owner 2026-09-15）：浅色模式下大片纯白显得
+   平；换用 DS 已有的语义渐变令牌 `--gradient-card-*`——浅色是白到品牌浅色
+   （brand-50）的极轻过渡，深色是中性深灰到品牌深色（brand-950）的过渡，两套
+   值都由 DS 按主题给（`.dark`/`:root.dark` 已经定义好了两份），这里不重复写
+   深浅两套判断。**只在设置页生效**（选择器带 `.settings-page` 前缀），不改
+   首页 / 项目面板里同样用 `.card` 的卡片观感。 */
+.settings-page .card {
+  background: linear-gradient(155deg, var(--gradient-card-from), var(--gradient-card-to));
+}
 /* ---------- 单行类的行：一处定义，账户 / 通用设置 / 软件更新 共用 ----------
    行高一个值、虚下划线一种画法（owner 2026-09-04 第 7 条：全局一致）。
    `.setting-row` 与 `.fact-row` 都是它的皮肤 —— 一个放控件，一个放事实，
