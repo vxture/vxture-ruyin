@@ -32,6 +32,28 @@ export function isRenderPdfRequest(value: unknown): value is RenderPdfRequest {
   );
 }
 
+/**
+ * How long the smoke run waits for the PDF marker (RY-001 #22).
+ *
+ * The daemon runs its smoke self-checks **in sequence** and PDF is last on
+ * purpose - the shell exits as soon as it sees that marker, so anything still
+ * running would lose its line (local-host main.ts explains). The wait
+ * therefore has to cover everything queued in front of it:
+ *
+ *   - tools self-check: one bundled MCP server start, bounded by the MCP
+ *     client's start timeout (60 s since #16)
+ *   - uvx self-check: copying the bundled uv cache seed into the data dir
+ *     (35.7 s and 45.4 s measured on the CI runner, 2026-09-15) plus a second
+ *     server start under the same 60 s bound
+ *   - ui self-check and the PDF render itself: a few seconds
+ *
+ * It was 60 s, which the seed copy plus one uvx start alone can exceed: PR
+ * #259's read-only smoke round failed exactly that way while the normal round
+ * in the same run passed. The number is a ceiling, not a delay - the shell
+ * still stops the moment the marker shows up.
+ */
+export const PDF_SELF_CHECK_WAIT_MS = 240_000;
+
 export type PdfSelfCheckResult =
   | { status: "pending" }
   | { status: "ok" }

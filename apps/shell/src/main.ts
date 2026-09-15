@@ -26,7 +26,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderPdf } from "./pdf.js";
-import { isRenderPdfRequest, parsePdfSelfCheck, type RenderPdfReply } from "./pdf-protocol.js";
+import {
+  PDF_SELF_CHECK_WAIT_MS,
+  isRenderPdfRequest,
+  parsePdfSelfCheck,
+  type RenderPdfReply,
+} from "./pdf-protocol.js";
 import { captionOverlay, themeFromReply } from "./caption-overlay.js";
 import { extractDaemonEvents, type DaemonEventKind } from "./daemon-events.js";
 import { humanBytes, moveWaitMs, progressLine, progressPercent } from "./migration-wait.js";
@@ -333,7 +338,7 @@ async function streamDaemonEvents(): Promise<void> {
  * 只在冒烟里用。等的是标记而不是固定时长：一条「等两秒然后宣布通过」的检查，
  * 在机器慢的时候会通过，在链路断掉的时候也会通过。
  */
-async function waitForPdfSelfCheck(timeoutMs = 60_000): Promise<void> {
+async function waitForPdfSelfCheck(timeoutMs = PDF_SELF_CHECK_WAIT_MS): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const result = parsePdfSelfCheck(daemonOutput);
