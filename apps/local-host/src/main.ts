@@ -79,6 +79,7 @@ import { EventBus } from "./events.js";
 import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
 import { PlatformSession } from "./platform-session.js";
+import { loadRoutingPolicy } from "./capability-routing.js";
 import { FolderPick } from "./folder-pick.js";
 import {
   startMigrationServer,
@@ -478,6 +479,8 @@ const server = createLocalApi({
   // 本机固件信息（关于页）。用无参调用 —— 生产路径永远接真探针,缓存在
   // hardware-info.ts 那一层,不在这里重复。
   hardwareInfo: () => getHardwareInfo(),
+  // 能力路由（ADR-025）：每次问都重读策略文件，改了不必重启。没有文件 = 只许本机。
+  capabilityRouting: () => loadRoutingPolicy(dataDir),
   reindex: (projectId, binding) => {
     // 按绑定记的连接器取，不再钉死 local-fs（ADR-005 接缝 ②）。
     const connector = connectors.get(binding.connector);

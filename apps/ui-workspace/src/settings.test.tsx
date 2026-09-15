@@ -1772,3 +1772,52 @@ test("能力平台：取消失败时也把原话摆出来（reload 之后再放�
   await userEvent.click(within(rows[0]!).getByRole("button", { name: "取消" }));
   expect(await screen.findByText("已经落地了，取消不了")).toBeTruthy();
 });
+
+// ───────────────────────── 能力调用路径（ADR-025） ─────────────────────────
+
+test("能力平台：顶上说清能力调用路径 —— 当前档位、Runos 是兼容协议的本地能力面、云端通路未开放", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      capabilityRouting: vi.fn().mockResolvedValue({
+        name: "Runos",
+        note: "兼容 Runos 协议的本地能力面",
+        cloudOpen: false,
+        source: "default",
+        errors: [],
+        current: { mode: "local_only", source: "default", label: "只许本机" },
+      }),
+    } as Partial<Api>),
+  );
+  expect(await screen.findByText("只许本机")).toBeInTheDocument();
+  // 名字出现的地方，说明必须一起出现
+  expect(screen.getByText(/Runos（兼容 Runos 协议的本地能力面）/)).toBeInTheDocument();
+  expect(screen.getByText(/云端 Runos 通路尚未开放/)).toBeInTheDocument();
+});
+
+test("能力平台：云端通路开放后不再说「尚未开放」", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      capabilityRouting: vi.fn().mockResolvedValue({
+        name: "Runos",
+        note: "兼容 Runos 协议的本地能力面",
+        cloudOpen: true,
+        source: "file",
+        errors: [],
+        current: { mode: "prefer_local", source: "workspace", label: "优先本机" },
+      }),
+    } as Partial<Api>),
+  );
+  expect(await screen.findByText("优先本机")).toBeInTheDocument();
+  expect(screen.queryByText(/尚未开放/)).not.toBeInTheDocument();
+});
+
+test("能力平台：路由配置读不到时不显示调用路径那一行，不猜一个档位", async () => {
+  renderSection(
+    "skills",
+    skillsApi({ capabilityRouting: vi.fn().mockRejectedValue(new Error("503")) } as Partial<Api>),
+  );
+  await capabilityRows("技能");
+  expect(screen.queryByText(/能力调用路径/)).not.toBeInTheDocument();
+});

@@ -443,6 +443,12 @@ const WRAPPER_CASES: WrapperCase[] = [
     path: "/platform/subscribed-products",
   },
   { name: "quotaUsage", call: (api) => api.quotaUsage(), method: "GET", path: "/platform/quota-usage" },
+  {
+    name: "capabilityRouting",
+    call: (api) => api.capabilityRouting(),
+    method: "GET",
+    path: "/capabilities/routing",
+  },
 ];
 
 for (const c of WRAPPER_CASES) {
