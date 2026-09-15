@@ -333,8 +333,9 @@ Runtime 拉 index.json → 验平台签名 → 下载 .ruyinpkg → 验双签（
 
 # 9. Open Questions
 
-- **OQ-1 代码签名证书**：Windows Authenticode（OV/EV）未采购。未签名 = SmartScreen 拦阻 +
-  企业环境不可接受。公开发布前必须解决；beta 渠道内测期可暂缺（受众可控）
+- **OQ-1 代码签名证书**：Windows Authenticode（OV/EV）未采购。未签名 = SmartScreen 警告，
+  且开着 Smart App Control 的机器上下载来的安装包直接被封锁（没有「仍要运行」，
+  TD-001 补记 2026-09-14）+ 企业环境不可接受。公开发布前必须解决；beta 渠道内测期可暂缺（受众可控）
 - **OQ-2 npm 包版本策略**：changesets 自动化 vs 手动 tag；runtime-core 版本 = 规范实现版本
   （03-A §5 runtime.minimum 的校验对象），需要严格的 semver 纪律。
   **已定（2026-09-03，owner）：手动版本 + 守卫。** `check-package-versions.mjs` 以最近的
