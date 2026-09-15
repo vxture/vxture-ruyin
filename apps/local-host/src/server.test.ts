@@ -49,7 +49,7 @@ import {
   PlatformNotConfiguredError,
   type PlatformService,
 } from "./platform.js";
-import type { PlatformSession } from "./platform-session.js";
+import { NotSignedInError as SessionNotSignedInError, type PlatformSession } from "./platform-session.js";
 
 // Compiled test runs from dist/, so ../../../ is the repo root (same
 // convention as integration.test.ts).
@@ -2942,6 +2942,36 @@ void test("product-surface: 产品级凭据问不了（只有会话令牌能问�
       headers: { authorization: `Bearer ${minted.token}` },
     });
     assert.equal(res.status, 401);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/*
+ * 平台读在未登录 / 会话被平台拒时必须是 401 AUTH_REQUIRED（retryable: false）。
+ * 此前错误映射只认旧 platform.ts 的 NotSignedInError，会话模块抛的是另一个同名类，
+ * 于是落成 500 INTERNAL、retryable: true —— 调用方会去重试一个永远不会成的请求。
+ */
+void test("平台读在未登录 / 会话被拒时回 401 AUTH_REQUIRED，不是 500", async () => {
+  const reject = async () => {
+    throw new SessionNotSignedInError("session rejected by platform");
+  };
+  const platformSession = {
+    status: () => ({ signedIn: false, expiresAt: null }),
+    signedIn: () => false,
+    subscribedProducts: reject,
+    entitlements: reject,
+    quotaUsage: reject,
+  } as unknown as PlatformSession;
+  const rig = await startServer({ platform: signedInTo("wsp_x"), platformSession });
+  try {
+    for (const ep of ["subscribed-products", "entitlements", "quota-usage"]) {
+      const res = await fetch(`${rig.base}/platform/${ep}`, { headers: rig.headers });
+      assert.equal(res.status, 401, `/platform/${ep} 应为 401`);
+      const body = (await res.json()) as { code: string; retryable: boolean };
+      assert.equal(body.code, "AUTH_REQUIRED");
+      assert.equal(body.retryable, false);
+    }
   } finally {
     closeRig(rig);
   }

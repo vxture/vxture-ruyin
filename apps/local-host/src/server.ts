@@ -60,7 +60,10 @@ import {
   PlatformNotConfiguredError,
   type PlatformService,
 } from "./platform.js";
-import type { PlatformSession } from "./platform-session.js";
+import {
+  NotSignedInError as SessionNotSignedInError,
+  type PlatformSession,
+} from "./platform-session.js";
 
 /**
  * server.ts 只依赖这几个动作；实现见 connector-registry.ts。`install`/`probe`
@@ -478,7 +481,10 @@ function errorStatus(cause: unknown): { status: number; body: unknown } {
   if (cause instanceof SyntaxError) {
     return { status: 400, body: apiError("REQUEST_MALFORMED", cause.message) };
   }
-  if (cause instanceof NotSignedInError) {
+  // 两个 NotSignedInError：旧 OIDC 路径（platform.ts）的与会话路径（platform-session.ts）的。
+  // 只认前一个时，/platform/* 未登录或会话被平台拒会落成 500 INTERNAL、retryable: true ——
+  // 调用方会去重试一个永远不会成的请求。旧路径删掉时连同这里的第一支一起删。
+  if (cause instanceof NotSignedInError || cause instanceof SessionNotSignedInError) {
     return { status: 401, body: apiError("AUTH_REQUIRED", cause.message) };
   }
   if (cause instanceof PlatformNotConfiguredError) {
