@@ -1575,7 +1575,9 @@ function catalogTime(iso: string | undefined): string {
 function catalogStateLine(source: CatalogSourceStatus): string {
   switch (source.state) {
     case "unavailable":
-      return "平台尚未提供能力目录，暂时没有清单。";
+      // 守护进程的原因本来就是这半句（带着 issue 号）：拼成一句说，不再在下面重复一遍
+      // （owner 2026-09-15 真机看到两遍，RY-001 #23）。
+      return `${source.reason ?? "平台尚未提供能力目录"}，暂时没有清单。`;
     case "never":
       return "还没有取到 Runos 清单。";
     case "synced":
@@ -2007,7 +2009,7 @@ function SkillsSection({ api }: { api: Api }) {
         >
           {catalogFailed && <div className="update-line update-line--warn">{catalogFailed}</div>}
           <p className="set-note">{catalogStateLine(catalog.source)}</p>
-          {catalog.source.state !== "synced" && catalog.source.reason && (
+          {(catalog.source.state === "never" || catalog.source.state === "stale") && catalog.source.reason && (
             <p className="set-note text-muted-foreground">{catalog.source.reason}</p>
           )}
           {catalogDiffLine(catalog.source) && <p className="set-note">{catalogDiffLine(catalog.source)}</p>}
