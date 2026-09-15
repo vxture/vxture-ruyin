@@ -1342,6 +1342,33 @@ void test("软件更新: 自动检查旁边的提示说清行为", async () => {
   expect(await screen.findByText("每次启动软件自动检查最新版本", {}, { timeout: 2000 })).toBeInTheDocument();
 });
 
+/**
+ * 私密/沙盒浏览下 localStorage 读会抛 —— 缺省仍然是「开」，不是崩溃或变「关」。
+ * 只让这一个键抛错（不是整个 Storage 原型都坏），否则会连带打坏设计系统自己那份
+ * 也读 localStorage 的偏好（字号等），那不是这条用例要测的东西。
+ */
+void test("软件更新: 读「自动检查」偏好时 localStorage 抛错，缺省仍是开着", async () => {
+  const realGetItem = Storage.prototype.getItem;
+  vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {
+    if (key === "ruyin-update-auto-check") throw new DOMException("access denied", "SecurityError");
+    return realGetItem.call(this, key);
+  });
+  const api = fakeApi({ checkUpdate: vi.fn().mockResolvedValue(currentResult({ latest: "0.2.0" })) });
+  renderSection("updates", api);
+  expect(screen.getByRole("checkbox", { name: "自动检查" })).toBeChecked();
+  await vi.waitFor(() => expect(api.checkUpdate).toHaveBeenCalledTimes(1));
+});
+
+/** 页顶提示条关得掉——「关闭」不只是渲染出来，得真的让提示消失。 */
+void test("软件更新: 页顶提示条点关闭之后真的消失", async () => {
+  const api = fakeApi({ checkUpdate: vi.fn().mockResolvedValue(currentResult({ latest: "0.2.0" })) });
+  renderSection("updates", api);
+  await clickCheck();
+  await screen.findByText("已是最新（0.2.0）");
+  await userEvent.setup().click(screen.getByRole("button", { name: "关闭提醒" }));
+  expect(screen.queryByText("已是最新（0.2.0）")).not.toBeInTheDocument();
+});
+
 void test("Settings/连接器: 添加页有自己的地址 —— 点进去地址就变，直接开那个地址也能进", async () => {
   const api = fakeApi({ connectors: vi.fn().mockResolvedValue({ items: [] }) });
   const { unmount } = renderRouted("connectors", api);

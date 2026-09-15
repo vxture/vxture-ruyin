@@ -32,9 +32,12 @@ const updates = readFileSync(
 // 检查结果与「没查到 / 渠道」这几档的渲染，2026-09-15 起从 settings.tsx 挪进
 // update-check.tsx（自动检查与手动检查共用同一份状态、同一段渲染）——两个文件
 // 拼在一起当作「设置页」来查，规则查的是页面最终呈现了什么，不是哪个源文件里。
+// update-check.tsx 是本条规则单独关心的文件，不是整个设置页面都依赖它，所以像
+// component-store.ts 那样容忍它不存在（自测的基线夹具就没有这个文件）。
+const updateCheckFile = join(repoRoot, "apps", "ui-workspace", "src", "update-check.tsx");
 const settings = [
   readFileSync(join(repoRoot, "apps", "ui-workspace", "src", "settings.tsx"), "utf8"),
-  readFileSync(join(repoRoot, "apps", "ui-workspace", "src", "update-check.tsx"), "utf8"),
+  existsSync(updateCheckFile) ? readFileSync(updateCheckFile, "utf8") : "",
 ].join("\n");
 
 const problems = [];
