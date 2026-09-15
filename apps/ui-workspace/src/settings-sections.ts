@@ -13,6 +13,11 @@ export type SectionId =
    * 它不进侧栏：侧栏是「我能去哪儿」，添加是从列表页发起的一个动作。
    */
   | "connectors-add"
+  /**
+   * 模型平台 —— 只展示本工作区被授权的模型，不调用、不配置；模型由各智能体直接对接
+   * Atlas（ADR-026 §2 第 3 条）。
+   */
+  | "models"
   /** 能力平台（ADR-018 §2.7）：本机装着的技能与工具，一张清单。代码标识符仍叫 skills。 */
   | "skills"
   | "database"
@@ -36,6 +41,8 @@ export const SETTINGS_SECTIONS: Array<{ id: SectionId; label: string; icon: stri
    * 一个**来源**，不是与它并列的另一件事。来源排在结果前面，读者就得先理解一个
    * 他还没有理由关心的东西。
    */
+  /** 模型平台排在能力平台**前面**（owner 2026-09-15）。只展示，不调用。 */
+  { id: "models", label: "模型平台", icon: "cpu" },
   { id: "skills", label: "能力平台", icon: "sparkles" },
   { id: "connectors", label: "连接器", icon: "plugs-connected" },
   { id: "database", label: "数据库", icon: "table" },

@@ -495,6 +495,7 @@ const WRAPPER_CASES: WrapperCase[] = [
     path: "/capabilities/catalog/refresh",
     body: { reason: "focus" },
   },
+  { name: "atlasModels", call: (api) => api.atlasModels(), method: "GET", path: "/platform/atlas/models" },
 ];
 
 for (const c of WRAPPER_CASES) {

@@ -103,3 +103,20 @@ ADR 改为：**产品的智能随桌面包到本机**，由 Harness 在本机编
 | 由 Runos 统一对外提供模型 | 要改 Runos 的产品范围（它的 ADR-003 排除模型推理）；owner 定：调用智能体走既有 console 路径，模型由产品直接对接 Atlas |
 | 用 Runos 的 `asset` 原语装智能体定义 | `asset` 是给平台级产品沉淀的共享资产用的，不是智能体定义（owner 澄清） |
 | ruyin 做工作区成员之间的数据同步 | 越界：数据互通是平台的工作；ruyin 只解决数据不出域 |
+
+## 8. 追加（owner，2026-09-15）：设置 › 模型平台 —— 只展示，不调用
+
+owner 要求在设置里「能力平台」之前加「模型平台」，并明确：**主要功能只展示，不是调用**；范围
+**只列模型**（「用量和配额在平台端，不用复杂化」）。
+
+**这不是对 §2 第 3 条的松动。** 模型仍由产品直接对接 Atlas；ruyin 不发模型回合、不选模型、
+不配置模型、不持任何 key。这一格只把平台已有的事实展示给用户：本工作区被授权使用哪些模型。
+
+- **取法是平台现成的会话读，不向平台提新请求**：console-bff `GET /api/atlas/models`
+  （`atlas.router.ts`，在 `api/*` 下，桌面会话够得着；经 S2S 代理 Atlas `/tenancy/models`，
+  已按本工作区授权过滤）。守护进程转成 `GET /platform/atlas/models`（RY-102）。
+- **只投影展示字段**（`modelCode` / `modelName` / `provider` / `capabilities` / `isActive`）：
+  平台记录里的 `endpointUrl`、`keyReference`、`config` 是运维信息，不出守护进程。
+- **可见性照平台的角色**：`tenant.model.read` 只授租户所有者（vxture-platform 迁移
+  2026-09-14，批 7）。其他角色看到的是「只有租户所有者能查看」，ruyin 不绕过、不另判。
+- 用量（`/api/atlas/usage`，Atlas 请求日志，非计费）与配额不放：owner 定不做。

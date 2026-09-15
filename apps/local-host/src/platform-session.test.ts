@@ -24,6 +24,8 @@ import {
   type PlatformSessionConfig,
   PLATFORM_PATHS,
   PLATFORM_READS,
+  PlatformReadError,
+  projectAtlasModels,
   projectIdentity,
 } from "./platform-session.js";
 import type { KeyManager } from "./keys.js";
@@ -491,6 +493,53 @@ describe("platform-session", () => {
     await s.completeLogin();
     assert.deepEqual(await s.quotaUsage(), { storage: { used: 1, limit: 2 }, aiCredit: { used: 3, limit: 4 } });
     assert.match(f.calls.at(-1)!.url, /\/api\/subscription\/quota-usage$/);
+  });
+
+  /* 模型平台（RY-001 #24）：读 console-bff 的 atlas 模型；平台非 2xx 要带着状态码抛，
+     server 那一层才分得清「这个角色不能看」（403）与「这次没取到」。 */
+  it("atlasModels 走 console-bff 的 /api/atlas/models；非 2xx 抛带状态码的 PlatformReadError", async () => {
+    const f = stubFetch([
+      { status: 200, body: { rpsid: "sess-m", expiresInSec: 3600 } },
+      { status: 200, body: [{ modelCode: "qwen-max", modelName: "通义千问 Max" }] },
+    ]);
+    restores.push(f.restore);
+    const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    s.beginLogin();
+    await s.completeLogin();
+    assert.deepEqual(await s.atlasModels(), [{ modelCode: "qwen-max", modelName: "通义千问 Max" }]);
+    assert.match(f.calls.at(-1)!.url, new RegExp(`${PLATFORM_READS.atlasModels}$`));
+
+    const g = stubFetch([
+      { status: 200, body: { rpsid: "sess-m2", expiresInSec: 3600 } },
+      { status: 403, body: { code: "FORBIDDEN" } },
+    ]);
+    restores.push(g.restore);
+    const t = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    t.beginLogin();
+    await t.completeLogin();
+    await assert.rejects(t.atlasModels(), (e: unknown) => {
+      assert.ok(e instanceof PlatformReadError);
+      assert.equal(e.status, 403);
+      assert.equal(e.path, "/api/atlas/models");
+      assert.equal(e.message, "/api/atlas/models failed: HTTP 403");
+      return true;
+    });
+  });
+
+  it("projectAtlasModels：只留展示字段；不是数组就是空", () => {
+    assert.deepEqual(projectAtlasModels({ items: [] }), []);
+    assert.deepEqual(
+      projectAtlasModels([
+        { modelCode: "a", modelName: "A", provider: "p", capabilities: ["chat", 1], isActive: false, endpointUrl: "x", keyReference: { name: "K" } },
+        { modelCode: "b", modelName: "B" },
+        { modelName: "no code" },
+        "junk",
+      ]),
+      [
+        { modelCode: "a", modelName: "A", provider: "p", capabilities: ["chat"], isActive: false },
+        { modelCode: "b", modelName: "B", provider: "", capabilities: [], isActive: true },
+      ],
+    );
   });
 
   it("每次 beginLogin 生成新的 secret——重开登录不复用旧的", () => {

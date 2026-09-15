@@ -15,6 +15,12 @@ void test("resolveSection: 添加连接器不在侧栏里，但它是一个能�
   expect(resolveSection("connectors-add")).toBe("connectors-add");
 });
 
+void test("模型平台紧挨在能力平台前面（owner 2026-09-15）", () => {
+  const ids = SETTINGS_SECTIONS.map((s) => s.id);
+  expect(ids.indexOf("models")).toBe(ids.indexOf("skills") - 1);
+  expect(SETTINGS_SECTIONS.find((s) => s.id === "models")?.label).toBe("模型平台");
+});
+
 void test("resolveSection: 侧栏里的分区照原样通过；不认识的地址回账户，不是空白", () => {
   for (const s of SETTINGS_SECTIONS) expect(resolveSection(s.id)).toBe(s.id);
   expect(resolveSection("no-such-section")).toBe("account");
