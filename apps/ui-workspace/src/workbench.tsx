@@ -51,6 +51,7 @@ import { HeaderSearch } from "./header-search";
 import { RuntimeMenu } from "./runtime-menu";
 import { PendingInbox, usePending } from "./pending";
 import { useHostChrome } from "./host-chrome";
+import { UpdateToast, useUpdateCheck } from "./update-check";
 
 // 首页/设置/项目面板各自懒加载（TD-011②）——三个都不小（各自的 DS 组件面
 // 加起来是这个应用体量的大头），而任一时刻至多一个在屏幕上。静态导入等于
@@ -172,6 +173,13 @@ export function Workbench({
   const health = useRuntimeHealth();
   const chrome = useHostChrome();
   const pending = usePending(api);
+  /**
+   * 检查更新（owner 2026-09-15）：挂在工作台这一层，登录后应用一起来就问一次
+   * ——这才是字面意义上的「软件启动时」；原来挂在设置页，只在打开设置页那一刻
+   * 才问，被指出来不算数。结果分两处：有新版本时弹右下角浮层（下面）；设置页
+   * 顶部那条（四种结果都显示）仍由 `SettingsView` 接住同一份状态渲染。
+   */
+  const updateCheck = useUpdateCheck(api);
   /**
    * 打开的这个项目，产品有没有自己的界面。**侧栏与项目面板共用这一份回答**：列不列
    * 产品界面那一格、进项目默认落在哪、那一格里装什么，都按它。
@@ -710,53 +718,58 @@ export function Workbench({
   );
 
   return (
-    // 无全局 agent 面：ruyin 是工作空间运行时（20-specs/10 §1.3），智能体现在
-    // 各业务产品的任务流里（Harness 任务 + 人工检查点），不做壳级对话助手。
-    <ShellViewport
-      header={header}
-      sidebar={sidebar}
-      sidebarMode={collapsed ? "collapsed" : "expanded"}
-    >
-      <ShellPageContainer width="wide-2xl" className="workbench-page">
-        {error && <NoticeBar message={error} onClose={() => setError(null)} />}
-        <Suspense
-          fallback={
-            <p className="text-body-md text-muted-foreground">加载中……</p>
-          }
-        >
-          {view.kind === "settings" ? (
-            <SettingsView api={api} section={view.section} />
-          ) : view.kind === "workspace" ? (
-            view.tab === undefined ? (
-              // 还在等「有没有产品界面」的回答，决定进哪一格（见上面的解析）。
+    <>
+      {/* 无全局 agent 面：ruyin 是工作空间运行时（20-specs/10 §1.3），智能体现在
+          各业务产品的任务流里（Harness 任务 + 人工检查点），不做壳级对话助手。 */}
+      <ShellViewport
+        header={header}
+        sidebar={sidebar}
+        sidebarMode={collapsed ? "collapsed" : "expanded"}
+      >
+        <ShellPageContainer width="wide-2xl" className="workbench-page">
+          {error && <NoticeBar message={error} onClose={() => setError(null)} />}
+          <Suspense
+            fallback={
               <p className="text-body-md text-muted-foreground">加载中……</p>
+            }
+          >
+            {view.kind === "settings" ? (
+              <SettingsView api={api} section={view.section} updateCheck={updateCheck} />
+            ) : view.kind === "workspace" ? (
+              view.tab === undefined ? (
+                // 还在等「有没有产品界面」的回答，决定进哪一格（见上面的解析）。
+                <p className="text-body-md text-muted-foreground">加载中……</p>
+              ) : (
+                <ProjectPanel
+                  key={view.id}
+                  api={api}
+                  id={view.id}
+                  tab={view.tab}
+                  onPending={setProjectPending}
+                  surface={surface}
+                  onReloadSurface={reloadSurface}
+                />
+              )
             ) : (
-              <ProjectPanel
-                key={view.id}
+              <HomePage
                 api={api}
-                id={view.id}
-                tab={view.tab}
-                onPending={setProjectPending}
-                surface={surface}
-                onReloadSurface={reloadSurface}
+                products={products}
+                workspaces={workspaces}
+                health={health}
+                onOpen={(id) => navigate(`#ws/${id}`)}
+                onCreated={openProject}
+                onRefresh={refreshSidebar}
+                onError={setError}
+                selectedProductId={selectedProductId}
+                onSelectProduct={setSelectedProductId}
               />
-            )
-          ) : (
-            <HomePage
-              api={api}
-              products={products}
-              workspaces={workspaces}
-              health={health}
-              onOpen={(id) => navigate(`#ws/${id}`)}
-              onCreated={openProject}
-              onRefresh={refreshSidebar}
-              onError={setError}
-              selectedProductId={selectedProductId}
-              onSelectProduct={setSelectedProductId}
-            />
-          )}
-        </Suspense>
-      </ShellPageContainer>
-    </ShellViewport>
+            )}
+          </Suspense>
+        </ShellPageContainer>
+      </ShellViewport>
+      {/* 浮层贴屏幕角落，不跟着当前是哪一格视图走——不管这一刻在首页、项目里
+          还是设置页，启动时那次自动检查都能弹出来（owner 2026-09-15）。 */}
+      <UpdateToast state={updateCheck} />
+    </>
   );
 }

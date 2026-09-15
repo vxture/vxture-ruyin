@@ -20,6 +20,7 @@ import { ThemeProvider } from "@vxture/design-system";
 import { useEffect, useState } from "react";
 import { SettingsView, type SectionId } from "./settings";
 import { resolveSection } from "./settings-sections";
+import { useUpdateCheck, type UpdateCheckState } from "./update-check";
 import { Api, type SystemInfo, type HardwareInfo, type UpdateCheck, ApiError } from "./api";
 
 function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
@@ -51,10 +52,38 @@ function fakeApi(over: Partial<Api> = {}): Api {
   } as unknown as Api;
 }
 
+/**
+ * `updateCheck` 现在是工作台那一层的状态，`SettingsView` 只收不建（owner
+ * 2026-09-15：自动检查的挂载点从设置页挪到工作台）。测试里没有工作台，
+ * 这个小宿主替它建一份、传下去 —— 与生产代码里工作台做的事同形。
+ */
+function SettingsHost({ api, section }: { api: Api; section: SectionId }) {
+  const updateCheck = useUpdateCheck(api);
+  return <SettingsView api={api} section={section} updateCheck={updateCheck} />;
+}
+
+/**
+ * 与检查更新完全无关的用例（存储位置那一组，靠 `vi.resetModules()` 拿一份
+ * 新鲜的 `./settings` 好让 `host-chrome` 重新判一次 UA）不需要真的建一份
+ * `useUpdateCheck` —— 一份不做任何事的静态值就够了，也不会顺带打一次
+ * `api.checkUpdate()`。
+ */
+function stubUpdateCheck(): UpdateCheckState {
+  return {
+    autoCheck: false,
+    setAutoCheck: () => {},
+    busy: false,
+    result: null,
+    failed: null,
+    check: async () => {},
+    dismiss: () => {},
+  };
+}
+
 function renderSection(section: SectionId, api: Api = fakeApi()) {
   return render(
     <ThemeProvider defaultMode="dark" defaultDensity="default">
-      <SettingsView api={api} section={section} />
+      <SettingsHost api={api} section={section} />
     </ThemeProvider>,
   );
 }
@@ -74,7 +103,7 @@ function renderRouted(section: SectionId, api: Api = fakeApi()) {
       window.addEventListener("hashchange", apply);
       return () => window.removeEventListener("hashchange", apply);
     }, []);
-    return <SettingsView api={api} section={resolveSection(id)} />;
+    return <SettingsHost api={api} section={resolveSection(id)} />;
   }
   return render(
     <ThemeProvider defaultMode="dark" defaultDensity="default">
@@ -120,8 +149,9 @@ void test("AboutSection: shows version/platform/arch once system loads, placehol
 });
 
 /**
- * 「本机固件信息」块（关于页）：采集成功时逐项展示。不新开一张卡 ——
- * 嵌在身份卡里的 `.about-hardware` 子块（见 AboutSection 里的说明）。
+ * 「本机固件信息」块（关于页「本机配置」）：采集成功时逐项展示。它是一个标准
+ * `SettingsBlock`（owner 2026-09-15 第二次修正：原来是手写的居中标题+说明，
+ * 与设置页别处「图标+标题+说明，左对齐、内容缩进」的统一版式对不上）。
  */
 void test("AboutSection: 本机固件信息 —— 采集成功时逐项展示", async () => {
   const hardware: HardwareInfo = {
@@ -166,7 +196,7 @@ void test("AboutSection: 本机固件信息 —— 缺整块的落「—」，�
   const { container } = renderSection("about", api);
   await screen.findByText("Test CPU");
   expect(screen.getByText("Windows 11 Pro")).toBeInTheDocument();
-  const rows = container.querySelectorAll(".about-hardware .fact-row");
+  const rows = container.querySelectorAll(".set-block .fact-row");
   // 主板与 BIOS 合并成一行后共 7 行（owner 2026-09-15，原 8 行）。
   expect(rows).toHaveLength(7);
   const emptyRows = [...rows].filter((r) => r.querySelector(".fact-empty"));
@@ -184,7 +214,7 @@ void test("AboutSection: 本机固件信息 —— CPU/操作系统整块都没�
   const api = fakeApi({ hardware: vi.fn().mockResolvedValue(hardware) });
   const { container } = renderSection("about", api);
   await screen.findByText("本机配置");
-  const rows = container.querySelectorAll(".about-hardware .fact-row");
+  const rows = container.querySelectorAll(".set-block .fact-row");
   expect(rows).toHaveLength(7);
   for (const row of rows) {
     expect(row.querySelector(".fact-empty")).toBeInTheDocument();
@@ -199,19 +229,19 @@ void test("AboutSection: 本机固件信息 —— 守护进程未接这一路�
 });
 
 /**
- * 关于页只有身份 + 三条条款 + 三方许可 + 一条判断式提醒（owner 2026-09-10 连收
- * 两次：四张卡 → 两块 → 去掉「须知」；2026-09-15 再拆成三块，本机配置单独一
- * 张卡，见下面「本机配置」相关用例）。
+ * 关于页只有身份 + 三条条款 + 三方许可 + 「本机配置」块 + 一条判断式提醒
+ * （owner 2026-09-10 连收两次：四张卡 → 两块 → 去掉「须知」；2026-09-15 拆成
+ * 三块；同日第二次修正：本机配置改用标准 `SettingsBlock`，见下面「本机配置」
+ * 相关用例）。
  *
  * 钉**结构**而不只是文案：只钉文案的话，下一个人再加两张卡，用例照样全绿。
  */
 void test("AboutSection: 关于信息自动布满，提示按需显隐", async () => {
   const { container } = renderSection("about");
   await screen.findByText("RUYIN");
-  // 没有板块卡、没有导航按钮：这一页收过三次，钉住结构才拦得住第四次被撑回导航站。
-  // **唯一的按钮**是「随包第三方组件许可」（TD-058，2026-09-12）：它不去别处，只是就地
-  // 展开一份许可证要求的署名清单。再多一个按钮，这条就该红。
-  expect(container.querySelectorAll(".set-block")).toHaveLength(0);
+  // 没有导航站式的板块卡堆叠：这一页收过三次，钉住结构才拦得住第四次被撑回
+  // 导航站——「本机配置」是这一页仅有的一个正当 `SettingsBlock`，不是三个五个。
+  expect(container.querySelectorAll(".set-block")).toHaveLength(1);
   const buttons = container.querySelectorAll("button");
   expect(buttons).toHaveLength(1);
   expect(buttons[0]).toHaveClass("about-third-party");
@@ -225,18 +255,20 @@ void test("AboutSection: 关于信息自动布满，提示按需显隐", async (
 });
 
 /**
- * 「本机配置」拆成自己的卡（owner 2026-09-15，原先嵌在「关于」那张卡里靠一条
+ * 「本机配置」是自己的一块（owner 2026-09-15，原先嵌在「关于」那张卡里靠一条
  * 分隔线区分）：钉住它是 `.about-main` 的**兄弟**，不是子元素——这样它才能按
- * 内容撑高，不参与 `.about-main` 的黄金分割。
+ * 内容撑高，不参与「关于」那张卡的 `flex: 1`。
  */
-void test("AboutSection: 「本机配置」是独立一张卡，不在「关于」那张卡里面", async () => {
+void test("AboutSection: 「本机配置」是独立一块，不在「关于」那张卡里面，版式与其它设置块一致", async () => {
   const { container } = renderSection("about");
-  await screen.findByText("本机配置");
-  const hardwareCard = container.querySelector(".about-hardware-card");
-  expect(hardwareCard).toBeInTheDocument();
-  expect(hardwareCard).toHaveClass("card");
-  expect(container.querySelector(".about-main")?.contains(hardwareCard)).toBe(false);
-  expect(hardwareCard?.querySelector(".about-hardware")).toBeInTheDocument();
+  const title = await screen.findByText("本机配置");
+  const block = title.closest("section");
+  expect(block).toBeInTheDocument();
+  expect(block).toHaveClass("card", "set-block");
+  expect(container.querySelector(".about-main")?.contains(block)).toBe(false);
+  // 图标 + 标题 + 说明，与设置页别处同一个版式（owner 2026-09-15 第二次修正）。
+  expect(block?.querySelector(".set-block-icon")).toBeInTheDocument();
+  expect(within(block as HTMLElement).getByText(/为保障处理过程中的数据不出域/)).toBeInTheDocument();
 });
 
 /**
@@ -898,7 +930,7 @@ void test("Settings/账户: a session() failure falls back to the signed-out gui
   expect(await screen.findByText("账户由左下角的账户菜单管理")).toBeInTheDocument();
 });
 
-void test("Settings/通用设置: the encryption chain spells out all three layers, says what is NOT encrypted, and never claims '三次加密'", async () => {
+void test("Settings/通用设置: the encryption chain spells out all three layers, never claims '三次加密', and doesn't expose what's NOT encrypted (owner: 别把技术设计说给用户)", async () => {
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "dpapi" })) });
   const { container } = renderSection("general", api);
   const rows = await screen.findAllByRole("listitem");
@@ -909,7 +941,9 @@ void test("Settings/通用设置: the encryption chain spells out all three laye
   ]);
   // 一次加密 + 两层密钥保护。把层数说成加密次数是在核实的那一刻会崩掉的话。
   expect(container.textContent).not.toContain("三次加密");
-  expect(container.textContent).toContain("产品契约与本机配置不加密");
+  // owner 2026-09-15：这句话把内部技术设计（哪些东西按设计不加密）暴露给了用户，
+  // 删掉——用户不需要知道契约/本机配置的加密边界在哪。
+  expect(container.textContent).not.toContain("产品契约与本机配置不加密");
   // 保护到位时不再多挂一个徽章重复「主密钥」那一行（owner 第 2 条）。
   expect(container.textContent).not.toContain("主密钥由 Windows DPAPI 保护");
 });
@@ -997,7 +1031,7 @@ void test("Settings/存储位置: 壳里给「打开目录」，浏览器里不�
   const { SettingsView: Shell } = await import("./settings");
   const { unmount } = render(
     <ThemeProvider defaultMode="dark" defaultDensity="default">
-      <Shell api={api} section="general" />
+      <Shell api={api} section="general" updateCheck={stubUpdateCheck()} />
     </ThemeProvider>,
   );
   const btn = await screen.findByRole("button", { name: /打开目录/ });
@@ -1012,7 +1046,7 @@ void test("Settings/存储位置: 壳里给「打开目录」，浏览器里不�
   const { SettingsView: Web } = await import("./settings");
   render(
     <ThemeProvider defaultMode="dark" defaultDensity="default">
-      <Web api={api} section="general" />
+      <Web api={api} section="general" updateCheck={stubUpdateCheck()} />
     </ThemeProvider>,
   );
   expect(await screen.findByText("C:/data")).toBeInTheDocument();
@@ -1039,7 +1073,7 @@ async function renderStorage(api: Api) {
   const { SettingsView: View } = await import("./settings");
   const r = render(
     <ThemeProvider defaultMode="dark" defaultDensity="default">
-      <View api={api} section="general" />
+      <View api={api} section="general" updateCheck={stubUpdateCheck()} />
     </ThemeProvider>,
   );
   return { ...r, restore };
@@ -1889,7 +1923,7 @@ test("能力平台：取消失败时也把原话摆出来（reload 之后再放�
 
 // ───────────────────────── 能力调用路径（ADR-025） ─────────────────────────
 
-test("能力平台：顶上说清能力调用路径 —— 当前档位、Runos 是兼容协议的本地能力面、云端通路未开放", async () => {
+test("能力平台：顶上那句话末尾贴着调用路径的标签 —— 当前档位、Runos 是兼容协议的本地能力面、云端未开放", async () => {
   renderSection(
     "skills",
     skillsApi({
@@ -1905,11 +1939,13 @@ test("能力平台：顶上说清能力调用路径 —— 当前档位、Runos 
   );
   expect(await screen.findByText("只许本机")).toBeInTheDocument();
   // 名字出现的地方，说明必须一起出现
-  expect(screen.getByText(/Runos（兼容 Runos 协议的本地能力面）/)).toBeInTheDocument();
-  expect(screen.getByText(/云端 Runos 通路尚未开放/)).toBeInTheDocument();
+  expect(screen.getByText("Runos（兼容 Runos 协议的本地能力面）")).toBeInTheDocument();
+  expect(screen.getByText("云端未开放")).toBeInTheDocument();
+  // 只剩一条信息了 —— 原来单独一句的「能力调用路径：」前缀已经收掉。
+  expect(screen.queryByText(/能力调用路径：/)).not.toBeInTheDocument();
 });
 
-test("能力平台：云端通路开放后不再说「尚未开放」", async () => {
+test("能力平台：云端通路开放后不再显示「云端未开放」标签", async () => {
   renderSection(
     "skills",
     skillsApi({
@@ -1924,16 +1960,16 @@ test("能力平台：云端通路开放后不再说「尚未开放」", async ()
     } as Partial<Api>),
   );
   expect(await screen.findByText("优先本机")).toBeInTheDocument();
-  expect(screen.queryByText(/尚未开放/)).not.toBeInTheDocument();
+  expect(screen.queryByText("云端未开放")).not.toBeInTheDocument();
 });
 
-test("能力平台：路由配置读不到时不显示调用路径那一行，不猜一个档位", async () => {
+test("能力平台：路由配置读不到时不显示调用路径的标签，不猜一个档位", async () => {
   renderSection(
     "skills",
     skillsApi({ capabilityRouting: vi.fn().mockRejectedValue(new Error("503")) } as Partial<Api>),
   );
   await capabilityRows("技能");
-  expect(screen.queryByText(/能力调用路径/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/只许本机|优先本机|优先云端/)).not.toBeInTheDocument();
 });
 
 // ───────────────────────── Runos 清单（ADR-020 §6.2 / RY-204） ─────────────────────────

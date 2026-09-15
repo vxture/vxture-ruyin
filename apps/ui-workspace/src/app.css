@@ -616,6 +616,15 @@ select optgroup {
 /* （.settings / .settings-nav / .settings-content 已随页内那根竖直导航一并
    删除：设置有了自己的框架，分区在侧栏里。留着这些规则，下一个人会以为页面
    里还该有第二根导航。） */
+/* 设置页各板块用渐变底，不是纯色（owner 2026-09-15）：浅色模式下大片纯白显得
+   平；换用 DS 已有的语义渐变令牌 `--gradient-card-*`——浅色是白到品牌浅色
+   （brand-50）的极轻过渡，深色是中性深灰到品牌深色（brand-950）的过渡，两套
+   值都由 DS 按主题给（`.dark`/`:root.dark` 已经定义好了两份），这里不重复写
+   深浅两套判断。**只在设置页生效**（选择器带 `.settings-page` 前缀），不改
+   首页 / 项目面板里同样用 `.card` 的卡片观感。 */
+.settings-page .card {
+  background: linear-gradient(155deg, var(--gradient-card-from), var(--gradient-card-to));
+}
 /* ---------- 单行类的行：一处定义，账户 / 通用设置 / 软件更新 共用 ----------
    行高一个值、虚下划线一种画法（owner 2026-09-04 第 7 条：全局一致）。
    `.setting-row` 与 `.fact-row` 都是它的皮肤 —— 一个放控件，一个放事实，
@@ -739,22 +748,6 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
    登录页用同一个类，那一屏的配色是另一件事，不该被这里的改动带着变。 */
 .about-brand-text .brand-name { color: var(--primary); }
 
-/* 「本机配置」——独立一张卡（owner 2026-09-15 从「关于」拆出来），按需高度：
-   不设 flex，`.about-page` 是纵向 flex，没有 flex 的子项按内容撑高，自然排在
-   「关于」那张卡（`.about-main`，flex: 1）下面，不参与它的黄金分割。 */
-.about-hardware-card { margin-bottom: 0; flex-shrink: 0; }
-.about-hardware-title {
-  text-align: center;
-  font-weight: 600;
-  font-size: var(--body-md-font-size);
-  margin-bottom: var(--spacing-2xs);
-}
-.about-hardware-desc {
-  text-align: center;
-  color: var(--muted-foreground);
-  font-size: var(--body-sm-font-size);
-  margin-bottom: var(--spacing-sm);
-}
 .logo-cn { font-weight: 700; font-size: var(--title-xl-font-size, 20px); }
 .logo-en { color: var(--muted-foreground); letter-spacing: 0.18em; }
 /* 品牌字标与标语：RUYIN 大写、字距拉开；Intelligent Workbench 弱化一档跟在后面。 */
@@ -931,6 +924,32 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
   border: 1px solid var(--success-border);
   border-left-width: 3px;
 }
+
+/* 启动时自动检查的右下角浮层（owner 2026-09-15）：只在「有新版本」时出现，
+   贴屏幕角落，不占正文位置——与页面顶部那条 `.update-notice`（设置页里，
+   四种结果都显示）故意不是同一个视觉形。 */
+.update-toast {
+  position: fixed;
+  right: var(--spacing-lg, 24px);
+  bottom: var(--spacing-lg, 24px);
+  z-index: 60;
+  width: min(340px, calc(100vw - 2 * var(--spacing-lg, 24px)));
+  padding: var(--spacing-md);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--info-border);
+  background: var(--card, var(--background));
+  box-shadow: var(--shadow-notification);
+}
+.update-toast-head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-weight: 600;
+  color: var(--foreground);
+}
+.update-toast-head .notice-bar-close { margin-left: auto; }
+.update-toast-body { margin: var(--spacing-2xs) 0 var(--spacing-sm); color: var(--muted-foreground); }
+.update-toast-actions { display: flex; align-items: center; gap: var(--spacing-sm); }
 
 /* ---------- 项目摘要带（把四个 tab 后面的事实并到一行） ---------- */
 .proj-summary {
@@ -1292,10 +1311,13 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 .crypto-note { opacity: 0.85; }
 
 /* ---------- 关于页 ----------
-   两块（owner 2026-09-10）：① 关于信息**自动布满**；② 提示信息**按需显隐、固定
-   高度**。要撑满就得让这条链上每一层都有确定高度 —— 滚动容器是 flex 定高的，
-   所以只在**关于页在场时**给 `.workbench-page` 一个 `min-height: 100%`，其余页面
-   照旧按内容高，不受影响。 */
+   三块（owner 2026-09-15 第二次修正，原「两块」的黄金分割版式作废）：① 「关于」
+   卡**撑满**剩下的高度，内容在卡的框里居中（不再靠卡外两条看不见的弹性空白
+   把卡「顶」到中部——那两条空白与「本机配置」卡叠在一起时，读起来是卡与卡
+   之间一大段无缘无故的空白，owner 直接看见了这个问题）；② 「本机配置」块
+   按需高度；③ 提示信息按需显隐、固定高度。要撑满就得让这条链上每一层都有
+   确定高度 —— 滚动容器是 flex 定高的，所以只在**关于页在场时**给
+   `.workbench-page` 一个 `min-height: 100%`，其余页面照旧按内容高，不受影响。 */
 .workbench-page:has(.about-page) { min-height: 100%; }
 .settings-page:has(.about-page) { flex: 1; min-height: 0; }
 .about-page {
@@ -1303,27 +1325,36 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   min-height: 0;
   display: flex;
   flex-direction: column;
+  gap: var(--spacing-sm);
 }
 
-/* 黄金分割：上方留白 : 下方留白 = 0.382 : 0.618，于是内容落在「中部靠上一些」，
-   而不是正中。写成两个弹性空白而不是一个魔法 padding —— 换窗口高度它自己按比例
-   走，不用重新算一个数。 */
 .about-main {
-  --about-golden: 0.382;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
 }
-/* 卡片在这里要去掉默认的下外边距：`.card` 自带 margin-bottom，是给「一摞卡」
-   用的；这一页只有一张，那段外边距会算进下方留白里，把黄金分割挪偏。 */
-.about-card { margin-bottom: 0; }
+/* 卡片本身撑满 `.about-main` 剩下的高度，内容纵向居中在卡的框里 —— 撑满与
+   居中现在是同一块框在做的两件事，不再是「卡 + 卡外空白」拼出来的效果。
+   去掉默认的下外边距：`.card` 自带 margin-bottom 是给「一摞卡」用的，这里
+   由 `.about-page` 的 `gap` 统一控距。 */
+.about-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow-y: auto;
+  margin-bottom: 0;
+}
 /* 关于页的字标放大到 heading-1（36px，缺省 `.brand-name` 是 20px）。这一页的
    主角就是这个字标 —— 登录页有 120px 的图形标撑场，这里没有，只有字。 */
 .about-block .brand-name { font-size: var(--heading-1-font-size); }
-.about-main::before { content: ""; flex: var(--about-golden); }
-.about-main::after { content: ""; flex: calc(1 - var(--about-golden)); }
+
+/* 「本机配置」现在是一个标准 `SettingsBlock`（`.set-block`），与设置页别处
+   一致；它在关于页里仍然是**按需高度**，不参与上面那张卡的 `flex: 1`，也不
+   跟着 `.about-page` 的 `gap` 再叠一次 `.card` 自带的下外边距。 */
+.about-page > .set-block { margin-bottom: 0; flex-shrink: 0; }
 
 /* 固定高度取 `--space-row-2xl`（96px）：实测那条提醒在 1280 宽是 57px、900 宽
    75px、760 宽 93px，96 刚好罩住最窄那一档。**内部仍留滚动兜底** —— 固定高度是
@@ -1565,6 +1596,15 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   line-height: 1.6;
 }
 .cap-sync strong { color: var(--foreground); font-weight: 500; }
+/* 调用路径（ADR-025）收成标签贴在同一行里，不再单独占一句话
+   （owner 2026-09-15：两条信息挤成了一条，第二条整段收进标签）。 */
+.cap-sync-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  margin-left: var(--spacing-xs);
+}
 
 /* 大类标题上的条数：收起之后它是唯一还看得见的量，所以不能只当装饰。 */
 .set-block-count {
