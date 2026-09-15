@@ -174,12 +174,26 @@ export function canWrite(dir) {
 }
 
 /**
+ * Windows 自带的 whoami.exe，按绝对路径取。
+ *
+ * 不能只写 "whoami"：release.yml 的打包步骤是 `shell: bash`，PATH 上排在前面的是
+ * Git Bash 自带的 GNU whoami，它不认 `/user`（beta-20260915.1 就红在这里）。
+ * packaged-smoke 那一步用的是默认 shell，找到的是 System32 那个 —— 同一段代码
+ * CI 绿、发版红，差别只在外面套的是哪个 shell。
+ *
+ * @returns {string}
+ */
+function windowsWhoami() {
+  return join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe");
+}
+
+/**
  * 当前进程令牌的用户 SID（Windows）：`whoami /user /fo csv /nh` 的最后一列。
  *
  * @returns {string}
  */
 export function tokenSid() {
-  const r = spawnSync("whoami", ["/user", "/fo", "csv", "/nh"], { encoding: "utf8" });
+  const r = spawnSync(windowsWhoami(), ["/user", "/fo", "csv", "/nh"], { encoding: "utf8" });
   const m = /"(S-1-[\d-]+)"\s*$/.exec((r.stdout ?? "").trim());
   if (!m) throw new Error(`tokenSid: 读不出令牌 SID：${r.stdout ?? ""}${r.stderr ?? ""}`);
   return m[1];
@@ -198,7 +212,7 @@ export function describeIdentity(dir) {
     return `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
   };
   if (process.platform === "win32") {
-    return [`whoami /user /priv:`, out("whoami", ["/user", "/priv"]), `icacls ${dir}:`, out("icacls", [dir])].join("\n");
+    return [`whoami /user /priv:`, out(windowsWhoami(), ["/user", "/priv"]), `icacls ${dir}:`, out("icacls", [dir])].join("\n");
   }
   return [`id:`, out("id", []), `ls -ld ${dir}:`, out("ls", ["-ld", dir])].join("\n");
 }
