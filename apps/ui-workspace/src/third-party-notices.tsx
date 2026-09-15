@@ -59,7 +59,7 @@ export function ThirdPartyNotices({ entries = THIRD_PARTY }: { entries?: ThirdPa
                   <TableHead>组件</TableHead>
                   <TableHead>版本</TableHead>
                   <TableHead>许可证</TableHead>
-                  <TableHead>随哪一块</TableHead>
+                  <TableHead className="third-party-part">所属模块</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -69,7 +69,7 @@ export function ThirdPartyNotices({ entries = THIRD_PARTY }: { entries?: ThirdPa
                     <TableCell className="mono">{e.name}</TableCell>
                     <TableCell className="mono text-muted-foreground">{e.version}</TableCell>
                     <TableCell>{e.license}</TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell className="text-muted-foreground third-party-part">
                       {e.usedBy.map((u) => PART_LABEL[u] ?? u).join("、")}
                     </TableCell>
                   </TableRow>

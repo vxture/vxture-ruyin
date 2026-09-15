@@ -1343,14 +1343,14 @@ function AboutSection({
                 <p className="brand-tag">Intelligent Workbench</p>
               </div>
             </div>
-            <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
+            <p className="about-desc text-body-md text-muted-foreground">
               Vxture AI 原生智能体的本地智能工作环境
             </p>
-            <div className="mono text-muted-foreground">
+            <div className="about-runtime mono text-muted-foreground">
               Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
               {system?.arch ?? ""}
             </div>
-            <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
+            <p className="about-copyright text-body-sm text-muted-foreground">
               © 2026 Vxture · 保留所有权利
             </p>
             {/* 三条条款做成按钮式（owner 2026-09-10），但**仍然是 `<a>`**：真链接才能
@@ -1385,7 +1385,7 @@ function AboutSection({
       <SettingsBlock
         icon="cpu"
         title="本机配置"
-        desc="为保障处理过程中的数据不出域，Ruyin 在本机构建沙箱执行分析与计算——以下信息用于确定沙箱运行在什么机器上，仅本机读取、本机展示，不上传、不计费、不进遥测"
+        desc="仅用于确定本机运行环境，只在本机展示，不上传、不计费、不进遥测"
       >
         {hardwareUnavailable ? (
           <p className="text-body-sm text-muted-foreground">

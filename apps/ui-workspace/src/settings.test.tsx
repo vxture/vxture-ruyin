@@ -268,7 +268,7 @@ void test("AboutSection: 「本机配置」是独立一块，不在「关于」�
   expect(container.querySelector(".about-main")?.contains(block)).toBe(false);
   // 图标 + 标题 + 说明，与设置页别处同一个版式（owner 2026-09-15 第二次修正）。
   expect(block?.querySelector(".set-block-icon")).toBeInTheDocument();
-  expect(within(block as HTMLElement).getByText(/为保障处理过程中的数据不出域/)).toBeInTheDocument();
+  expect(within(block as HTMLElement).getByText(/仅用于确定本机运行环境/)).toBeInTheDocument();
 });
 
 /**
