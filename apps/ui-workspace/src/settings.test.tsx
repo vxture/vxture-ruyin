@@ -288,6 +288,8 @@ void test("AboutSection: 未签名才提醒；已签名与开发态都不提醒"
 
   const unsignedRender = renderSection("about", withSigning("unsigned"));
   expect(await screen.findByText(/SmartScreen/)).toBeInTheDocument();
+  // 只讲 SmartScreen 会误导开着智能应用控制的用户：那里是封锁，不是警告（TD-001 补记）。
+  expect(screen.getByText(/智能应用控制/)).toBeInTheDocument();
   expect(unsignedRender.container.querySelector(".about-notice")).toBeInTheDocument();
   cleanup();
 

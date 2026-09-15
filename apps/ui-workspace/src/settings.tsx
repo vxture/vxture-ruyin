@@ -1462,8 +1462,9 @@ function AboutSection({
             <Icon name="warning" size="sm" />
             <span>
               <strong>这个安装包没有做代码签名。</strong>
-              首次安装时 Windows 的 SmartScreen 会弹一个蓝色提示框：点「更多信息」，再点
-              「仍要运行」即可继续 —— 这是提醒，不是阻止，同一台机器以后不再提示。
+              首次安装时 Windows 的 SmartScreen 通常会弹一个蓝色提示框：点「更多信息」，再点
+              「仍要运行」即可继续。但开着「智能应用控制」的电脑会直接拦下下载来的安装包，
+              双击没有任何反应 —— 先右键安装包 →「属性」→ 勾选「解除锁定」，再运行。
               请从 Vxture 官方下载页取安装包，并核对 SHA256。
             </span>
           </p>
