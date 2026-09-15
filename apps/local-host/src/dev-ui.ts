@@ -71,7 +71,7 @@ async function boot() {
   try {
     var h = await (await fetch("/health")).json();
     document.getElementById("version").textContent = "runtime " + h.version;
-    var products = await api("/products");
+    var products = (await api("/products")).items;
     document.getElementById("productSel").innerHTML = products.map(function (p) {
       return '<option value="' + esc(p.id) + '">' + esc(p.name) + " (" + esc(p.id) + ")</option>";
     }).join("");
@@ -79,7 +79,7 @@ async function boot() {
   } catch (e) { fail(e); }
 }
 async function refreshWs() {
-  var list = await api("/projects");
+  var list = (await api("/projects")).items;
   document.getElementById("wsList").innerHTML = list.map(function (w) {
     var cls = current && current.meta.id === w.id ? "card sel" : "card";
     return '<div class="' + cls + '" onclick="openWs(\\'' + w.id + '\\')">'
@@ -106,10 +106,11 @@ async function openWs(id) {
 }
 async function render() {
   var ws = current;
-  var instances = await api("/projects/" + ws.meta.id + "/tasks");
-  var audit = await api("/projects/" + ws.meta.id + "/audit");
-  var grants = await api("/projects/" + ws.meta.id + "/grants");
-  var bindings = await api("/projects/" + ws.meta.id + "/bindings");
+  // 列表接口一律回 { items }（通则 A-4）。
+  var instances = (await api("/projects/" + ws.meta.id + "/tasks")).items;
+  var audit = (await api("/projects/" + ws.meta.id + "/audit")).items;
+  var grants = (await api("/projects/" + ws.meta.id + "/grants")).items;
+  var bindings = (await api("/projects/" + ws.meta.id + "/bindings")).items;
   var html = "<h1>" + esc(ws.meta.name)
     + ' <span class="state">' + esc(ws.businessState) + "</span></h1>"
     + '<div class="muted">' + esc(ws.product.id) + "@" + esc(ws.product.version)

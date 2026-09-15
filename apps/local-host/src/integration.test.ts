@@ -308,9 +308,9 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     const denied = await fetch(`${base}/products`);
     assert.equal(denied.status, 401);
 
-    const products = (await (
+    const { items: products } = (await (
       await fetch(`${base}/products`, { headers: authed })
-    ).json()) as Array<{ id: string }>;
+    ).json()) as { items: Array<{ id: string }> };
     assert.ok(products.some((p) => p.id === "bidproposal"));
 
     // System transparency surface for the settings panel.
@@ -345,7 +345,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     // 在任何项目之外也能查得到——那正是原先看不见未决确认的原因。
     const quiet = await fetch(`${base}/pending`, { headers: authed });
     assert.equal(quiet.status, 200);
-    assert.deepEqual(await quiet.json(), []);
+    assert.deepEqual(await quiet.json(), { items: [] });
 
     const created = await fetch(`${base}/projects`, {
       method: "POST",
@@ -382,9 +382,9 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     assert.equal(instance.state, "waiting_human");
 
     // 停在等人的那一刻，/pending 就报得出来 —— 不需要先打开这个项目。
-    const waiting = (await (
+    const { items: waiting } = (await (
       await fetch(`${base}/pending`, { headers: authed })
-    ).json()) as Array<{ projectId: string; taskInstanceId: string; kind: string }>;
+    ).json()) as { items: Array<{ projectId: string; taskInstanceId: string; kind: string }> };
     assert.equal(waiting.length, 1);
     assert.equal(waiting[0]?.projectId, meta.id);
     assert.equal(waiting[0]?.taskInstanceId, instance.id);
@@ -400,7 +400,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     // 决定做完就从清单里消失，否则入口很快变成一堆已处理过的噪音。
     assert.deepEqual(
       await (await fetch(`${base}/pending`, { headers: authed })).json(),
-      [],
+      { items: [] },
     );
 
     // Human-confirm state transition surfaces as 409 until confirmed.
@@ -428,7 +428,7 @@ test("local api: token gate, product listing, workspace + task flow", async () =
     const audit = await fetch(`${base}/projects/${meta.id}/audit`, {
       headers: authed,
     });
-    const events = (await audit.json()) as Parameters<typeof verifyAuditChain>[2];
+    const { items: events } = (await audit.json()) as { items: Parameters<typeof verifyAuditChain>[2] };
     assert.ok(verifyAuditChain(nodeCrypto, meta.id, events));
   } finally {
     await new Promise<void>((ok) => server.close(() => ok()));

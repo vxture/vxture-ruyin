@@ -87,6 +87,24 @@ void test("错误码必须是 SCREAMING_SNAKE", () => {
   }
 });
 
+void test("错误状态码直接回 { code } 字面量要拦 —— 缺 message / retryable，只看 apiError() 的规则看不见它", () => {
+  const r = check({ "server.ts": `      send(res, 503, { code: "HARDWARE_INFO_NOT_CONFIGURED" });` });
+  assert.equal(r.code, 1);
+  assert.match(r.out, /不走 apiError\(\)/);
+  assert.match(r.out, /message 与 retryable/, "要说清缺的是什么");
+
+  // 反向：成功响应里带 code 字段是数据，不是封套；跨行展开 apiError() 也合规。
+  const ok = check({
+    "server.ts": [
+      `send(res, 200, { code: "not_an_error" });`,
+      `send(res, 400, {`,
+      `  ...apiError("REQUEST_MALFORMED", m),`,
+      `});`,
+    ].join("\n"),
+  });
+  assert.equal(ok.code, 0, ok.out);
+});
+
 void test("QUOTA_EXCEEDED 要拦 —— **Ruyin 不做配额门控，这个码永远不会发生**", () => {
   const r = check({ "server.ts": `apiError("QUOTA_EXCEEDED", "超额")` });
   assert.equal(r.code, 1);

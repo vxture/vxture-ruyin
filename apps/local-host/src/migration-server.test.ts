@@ -38,7 +38,11 @@ void test("搬家期间的小服务：进度要令牌；别的路一律 503，�
     for (const path of ["/system", "/projects", "/"]) {
       const r = await fetch(`http://127.0.0.1:17932${path}`);
       assert.equal(r.status, 503, path);
-      assert.equal(((await r.json()) as { code: string }).code, "MIGRATING");
+      // X-1 完整封套；搬完就能答，所以可重试。
+      const body = (await r.json()) as { code: string; message: string; retryable: boolean };
+      assert.equal(body.code, "MIGRATING");
+      assert.ok(body.message.length > 0);
+      assert.equal(body.retryable, true);
     }
   } finally {
     await stopMigrationServer(server);
