@@ -16,4 +16,5 @@
 | `40-2608301530-ruyin-l3-client-registration-blockers.md` | L3 补充：回调登记 / ruyin-beta / 权益基址（附实测） | (1)(2) met · **(3) 已开 issue `#272`** | C2 公网基址 |
 | `50-2609101850-ruyin-native-session-management.md` | accounts 补齐原生客户端会话管理三件同源：`prompt` 兑现 / `post_logout_redirect_uri` 兑现 / 设备列表与远程吊销（附四组实测回应）。**已开 issue：`vxture-platform/vxture-platform#271`** | open | 「退出登录」在用户那里成立（不阻塞开发） |
 | `60-2609101900-ruyin-design-tokens-comfortable-density.md` | **DS 线**：`@vxture/design-tokens@3.0.0` 宽松档 inset/row 两组与默认档逐字相同，只有 control 抬了一档（附源文件逐行对照）。**已开 issue：`vxture/vxture-design#59`** | open | 不阻塞；ruyin 已自行撑开容器作过渡 |
+| `70-2609151351-ruyin-desktop-session-interface-gaps.md` | console-bff 补齐桌面会话够得着的三个接口：A 切换租户 / 工作区并读到真实 active workspace / B 原生退出（`/auth/logout` 只有 GET 且只认 cookie）/ C Runos 能力目录清单（ADR-020 §6.2）；附 platform `9b814c97` · runos `bd26817a` 读码定位 | open | A 多租户 / 多工作区用户切不出默认工作区 · B 退出在服务端成立 · C 能力清单落地（均不阻塞现有登录） |
 | vxture-platform/vxture-platform#198（issue，按 §10 开在平台仓） | L4 bid 云端能力面接入：OBO subject_token 受众（现规则必拒）+ bid 按暂用名登记 | open | 生产上 bid 三个鉴权端点 |
