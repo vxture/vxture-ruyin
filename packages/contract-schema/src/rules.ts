@@ -263,15 +263,26 @@ const r10: Rule = (c, errors) => {
   }
 };
 
-// R11 - temporary data class is fixed to local_only.
+// R11 - every sync policy is fixed to local_only: Ruyin does not sync agent
+// data (ADR-026 §5). It used to pin only the temporary class; any other value
+// was accepted and then did nothing, which reads as a promise. The enum keeps
+// the old values until the next contract major removes the key.
 const r11: Rule = (c, errors) => {
+  if (c.sync.default !== "local_only") {
+    err(
+      errors,
+      "R11",
+      "sync.default",
+      `sync policy is fixed to local_only (got ${c.sync.default}); Ruyin does not sync agent data (ADR-026)`,
+    );
+  }
   c.sync.classes.forEach((entry, i) => {
-    if (entry.class === "temporary" && entry.policy !== "local_only") {
+    if (entry.policy !== "local_only") {
       err(
         errors,
         "R11",
         `sync.classes[${i}].policy`,
-        `temporary data class sync policy is fixed to local_only (got ${entry.policy})`,
+        `${entry.class} data class sync policy is fixed to local_only (got ${entry.policy}); Ruyin does not sync agent data (ADR-026)`,
       );
     }
   });

@@ -367,6 +367,26 @@ test("R11: temporary data class sync policy is fixed to local_only", () => {
 });
 
 /**
+ * R11 扩到全部同步策略（ADR-026 §5）：Ruyin 不同步智能体数据。原先只钉 temporary，
+ * 别的类写 selective / manual 照收、然后什么都不发生 —— 契约读起来像一句承诺。
+ * default 与每一类各报一条，好让作者一次改全。
+ */
+test("R11: every sync policy - default and each class - is fixed to local_only (ADR-026)", () => {
+  const result = mutate((c) => {
+    c.sync.default = "cloud_only";
+    const core = c.sync.classes.find((x) => x.class === "core");
+    const generated = c.sync.classes.find((x) => x.class === "generated");
+    assert.ok(core && generated);
+    core.policy = "selective";
+    generated.policy = "manual";
+  });
+  const r11 = result.errors.filter((e) => e.rule === "R11");
+  assert.equal(r11.length, 3);
+  assert.ok(r11.some((e) => e.path === "sync.default"));
+  assert.ok(r11.every((e) => /ADR-026/.test(e.message)));
+});
+
+/**
  * R14：声明了工具却没有能力的任务，永远调不到那些工具。
  *
  * 这不是洁癖。标书契约的 `export_deliverable` 原本就是这个形状 —— 目标是

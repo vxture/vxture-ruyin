@@ -245,7 +245,7 @@ sync:
   default: local_only
   classes:
     - { class: source,    policy: local_only }
-    - { class: core,      policy: selective }
-    - { class: generated, policy: manual }
+    - { class: core,      policy: local_only }
+    - { class: generated, policy: local_only }
     - { class: derived,   policy: local_only }
     - { class: temporary, policy: local_only }

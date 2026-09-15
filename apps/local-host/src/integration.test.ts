@@ -177,7 +177,7 @@ sync:
   default: local_only
   classes:
     - { class: source,    policy: local_only }
-    - { class: generated, policy: manual }
+    - { class: generated, policy: local_only }
 `;
 }
 
