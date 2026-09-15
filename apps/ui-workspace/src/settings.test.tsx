@@ -1821,3 +1821,215 @@ test("能力平台：路由配置读不到时不显示调用路径那一行，�
   await capabilityRows("技能");
   expect(screen.queryByText(/能力调用路径/)).not.toBeInTheDocument();
 });
+
+// ───────────────────────── Runos 清单（ADR-020 §6.2 / RY-204） ─────────────────────────
+
+const CATALOG_ITEMS = [
+  {
+    capabilityId: "opensensenova.sn-deep-research",
+    primitiveType: "skill",
+    title: "Deep Research",
+    displayName: { "zh-CN": "深度研究", en: "Deep Research" },
+    category: "research",
+    tags: ["preset"],
+    summary: "多步研究",
+    local: { runnable: true, via: "preset-skill" },
+  },
+  {
+    capabilityId: "addyosmani.api-and-interface-design",
+    primitiveType: "skill",
+    title: "API and Interface Design",
+    tags: [],
+    local: { runnable: false },
+  },
+  {
+    capabilityId: "markitdown.document-to-markdown",
+    primitiveType: "connector",
+    title: "Document to Markdown",
+    category: "document",
+    tags: [],
+    local: { runnable: false },
+  },
+];
+
+function catalogPage(over: Record<string, unknown> = {}) {
+  return {
+    items: CATALOG_ITEMS,
+    total: 3,
+    source: {
+      kind: "platform",
+      state: "synced",
+      fetchedAt: "2026-09-15T08:00:00Z",
+      total: 3,
+      ref: "sha256:abc",
+      diff: { added: 2, removed: 0, changed: 1 },
+    },
+    ...over,
+  };
+}
+
+async function catalogBlock(): Promise<HTMLElement> {
+  const title = await screen.findByText("Runos 清单");
+  return title.closest("section") as HTMLElement;
+}
+
+test("Runos 清单：平台还没有目录端点时如实说没有 —— 刷新不可点、没有筛选，第一句就说它不是安装", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      capabilityCatalog: vi.fn().mockResolvedValue({
+        items: [],
+        total: 0,
+        source: { kind: "platform", state: "unavailable", reason: "平台尚未提供能力目录（vxture-platform#339）" },
+      }),
+    } as Partial<Api>),
+  );
+  expect(await screen.findByText("平台尚未提供能力目录，暂时没有清单。")).toBeInTheDocument();
+  expect(screen.getByText(/vxture-platform#339/)).toBeInTheDocument();
+  expect(screen.getByText(/不是安装：条目不会下载到本机/)).toBeInTheDocument();
+  expect(within(await catalogBlock()).getByRole("button", { name: "刷新" })).toBeDisabled();
+  expect(screen.queryByRole("textbox", { name: "搜索 Runos 清单" })).not.toBeInTheDocument();
+});
+
+test("Runos 清单：有数据源、还没取到过 —— 说还没有，并转达上次失败的原因", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      capabilityCatalog: vi.fn().mockResolvedValue({
+        items: [],
+        total: 0,
+        source: { kind: "platform", state: "never", reason: "取到 2 条，平台说共 3 条" },
+      }),
+    } as Partial<Api>),
+  );
+  expect(await screen.findByText("还没有取到 Runos 清单。")).toBeInTheDocument();
+  expect(screen.getByText("取到 2 条，平台说共 3 条")).toBeInTheDocument();
+  expect(within(await catalogBlock()).getByRole("button", { name: "刷新" })).toBeEnabled();
+});
+
+test("Runos 清单：旧的一份照样列，但说清是哪一刻的、为什么没更新", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      capabilityCatalog: vi.fn().mockResolvedValue(
+        catalogPage({
+          source: { kind: "platform", state: "stale", fetchedAt: "2026-09-14T08:00:00Z", total: 3, reason: "HTTP 502" },
+        }),
+      ),
+    } as Partial<Api>),
+  );
+  expect(await screen.findByText(/^显示的是 .+ 时的清单，之后没能更新。$/)).toBeInTheDocument();
+  expect(screen.getByText("HTTP 502")).toBeInTheDocument();
+  expect(screen.queryByText(/本次新增/)).not.toBeInTheDocument();
+});
+
+test("Runos 清单：同步过的一份 —— 条数、时间、本次变化，每条标本机能不能跑（D4）", async () => {
+  renderSection("skills", skillsApi({ capabilityCatalog: vi.fn().mockResolvedValue(catalogPage()) } as Partial<Api>));
+  expect(await screen.findByText(/^共 3 项 · 更新于 /)).toBeInTheDocument();
+  expect(screen.getByText("本次新增 2 · 下线 0 · 变更 1")).toBeInTheDocument();
+  const rows = within(screen.getByRole("list", { name: "Runos 清单条目" })).getAllByRole("listitem");
+  expect(rows).toHaveLength(3);
+  // 中文显示名优先，没有才用 title
+  expect(within(rows[0]!).getByText("深度研究")).toBeInTheDocument();
+  expect(within(rows[0]!).getByText("本机可运行")).toBeInTheDocument();
+  expect(within(rows[0]!).getByText("research")).toBeInTheDocument();
+  expect(within(rows[1]!).getByText("API and Interface Design")).toBeInTheDocument();
+  expect(within(rows[1]!).getByText("本机无")).toBeInTheDocument();
+  expect(within(rows[2]!).getByText("markitdown.document-to-markdown")).toBeInTheDocument();
+  expect(within(rows[2]!).getByText("仅云端")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "再显示更多" })).not.toBeInTheDocument();
+});
+
+test("Runos 清单：没有变化时不说「本次新增 0」", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      capabilityCatalog: vi.fn().mockResolvedValue(
+        catalogPage({
+          source: { kind: "platform", state: "synced", total: 3, diff: { added: 0, removed: 0, changed: 0 } },
+        }),
+      ),
+    } as Partial<Api>),
+  );
+  expect(await screen.findByText(/^共 3 项 · 更新于 —$/)).toBeInTheDocument();
+  expect(screen.queryByText(/本次新增/)).not.toBeInTheDocument();
+});
+
+test("Runos 清单：按类型筛选交给守护进程；筛完没有就说没有，筛选本身还在", async () => {
+  const capabilityCatalog = vi
+    .fn()
+    .mockResolvedValueOnce(catalogPage())
+    .mockResolvedValue(catalogPage({ items: [], total: 0 }));
+  renderSection("skills", skillsApi({ capabilityCatalog } as Partial<Api>));
+  await screen.findByRole("list", { name: "Runos 清单条目" });
+  await userEvent.click(screen.getByRole("radio", { name: "执行器" }));
+  await waitFor(() => expect(capabilityCatalog).toHaveBeenLastCalledWith({ type: "executor" }));
+  expect(await screen.findByText("没有符合条件的条目。")).toBeInTheDocument();
+  expect(screen.getByRole("radio", { name: "执行器" })).toBeInTheDocument();
+});
+
+test("Runos 清单：搜索词交给守护进程（q），空白不发", async () => {
+  const capabilityCatalog = vi.fn().mockResolvedValue(catalogPage());
+  renderSection("skills", skillsApi({ capabilityCatalog } as Partial<Api>));
+  const box = await screen.findByRole("textbox", { name: "搜索 Runos 清单" });
+  fireEvent.change(box, { target: { value: " excel " } });
+  await waitFor(() => expect(capabilityCatalog).toHaveBeenLastCalledWith({ q: "excel" }));
+  fireEvent.change(box, { target: { value: "   " } });
+  await waitFor(() => expect(capabilityCatalog).toHaveBeenLastCalledWith({}));
+});
+
+test("Runos 清单：「再显示更多」带着游标取下一页并接在后面；取完按钮就没了", async () => {
+  const capabilityCatalog = vi
+    .fn()
+    .mockResolvedValueOnce(catalogPage({ items: CATALOG_ITEMS.slice(0, 2), nextCursor: "2" }))
+    .mockResolvedValueOnce(catalogPage({ items: CATALOG_ITEMS.slice(2) }));
+  renderSection("skills", skillsApi({ capabilityCatalog } as Partial<Api>));
+  await userEvent.click(await screen.findByRole("button", { name: "再显示更多" }));
+  await waitFor(() => expect(capabilityCatalog).toHaveBeenLastCalledWith({ cursor: "2" }));
+  await waitFor(() =>
+    expect(within(screen.getByRole("list", { name: "Runos 清单条目" })).getAllByRole("listitem")).toHaveLength(3),
+  );
+  expect(screen.queryByRole("button", { name: "再显示更多" })).not.toBeInTheDocument();
+});
+
+test("Runos 清单：翻页失败留着已经列出的，并说一句", async () => {
+  const capabilityCatalog = vi
+    .fn()
+    .mockResolvedValueOnce(catalogPage({ items: CATALOG_ITEMS.slice(0, 2), nextCursor: "2" }))
+    .mockRejectedValueOnce(new Error("网络断了"));
+  renderSection("skills", skillsApi({ capabilityCatalog } as Partial<Api>));
+  await userEvent.click(await screen.findByRole("button", { name: "再显示更多" }));
+  expect(await screen.findByText("网络断了")).toBeInTheDocument();
+  expect(within(screen.getByRole("list", { name: "Runos 清单条目" })).getAllByRole("listitem")).toHaveLength(2);
+});
+
+test("Runos 清单：刷新 = 手动取一次再重读", async () => {
+  const capabilityCatalog = vi.fn().mockResolvedValue(catalogPage());
+  const refreshCapabilityCatalog = vi.fn().mockResolvedValue({ outcome: "synced", source: catalogPage().source });
+  renderSection("skills", skillsApi({ capabilityCatalog, refreshCapabilityCatalog } as Partial<Api>));
+  await userEvent.click(within(await catalogBlock()).getByRole("button", { name: "刷新" }));
+  await waitFor(() => expect(refreshCapabilityCatalog).toHaveBeenCalledWith("manual"));
+  await waitFor(() => expect(capabilityCatalog).toHaveBeenCalledTimes(2));
+});
+
+test("Runos 清单：刷新失败把守护进程的原因原样说出来，列表照旧", async () => {
+  const capabilityCatalog = vi.fn().mockResolvedValue(catalogPage());
+  const refreshCapabilityCatalog = vi
+    .fn()
+    .mockRejectedValue(new ApiError(502, { message: "取到 2 条，平台说共 3 条" }));
+  renderSection("skills", skillsApi({ capabilityCatalog, refreshCapabilityCatalog } as Partial<Api>));
+  await userEvent.click(within(await catalogBlock()).getByRole("button", { name: "刷新" }));
+  expect(await screen.findByText("取到 2 条，平台说共 3 条")).toBeInTheDocument();
+  expect(screen.getByRole("list", { name: "Runos 清单条目" })).toBeInTheDocument();
+});
+
+test("Runos 清单：这套装配没有清单（503）时整块不显示，不拿空列表冒充", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      capabilityCatalog: vi.fn().mockRejectedValue(new ApiError(503, { message: "CAPABILITY_CATALOG_NOT_CONFIGURED" })),
+    } as Partial<Api>),
+  );
+  await capabilityRows("技能");
+  expect(screen.queryByText("Runos 清单")).not.toBeInTheDocument();
+});

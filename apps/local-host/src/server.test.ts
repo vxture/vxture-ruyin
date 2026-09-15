@@ -3062,3 +3062,173 @@ void test("GET /capabilities/routing：没接回 503；接了按会话的租户 
     }
   }
 });
+
+/*
+ * Runos 能力清单（ADR-020 §6.3，RY-204）的两个接口。清单本体的规则在
+ * capability-catalog.test.ts 里钉；这里钉的是 HTTP 面：没接就说没接、查询参数原样
+ * 转交、每条带「本机可运行」、刷新时各种处境各回各的码，以及登录成功后自己同步一次。
+ */
+type CatalogSourceStatusLike = { kind: "platform"; state: string; reason?: string; total?: number };
+
+function fakeCatalog(init: {
+  state?: string;
+  reason?: string;
+  outcome?: { status: string; error?: string; reason?: string };
+}) {
+  const calls = { list: [] as unknown[], sync: [] as string[] };
+  let state = init.state ?? "never";
+  const catalog = {
+    list: (query: unknown) => {
+      calls.list.push(query);
+      return {
+        items: [
+          { capabilityId: "opensensenova.sn-deep-research", primitiveType: "skill" as const, title: "Deep research", tags: [] },
+          { capabilityId: "sandbox.python", primitiveType: "executor" as const, title: "Python", tags: [] },
+        ],
+        total: 7,
+        nextCursor: "2",
+      };
+    },
+    status: (): CatalogSourceStatusLike => ({ kind: "platform", state, ...(init.reason ? { reason: init.reason } : {}) }),
+    sync: (reason: string) => {
+      calls.sync.push(reason);
+      if (init.outcome?.status === "synced") state = "synced";
+      return Promise.resolve(init.outcome ?? { status: "synced" });
+    },
+  };
+  return { catalog, calls };
+}
+
+const signedInSession = (signedIn: boolean) =>
+  ({
+    status: () => ({ signedIn, expiresAt: Date.now() + 3600_000 }),
+    signedIn: () => signedIn,
+    identity: async () => ({}),
+  }) as unknown as PlatformSession;
+
+void test("GET /capabilities/catalog：没接回 503；接了原样转交查询参数、每条带本机可运行、带着数据源状态", async () => {
+  let rig = await startServer({});
+  try {
+    for (const [method, path] of [["GET", "/capabilities/catalog"], ["POST", "/capabilities/catalog/refresh"]] as const) {
+      const res = await fetch(`${rig.base}${path}`, { method, headers: rig.json, ...(method === "POST" ? { body: "{}" } : {}) });
+      assert.equal(res.status, 503, path);
+      assert.equal(((await res.json()) as { code: string }).code, "CAPABILITY_CATALOG_NOT_CONFIGURED");
+    }
+  } finally {
+    closeRig(rig);
+  }
+
+  const { catalog, calls } = fakeCatalog({ state: "unavailable", reason: "平台尚未提供能力目录（vxture-platform#339）" });
+  rig = await startServer({
+    capabilityCatalog: {
+      catalog: catalog as never,
+      localFacts: async () => ({
+        skills: [{ name: "sn-deep-research", source: "opensensenova.sensenova-skills", layer: "bundled", enabled: true }],
+      }),
+    },
+  });
+  try {
+    const res = await fetch(`${rig.base}/capabilities/catalog?type=skill&category=research&q=deep&cursor=2&limit=50`, {
+      headers: rig.headers,
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      items: Array<{ capabilityId: string; local: { runnable: boolean; via?: string } }>;
+      total: number;
+      nextCursor?: string;
+      source: CatalogSourceStatusLike;
+    };
+    assert.deepEqual(calls.list, [{ type: "skill", category: "research", q: "deep", cursor: "2", limit: 50 }]);
+    assert.deepEqual(
+      body.items.map((i) => [i.capabilityId, i.local]),
+      [
+        ["opensensenova.sn-deep-research", { runnable: true, via: "preset-skill" }],
+        ["sandbox.python", { runnable: false }],
+      ],
+    );
+    assert.equal(body.total, 7);
+    assert.equal(body.nextCursor, "2");
+    assert.equal(body.source.state, "unavailable");
+    assert.match(String(body.source.reason), /vxture-platform#339/);
+
+    // 不带参数：一个都不转交，limit 读不懂就不传。
+    await fetch(`${rig.base}/capabilities/catalog?limit=abc`, { headers: rig.headers });
+    assert.deepEqual(calls.list[1], {});
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("POST /capabilities/catalog/refresh：reason 不认识 400；没有来源 503；未登录 401；失败 502 可重试；成功与跳过 200", async () => {
+  const post = (rig: Rig, body: unknown) =>
+    fetch(`${rig.base}/capabilities/catalog/refresh`, { method: "POST", headers: rig.json, body: JSON.stringify(body) });
+
+  const cases: Array<{
+    name: string;
+    catalog: ReturnType<typeof fakeCatalog>;
+    session?: PlatformSession;
+    body: unknown;
+    status: number;
+    code?: string;
+    retryable?: boolean;
+    outcome?: string;
+    synced?: string[];
+  }> = [
+    { name: "bad reason", catalog: fakeCatalog({}), session: signedInSession(true), body: { reason: "cron" }, status: 400, code: "REQUEST_MALFORMED", synced: [] },
+    { name: "non-string reason", catalog: fakeCatalog({}), session: signedInSession(true), body: { reason: 3 }, status: 400, code: "REQUEST_MALFORMED", synced: [] },
+    { name: "no source", catalog: fakeCatalog({ state: "unavailable", reason: "平台尚未提供能力目录（vxture-platform#339）" }), session: signedInSession(true), body: {}, status: 503, code: "CAPABILITY_CATALOG_SOURCE_UNAVAILABLE", synced: [] },
+    { name: "no source, no reason", catalog: fakeCatalog({ state: "unavailable" }), body: {}, status: 503, code: "CAPABILITY_CATALOG_SOURCE_UNAVAILABLE", synced: [] },
+    { name: "signed out", catalog: fakeCatalog({}), session: signedInSession(false), body: {}, status: 401, code: "AUTH_REQUIRED", synced: [] },
+    { name: "no session at all", catalog: fakeCatalog({}), body: {}, status: 401, code: "AUTH_REQUIRED", synced: [] },
+    { name: "sync failed", catalog: fakeCatalog({ outcome: { status: "failed", error: "取到 3 条，平台说共 4 条" } }), session: signedInSession(true), body: { reason: "manual" }, status: 502, code: "CAPABILITY_CATALOG_SYNC_FAILED", retryable: true, synced: ["manual"] },
+    { name: "source vanished mid-flight", catalog: fakeCatalog({ outcome: { status: "unavailable", reason: "没了" } }), session: signedInSession(true), body: {}, status: 503, code: "CAPABILITY_CATALOG_SOURCE_UNAVAILABLE", synced: ["manual"] },
+    { name: "synced", catalog: fakeCatalog({ outcome: { status: "synced" } }), session: signedInSession(true), body: { reason: "manual" }, status: 200, outcome: "synced", synced: ["manual"] },
+    { name: "focus skipped", catalog: fakeCatalog({ state: "synced", outcome: { status: "skipped" } }), session: signedInSession(true), body: { reason: "focus" }, status: 200, outcome: "skipped", synced: ["focus"] },
+  ];
+  for (const c of cases) {
+    const rig = await startServer({
+      ...(c.session ? { platformSession: c.session } : {}),
+      capabilityCatalog: { catalog: c.catalog.catalog as never, localFacts: () => ({ skills: [] }) },
+    });
+    try {
+      const res = await post(rig, c.body);
+      assert.equal(res.status, c.status, c.name);
+      const body = (await res.json()) as { code?: string; retryable?: boolean; outcome?: string; source?: CatalogSourceStatusLike; message?: string };
+      if (c.code) assert.equal(body.code, c.code, c.name);
+      if (c.retryable !== undefined) assert.equal(body.retryable, c.retryable, c.name);
+      if (c.outcome) {
+        assert.equal(body.outcome, c.outcome, c.name);
+        assert.equal(body.source?.kind, "platform", c.name);
+      }
+      if (c.name === "sync failed") assert.equal(body.message, "取到 3 条，平台说共 4 条");
+      assert.deepEqual(c.catalog.calls.sync, c.synced, c.name);
+    } finally {
+      closeRig(rig);
+    }
+  }
+});
+
+void test("登录成功后守护进程自己同步一次清单（D3）", async () => {
+  const { catalog, calls } = fakeCatalog({});
+  let finish!: () => void;
+  const claimed = new Promise<void>((r) => (finish = r));
+  const rig = await startServer({
+    platform: signedInTo("wsp_x"),
+    platformSession: {
+      ...signedInSession(false),
+      beginLogin: () => "https://console.vxture.com/auth/login?surface=native&handle=abc",
+      completeLogin: () => claimed,
+    } as unknown as PlatformSession,
+    capabilityCatalog: { catalog: catalog as never, localFacts: () => ({ skills: [] }) },
+  });
+  try {
+    const res = await fetch(`${rig.base}/auth/login`, { method: "POST", headers: rig.headers });
+    assert.equal(res.status, 200);
+    assert.deepEqual(calls.sync, [], "领取完成之前不取");
+    finish();
+    for (let i = 0; i < 50 && calls.sync.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(calls.sync, ["login"]);
+  } finally {
+    closeRig(rig);
+  }
+});
