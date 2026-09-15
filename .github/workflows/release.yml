@@ -149,7 +149,7 @@ jobs:
           # 1. The versioned release: immutable record of this exact build.
           gh release create "$TAG" "${ASSETS[@]}" \
             --title "Ruyin $VERSION ($CHANNEL, $TAG)" \
-            --notes "Channel: $CHANNEL. Unsigned installer (TD-001): Windows SmartScreen warns once; choose More info -> Run anyway. Feed and manifest are the copies also served from the rolling '$CHANNEL' release." \
+            --notes "Channel: $CHANNEL. Unsigned installer (TD-001). Windows SmartScreen usually warns once: choose More info -> Run anyway. On a machine with Smart App Control on, the downloaded installer is blocked silently instead (double-click does nothing): run Unblock-File on the .exe in PowerShell first. Feed and manifest are the copies also served from the rolling '$CHANNEL' release." \
             "${PRE[@]}"
 
           # 2. The rolling channel release: a fixed address whose assets are
