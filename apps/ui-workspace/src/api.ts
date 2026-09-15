@@ -1036,6 +1036,25 @@ export class Api {
     this.call<SubscribedProduct[]>("/platform/subscribed-products");
   /** 本工作区的配额用量，只读展示。 */
   quotaUsage = () => this.call<QuotaUsage>("/platform/quota-usage");
+  /** 能力调用走本机还是云端（ADR-025）：当前档位、档位来源、那句必须带着的说明。 */
+  capabilityRouting = () => this.call<CapabilityRouting>("/capabilities/routing");
+}
+
+/** 能力路由（ADR-025）。三档：只许本机 / 优先本机 / 优先云端；默认只许本机。 */
+export interface CapabilityRouting {
+  /** 面向用户的名字（Runos），**出现时必须带着 `note`**。 */
+  name: string;
+  /** 「兼容 Runos 协议的本地能力面」。 */
+  note: string;
+  /** 云端 Runos 通路开没开放。开放之前任何配置都按本机执行。 */
+  cloudOpen: boolean;
+  source: "default" | "file";
+  errors: string[];
+  current: {
+    mode: "local_only" | "prefer_local" | "prefer_cloud";
+    source: "capability" | "workspace" | "tenant" | "default";
+    label: string;
+  };
 }
 
 /**

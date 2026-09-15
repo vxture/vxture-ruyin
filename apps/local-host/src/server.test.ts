@@ -2976,3 +2976,76 @@ void test("平台读在未登录 / 会话被拒时回 401 AUTH_REQUIRED，不是
     closeRig(rig);
   }
 });
+
+/*
+ * 能力路由（ADR-025）的只读面。钉三件：没接就说没接（503，不拿默认值冒充问过了）；
+ * 档位按**当前会话**的租户 / 工作区取；名字（Runos）出现时带着那句说明。
+ */
+void test("GET /capabilities/routing：没接回 503；接了按会话的租户 / 工作区取档位，名字带着说明", async () => {
+  let rig = await startServer({});
+  try {
+    const res = await fetch(`${rig.base}/capabilities/routing`, { headers: rig.headers });
+    assert.equal(res.status, 503);
+    assert.equal(((await res.json()) as { code: string }).code, "CAPABILITY_ROUTING_NOT_CONFIGURED");
+  } finally {
+    closeRig(rig);
+  }
+
+  const policy = {
+    default: "local_only" as const,
+    tenants: { t1: "prefer_local" as const },
+    workspaces: { w1: "prefer_cloud" as const },
+    capabilities: {},
+  };
+  type Body = {
+    name: string;
+    note: string;
+    cloudOpen: boolean;
+    source: string;
+    errors: string[];
+    current: { mode: string; source: string; label: string };
+  };
+
+  rig = await startServer({
+    platformSession: {
+      status: () => ({ signedIn: true, expiresAt: Date.now() + 3600_000 }),
+      signedIn: () => true,
+      identity: async () => ({ org: { id: "t1" }, workspace: { id: "w1" } }),
+    } as unknown as PlatformSession,
+    capabilityRouting: () => ({ policy, source: "file", errors: [] }),
+  });
+  try {
+    const body = (await (await fetch(`${rig.base}/capabilities/routing`, { headers: rig.headers })).json()) as Body;
+    assert.equal(body.name, "Runos");
+    assert.equal(body.note, "兼容 Runos 协议的本地能力面");
+    assert.equal(body.cloudOpen, false, "云端通路开放之前恒为 false");
+    assert.equal(body.source, "file");
+    assert.deepEqual(body.current, { mode: "prefer_cloud", source: "workspace", label: "优先云端" });
+  } finally {
+    closeRig(rig);
+  }
+
+  // 身份读失败 / 未登录：拿不到租户与工作区，就按默认档位，不猜
+  for (const platformSession of [
+    {
+      status: () => ({ signedIn: true, expiresAt: Date.now() + 3600_000 }),
+      signedIn: () => true,
+      identity: async () => {
+        throw new Error("网关 502");
+      },
+    },
+    undefined,
+  ]) {
+    rig = await startServer({
+      ...(platformSession ? { platformSession: platformSession as unknown as PlatformSession } : {}),
+      capabilityRouting: () => ({ policy, source: "default", errors: ["示例"] }),
+    });
+    try {
+      const body = (await (await fetch(`${rig.base}/capabilities/routing`, { headers: rig.headers })).json()) as Body;
+      assert.deepEqual(body.current, { mode: "local_only", source: "default", label: "只许本机" });
+      assert.deepEqual(body.errors, ["示例"]);
+    } finally {
+      closeRig(rig);
+    }
+  }
+});

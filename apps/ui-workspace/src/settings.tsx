@@ -43,6 +43,7 @@ import {
   type SkillView,
   type ComponentState,
   type ToolView,
+  type CapabilityRouting,
   type DataDirCheck,
   type HardwareInfo,
   type SessionInfo,
@@ -1554,6 +1555,8 @@ const TOOL_KIND: Record<ToolView["kind"], string> = {
 function SkillsSection({ api }: { api: Api }) {
   const [listing, setListing] = useState<SkillListing | null>(null);
   const [tools, setTools] = useState<ToolView[] | null>(null);
+  /** 能力调用路径（ADR-025）。null = 没问到 —— 那时不显示那一行，不猜一个档位。 */
+  const [routing, setRouting] = useState<CapabilityRouting | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1577,6 +1580,11 @@ function SkillsSection({ api }: { api: Api }) {
       setTools((await api.tools()).items);
     } catch {
       setTools([]);
+    }
+    try {
+      setRouting(await api.capabilityRouting());
+    } catch {
+      setRouting(null);
     }
   };
   useEffect(() => {
@@ -1686,6 +1694,17 @@ function SkillsSection({ api }: { api: Api }) {
           （本机）此刻真正装着的那一份。
         </span>
       </p>
+      {routing && (
+        /* 调用路径（ADR-025）。叫 Runos 好理解，但本机跑的不是云端 Runos 服务 —— 名字
+           出现的地方，说明必须一起出现（owner 2026-09-15）。 */
+        <p className="cap-sync">
+          <Icon name="shield-check" size="sm" aria-hidden />
+          <span>
+            能力调用路径：<strong>{routing.current.label}</strong> · {routing.name}（{routing.note}）
+            {routing.cloudOpen ? "" : "。云端 Runos 通路尚未开放，任何配置都按本机执行"}
+          </span>
+        </p>
+      )}
       <SettingsBlock
         icon="sparkles"
         collapsible

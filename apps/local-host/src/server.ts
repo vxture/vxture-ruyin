@@ -63,7 +63,16 @@ import {
 import {
   NotSignedInError as SessionNotSignedInError,
   type PlatformSession,
+  type SessionIdentity,
 } from "./platform-session.js";
+import {
+  CLOUD_ROUTE_OPEN,
+  LOCAL_PLANE_NAME,
+  LOCAL_PLANE_NOTE,
+  ROUTE_MODE_LABEL,
+  modeFor,
+  type loadRoutingPolicy,
+} from "./capability-routing.js";
 
 /**
  * server.ts 只依赖这几个动作；实现见 connector-registry.ts。`install`/`probe`
@@ -325,6 +334,11 @@ export interface LocalApiDeps {
    * 传的是一个带缓存的函数，不在每次请求里现查。
    */
   hardwareInfo?: () => Promise<HardwareInfo>;
+  /**
+   * 能力路由配置（ADR-025）。缺省 = 这套装配没接这一路，`GET /capabilities/routing`
+   * 如实回 503 —— 不拿默认值冒充「问过了」。
+   */
+  capabilityRouting?: () => ReturnType<typeof loadRoutingPolicy>;
 }
 
 /**
@@ -967,6 +981,32 @@ async function handle(
       return;
     }
     send(res, 200, await deps.hardwareInfo());
+    return;
+  }
+
+  // GET /capabilities/routing - 能力调用走本机还是云端（ADR-025）。只读：档位、档位来源、
+  // 云端通路开没开，以及名字必须带着的那句说明。档位按当前会话的租户 / 工作区取。
+  if (method === "GET" && path === "/capabilities/routing") {
+    if (!deps.capabilityRouting) {
+      send(res, 503, apiError("CAPABILITY_ROUTING_NOT_CONFIGURED", "这套装配没有能力路由配置"));
+      return;
+    }
+    const { policy, source, errors } = deps.capabilityRouting();
+    const identity: SessionIdentity = deps.platformSession?.signedIn()
+      ? await deps.platformSession.identity().catch((): SessionIdentity => ({}))
+      : {};
+    const current = modeFor(policy, {
+      ...(identity.org?.id ? { tenantId: identity.org.id } : {}),
+      ...(identity.workspace?.id ? { workspaceId: identity.workspace.id } : {}),
+    });
+    send(res, 200, {
+      name: LOCAL_PLANE_NAME,
+      note: LOCAL_PLANE_NOTE,
+      cloudOpen: CLOUD_ROUTE_OPEN,
+      source,
+      errors,
+      current: { ...current, label: ROUTE_MODE_LABEL[current.mode] },
+    });
     return;
   }
 
