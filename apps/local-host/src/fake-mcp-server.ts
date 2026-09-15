@@ -11,6 +11,7 @@
  *   --no-tools            answer tools/list with an empty list
  *   --flood-stdout        写一大段**不带换行**的 stdout（客户端要在上限处收摊，TD-046）
  *   --huge-tool-result    tools/call 回一个特别大的结果（连接器要截断并明说，TD-046）
+ *   --slow-init MS        晚 MS 毫秒才回 initialize（模拟首次启动慢的服务器，如 uvx 现搭环境）
  *
  * Excluded from coverage (package.json): it runs in a child process, where
  * the coverage collector cannot see it.
@@ -21,6 +22,8 @@ import { createInterface } from "node:readline";
 const argv = new Set(process.argv.slice(2));
 const pagesArg = process.argv.indexOf("--pages");
 const PAGES = pagesArg >= 0 ? Number(process.argv[pagesArg + 1]) : 1;
+const slowInitArg = process.argv.indexOf("--slow-init");
+const SLOW_INIT_MS = slowInitArg >= 0 ? Number(process.argv[slowInitArg + 1]) : 0;
 
 const RESOURCES = [
   {
@@ -64,6 +67,22 @@ lines.on("line", (line) => {
   }
   switch (msg.method) {
     case "initialize":
+      if (SLOW_INIT_MS > 0) {
+        setTimeout(
+          () =>
+            write({
+              jsonrpc: "2.0",
+              id: msg.id,
+              result: {
+                protocolVersion: msg.params?.["protocolVersion"],
+                capabilities: { resources: {} },
+                serverInfo: { name: "fake-crm", version: "0.0.1" },
+              },
+            }),
+          SLOW_INIT_MS,
+        );
+        break;
+      }
       if (argv.has("--prose-on-stdout")) process.stdout.write("hello from a chatty server\n");
       write({
         jsonrpc: "2.0",

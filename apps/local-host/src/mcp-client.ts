@@ -124,6 +124,16 @@ interface RpcMessage {
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+/**
+ * 起进程到 initialize 回复的上限 —— **与单次请求的上限分开**。
+ *
+ * 起一个 stdio 服务器的时间不是一次 JSON-RPC 往返的时间：进程要启动、运行时要加载，
+ * uvx 形态首次还要从缓存现搭一个临时 Python 环境（Windows 上是往新目录写上万个
+ * 文件，杀毒软件会逐个扫）。本机实测一秒多，CI runner 上超过 15 秒 —— 两者共用
+ * 一个 15 秒时，首次启动就被判成「服务器不回话」，而之后每次都好好的（RY-001 #16）。
+ * 这里只放宽握手这一次；之后的请求仍按 timeoutMs，卡住的工具调用照样尽快失败。
+ */
+const DEFAULT_START_TIMEOUT_MS = 60_000;
 /** Pages of resources/list we will follow before giving up on a runaway server. */
 const MAX_LIST_PAGES = 50;
 
@@ -142,6 +152,8 @@ export class McpStdioClient implements McpClient {
     private readonly spec: McpServerSpec,
     private readonly options: {
       timeoutMs?: number;
+      /** 起进程到 initialize 回复的上限；缺省 60 秒，见 DEFAULT_START_TIMEOUT_MS。 */
+      startTimeoutMs?: number;
       clientInfo?: { name: string; version: string };
       /** 一条 JSON-RPC 消息的字节上限（TD-046）；缺省见 resource-limits.ts。 */
       maxLineBytes?: number;
@@ -187,11 +199,15 @@ export class McpStdioClient implements McpClient {
     child.stdout!.setEncoding("utf8");
     child.stdout!.on("data", (chunk: string) => this.onStdout(chunk));
 
-    const info = (await this.request("initialize", {
-      protocolVersion: MCP_PROTOCOL_VERSION,
-      capabilities: {},
-      clientInfo: this.options.clientInfo ?? { name: "ruyin", version: "0.1.0" },
-    })) as McpServerInfo;
+    const info = (await this.request(
+      "initialize",
+      {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: this.options.clientInfo ?? { name: "ruyin", version: "0.1.0" },
+      },
+      this.options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS,
+    )) as McpServerInfo;
     if (typeof info?.protocolVersion !== "string") {
       throw new McpError("initialize", "server returned no protocolVersion");
     }
@@ -265,14 +281,14 @@ export class McpStdioClient implements McpClient {
 
   // -- wire --------------------------------------------------------------
 
-  private request(method: string, params: unknown): Promise<unknown> {
+  private request(method: string, params: unknown, timeoutOverrideMs?: number): Promise<unknown> {
     if (!this.child || this.exited !== undefined) {
       return Promise.reject(
         new McpError(method, this.exited ?? "not started"),
       );
     }
     const id = this.nextId++;
-    const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timeoutMs = timeoutOverrideMs ?? this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);

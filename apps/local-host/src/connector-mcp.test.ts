@@ -60,6 +60,31 @@ test("client: server exit rejects pending and later requests name the exit", asy
   await assert.rejects(client.ping(), /server exited/);
 });
 
+/*
+ * RY-001 #16：首次启动慢的服务器（uvx 现搭环境）不能被单次请求的上限判死。
+ * 握手按启动上限等，之后的请求仍按请求上限 —— 两件事各钉一条。
+ */
+test("client: initialize waits for the start timeout, not the per-request one", async () => {
+  // 回复晚于请求上限（200ms）、但在启动上限（3s）以内：照常起来
+  const slow = new McpStdioClient(spec("--slow-init", "500"), { timeoutMs: 200, startTimeoutMs: 3000 });
+  const info = await slow.start();
+  assert.equal(info.serverInfo?.name, "fake-crm");
+  assert.ok(slow.running);
+  await slow.stop();
+
+  // 超过启动上限：失败，并且说出是 initialize 没回
+  const tooSlow = new McpStdioClient(spec("--slow-init", "2000"), { timeoutMs: 5000, startTimeoutMs: 300 });
+  await assert.rejects(tooSlow.start(), /initialize: no reply within 300ms/);
+  await tooSlow.stop();
+});
+
+test("client: after a slow start, requests are still held to the per-request timeout", async () => {
+  const client = new McpStdioClient(spec("--slow-init", "400", "--hang-read"), { timeoutMs: 250, startTimeoutMs: 3000 });
+  await client.start();
+  await assert.rejects(client.readResource("crm://accounts/1"), /resources\/read: no reply within 250ms/);
+  await client.stop();
+});
+
 test("client: a request with no reply times out with the method named, not hangs", async () => {
   const client = new McpStdioClient(spec("--hang-read"), { timeoutMs: 300 });
   await client.start();
