@@ -1222,8 +1222,15 @@ void test("HomePage: 平台上订了、本机没装的智能体照样列出，�
   expect(screen.queryByText("无码")).not.toBeInTheDocument();
   expect(screen.getAllByText("本机未安装")).toHaveLength(3);
   expect(screen.getByText("已过期")).toBeInTheDocument();
-  expect(screen.getByText("套餐 Starter · v2.1.0")).toBeInTheDocument();
-  expect(screen.getByText("套餐 Starter")).toBeInTheDocument();
+  // 档位标签、版本号、产品介绍分居三处（owner 2026-09-16，与本地卡片同一套
+  // 版式）：档位是标题行右侧的标签，不再塞进描述里。
+  expect(screen.getAllByText("starter")).toHaveLength(3);
+  const remoteCard = screen.getByText("产品范本").closest("article") as HTMLElement;
+  expect(within(remoteCard).getByText("v2.1.0")).toBeInTheDocument();
+  expect(within(remoteCard).getByText("Vxture 智能体")).toBeInTheDocument();
+  // 过期那张没有 releaseVersion，左下角就不该冒出一个空的版本号。
+  const expiredCard = screen.getByText("发票助手").closest("article") as HTMLElement;
+  expect(within(expiredCard).queryByText(/^v/)).not.toBeInTheDocument();
   // 本地卡只有 bidproposal 一张
   expect(screen.getAllByText("bidproposal")).toHaveLength(1);
   // 订阅清单问到了：「订阅状态尚未接通」那句不再出现
