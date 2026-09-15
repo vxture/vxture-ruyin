@@ -1061,6 +1061,21 @@ export class Api {
   /** 立刻取一次清单。`focus` 由守护进程按 6 小时节流（RY-204 D3），登录与手动总是取。 */
   refreshCapabilityCatalog = (reason: "login" | "focus" | "manual" = "manual") =>
     this.call<CapabilityCatalogRefresh>("/capabilities/catalog/refresh", "POST", { reason });
+  /**
+   * 模型平台（RY-001 #24）：本工作区在 Atlas 上被授权的模型，**只展示**。模型由各智能体
+   * 直接对接 Atlas（ADR-026 §2 第 3 条），本机不配置、不调用。平台只授租户所有者读，
+   * 其他角色守护进程回 403。
+   */
+  atlasModels = () => this.list<AtlasModel>("/platform/atlas/models");
+}
+
+/** 模型平台里的一个模型。守护进程已投影掉端点地址、密钥引用等运维字段。 */
+export interface AtlasModel {
+  modelCode: string;
+  modelName: string;
+  provider: string;
+  capabilities: string[];
+  isActive: boolean;
 }
 
 /** 能力路由（ADR-025）。三档：只许本机 / 优先本机 / 优先云端；默认只许本机。 */

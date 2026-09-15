@@ -49,7 +49,7 @@ import {
   PlatformNotConfiguredError,
   type PlatformService,
 } from "./platform.js";
-import { NotSignedInError as SessionNotSignedInError, type PlatformSession } from "./platform-session.js";
+import { NotSignedInError as SessionNotSignedInError, PlatformReadError, type PlatformSession } from "./platform-session.js";
 
 // Compiled test runs from dist/, so ../../../ is the repo root (same
 // convention as integration.test.ts).
@@ -3230,5 +3230,102 @@ void test("登录成功后守护进程自己同步一次清单（D3）", async (
     assert.deepEqual(calls.sync, ["login"]);
   } finally {
     closeRig(rig);
+  }
+});
+
+/*
+ * 模型平台（RY-001 #24，ADR-026 §8）：只展示本工作区被授权的模型。钉三件：只投影展示字段
+ * （端点地址、密钥引用、运维配置不出守护进程）；平台拒绝这个角色（403）说成 POLICY_DENIED、
+ * 不可重试，别的非 2xx 是 502 可重试；没登录走统一的 401。
+ */
+void test("GET /platform/atlas/models：只投影展示字段；403 是角色事实，别的非 2xx 可重试；未登录 401", async () => {
+  const record = {
+    id: "m1",
+    providerId: "p1",
+    modelCode: "qwen-max",
+    modelName: "通义千问 Max",
+    provider: "dashscope",
+    endpointUrl: "https://internal.example/v1",
+    protocol: "openai",
+    capabilities: ["chat", 7, "tools"],
+    keyReference: { source: "env", name: "DASHSCOPE_KEY", configured: true },
+    isActive: true,
+    config: { temperature: 0.2 },
+    createdAt: "2026-09-01T00:00:00Z",
+    updatedAt: "2026-09-02T00:00:00Z",
+  };
+  const session = (atlasModels: () => Promise<unknown>) =>
+    ({ ...signedInSession(true), atlasModels }) as unknown as PlatformSession;
+
+  const cases: Array<{ name: string; deps: Partial<LocalApiDeps>; status: number; check: (body: Record<string, unknown>) => void }> = [
+    {
+      name: "projection",
+      deps: {
+        platform: signedInTo("wsp_x"),
+        platformSession: session(async () => [
+          record,
+          { ...record, modelCode: "old-model", modelName: "旧模型", provider: 3, capabilities: "chat", isActive: false },
+          { modelName: "缺 code" },
+          null,
+        ]),
+      },
+      status: 200,
+      check: (body) => {
+        assert.deepEqual(body["items"], [
+          { modelCode: "qwen-max", modelName: "通义千问 Max", provider: "dashscope", capabilities: ["chat", "tools"], isActive: true },
+          { modelCode: "old-model", modelName: "旧模型", provider: "", capabilities: [], isActive: false },
+        ]);
+        const raw = JSON.stringify(body);
+        for (const leak of ["internal.example", "DASHSCOPE_KEY", "temperature"]) assert.ok(!raw.includes(leak), `漏出了 ${leak}`);
+      },
+    },
+    {
+      name: "not an array",
+      deps: { platform: signedInTo("wsp_x"), platformSession: session(async () => ({ unexpected: true })) },
+      status: 200,
+      check: (body) => assert.deepEqual(body["items"], []),
+    },
+    {
+      name: "forbidden role",
+      deps: { platform: signedInTo("wsp_x"), platformSession: session(async () => { throw new PlatformReadError("/api/atlas/models", 403); }) },
+      status: 403,
+      check: (body) => {
+        assert.equal(body["code"], "POLICY_DENIED");
+        assert.equal(body["retryable"], false);
+        assert.match(String(body["message"]), /只有租户所有者/);
+      },
+    },
+    {
+      name: "upstream failed",
+      deps: { platform: signedInTo("wsp_x"), platformSession: session(async () => { throw new PlatformReadError("/api/atlas/models", 500); }) },
+      status: 502,
+      check: (body) => {
+        assert.equal(body["code"], "PLATFORM_READ_FAILED");
+        assert.equal(body["retryable"], true);
+        assert.equal(body["message"], "/api/atlas/models failed: HTTP 500");
+      },
+    },
+    {
+      name: "signed out",
+      deps: { platform: signedInTo("wsp_x"), platformSession: session(async () => { throw new SessionNotSignedInError(); }) },
+      status: 401,
+      check: (body) => assert.equal(body["code"], "AUTH_REQUIRED"),
+    },
+    {
+      name: "no session configured",
+      deps: { platform: signedInTo("wsp_x") },
+      status: 503,
+      check: (body) => assert.equal(body["code"], "PLATFORM_SESSION_NOT_CONFIGURED"),
+    },
+  ];
+  for (const c of cases) {
+    const rig = await startServer(c.deps);
+    try {
+      const res = await fetch(`${rig.base}/platform/atlas/models`, { headers: rig.headers });
+      assert.equal(res.status, c.status, c.name);
+      c.check((await res.json()) as Record<string, unknown>);
+    } finally {
+      closeRig(rig);
+    }
   }
 });

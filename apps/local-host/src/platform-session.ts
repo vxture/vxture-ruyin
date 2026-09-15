@@ -115,7 +115,57 @@ export const PLATFORM_READS = {
   subscribedProducts: "/api/subscription/subscribed-products",
   entitlements: "/api/subscription/entitlements",
   quotaUsage: "/api/subscription/quota-usage",
+  /**
+   * 本工作区被授权的模型（console-bff `atlas.router.ts`，经 S2S 代理 Atlas
+   * `/tenancy/models`）。**只展示，不调用**（RY-001 #24）：模型由产品直接对接 Atlas
+   * （ADR-026 §2 第 3 条）。平台只授租户所有者 `tenant.model.read`，其余角色 403。
+   */
+  atlasModels: "/api/atlas/models",
 } as const;
+
+/**
+ * 平台读接口回了非 2xx。带着状态码：调用方要分得清「平台拒绝这个角色」（403）与
+ * 「这次没取到」（其余），前者重试没有用。消息沿用原来的 `<path> failed: HTTP <n>`。
+ */
+export class PlatformReadError extends Error {
+  constructor(
+    readonly path: string,
+    readonly status: number,
+  ) {
+    super(`${path} failed: HTTP ${status}`);
+    this.name = "PlatformReadError";
+  }
+}
+
+/** 界面要的模型字段。端点地址、密钥引用、运维配置**不出守护进程**。 */
+export interface AtlasModelView {
+  modelCode: string;
+  modelName: string;
+  provider: string;
+  capabilities: string[];
+  isActive: boolean;
+}
+
+/** 平台一条模型记录 → 展示字段；缺 `modelCode` / `modelName` 的条目不列。 */
+export function projectAtlasModels(raw: unknown): AtlasModelView[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AtlasModelView[] = [];
+  for (const r of raw) {
+    if (!r || typeof r !== "object") continue;
+    const m = r as Record<string, unknown>;
+    if (typeof m["modelCode"] !== "string" || typeof m["modelName"] !== "string") continue;
+    out.push({
+      modelCode: m["modelCode"],
+      modelName: m["modelName"],
+      provider: typeof m["provider"] === "string" ? m["provider"] : "",
+      capabilities: Array.isArray(m["capabilities"])
+        ? m["capabilities"].filter((c): c is string => typeof c === "string")
+        : [],
+      isActive: m["isActive"] !== false,
+    });
+  }
+  return out;
+}
 
 /** 给 UI 与宿主的身份投射。字段缺失 = 平台这次没给，**不补、不猜**。 */
 export interface SessionIdentity {
@@ -466,6 +516,11 @@ export class PlatformSession {
     return this.cachedGet(PLATFORM_READS.quotaUsage);
   }
 
+  /** 本工作区被授权的模型（原样，未投影；投影在 server 那一层）。 */
+  async atlasModels(): Promise<unknown> {
+    return this.cachedGet(PLATFORM_READS.atlasModels);
+  }
+
   // --------------------------------------------------------------------------
   // 身份
   // --------------------------------------------------------------------------
@@ -513,7 +568,7 @@ export class PlatformSession {
     if (hit && Date.now() < hit.expiresAt) return hit.body;
 
     const res = await this.fetch(path);
-    if (!res.ok) throw new Error(`${path} failed: HTTP ${res.status}`);
+    if (!res.ok) throw new PlatformReadError(path, res.status);
     const body = (await res.json()) as unknown;
     const maxAge = /max-age=(\d+)/.exec(res.headers.get("cache-control") ?? "")?.[1];
     this.readCache.set(path, {

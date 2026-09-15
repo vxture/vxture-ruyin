@@ -62,6 +62,8 @@ import {
 } from "./platform.js";
 import {
   NotSignedInError as SessionNotSignedInError,
+  PlatformReadError,
+  projectAtlasModels,
   type PlatformSession,
   type SessionIdentity,
 } from "./platform-session.js";
@@ -1177,6 +1179,26 @@ async function handle(
         return;
       }
       send(res, 200, await deps.platformSession.quotaUsage());
+      return;
+    }
+    // 模型平台（RY-001 #24）：本工作区被授权的模型，**只展示不调用** —— 模型由产品直接
+    // 对接 Atlas（ADR-026 §2 第 3 条）。只投影展示字段：端点地址、密钥引用、运维配置不出
+    // 守护进程。平台只授租户所有者 tenant.model.read：403 是角色事实，不是「这次没取到」。
+    if (method === "GET" && path === "/platform/atlas/models") {
+      if (!deps.platformSession) {
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
+        return;
+      }
+      try {
+        send(res, 200, { items: projectAtlasModels(await deps.platformSession.atlasModels()) });
+      } catch (cause) {
+        if (!(cause instanceof PlatformReadError)) throw cause;
+        if (cause.status === 403) {
+          send(res, 403, apiError(REJECTION.POLICY_DENIED, "只有租户所有者能查看本工作区的模型（平台权限 tenant.model.read）"));
+        } else {
+          send(res, 502, apiError("PLATFORM_READ_FAILED", cause.message, { retryable: true }));
+        }
+      }
       return;
     }
     if (method === "POST" && path === "/auth/logout") {

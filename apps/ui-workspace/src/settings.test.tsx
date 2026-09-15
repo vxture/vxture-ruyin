@@ -2044,3 +2044,79 @@ test("Runos 清单：这套装配没有清单（503）时整块不显示，不�
   await capabilityRows("技能");
   expect(screen.queryByText("Runos 清单")).not.toBeInTheDocument();
 });
+
+// ───────────────────────── 模型平台（RY-001 #24，只展示） ─────────────────────────
+
+const MODELS = [
+  { modelCode: "deepseek-v3", modelName: "DeepSeek V3", provider: "deepseek", capabilities: ["chat", "tools"], isActive: true },
+  { modelCode: "bge-m3", modelName: "BGE M3", provider: "baai", capabilities: ["embed"], isActive: false },
+];
+
+test("模型平台：列出本工作区被授权的模型 —— 名称、模型码、供应商、能力、启用状态；没有任何调用或配置的按钮", async () => {
+  const atlasModels = vi.fn().mockResolvedValue(MODELS);
+  renderSection("models", fakeApi({ atlasModels } as Partial<Api>));
+  const list = await screen.findByRole("list", { name: "可用模型" });
+  const rows = within(list).getAllByRole("listitem");
+  expect(rows).toHaveLength(2);
+  expect(within(rows[0]!).getByText("DeepSeek V3")).toBeInTheDocument();
+  expect(within(rows[0]!).getByText("deepseek-v3")).toBeInTheDocument();
+  expect(within(rows[0]!).getByText("deepseek")).toBeInTheDocument();
+  expect(within(rows[0]!).getByText("tools")).toBeInTheDocument();
+  expect(within(rows[0]!).getByText("已启用")).toBeInTheDocument();
+  expect(within(rows[1]!).getByText("已停用")).toBeInTheDocument();
+  expect(within(list).queryByRole("button")).not.toBeInTheDocument();
+  expect(screen.getByText(/本机不配置、不调用模型/)).toBeInTheDocument();
+  expect(atlasModels).toHaveBeenCalledTimes(1);
+});
+
+test("模型平台：一个都没有时直说没有", async () => {
+  renderSection("models", fakeApi({ atlasModels: vi.fn().mockResolvedValue([]) } as Partial<Api>));
+  expect(await screen.findByText("本工作区还没有被授权使用的模型。")).toBeInTheDocument();
+});
+
+test("模型平台：平台拒绝（403）只说一句 —— 守护进程那句已经说清谁能看，不再重复", async () => {
+  const message = "只有租户所有者能查看本工作区的模型（平台权限 tenant.model.read）";
+  renderSection(
+    "models",
+    fakeApi({ atlasModels: vi.fn().mockRejectedValue(new ApiError(403, { message })) } as Partial<Api>),
+  );
+  expect(await screen.findByText(message)).toBeInTheDocument();
+  expect(screen.getAllByText(/租户所有者/)).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+});
+
+test("模型平台：没登录平台时说登录后才能看", async () => {
+  renderSection(
+    "models",
+    fakeApi({ atlasModels: vi.fn().mockRejectedValue(new ApiError(401, { message: "AUTH_REQUIRED" })) } as Partial<Api>),
+  );
+  expect(await screen.findByText("登录平台后才能查看本工作区的模型。")).toBeInTheDocument();
+});
+
+test("模型平台：没接平台的装配（503 与 404 同一句）", async () => {
+  for (const status of [503, 404]) {
+    const view = renderSection(
+      "models",
+      fakeApi({ atlasModels: vi.fn().mockRejectedValue(new ApiError(status, { message: "x" })) } as Partial<Api>),
+    );
+    expect(await screen.findByText("这套装配没有接平台，没有模型可展示。")).toBeInTheDocument();
+    view.unmount();
+  }
+});
+
+test("模型平台：这次没取到（502）把原因说出来，重试重新读", async () => {
+  const atlasModels = vi
+    .fn()
+    .mockRejectedValueOnce(new ApiError(502, { message: "/api/atlas/models failed: HTTP 500" }))
+    .mockResolvedValueOnce(MODELS);
+  renderSection("models", fakeApi({ atlasModels } as Partial<Api>));
+  expect(await screen.findByText("这次没从平台取到模型：/api/atlas/models failed: HTTP 500")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "重试" }));
+  expect(await screen.findByRole("list", { name: "可用模型" })).toBeInTheDocument();
+  expect(atlasModels).toHaveBeenCalledTimes(2);
+});
+
+test("模型平台：守护进程没响应（不是 ApiError）也照样说没取到", async () => {
+  renderSection("models", fakeApi({ atlasModels: vi.fn().mockRejectedValue(new Error("fetch failed")) } as Partial<Api>));
+  expect(await screen.findByText("这次没从平台取到模型：fetch failed")).toBeInTheDocument();
+});

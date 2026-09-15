@@ -18,6 +18,7 @@ import {
   Avatar,
   AvatarFallback,
   AvatarImage,
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -37,6 +38,7 @@ import {
 import {
   Api,
   ApiError,
+  type AtlasModel,
   type ConnectorView,
   type SkillLayer,
   type SkillListing,
@@ -103,6 +105,7 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
       {view === "general" && <SystemSection system={system} api={api} />}
       {view === "connectors" && <ConnectorsSection api={api} />}
       {view === "connectors-add" && <AddConnectorPage api={api} />}
+      {view === "models" && <ModelsSection api={api} />}
       {view === "skills" && <SkillsSection api={api} />}
       {view === "database" && <DatabaseSection />}
       {view === "updates" && <UpdatesSection system={system} api={api} />}
@@ -2056,5 +2059,84 @@ function SkillsSection({ api }: { api: Api }) {
         </SettingsBlock>
       )}
     </>
+  );
+}
+
+/**
+ * 模型平台（owner 2026-09-15，RY-001 #24）—— **只展示**本工作区在 Atlas 上被授权的模型。
+ *
+ * 不调用、不配置：模型由各智能体直接对接 Atlas（ADR-026 §2 第 3 条）；用量与配额在平台
+ * 看（owner：不用复杂化）。每种处境只说一句 —— 平台拒绝时守护进程给的那句已经说清谁能看，
+ * 就用它，不在下面再重复一遍（#23 的教训）。
+ */
+type ModelsState =
+  | { kind: "loading" }
+  | { kind: "ready"; models: AtlasModel[] }
+  | { kind: "message"; text: string }
+  | { kind: "failed"; text: string };
+
+function modelsStateOf(e: unknown): ModelsState {
+  if (e instanceof ApiError) {
+    if (e.status === 403) return { kind: "message", text: e.message };
+    if (e.status === 401) return { kind: "message", text: "登录平台后才能查看本工作区的模型。" };
+    // 没接平台的装配：会话没配（503），或整组路由都不在（404）—— 对用户是同一件事。
+    if (e.status === 404 || e.status === 503) return { kind: "message", text: "这套装配没有接平台，没有模型可展示。" };
+  }
+  return { kind: "failed", text: `这次没从平台取到模型：${(e as Error).message}` };
+}
+
+function ModelsSection({ api }: { api: Api }) {
+  const [state, setState] = useState<ModelsState>({ kind: "loading" });
+  const load = async () => {
+    setState({ kind: "loading" });
+    try {
+      setState({ kind: "ready", models: await api.atlasModels() });
+    } catch (e) {
+      setState(modelsStateOf(e));
+    }
+  };
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api]);
+
+  return (
+    <SettingsBlock
+      icon="cpu"
+      title="可用模型"
+      desc="本工作区在 Atlas 上被授权使用的模型。这里只展示：模型由各智能体直接对接 Atlas 调用，本机不配置、不调用模型；用量与配额在平台查看。"
+      {...(state.kind === "ready" ? { count: state.models.length } : {})}
+    >
+      {state.kind === "loading" && <p className="set-note">正在从平台读取模型…</p>}
+      {state.kind === "message" && <p className="set-note">{state.text}</p>}
+      {state.kind === "failed" && (
+        <div className="update-line update-line--warn">
+          <span>{state.text}</span>
+          <Button variant="outline" size="sm" onClick={() => void load()}>
+            重试
+          </Button>
+        </div>
+      )}
+      {state.kind === "ready" &&
+        (state.models.length === 0 ? (
+          <p className="set-note">本工作区还没有被授权使用的模型。</p>
+        ) : (
+          <ul className="row-list" aria-label="可用模型">
+            {state.models.map((m) => (
+              <li key={m.modelCode} className="row-item">
+                <span className="row-main">{m.modelName}</span>
+                <code className="text-body-sm text-muted-foreground">{m.modelCode}</code>
+                <span className="row-tag">{m.provider}</span>
+                {m.capabilities.map((c) => (
+                  <Badge key={c} variant="secondary">
+                    {c}
+                  </Badge>
+                ))}
+                <StatusBadge tone={m.isActive ? "success" : "neutral"}>{m.isActive ? "已启用" : "已停用"}</StatusBadge>
+              </li>
+            ))}
+          </ul>
+        ))}
+    </SettingsBlock>
   );
 }
