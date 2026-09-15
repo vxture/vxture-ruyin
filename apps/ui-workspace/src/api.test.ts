@@ -33,7 +33,7 @@ afterEach(() => {
 /* ---------------- call() - the core every wrapper method goes through ---------------- */
 
 void test("Api: a GET sends the bearer token and no body", async () => {
-  const fetchMock = vi.fn().mockResolvedValue(jsonResponse([]));
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [] }));
   globalThis.fetch = fetchMock;
   const api = new Api("tok_123");
 
@@ -85,6 +85,25 @@ void test("Api: a fetch-level rejection (network down) propagates, not swallowed
   globalThis.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
   const api = new Api("tok_123");
   await expect(api.products()).rejects.toThrow("ECONNREFUSED");
+});
+
+void test("Api: list endpoints answer { items } and the wrapper hands callers the array", async () => {
+  const rows = [{ id: "bidproposal" }];
+  globalThis.fetch = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ items: rows })));
+  const api = new Api("tok_123");
+
+  for (const call of [
+    () => api.pending(),
+    () => api.refreshEntitlements(),
+    () => api.products(),
+    () => api.taskInstances("prj_1"),
+    () => api.grants("prj_1"),
+    () => api.bindings("prj_1"),
+    () => api.audit("prj_1"),
+    () => api.contextItems("prj_1", "tender_document"),
+  ]) {
+    expect(await call()).toEqual(rows);
+  }
 });
 
 /* ---------------- ApiError's message fallback chain ---------------- */

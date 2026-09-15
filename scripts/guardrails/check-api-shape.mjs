@@ -2,11 +2,13 @@
 /**
  * 本地 API 形状守卫（《产品接入通则》D-3：可自动判定的部分应由仓内守卫脚本校验）。
  *
- * 查三件 X-1/B-3 里能机器判定的事：
+ * 查 X-1/B-3 里能机器判定的几件事：
  *
  *   1. 错误响应不得再用旧的 `{ error: "..." }` 形状
  *   2. 错误码必须是 SCREAMING_SNAKE
  *   3. 不得出现通则词表里 Ruyin 不会发出的拒绝码
+ *   4. 错误状态码不得直接回 `{ code: ... }` 字面量 —— 那样缺 message 与 retryable。
+ *      第 2 条只看 `apiError()` 的调用，绕过它的两处 503 因此一直没被看见（#13）
  *
  * 第 3 条不是洁癖：通则说得很直接——**加一个永不抛出的码，消费方会写一条永不
  * 触发的分支**。Ruyin 不做配额门控（配额在 SaaS，ADR-006），所以
@@ -47,6 +49,10 @@ function scan(dir) {
         if (!/^[A-Z][A-Z0-9_]*$/.test(m[1])) {
           problems.push(`${at} 错误码 "${m[1]}" 不是 SCREAMING_SNAKE（X-1）`);
         }
+      }
+      // 4. 绕过 apiError() 的错误封套
+      if (/send\(\s*res\s*,\s*[45]\d\d\s*,\s*\{\s*code\s*:/.test(line)) {
+        problems.push(`${at} 错误响应不走 apiError()：只有 code，缺 message 与 retryable（X-1）`);
       }
       // 3. 永不抛出的拒绝码
       for (const code of FORBIDDEN_REJECTIONS) {

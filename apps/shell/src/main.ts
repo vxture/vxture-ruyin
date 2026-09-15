@@ -528,7 +528,7 @@ function watchPending(win: BrowserWindow): void {
         headers: { authorization: `Bearer ${TOKEN}` },
       });
       if (!res.ok) return;
-      rows = (await res.json()) as PendingRow[];
+      rows = ((await res.json()) as { items: PendingRow[] }).items;
     } catch {
       return; // daemon busy or restarting - nothing to say
     }

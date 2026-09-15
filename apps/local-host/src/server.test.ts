@@ -267,9 +267,9 @@ test("connectors: development install -> project grant -> lan binding -> discove
     // Three resources under crm://accounts/ - one unreadable, still indexed by name.
     assert.equal(binding.indexed, 3);
 
-    const items = (await (
+    const { items } = (await (
       await fetch(`${rig.base}/projects/${pid}/context/enterprise_capability`, { headers: rig.headers })
-    ).json()) as Array<{ connector: string; source: string; ref: string }>;
+    ).json()) as { items: Array<{ connector: string; source: string; ref: string }> };
     assert.equal(items.length, 3);
     assert.ok(items.every((i) => i.connector === "crm" && i.source === "lan" && i.ref.startsWith("crm://accounts/")));
 
@@ -709,10 +709,11 @@ void test("未配置 platformSession 时 /auth/login 回 503，而不是假装�
       headers: rig.headers,
     });
     assert.equal(res.status, 503);
-    assert.equal(
-      ((await res.json()) as { code: string }).code,
-      "PLATFORM_SESSION_NOT_CONFIGURED",
-    );
+    // X-1 完整封套：曾经只回 { code }（#13）。
+    const body = (await res.json()) as { code: string; message: string; retryable: boolean };
+    assert.equal(body.code, "PLATFORM_SESSION_NOT_CONFIGURED");
+    assert.ok(body.message.length > 0);
+    assert.equal(body.retryable, false);
   } finally {
     closeRig(rig);
   }
@@ -885,7 +886,7 @@ void test("HTTP POST /entitlements/refresh: no refreshEntitlements configured st
       headers: rig.headers,
     });
     assert.equal(res.status, 200);
-    assert.ok(Array.isArray(await res.json()));
+    assert.ok(Array.isArray(((await res.json()) as { items: unknown }).items));
   } finally {
     closeRig(rig);
   }
@@ -973,7 +974,7 @@ void test("HTTP GET/POST /projects/:id/grants", async () => {
   try {
     const pid = await projectIn(rig, "wsp_x");
     const empty = await fetch(`${rig.base}/projects/${pid}/grants`, { headers: rig.headers });
-    assert.deepEqual(await empty.json(), []);
+    assert.deepEqual(await empty.json(), { items: [] });
 
     const created = await fetch(`${rig.base}/projects/${pid}/grants`, {
       method: "POST",
@@ -985,8 +986,8 @@ void test("HTTP GET/POST /projects/:id/grants", async () => {
 
     const list = (await (
       await fetch(`${rig.base}/projects/${pid}/grants`, { headers: rig.headers })
-    ).json()) as unknown[];
-    assert.equal(list.length, 1);
+    ).json()) as { items: unknown[] };
+    assert.equal(list.items.length, 1);
   } finally {
     closeRig(rig);
     rmSync(dir, { recursive: true, force: true });
@@ -1256,8 +1257,8 @@ void test("HTTP POST /projects/:id/bindings: an ungranted root is BINDING_INVALI
 
     const list = (await (
       await fetch(`${rig.base}/projects/${pid}/bindings`, { headers: rig.headers })
-    ).json()) as unknown[];
-    assert.equal(list.length, 1);
+    ).json()) as { items: unknown[] };
+    assert.equal(list.items.length, 1);
   } finally {
     closeRig(rig);
     rmSync(dir, { recursive: true, force: true });
@@ -1274,7 +1275,7 @@ void test("HTTP GET /projects/:id/context/:type: empty before binding, non-empty
       headers: rig.headers,
     });
     assert.equal(before.status, 200);
-    assert.deepEqual(await before.json(), []);
+    assert.deepEqual(await before.json(), { items: [] });
 
     await fetch(`${rig.base}/projects/${pid}/grants`, {
       method: "POST",
@@ -1289,7 +1290,7 @@ void test("HTTP GET /projects/:id/context/:type: empty before binding, non-empty
     const after = await fetch(`${rig.base}/projects/${pid}/context/tender_document`, {
       headers: rig.headers,
     });
-    const items = (await after.json()) as unknown[];
+    const { items } = (await after.json()) as { items: unknown[] };
     assert.ok(items.length > 0);
   } finally {
     closeRig(rig);
@@ -1303,7 +1304,7 @@ void test("HTTP GET /projects/:id/audit: the project's own creation is already o
     const pid = await projectIn(rig, "wsp_x");
     const res = await fetch(`${rig.base}/projects/${pid}/audit`, { headers: rig.headers });
     assert.equal(res.status, 200);
-    const events = (await res.json()) as unknown[];
+    const { items: events } = (await res.json()) as { items: unknown[] };
     assert.ok(events.length > 0);
   } finally {
     closeRig(rig);
@@ -1414,7 +1415,11 @@ void test("HTTP GET /system/hardware：装配没接 hardwareInfo 时如实 503",
   try {
     const res = await fetch(`${rig.base}/system/hardware`, { headers: rig.headers });
     assert.equal(res.status, 503);
-    assert.equal((await res.json()).code, "HARDWARE_INFO_NOT_CONFIGURED");
+    // X-1 完整封套：曾经只回 { code }（#13）。
+    const body = (await res.json()) as { code: string; message: string; retryable: boolean };
+    assert.equal(body.code, "HARDWARE_INFO_NOT_CONFIGURED");
+    assert.ok(body.message.length > 0);
+    assert.equal(body.retryable, false);
   } finally {
     closeRig(rig);
   }
@@ -2241,13 +2246,15 @@ void test("bridge: /bridge/tasks 只给进度与在等哪类确认，路径、�
     assert.equal(res.status, 200);
     const raw = await res.text();
     const body = JSON.parse(raw) as {
-      tasks: Array<{ id: string; state: string; waitingOn: Array<{ kind: string }>; hasResult: boolean }>;
+      projectId: string;
+      items: Array<{ id: string; state: string; waitingOn: Array<{ kind: string }>; hasResult: boolean }>;
     };
-    assert.equal(body.tasks.length, 1);
-    assert.equal(body.tasks[0]!.state, "waiting_human");
+    assert.equal(body.projectId, projectId);
+    assert.equal(body.items.length, 1);
+    assert.equal(body.items[0]!.state, "waiting_human");
     // 只列未决的那一个（已决定的 context_confirm 不算在等）。
-    assert.deepEqual(body.tasks[0]!.waitingOn.map((w) => w.kind), ["tool_ask"]);
-    assert.equal(body.tasks[0]!.hasResult, false);
+    assert.deepEqual(body.items[0]!.waitingOn.map((w) => w.kind), ["tool_ask"]);
+    assert.equal(body.items[0]!.hasResult, false);
     assert.ok(!raw.includes("ruyin-bridge-secret-task-path"), `任务记录里的东西漏进了桥面：${raw}`);
   } finally {
     closeRig(rig);
@@ -2304,8 +2311,8 @@ void test("bridge: 还没成果 → 409；任务不在这个项目 → 404，与
     assert.equal(missing.status, 404);
     assert.deepEqual(await cross.json(), await missing.json());
     // B 的任务列表里也看不到 A 的任务。
-    const listB = (await (await fetch(`${rig.base}/bridge/tasks`, { headers: authB })).json()) as { tasks: unknown[] };
-    assert.deepEqual(listB.tasks, []);
+    const listB = (await (await fetch(`${rig.base}/bridge/tasks`, { headers: authB })).json()) as { items: unknown[] };
+    assert.deepEqual(listB.items, []);
   } finally {
     closeRig(rig);
   }
@@ -2473,13 +2480,15 @@ void test("bridge 写: 挂着的推进请求出现在 /pending 里；决定之�
     for (const s of ["planning", "writing", "review"]) await rig.runtime.transitionBusinessState(projectId, s);
     await bridgePost(rig, await bridgeTokenFor(rig, projectId), "/bridge/project/transition", { to: "submitted" });
 
-    const rows = (await (await fetch(`${rig.base}/pending`, { headers: rig.headers })).json()) as Array<{
-      kind: string;
-      projectId: string;
-      projectName: string;
-      to?: string;
-      checkpointId: string;
-    }>;
+    const { items: rows } = (await (await fetch(`${rig.base}/pending`, { headers: rig.headers })).json()) as {
+      items: Array<{
+        kind: string;
+        projectId: string;
+        projectName: string;
+        to?: string;
+        checkpointId: string;
+      }>;
+    };
     const row = rows.find((r) => r.kind === "state_transition");
     assert.ok(row, `单子上没有这张卡：${JSON.stringify(rows)}`);
     assert.deepEqual([row.projectId, row.projectName, row.to], [projectId, "投标项目", "submitted"]);
@@ -2490,7 +2499,9 @@ void test("bridge 写: 挂着的推进请求出现在 /pending 里；决定之�
       headers: { ...rig.headers, "content-type": "application/json" },
       body: JSON.stringify({ to: "submitted", approve: false }),
     });
-    const after = (await (await fetch(`${rig.base}/pending`, { headers: rig.headers })).json()) as Array<{ kind: string }>;
+    const { items: after } = (await (await fetch(`${rig.base}/pending`, { headers: rig.headers })).json()) as {
+      items: Array<{ kind: string }>;
+    };
     assert.ok(!after.some((r) => r.kind === "state_transition"));
   } finally {
     closeRig(rig);
@@ -2705,7 +2716,9 @@ void test("archive: 作废产品凭据、收掉事件流、撤掉挂着的推进
     assert.equal(after.status, 401, "旧凭据在归档后必须失效");
     const { ended } = await reading;
     assert.equal(ended, true, "开着的事件流必须被收掉");
-    const pending = (await (await fetch(`${rig.base}/pending`, { headers: rig.headers })).json()) as Array<{ kind: string }>;
+    const { items: pending } = (await (await fetch(`${rig.base}/pending`, { headers: rig.headers })).json()) as {
+      items: Array<{ kind: string }>;
+    };
     assert.ok(!pending.some((r) => r.kind === "state_transition"), "挂着的推进请求要撤掉");
     const surface = (await (
       await fetch(`${rig.base}/projects/${projectId}/product-surface`, { headers: rig.headers })

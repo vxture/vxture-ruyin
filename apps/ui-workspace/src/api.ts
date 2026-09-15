@@ -700,6 +700,11 @@ export class Api {
     return data;
   }
 
+  /** 列表接口一律回 `{ items }`（通则 A-4）；在这里拆开，调用方拿到的仍是数组。 */
+  private async list<T>(path: string, method = "GET"): Promise<T[]> {
+    return (await this.call<{ items: T[] }>(path, method)).items;
+  }
+
   /**
    * 安装一个 .ruyinpkg（§18.2）。请求体就是包字节。
    *
@@ -720,10 +725,10 @@ export class Api {
     if (!res.ok) throw new ApiError(res.status, data as ApiError["body"]);
     return data;
   };
-  pending = () => this.call<PendingConfirmation[]>("/pending");
+  pending = () => this.list<PendingConfirmation>("/pending");
   /** 立刻拉一次订阅（D5：用户付完款回到应用的那一刻）。 */
   refreshEntitlements = () =>
-    this.call<ProductInfo[]>("/entitlements/refresh", "POST");
+    this.list<ProductInfo>("/entitlements/refresh", "POST");
   /**
    * 本机生效开关（§18.5）。**不卸载，数据不动** —— 停用只是让这台机器上打不开
    * 它；项目、审计、成果都还在，重新启用就回来。
@@ -783,7 +788,7 @@ export class Api {
     return () => abort.abort();
   };
   checkUpdate = () => this.call<UpdateCheck>("/updates/check");
-  products = () => this.call<ProductInfo[]>("/products");
+  products = () => this.list<ProductInfo>("/products");
   projects = () => this.call<ProjectList>("/projects");
   createProject = (product: string, name: string) =>
     this.call<ProjectMeta>("/projects", "POST", { product, name });
@@ -821,7 +826,7 @@ export class Api {
     }>(`/projects/${id}/product-surface`);
   workspace = (id: string) => this.call<ProjectView>(`/projects/${id}`);
   taskInstances = (id: string) =>
-    this.call<TaskInstance[]>(`/projects/${id}/tasks`);
+    this.list<TaskInstance>(`/projects/${id}/tasks`);
   startTask = (id: string, task: string, inputs?: Record<string, unknown>) =>
     this.call<TaskInstance>(`/projects/${id}/tasks`, "POST", {
       task,
@@ -860,12 +865,12 @@ export class Api {
       "POST",
       { to, approve },
     );
-  grants = (id: string) => this.call<Grant[]>(`/projects/${id}/grants`);
+  grants = (id: string) => this.list<Grant>(`/projects/${id}/grants`);
   addGrant = (id: string, path: string) =>
     this.call<FolderGrant>(`/projects/${id}/grants`, "POST", { path });
   addConnectorGrant = (id: string, connector: string) =>
     this.call<ConnectorGrant>(`/projects/${id}/grants`, "POST", { connector });
-  bindings = (id: string) => this.call<Binding[]>(`/projects/${id}/bindings`);
+  bindings = (id: string) => this.list<Binding>(`/projects/${id}/bindings`);
   /**
    * 不带 `via` = 本地文件夹（local-fs，来源 local）。带了 = 经某个连接器，
    * `source` 是它服务的来源种类；由内核对照契约校验，界面只透传。
@@ -974,9 +979,9 @@ export class Api {
     this.call<ConnectorView>(`/connectors/${id}/activate`, "POST");
   removeConnector = (id: string) =>
     this.call<{ removed: string }>(`/connectors/${id}`, "DELETE");
-  audit = (id: string) => this.call<StoredAuditEvent[]>(`/projects/${id}/audit`);
+  audit = (id: string) => this.list<StoredAuditEvent>(`/projects/${id}/audit`);
   contextItems = (id: string, type: string) =>
-    this.call<ContextItemMeta[]>(`/projects/${id}/context/${type}`);
+    this.list<ContextItemMeta>(`/projects/${id}/context/${type}`);
   system = () => this.call<SystemInfo>("/system");
   /**
    * 本机固件信息（关于页）。守护进程没接这一路时答 503（`ApiError`）——

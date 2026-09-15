@@ -878,7 +878,7 @@ async function handle(
       const instances = await deps.runtime.listTaskInstances(scope.projectId);
       send(res, 200, {
         projectId: scope.projectId,
-        tasks: instances.map((t) => ({
+        items: instances.map((t) => ({
           id: t.id,
           taskId: t.taskId,
           state: t.state,
@@ -977,7 +977,7 @@ async function handle(
   // GET /system/hardware - 本机固件信息（关于页），懒加载、装配没接就如实 503。
   if (method === "GET" && path === "/system/hardware") {
     if (!deps.hardwareInfo) {
-      send(res, 503, { code: "HARDWARE_INFO_NOT_CONFIGURED" });
+      send(res, 503, apiError("HARDWARE_INFO_NOT_CONFIGURED", "这套装配没有本机固件信息采集"));
       return;
     }
     send(res, 200, await deps.hardwareInfo());
@@ -1046,7 +1046,7 @@ async function handle(
     }
     if (method === "POST" && path === "/auth/login") {
       if (!deps.platformSession) {
-        send(res, 503, { code: "PLATFORM_SESSION_NOT_CONFIGURED" });
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
         return;
       }
       /* 返回地址给 UI 去开系统浏览器；随即在后台轮询领取。
@@ -1348,7 +1348,7 @@ async function handle(
           ]
         : [];
     });
-    send(res, 200, [...confirmations, ...requests].sort((x, y) => x.raisedAt.localeCompare(y.raisedAt)));
+    send(res, 200, { items: [...confirmations, ...requests].sort((x, y) => x.raisedAt.localeCompare(y.raisedAt)) });
     return;
   }
 
@@ -1357,7 +1357,7 @@ async function handle(
   // 上一次的判定（ADR-003），而不是把用户锁住。
   if (method === "POST" && path === "/entitlements/refresh") {
     await deps.refreshEntitlements?.().catch(() => {});
-    send(res, 200, deps.registry.list());
+    send(res, 200, { items: deps.registry.list() });
     return;
   }
 
@@ -1595,7 +1595,7 @@ async function handle(
 
   // GET /products - 受管资产视图：已装 + 启用态 + 订阅可用性（§18.5）
   if (method === "GET" && path === "/products") {
-    send(res, 200, deps.registry.list());
+    send(res, 200, { items: deps.registry.list() });
     return;
   }
 
@@ -2021,7 +2021,7 @@ async function handle(
     // GET /projects/:id/tasks - task instances
     if (method === "GET" && segments.length === 3 && segments[2] === "tasks") {
       const list = await deps.runtime.listTaskInstances(projectId);
-      send(res, 200, list.map((t) => withRunState(t, deps)));
+      send(res, 200, { items: list.map((t) => withRunState(t, deps)) });
       return;
     }
 
@@ -2077,7 +2077,7 @@ async function handle(
     // GET/POST /projects/:id/grants  { path, mode? } | { connector }
     if (segments.length === 3 && segments[2] === "grants") {
       if (method === "GET") {
-        send(res, 200, await deps.runtime.listGrants(projectId));
+        send(res, 200, { items: await deps.runtime.listGrants(projectId) });
         return;
       }
       if (method === "POST") {
@@ -2281,7 +2281,7 @@ async function handle(
     // GET/POST /projects/:id/bindings  { type, root, connector?, source? }
     if (segments.length === 3 && segments[2] === "bindings") {
       if (method === "GET") {
-        send(res, 200, await deps.runtime.listBindings(projectId));
+        send(res, 200, { items: await deps.runtime.listBindings(projectId) });
         return;
       }
       if (method === "POST") {
@@ -2385,13 +2385,13 @@ async function handle(
       segments.length === 4 &&
       segments[2] === "context"
     ) {
-      send(res, 200, await deps.runtime.discoverContext(projectId, segments[3]!));
+      send(res, 200, { items: await deps.runtime.discoverContext(projectId, segments[3]!) });
       return;
     }
 
     // GET /projects/:id/audit
     if (method === "GET" && segments.length === 3 && segments[2] === "audit") {
-      send(res, 200, await deps.runtime.listAuditEvents(projectId));
+      send(res, 200, { items: await deps.runtime.listAuditEvents(projectId) });
       return;
     }
   }
