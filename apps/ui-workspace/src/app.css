@@ -1092,6 +1092,11 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
 .pcard { padding: 16px; gap: 8px; }
 .pcard-head { row-gap: 4px; }
 .pcard-foot { margin-top: 4px; padding-top: 12px; }
+/* 同一行卡片高度不一时，分隔线与底部操作要沉底对齐（owner 2026-09-15）。上面这条
+   margin-top: 4px 盖掉了 .pcard-foot 原先的 margin-top: auto，底部于是跟着内容往上走。
+   不改回 auto：那样「正文 → 分割线 12px」的下限就只剩 gap 8px。让正文吃掉剩余高度，
+   分隔线自然落到底，12px 仍是最小间距。 */
+.pcard-body { flex: 1 1 auto; }
 .pcard-badges { gap: 4px; }
 .pcard-badges [data-slot="badge"], .pcard .catalog-caps [data-slot="badge"] { font-size: 11px; }
 .pcard-ident { font-size: 12px; }
