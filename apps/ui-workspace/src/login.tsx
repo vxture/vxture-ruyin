@@ -112,9 +112,6 @@ function LoginScreen({
 }) {
   const [busy, setBusy] = useState(false);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
-  /** 平台的 RP-initiated logout 地址；平台没公布就不给「换个账号」这个入口。 */
-  const [endSession, setEndSession] = useState<string | null>(null);
-  const [switching, setSwitching] = useState(false);
   const pollRef = useRef<number | undefined>(undefined);
 
   useEffect(
@@ -123,19 +120,6 @@ function LoginScreen({
     },
     [],
   );
-
-  useEffect(() => {
-    let alive = true;
-    api
-      .endSessionUrl()
-      .then((r) => alive && setEndSession(r.url ?? null))
-      .catch(() => {
-        /* 取不到就不给入口 —— 给一个点了没反应的链接更糟 */
-      });
-    return () => {
-      alive = false;
-    };
-  }, [api]);
 
   const startLogin = async () => {
     setBusy(true);
@@ -180,7 +164,7 @@ function LoginScreen({
           <span className="brand-tag">Intelligent Workbench</span>
         </h1>
         <p className="login-sub">
-          Vxture AI 原生智能体的本地智能工作环境 · 本地数据不出设备
+          Ruyin Studio 原生智能体本地运行环境 · 本地数据不出域
         </p>
         <Button
           className="login-btn"
@@ -199,31 +183,13 @@ function LoginScreen({
             （owner 实测：清空重来一遍，第一次有验证、退出后第二次静默直入）。
             所以那一屏在平台补上支持之前不会出现。
 
-            界面这一侧能做的就只有这段话和下面那个入口：**把「会直接用浏览器
-            里那个账号」说出来，并给一条换人的路。**说清楚不能代替验证，但
-            一个静默发生、又没人告诉你的登录，比说清楚了的更糟。见 TD-057。 */}
+            界面这一侧只做提示，不给跳转链接（owner 2026-09-15）：把「会直接用
+            浏览器里那个账号」和「怎么才算真退出」说出来就够，不承诺一条按下去
+            会把人带到哪的路——这一步换人操作本就得用户自己在浏览器里做，见
+            TD-057。 */}
         <p className="login-note text-body-sm text-muted-foreground">
-          浏览器中若已登录 Vxture，会直接用那个账号继续。
-          {endSession && (
-            <>
-              {" "}要换人，
-              <a
-                className="text-primary-text underline"
-                href={endSession}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => setSwitching(true)}
-              >
-                先在浏览器里退出 Vxture ↗
-              </a>
-            </>
-          )}
+          浏览器中若已登录则会直接登录，安全退出请退出浏览器登录态。
         </p>
-        {switching && (
-          <div className="login-hint text-body-sm text-muted-foreground">
-            在浏览器里退出之后，回到这里再点一次登录。
-          </div>
-        )}
         {pendingUrl && (
           <div className="login-hint text-body-sm text-muted-foreground">
             在浏览器中完成登录后自动返回…{" "}

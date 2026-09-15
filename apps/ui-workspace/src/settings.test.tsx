@@ -143,8 +143,8 @@ void test("AboutSection: 本机固件信息 —— 采集成功时逐项展示",
   renderSection("about", api);
   expect(await screen.findByText("Intel(R) Core(TM) i7 · 16 核")).toBeInTheDocument();
   expect(screen.getByText("32.0 GB")).toBeInTheDocument();
-  expect(screen.getByText("ASUS ROG STRIX")).toBeInTheDocument();
-  expect(screen.getByText("American Megatrends · 2.10")).toBeInTheDocument();
+  // 主板与 BIOS 同一行、空格分隔（owner 2026-09-15）；各自内部原来怎么拼还怎么拼。
+  expect(screen.getByText("ASUS ROG STRIX American Megatrends · 2.10")).toBeInTheDocument();
   expect(screen.getByText("Windows 11 Pro · build 22631")).toBeInTheDocument();
   expect(screen.getByText("Samsung SSD 980 · 500.0 GB；WD · 2.0 GB")).toBeInTheDocument();
   expect(screen.getByText("AA:BB:CC:DD:EE:01")).toBeInTheDocument();
@@ -167,10 +167,11 @@ void test("AboutSection: 本机固件信息 —— 缺整块的落「—」，�
   await screen.findByText("Test CPU");
   expect(screen.getByText("Windows 11 Pro")).toBeInTheDocument();
   const rows = container.querySelectorAll(".about-hardware .fact-row");
-  expect(rows).toHaveLength(8);
+  // 主板与 BIOS 合并成一行后共 7 行（owner 2026-09-15，原 8 行）。
+  expect(rows).toHaveLength(7);
   const emptyRows = [...rows].filter((r) => r.querySelector(".fact-empty"));
-  // 8 行里，处理器与操作系统那两行有值（型号/发行版），其余 6 行落「—」。
-  expect(emptyRows).toHaveLength(6);
+  // 7 行里，处理器与操作系统那两行有值（型号/发行版），其余 5 行落「—」。
+  expect(emptyRows).toHaveLength(5);
 });
 
 /**
@@ -182,9 +183,9 @@ void test("AboutSection: 本机固件信息 —— CPU/操作系统整块都没�
   const hardware: HardwareInfo = {};
   const api = fakeApi({ hardware: vi.fn().mockResolvedValue(hardware) });
   const { container } = renderSection("about", api);
-  await screen.findByText("本机固件信息");
+  await screen.findByText("本机配置");
   const rows = container.querySelectorAll(".about-hardware .fact-row");
-  expect(rows).toHaveLength(8);
+  expect(rows).toHaveLength(7);
   for (const row of rows) {
     expect(row.querySelector(".fact-empty")).toBeInTheDocument();
   }
@@ -198,12 +199,13 @@ void test("AboutSection: 本机固件信息 —— 守护进程未接这一路�
 });
 
 /**
- * 关于页只有身份 + 三条条款 + 一条判断式提醒（owner 2026-09-10 连收两次：
- * 四张卡 → 两块 → 去掉「须知」）。
+ * 关于页只有身份 + 三条条款 + 三方许可 + 一条判断式提醒（owner 2026-09-10 连收
+ * 两次：四张卡 → 两块 → 去掉「须知」；2026-09-15 再拆成三块，本机配置单独一
+ * 张卡，见下面「本机配置」相关用例）。
  *
  * 钉**结构**而不只是文案：只钉文案的话，下一个人再加两张卡，用例照样全绿。
  */
-void test("AboutSection: 两块版式 —— 关于信息自动布满，提示按需显隐", async () => {
+void test("AboutSection: 关于信息自动布满，提示按需显隐", async () => {
   const { container } = renderSection("about");
   await screen.findByText("RUYIN");
   // 没有板块卡、没有导航按钮：这一页收过三次，钉住结构才拦得住第四次被撑回导航站。
@@ -220,6 +222,21 @@ void test("AboutSection: 两块版式 —— 关于信息自动布满，提示�
   expect(container.querySelector(".about-page")).toBeInTheDocument();
   expect(container.querySelector(".about-main")).toBeInTheDocument();
   expect(container.querySelector(".about-notice")).not.toBeInTheDocument();
+});
+
+/**
+ * 「本机配置」拆成自己的卡（owner 2026-09-15，原先嵌在「关于」那张卡里靠一条
+ * 分隔线区分）：钉住它是 `.about-main` 的**兄弟**，不是子元素——这样它才能按
+ * 内容撑高，不参与 `.about-main` 的黄金分割。
+ */
+void test("AboutSection: 「本机配置」是独立一张卡，不在「关于」那张卡里面", async () => {
+  const { container } = renderSection("about");
+  await screen.findByText("本机配置");
+  const hardwareCard = container.querySelector(".about-hardware-card");
+  expect(hardwareCard).toBeInTheDocument();
+  expect(hardwareCard).toHaveClass("card");
+  expect(container.querySelector(".about-main")?.contains(hardwareCard)).toBe(false);
+  expect(hardwareCard?.querySelector(".about-hardware")).toBeInTheDocument();
 });
 
 /**
@@ -371,9 +388,13 @@ void test("通用设置: data dir / product dir / key protection reflect system 
   expect(await screen.findByText("C:/data")).toBeInTheDocument();
   expect(screen.getByText("D:/products")).toBeInTheDocument();
   // DPAPI 只在「主密钥」那一行说一次：底下那个说同一件事的徽章已经删了
-  // （owner 2026-09-04 第 2 条）。
+  // （owner 2026-09-04 第 2 条）。「Windows DPAPI」现在是一个高亮 tag（owner
+  // 2026-09-15），文字被拆进嵌套的 span 里——普通字符串匹配找不到跨元素的
+  // 拼接结果，用回调按完整 textContent 判等。
   expect(
-    screen.getByText("Windows DPAPI 保护（当前用户作用域），不落明文"),
+    screen.getByText(
+      (_, el) => el?.textContent === "Windows DPAPI 保护（当前用户作用域），不落明文",
+    ),
   ).toBeInTheDocument();
   expect(document.body.textContent).not.toContain("主密钥由 Windows DPAPI 保护");
 });
@@ -453,15 +474,17 @@ void test("UpdatesSection: an available update offers the exact package, with it
   vi.stubGlobal("open", vi.fn());
   renderSection("updates", api);
   await clickCheck();
-  await userEvent.setup().click(await screen.findByRole("button", { name: /下载安装包/ }));
+  // 结果搬到页面顶部那条提示了（owner 2026-09-15），按钮从「下载安装包」改叫
+  // 「升级」——与「关闭=放弃这次更新」并列的两个动作之一。
+  await userEvent.setup().click(await screen.findByRole("button", { name: "升级" }));
   expect(globalThis.open).toHaveBeenCalledWith(
     "https://dl.example.com/ruyin/stable/Ruyin-Setup-0.3.0.exe",
     "_blank",
     "noopener",
   );
   // 渠道要写在明面上：用户有权知道自己要装的是 stable 还是 beta。
-  // 收进那一行里断言 —— 「更新渠道」那一行也写着 stable，全页找会撞上它。
-  const line = document.querySelector(".update-line--new");
+  // 收进提示条里断言 —— 「更新渠道」那一行也写着 stable，全页找会撞上它。
+  const line = document.querySelector(".update-notice");
   expect(line?.textContent).toContain("stable");
   // 本应用不会自动安装 —— 这句话必须说出来，否则用户会等着它自己装。
   // 「不自动安装」现在是「安装方式」那个板块在说，不再挂在下载按钮旁边。
@@ -476,7 +499,9 @@ void test("UpdatesSection: no path in the feed means no link - never a guessed U
   await clickCheck();
   // 猜出来的地址点下去是 404，而用户会以为是产品坏了。照实说这次拿不到。
   expect(await screen.findByText(/更新源里没写文件名/)).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /下载安装包/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "升级" })).not.toBeInTheDocument();
+  // 没有地址可给，「关闭」这个动作还在——这一档不是「什么都做不了」，是「先不装」。
+  expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
 });
 
 void test("UpdatesSection: unreachable is a distinct status, never folded into 'current'", async () => {
@@ -813,13 +838,9 @@ void test("Settings/账户: signed in shows the identity - name, email, tenant, 
   const tenantRow = screen.getByText("当前租户").closest(".fact-row") as HTMLElement;
   expect(tenantRow.textContent).toContain("某租户");
   expect(tenantRow.textContent).toContain("某工作区");
-  const switchBtn = within(tenantRow).getByRole("button", { name: /切换租户/ });
-  const openSwitch = vi.spyOn(window, "open").mockImplementation(() => null);
-  await userEvent.setup().click(switchBtn);
-  // 本机换不了租户：token 里只有一个 active_org，平台 v2 已弃用 tenants 声明 ——
-  // 所以这个按钮只能是去平台切换的入口，而不是一个本地下拉。
-  expect(openSwitch).toHaveBeenCalledWith("https://vxture.com/zh-CN/profile", "_blank", "noopener");
-  openSwitch.mockRestore();
+  // 这一行不再放切换入口了（owner 2026-09-15）：标题栏的租户菜单里已经有
+  // 「租户管理 → 平台」，两处都能切是同一件事写了两遍。
+  expect(within(tenantRow).queryByRole("button")).not.toBeInTheDocument();
   // 「账户中心」那一行链接去掉了（owner 2026-09-04）：右上角的「在线修改」已经是同一个去处。
   expect(screen.queryByRole("link", { name: "https://vxture.com/zh-CN/profile" })).not.toBeInTheDocument();
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
@@ -828,6 +849,27 @@ void test("Settings/账户: signed in shows the identity - name, email, tenant, 
   expect(open).toHaveBeenCalledWith("https://vxture.com/zh-CN/profile", "_blank", "noopener");
   open.mockRestore();
   expect(screen.queryByText("账户由左下角的账户菜单管理")).not.toBeInTheDocument();
+});
+
+/** 租户类型的徽标（owner 2026-09-15）：「团队」不对，应为「个人租户 / 组织租户」。 */
+void test("Settings/账户: 租户类型徽标读作「个人租户 / 组织租户」，不是「个人 / 团队」", async () => {
+  const session = (type: string) => ({
+    signedIn: true,
+    profile: { sub: "u1", name: "郭彦豪" },
+    org: { id: "o1", name: "某租户", type },
+    workspace: { id: "w1", name: "某工作区" },
+    issuer: "",
+    consoleBase: "https://vxture.com",
+    entitlementsConfigured: false,
+  });
+  renderSection("account", fakeApi({ session: vi.fn().mockResolvedValue(session("personal")) }));
+  expect(await screen.findByText("个人租户")).toBeInTheDocument();
+  expect(screen.queryByText("个人", { exact: true })).not.toBeInTheDocument();
+  cleanup();
+
+  renderSection("account", fakeApi({ session: vi.fn().mockResolvedValue(session("organization")) }));
+  expect(await screen.findByText("组织租户")).toBeInTheDocument();
+  expect(screen.queryByText("团队")).not.toBeInTheDocument();
 });
 
 void test("Settings/账户: signed in without org/workspace names shows — rather than nothing; a picture renders an avatar image", async () => {
@@ -877,8 +919,13 @@ void test("Settings/通用设置: 没有 OS 级密钥保护时，行里与警告
   renderSection("general", api);
   expect(await screen.findByText("明文存放 —— 本平台没有 OS 级密钥保护")).toBeInTheDocument();
   expect(screen.getByText("开发态：主密钥明文存储，不可用于真实数据")).toBeInTheDocument();
-  // 库仍然是加密的 —— 暴露的是主密钥，别把两件事混成一件。
-  expect(screen.getByText("每个项目库整库加密 · SQLCipher（AES-256）")).toBeInTheDocument();
+  // 库仍然是加密的 —— 暴露的是主密钥，别把两件事混成一件。「SQLCipher（AES-256）」
+  // 是高亮 tag，文字拆进嵌套 span，按完整 textContent 判等（同上一条的理由）。
+  expect(
+    screen.getByText(
+      (_, el) => el?.textContent === "每个项目库整库加密 · SQLCipher（AES-256）",
+    ),
+  ).toBeInTheDocument();
 });
 
 void test("Settings/账户: every claim the platform gave is shown - username, phone, roles, locale - and the uuid never is", async () => {
@@ -1251,16 +1298,48 @@ void test("Settings/存储位置: 上次搬移失败要如实说，并且说清�
   expect(screen.getByText(/空间不够/)).toBeInTheDocument();
 });
 
-void test("Settings/软件更新: four blocks; the channel is a select with only stable; nothing is auto-installed", async () => {
+void test("Settings/软件更新: three blocks (检查更新收进「当前版本」的标题行了); the channel is a select with only stable; nothing is auto-installed", async () => {
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ version: "0.1.0" })) });
   renderSection("updates", api);
   const titles = Array.from(document.querySelectorAll(".set-block-title")).map((e) => e.textContent);
-  expect(titles).toEqual(["当前版本", "检查更新", "更新渠道", "安装方式"]);
+  // owner 2026-09-15 收口为三块：「检查更新」不再单独占一块，按钮挪进「当前版本」
+  // 的标题行。
+  expect(titles).toEqual(["当前版本", "更新渠道", "安装方式"]);
+  // 「自动检查」默认开着，挂载时会自己问一次——等它问完，按钮才落回「检查更新」。
+  expect(await screen.findByRole("button", { name: "检查更新" })).toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: "自动检查" })).toBeInTheDocument();
   const channel = screen.getByRole("combobox") as HTMLSelectElement;
   expect(channel.value).toBe("stable");
   expect(channel.disabled).toBe(true);
   expect(Array.from(channel.options).map((o) => o.value)).toEqual(["stable"]);
   expect(document.body.textContent).toContain("不会自动下载或自动安装");
+});
+
+/**
+ * 自动检查（owner 2026-09-15）：勾选是本机偏好，持久化在 localStorage；打开时
+ * 若开着这个偏好，进页面即问一次，不用等用户去点「检查更新」。
+ */
+void test("软件更新: 自动检查——勾选持久化；开着时打开设置页会自动问一次", async () => {
+  localStorage.clear();
+  const api = fakeApi({ checkUpdate: vi.fn().mockResolvedValue(currentResult({ latest: "0.2.0" })) });
+  renderSection("updates", api);
+  // 缺省开：不用先勾选就已经问过一次了。
+  await vi.waitFor(() => expect(api.checkUpdate).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText("已是最新（0.2.0）")).toBeInTheDocument();
+
+  const box = screen.getByRole("checkbox", { name: "自动检查" });
+  expect(box).toBeChecked();
+  await userEvent.setup().click(box);
+  expect(box).not.toBeChecked();
+  expect(localStorage.getItem("ruyin-update-auto-check")).toBe("0");
+});
+
+/** 悬停提示要说清「自动检查」在做什么。 */
+void test("软件更新: 自动检查旁边的提示说清行为", async () => {
+  renderSection("updates");
+  await userEvent.setup().hover(screen.getByRole("checkbox", { name: "自动检查" }));
+  // Radix 的悬停延迟（默认约 700ms）比 findBy 的默认等待长，给足时间再判定。
+  expect(await screen.findByText("每次启动软件自动检查最新版本", {}, { timeout: 2000 })).toBeInTheDocument();
 });
 
 void test("Settings/连接器: 添加页有自己的地址 —— 点进去地址就变，直接开那个地址也能进", async () => {
@@ -1413,12 +1492,12 @@ test("能力平台：两个大类可以收起，收起之后条数还在（owner
   expect(await capabilityRows("技能")).toHaveLength(3);
   // 计数挂在标题上，收起之后它是唯一还看得见的量 —— 所以先确认它在。
   const heads = screen.getAllByRole("heading", { level: 3 });
-  expect(heads.some((h) => (h.textContent ?? "").startsWith("技能") && h.textContent!.includes("3"))).toBe(true);
+  expect(heads.some((h) => (h.textContent ?? "").startsWith("本机技能") && h.textContent!.includes("3"))).toBe(true);
 
   await userEvent.click(screen.getAllByRole("button", { name: "收起" })[0]!);
   // 收起：这一类的小类清单整个不在了，但标题与条数还在。
   expect(screen.queryAllByRole("list", { name: /^技能 · / })).toHaveLength(0);
-  expect(screen.getAllByRole("heading", { level: 3 }).some((h) => (h.textContent ?? "").startsWith("技能"))).toBe(true);
+  expect(screen.getAllByRole("heading", { level: 3 }).some((h) => (h.textContent ?? "").startsWith("本机技能"))).toBe(true);
 
   await userEvent.click(screen.getByRole("button", { name: "展开" }));
   expect(await capabilityRows("技能")).toHaveLength(3);
@@ -1441,12 +1520,20 @@ test("能力平台：停用走 disable、启用走 enable（B-3 动词），键�
   expect(api.skills).toHaveBeenCalledTimes(4); // 首次 + 两次开关后的重拉 + 刷新后的重拉
 });
 
+/** 筛选原来是内容区里的一个 <select>，现在是标题行里的下拉菜单（owner
+ *  2026-09-15）：开菜单、点一项、菜单关掉，交互换了，断言的事实不变。 */
+async function pickFilter(triggerLabel: string, optionLabel: string): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: triggerLabel }));
+  await user.click(await screen.findByRole("menuitem", { name: optionLabel }));
+}
+
 test("能力平台：按层筛选只看用户层；没有登记册时说清，不是空清单", async () => {
   renderSection("skills", skillsApi());
   expect(await capabilityRows("技能")).toHaveLength(3);
-  fireEvent.change(screen.getByLabelText("按来源层筛选"), { target: { value: "user" } });
+  await pickFilter("按来源层筛选", "用户");
   expect(await capabilityRows("技能")).toHaveLength(1);
-  fireEvent.change(screen.getByLabelText("按来源层筛选"), { target: { value: "distributed" } });
+  await pickFilter("按来源层筛选", "产品分发");
   expect(screen.getByText("这一层没有技能。")).toBeTruthy();
 
   renderSection(
@@ -1869,7 +1956,7 @@ function catalogPage(over: Record<string, unknown> = {}) {
 }
 
 async function catalogBlock(): Promise<HTMLElement> {
-  const title = await screen.findByText("Runos 清单");
+  const title = await screen.findByText("云端能力清单 RUNOS");
   return title.closest("section") as HTMLElement;
 }
 
@@ -1973,10 +2060,10 @@ test("Runos 清单：按类型筛选交给守护进程；筛完没有就说没�
     .mockResolvedValue(catalogPage({ items: [], total: 0 }));
   renderSection("skills", skillsApi({ capabilityCatalog } as Partial<Api>));
   await screen.findByRole("list", { name: "Runos 清单条目" });
-  await userEvent.click(screen.getByRole("radio", { name: "执行器" }));
+  await pickFilter("按类型筛选", "执行器");
   await waitFor(() => expect(capabilityCatalog).toHaveBeenLastCalledWith({ type: "executor" }));
   expect(await screen.findByText("没有符合条件的条目。")).toBeInTheDocument();
-  expect(screen.getByRole("radio", { name: "执行器" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "按类型筛选" })).toHaveTextContent("执行器");
 });
 
 test("Runos 清单：搜索词交给守护进程（q），空白不发", async () => {
@@ -2042,7 +2129,7 @@ test("Runos 清单：这套装配没有清单（503）时整块不显示，不�
     } as Partial<Api>),
   );
   await capabilityRows("技能");
-  expect(screen.queryByText("Runos 清单")).not.toBeInTheDocument();
+  expect(screen.queryByText("云端能力清单 RUNOS")).not.toBeInTheDocument();
 });
 
 // ───────────────────────── 模型平台（RY-001 #24，只展示） ─────────────────────────

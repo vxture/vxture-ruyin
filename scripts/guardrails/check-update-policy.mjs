@@ -29,10 +29,13 @@ const updates = readFileSync(
   join(repoRoot, "apps", "local-host", "src", "updates.ts"),
   "utf8",
 );
-const settings = readFileSync(
-  join(repoRoot, "apps", "ui-workspace", "src", "settings.tsx"),
-  "utf8",
-);
+// 检查结果与「没查到 / 渠道」这几档的渲染，2026-09-15 起从 settings.tsx 挪进
+// update-check.tsx（自动检查与手动检查共用同一份状态、同一段渲染）——两个文件
+// 拼在一起当作「设置页」来查，规则查的是页面最终呈现了什么，不是哪个源文件里。
+const settings = [
+  readFileSync(join(repoRoot, "apps", "ui-workspace", "src", "settings.tsx"), "utf8"),
+  readFileSync(join(repoRoot, "apps", "ui-workspace", "src", "update-check.tsx"), "utf8"),
+].join("\n");
 
 const problems = [];
 
@@ -84,7 +87,7 @@ if (/https?:\/\/[^\s"'`]*\.exe/.test(settings)) {
       "    猜出来的地址点下去是 404，而用户会以为是产品坏了。",
   );
 }
-if (!/result\.channel/.test(settings)) {
+if (!/result!?\.channel/.test(settings)) {
   problems.push(
     "设置页没有显示渠道 —— **不写明渠道的下载链接是有害的**：用户可能正装上一个\n" +
       "    beta 包而不自知，而他以为自己在用 stable。",

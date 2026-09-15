@@ -20,12 +20,19 @@ import {
   AvatarImage,
   Badge,
   Button,
+  Checkbox,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   EmptyState,
   Icon,
   Input,
@@ -33,6 +40,10 @@ import {
   SectionHeader,
   SegmentedControl,
   StatusBadge,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
   useTheme,
 } from "@vxture/design-system";
 import {
@@ -53,7 +64,6 @@ import {
   type HardwareInfo,
   type SessionInfo,
   type SystemInfo,
-  type UpdateCheck,
 } from "./api";
 // SectionId/SETTINGS_SECTIONS live in their own module (settings-sections.ts)
 // so the sidebar can know the section list without pulling in this file's
@@ -65,6 +75,7 @@ import { groupCapabilities } from "./capability-groups";
 import { useHostChrome } from "./host-chrome";
 
 import { ThirdPartyNotices } from "./third-party-notices";
+import { UpdateNotice, useUpdateCheck, type UpdateCheckState } from "./update-check";
 const UI_VERSION = "0.2.0";
 
 /**
@@ -81,6 +92,9 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 检查更新的状态挂在这一层（不是「软件更新」那一页）：结果要能在**任何**分区的
+  // 顶部露出来——自动检查可能在用户正看着别的分区时问完（owner 2026-09-15）。
+  const updateCheck = useUpdateCheck(api);
 
   useEffect(() => {
     api
@@ -101,6 +115,7 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
     <div className="settings-page">
       {/* 「设置」两个字已经在标题栏和侧栏里，这里不再写第三遍。 */}
       {error && <NoticeBar message={error} onClose={() => setError(null)} />}
+      <UpdateNotice state={updateCheck} />
       {view === "account" && <AccountSection session={session} />}
       {view === "general" && <SystemSection system={system} api={api} />}
       {view === "connectors" && <ConnectorsSection api={api} />}
@@ -108,7 +123,7 @@ export function SettingsView({ api, section }: { api: Api; section: SectionId })
       {view === "models" && <ModelsSection api={api} />}
       {view === "skills" && <SkillsSection api={api} />}
       {view === "database" && <DatabaseSection />}
-      {view === "updates" && <UpdatesSection system={system} api={api} />}
+      {view === "updates" && <UpdatesSection system={system} updateCheck={updateCheck} />}
       {view === "about" && <AboutSection system={system} session={session} api={api} />}
     </div>
   );
@@ -320,35 +335,25 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
         <FactRow label="语言地区" value={p?.locale} mono />
         {/* 租户与工作区同一行（owner 第 4 条）：它们回答的是同一个问题 ——
             「我现在在哪儿干活」。中间一个淡分隔点，不是两行各说一半。
-            **切换只能去平台**（第 3 条）：token 里只有 `active_org` 一个组织，
-            平台 v2 已弃用 `tenants` 声明，所以本机既列不出候选、也换不了 ——
-            换租户等于换一份 token。按钮如实写成去平台切换，切完工作区一起变。 */}
+            **这里不再放切换入口**（owner 2026-09-15）：标题栏的租户菜单里已经有
+            「租户管理 → 平台」这一条，两处都能切等于同一件事写了两遍；本机也确实
+            切不了（token 里只有 `active_org` 一个组织，平台 v2 已弃用 `tenants`
+            声明），要切只能去标题栏那一处。 */}
         <div className="fact-row">
           <span className="fact-label">当前租户</span>
           <span className="fact-value">
             {session.org?.name ?? <span className="fact-empty">—</span>}
             {session.org?.type && (
-              <StatusBadge tone="neutral">
-                {session.org.type === "personal" ? "个人" : "团队"}
-              </StatusBadge>
+              <span className="fact-tag">
+                <StatusBadge tone="neutral">
+                  {session.org.type === "personal" ? "个人租户" : "组织租户"}
+                </StatusBadge>
+              </span>
             )}
             <span className="fact-sep">·</span>
             {session.workspace?.name ?? <span className="fact-empty">—</span>}
           </span>
-          <span className="fact-action">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.open(profileUrl, "_blank", "noopener")}
-            >
-              切换租户
-              <Icon name="external-link" size="xs" />
-            </Button>
-          </span>
         </div>
-        <p className="set-row-note">
-          切换在平台完成，工作区随租户一起切换；本机会话在下次刷新令牌时跟上。
-        </p>
       </SettingsBlock>
       <PreferencesBlock />
     </>
@@ -429,6 +434,17 @@ function PreferencesBlock() {
 
 /* ---------------- 通用设置（原「数据与隐私」的内容）---------------- */
 
+/** 数据加密那几行里的关键词高亮（owner 2026-09-15）：对勾 + 淡底，扫一眼就找到
+ *  「用的是什么算法 / 什么机制」，不必读完整句话。 */
+function CryptoTag({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="crypto-tag">
+      <Icon name="check" size="xs" />
+      {children}
+    </span>
+  );
+}
+
 /**
  * 通用设置：数据在哪儿、怎么加密、什么会离开本机。三件事三个板块 ——
  * 原先它们挤在两张卡里，而「目录」和「加密」不是同一个问题。
@@ -466,18 +482,26 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
             <ul className="crypto-chain">
               <li>
                 <span className="crypto-what">业务数据</span>
-                <span className="crypto-how">每个项目库整库加密 · SQLCipher（AES-256）</span>
+                <span className="crypto-how">
+                  每个项目库整库加密 · <CryptoTag>SQLCipher（AES-256）</CryptoTag>
+                </span>
               </li>
               <li>
                 <span className="crypto-what">库密钥</span>
-                <span className="crypto-how">一库一把随机密钥 · AES-256-GCM 封装在主密钥下</span>
+                <span className="crypto-how">
+                  一库一把随机密钥 · <CryptoTag>AES-256-GCM</CryptoTag> 封装在主密钥下
+                </span>
               </li>
               <li>
                 <span className="crypto-what">主密钥</span>
                 <span className="crypto-how">
-                  {system.keyProtection === "dpapi"
-                    ? "Windows DPAPI 保护（当前用户作用域），不落明文"
-                    : "明文存放 —— 本平台没有 OS 级密钥保护"}
+                  {system.keyProtection === "dpapi" ? (
+                    <>
+                      <CryptoTag>Windows DPAPI</CryptoTag> 保护（当前用户作用域），不落明文
+                    </>
+                  ) : (
+                    "明文存放 —— 本平台没有 OS 级密钥保护"
+                  )}
                 </span>
               </li>
             </ul>
@@ -1116,103 +1140,59 @@ function DatabaseSection() {
  * 时间戳；现在 `unreachable` 是一个正式状态，绝不折叠进「最新」。
  */
 /**
- * 软件更新：四件事四个板块（owner 2026-09-04）—— 现在装的是什么、去问一次、
- * 从哪个渠道问、以及问到了之后怎么装。
+ * 软件更新：三件事三个板块（owner 2026-09-15 收口为三块）—— 现在装的是什么
+ * （连同「去问一次」的入口一起放在这一块的标题行）、从哪个渠道问、问到了之后
+ * 怎么装。
+ *
+ * 「检查更新」不再单独占一块：**结果不在这里显示了** —— 它现在是页面顶部那条
+ * 提示（`UpdateNotice`，`SettingsView` 那一层），自动检查与手动点这里的按钮
+ * 写的是同一份状态。按钮与「自动检查」勾选一起挪到「当前版本」的标题行，紧挨着
+ * 它要问的正是这个事实。
  *
  * 最后一块不是客套话：**本应用不自动安装**（TD-021，owner 定不采购签名证书后
  * 的连带结果）。把「怎么装」写在这里，用户点下载之前就知道接下来要自己动手。
  */
 function UpdatesSection({
   system,
-  api,
+  updateCheck,
 }: {
   system: SystemInfo | null;
-  api: Api;
+  updateCheck: UpdateCheckState;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<UpdateCheck | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-
-  const check = async () => {
-    setBusy(true);
-    setFailed(null);
-    try {
-      setResult(await api.checkUpdate());
-    } catch (e) {
-      // 连守护进程都没问到，同样不能说成「最新」。
-      setResult(null);
-      setFailed(String((e as Error).message));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { autoCheck, setAutoCheck, busy, check } = updateCheck;
 
   return (
     <>
-      <SettingsBlock icon="info" title="当前版本" desc="这台机器上正在跑的是哪一版">
+      <SettingsBlock
+        icon="info"
+        title="当前版本"
+        desc="这台机器上正在跑的是哪一版"
+        aside={
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* 命中区在 label 上，勾选框本身够小；hover 在文字上更容易碰到。 */}
+                <label className="update-auto-check">
+                  <Checkbox
+                    checked={autoCheck}
+                    onCheckedChange={(v) => setAutoCheck(v === true)}
+                    aria-label="自动检查"
+                  />
+                  自动检查
+                </label>
+              </TooltipTrigger>
+              <TooltipContent>每次启动软件自动检查最新版本</TooltipContent>
+            </Tooltip>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void check()}>
+              {busy ? "正在检查…" : "检查更新"}
+            </Button>
+          </TooltipProvider>
+        }
+      >
         <FactRow label="运行时" value={system ? `Runtime ${system.version}` : undefined} mono />
         <FactRow label="界面" value={`UI ${UI_VERSION}`} mono />
         <FactRow label="平台" value={system ? `${system.platform}-${system.arch}` : undefined} mono />
         <FactRow label="启动时间" value={system?.startedAt} mono />
-      </SettingsBlock>
-
-      <SettingsBlock
-        icon="arrow-down"
-        title="检查更新"
-        desc="向发布渠道询问是否有新版本；只是问一句，不会下载任何东西"
-        aside={
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => void check()}>
-            {busy ? "正在检查…" : "检查更新"}
-          </Button>
-        }
-      >
-        {!result && !failed && !busy && (
-          <p className="set-note">还没查过。查一次也不会自动下载。</p>
-        )}
-        {failed && <div className="update-line update-line--warn">检查失败：{failed}</div>}
-        {result?.status === "current" && (
-          <div className="update-line">已是最新（{result.latest}）</div>
-        )}
-        {result?.status === "available" && (
-          <div className="update-line update-line--new">
-            有新版本 <span className="mono">{result.latest}</span>
-            （当前 <span className="mono">{result.current}</span>
-            {/* 渠道要写在明面上：用户有权知道自己要装的是 stable 还是 beta。
-                更新源没写明渠道时**不提它** —— 猜一个渠道名是拿错话冒充事实。 */}
-            {result.channel && (
-              <>
-                ，<span className="mono">{result.channel}</span> 渠道
-              </>
-            )}
-            ）
-            <div className="update-actions">
-              {result.downloadUrl ? (
-                <>
-                  <Button onClick={() => window.open(result.downloadUrl, "_blank", "noopener")}>
-                    下载安装包
-                    <Icon name="external-link" size="xs" />
-                  </Button>
-                  <span className="text-body-sm text-muted-foreground">
-                    在浏览器里下载，下载完自己运行它。
-                  </span>
-                </>
-              ) : (
-                // feed 里没有 path。**不拼一个猜出来的地址**：点下去拿到 404，
-                // 用户会以为是产品坏了。照实说这一次拿不到地址。
-                <span className="text-body-sm update-line--warn">
-                  这次没能拿到安装包地址（更新源里没写文件名）。
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-        {result?.status === "unreachable" && (
-          <div className="update-line update-line--warn">
-            没查到——{result.reason}。
-            <br />
-            这不代表你已是最新，只代表这次没问到。
-          </div>
-        )}
       </SettingsBlock>
 
       {/* 这一句的理由**换到第三个版本了**，前两个都随实现变化而过期：
@@ -1241,7 +1221,7 @@ function UpdatesSection({
         title="安装方式"
         desc="本应用不会自动下载或自动安装 —— 更新由你自己决定什么时候装"
       >
-        <FactRow label="检查" value="手动，或每次打开设置时你点一下" />
+        <FactRow label="检查" value="手动点一下，或开着「自动检查」时每次打开设置页问一次" />
         <FactRow label="下载" value="浏览器下载，安装包落在你的下载目录" />
         <FactRow label="安装" value="双击安装包，覆盖安装，业务数据不动" />
         {/* 这里原本还有一条 SmartScreen 提醒（语气块）。**移到「关于」页底部了**
@@ -1275,11 +1255,16 @@ const LEGAL_LINKS: Array<{ path: string; label: string }> = [
 ];
 
 /**
- * 关于页：**两块**（owner 2026-09-10 定的版式）。
+ * 关于页：**三块**（owner 2026-09-15 由两块拆成三块）。
  *
- * 1. `.about-main` —— 关于信息，**自动布满**剩下的高度。内容不居中，落在**黄金
- *    分割**上（上方留白 : 下方留白 = 0.382 : 0.618），所以是「中部靠上一些」。
- * 2. `.about-notice` —— 提示信息，**按需显隐、固定高度**。不出现时这块不占位，
+ * 1. `.about-main` —— 「关于」：品牌 + 条款 + 三方许可，**自动布满**剩下的高度。
+ *    内容不居中，落在**黄金分割**上（上方留白 : 下方留白 = 0.382 : 0.618），
+ *    所以是「中部靠上一些」。
+ * 2. 「本机配置」—— 本机固件信息，**按需高度**（内容多长就多高，不参与黄金
+ *    分割）。原先嵌在同一张卡里、靠一条分隔线区分（owner 2026-09-10 的版式），
+ *    现在拆成自己的卡：「这是什么产品」与「Ruyin 凭什么要读我这台机器」是两个
+ *    不同的问题，不该挤在一张卡里靠一条线分。
+ * 3. `.about-notice` —— 提示信息，**按需显隐、固定高度**。不出现时这块不占位，
  *    第一块随之长满。
  *
  * 事实不在这一页重复：数据目录、加密链条、推理策略、审计逐条写在「通用设置」，
@@ -1321,6 +1306,17 @@ function AboutSection({
       .catch(() => setHardwareUnavailable(true));
   }, [api]);
 
+  // 主板与 BIOS/UEFI 同一行、空格分隔（owner 2026-09-15）：都是「这块板子是什么」
+  // 这一件事的两个来源，分两行反而让人以为是两件不相关的事实。各自内部原来怎么
+  // 拼就还怎么拼（主板：厂商 型号；BIOS：厂商 · 版本），只在两组之间加空格。
+  const boardPart = hardware?.baseboard
+    ? [hardware.baseboard.manufacturer, hardware.baseboard.model].filter(Boolean).join(" ")
+    : undefined;
+  const biosPart = hardware?.bios
+    ? [hardware.bios.vendor, hardware.bios.version].filter(Boolean).join(" · ")
+    : undefined;
+  const board = hardware ? [boardPart, biosPart].filter(Boolean).join(" ") || undefined : "…";
+
   return (
     <div className="about-page">
       <div className="about-main">
@@ -1329,10 +1325,16 @@ function AboutSection({
             时把它弄丢了。 */}
         <div className="card about-card">
           <div className="about-block">
-            <p>
-              <span className="brand-name">RUYIN</span>
-            </p>
-            <p className="brand-tag">Intelligent Workbench</p>
+            {/* 图形标 + 品牌两行，左对齐、品牌色（owner 2026-09-15）。图形标复用
+                登录页那一份（/logo.svg），不是这一页专门画一份 —— 同一个产品只有
+                一个图形标。 */}
+            <div className="about-brand">
+              <img className="about-mark" src="/logo.svg" alt="" aria-hidden />
+              <div className="about-brand-text">
+                <p className="brand-name">RUYIN</p>
+                <p className="brand-tag">Intelligent Workbench</p>
+              </div>
+            </div>
             <p className="text-body-md text-muted-foreground" style={{ marginTop: 10 }}>
               Vxture AI 原生智能体的本地智能工作环境
             </p>
@@ -1343,9 +1345,11 @@ function AboutSection({
             <p className="text-body-sm text-muted-foreground" style={{ marginTop: 12 }}>
               © 2026 Vxture · 保留所有权利
             </p>
-            {/* 三条做成按钮式（owner 2026-09-10），但**仍然是 `<a>`**：真链接才能
+            {/* 三条条款做成按钮式（owner 2026-09-10），但**仍然是 `<a>`**：真链接才能
                 中键新开、右键复制地址；用按钮 + onClick 去 window.open 会把这两样
-                都弄丢，而它看起来一模一样。 */}
+                都弄丢，而它看起来一模一样。「三方许可」与它们同一行、同一个版式
+                （owner 2026-09-15）——它底层是个 `<button>`（就地展开一份清单，不是
+                去别处），所以留着 `.about-third-party` 自己的类，只是外观对齐。 */}
             <div className="about-legal">
               {LEGAL_LINKS.map((l) => (
                 <a
@@ -1359,107 +1363,85 @@ function AboutSection({
                   <Icon name="external-link" size="xs" />
                 </a>
               ))}
-            </div>
-            <ThirdPartyNotices />
-
-            {/* 独立信息块：本机固件信息。**不新开一张卡** —— 这一页刻意只留一张
-                （owner 2026-09-10：四张卡 → 两块 → 去掉「须知」，settings.test.tsx
-                钉着 `.set-block` 数目为 0，多一张卡这条就会红）。用一条分隔线与
-                上面的身份信息隔开，回答一个不同的问题：「Ruyin 凭什么要读我这台
-                机器」，不是「这是什么产品」。 */}
-            <div className="about-hardware">
-              <p className="about-hardware-title">本机固件信息</p>
-              <p className="about-hardware-desc">
-                为保障处理过程中的数据不出域，Ruyin
-                在本机构建沙箱执行分析与计算——以下信息用于确定沙箱运行在什么机器上，仅本机读取、本机展示，不上传、不计费、不进遥测
-              </p>
-              {hardwareUnavailable ? (
-                <p className="text-body-sm text-muted-foreground">
-                  本机固件信息暂不可用（守护进程未提供这一项，不影响其它功能）。
-                </p>
-              ) : (
-                <>
-                  <FactRow
-                    label="处理器"
-                    value={
-                      hardware?.cpu
-                        ? [
-                            hardware.cpu.brand,
-                            hardware.cpu.cores ? `${hardware.cpu.cores} 核` : undefined,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")
-                        : hardware
-                          ? undefined
-                          : "…"
-                    }
-                  />
-                  <FactRow label="内存" value={hardware ? gb(hardware.memoryTotalBytes) : "…"} />
-                  <FactRow
-                    label="主板"
-                    value={
-                      hardware?.baseboard
-                        ? [hardware.baseboard.manufacturer, hardware.baseboard.model]
-                            .filter(Boolean)
-                            .join(" ")
-                        : hardware
-                          ? undefined
-                          : "…"
-                    }
-                  />
-                  <FactRow
-                    label="BIOS / UEFI"
-                    value={
-                      hardware?.bios
-                        ? [hardware.bios.vendor, hardware.bios.version].filter(Boolean).join(" · ")
-                        : hardware
-                          ? undefined
-                          : "…"
-                    }
-                  />
-                  <FactRow
-                    label="操作系统"
-                    value={
-                      hardware?.os
-                        ? [
-                            hardware.os.distro,
-                            hardware.os.build ? `build ${hardware.os.build}` : undefined,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")
-                        : hardware
-                          ? undefined
-                          : "…"
-                    }
-                  />
-                  <FactRow
-                    label="磁盘"
-                    value={
-                      hardware?.disks && hardware.disks.length > 0
-                        ? hardware.disks
-                            .map((d) =>
-                              [d.name ?? d.vendor, gb(d.sizeBytes)].filter(Boolean).join(" · "),
-                            )
-                            .join("；")
-                        : hardware
-                          ? undefined
-                          : "…"
-                    }
-                  />
-                  <FactRow
-                    label="网卡 MAC 地址"
-                    value={hardware?.macAddresses?.join("、") ?? (hardware ? undefined : "…")}
-                    mono
-                  />
-                  <FactRow
-                    label="机器 ID"
-                    value={hardware?.machineId ?? (hardware ? undefined : "…")}
-                    mono
-                  />
-                </>
-              )}
+              <ThirdPartyNotices />
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* 「本机配置」——独立一张卡（owner 2026-09-15 从「关于」拆出来），按需高度，
+          不参与上面那张卡的黄金分割。 */}
+      <div className="card about-hardware-card">
+        <div className="about-hardware">
+          <p className="about-hardware-title">本机配置</p>
+          <p className="about-hardware-desc">
+            为保障处理过程中的数据不出域，Ruyin
+            在本机构建沙箱执行分析与计算——以下信息用于确定沙箱运行在什么机器上，仅本机读取、本机展示，不上传、不计费、不进遥测
+          </p>
+          {hardwareUnavailable ? (
+            <p className="text-body-sm text-muted-foreground">
+              本机固件信息暂不可用（守护进程未提供这一项，不影响其它功能）。
+            </p>
+          ) : (
+            <>
+              <FactRow
+                label="处理器"
+                value={
+                  hardware?.cpu
+                    ? [
+                        hardware.cpu.brand,
+                        hardware.cpu.cores ? `${hardware.cpu.cores} 核` : undefined,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : hardware
+                      ? undefined
+                      : "…"
+                }
+              />
+              <FactRow label="内存" value={hardware ? gb(hardware.memoryTotalBytes) : "…"} />
+              <FactRow label="主板 / BIOS" value={board} />
+              <FactRow
+                label="操作系统"
+                value={
+                  hardware?.os
+                    ? [
+                        hardware.os.distro,
+                        hardware.os.build ? `build ${hardware.os.build}` : undefined,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : hardware
+                      ? undefined
+                      : "…"
+                }
+              />
+              <FactRow
+                label="磁盘"
+                value={
+                  hardware?.disks && hardware.disks.length > 0
+                    ? hardware.disks
+                        .map((d) =>
+                          [d.name ?? d.vendor, gb(d.sizeBytes)].filter(Boolean).join(" · "),
+                        )
+                        .join("；")
+                    : hardware
+                      ? undefined
+                      : "…"
+                }
+              />
+              <FactRow
+                label="网卡 MAC 地址"
+                value={hardware?.macAddresses?.join("、") ?? (hardware ? undefined : "…")}
+                mono
+              />
+              <FactRow
+                label="机器 ID"
+                value={hardware?.machineId ?? (hardware ? undefined : "…")}
+                mono
+              />
+            </>
+          )}
         </div>
       </div>
 
@@ -1559,6 +1541,62 @@ const TOOL_KIND: Record<ToolView["kind"], string> = {
 };
 
 /**
+ * 板块标题行里的紧凑筛选（owner 2026-09-15）：原先技能板块内容区里那个全宽的
+ * `<select>` 太长，改成一个小按钮 + 下拉，挪到标题行、贴着刷新按钮、右对齐。
+ * 工具板块与云端能力清单的筛选同一个组件，只是各自的维度不同。
+ *
+ * 单选（不是多选复选框）：三处筛选各自只有一个维度，谁选中了在按钮上直接看得
+ * 见，不需要「多选之后拼一句摘要」那一层。
+ */
+function FilterMenu<T extends string>({
+  ariaLabel,
+  options,
+  value,
+  onChange,
+}: {
+  ariaLabel: string;
+  options: Array<{ value: T; label: string }>;
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  const current = options.find((o) => o.value === value)?.label ?? ariaLabel;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="cap-filter-trigger" aria-label={ariaLabel}>
+          {current}
+          <Icon name="caret-up-down" size="xs" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {options.map((o) => (
+          <DropdownMenuItem key={o.value} onSelect={() => onChange(o.value)}>
+            {o.value === value && <Icon name="check" size="xs" />}
+            {o.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const LAYER_FILTER_OPTIONS: Array<{ value: "all" | SkillLayer; label: string }> = [
+  { value: "all", label: "全部来源" },
+  { value: "bundled", label: LAYER_LABEL.bundled },
+  { value: "distributed", label: LAYER_LABEL.distributed },
+  { value: "user", label: LAYER_LABEL.user },
+  { value: "project", label: LAYER_LABEL.project },
+];
+
+type ToolKindFilter = "all" | ToolView["kind"];
+const TOOL_KIND_FILTER_OPTIONS: Array<{ value: ToolKindFilter; label: string }> = [
+  { value: "all", label: "全部类别" },
+  { value: "builtin", label: TOOL_KIND.builtin },
+  { value: "connector", label: TOOL_KIND.connector },
+  { value: "mcp-server", label: TOOL_KIND["mcp-server"] },
+];
+
+/**
  * Runos 清单（ADR-020 §6.2，RY-204）的筛选。资产（asset）Runos 目前登记即拒，不给它
  * 一个永远是空的按钮。
  */
@@ -1611,6 +1649,7 @@ function SkillsSection({ api }: { api: Api }) {
   const [failed, setFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [layer, setLayer] = useState<"all" | SkillLayer>("all");
+  const [toolKind, setToolKind] = useState<ToolKindFilter>("all");
   /** Runos 清单。null = 这套装配没有清单（503）或读不到 —— 那时整块不显示，不猜。 */
   const [catalog, setCatalog] = useState<CapabilityCatalogPage | null>(null);
   const [catalogType, setCatalogType] = useState<CatalogFilter>("all");
@@ -1707,6 +1746,7 @@ function SkillsSection({ api }: { api: Api }) {
 
   const items = (listing?.items ?? []).filter((s) => layer === "all" || s.layer === layer);
   const layerSummary = (listing?.layers ?? []).map((l) => `${LAYER_LABEL[l.layer]} ${l.count}`).join(" · ");
+  const toolItems = (tools ?? []).filter((t) => toolKind === "all" || t.kind === toolKind);
   // 预置的 MCP 服务器：启动 = 真起进程、握手、列工具；起不了的原因照原样转达。
   const [starting, setStarting] = useState<string | null>(null);
   const launch = async (t: ToolView, on: boolean) => {
@@ -1764,25 +1804,22 @@ function SkillsSection({ api }: { api: Api }) {
   };
 
   const skillGroups = groupCapabilities(items, (s) => ({ name: s.name, description: s.description }));
-  const toolGroups = groupCapabilities(tools ?? [], (t) => ({ id: t.id, name: t.id, description: t.detail }));
+  const toolGroups = groupCapabilities(toolItems, (t) => ({ id: t.id, name: t.id, description: t.detail }));
 
   return (
     <>
       {/*
-        这一屏顶上的一句事实（owner 2026-09-07）：本机这份能力不是本机自己攒的，
-        它与云端两处**同出一份登记册**。
-
-        措辞到「同一份登记册」为止，**不写「实时同步」**：三处用的是同一份预置
-        清单（ruyin 构建时按它随包，Runos 按它注册台账），产品还能经能力面把技能
-        下发到本机 —— 但那不是一条实时通道，此刻三边的清单未必逐条相同。写「同步」
-        会让用户以为在这里看到的就是云端此刻的样子。
-      */}
+        这一屏顶上的一句事实。原来两行讲的是「本机这份能力不是本机自己攒的，它与
+        云端两处同出一份登记册；这里显示的是本机此刻真正装着的那一份」——话没错，
+        但绕（owner 2026-09-15：啰嗦晦涩，改成一句）。收成一句后就不再逐字断言
+        「同一份登记册」这个精确说法了；不写「实时同步」的顾虑仍然成立（下面这句
+        「同步」指的是能力供给的来源，不是「此刻逐条相同」），所以只说到「同步」
+        为止，不展开成「登记册」那层技术说法。 */}
       <p className="cap-sync">
         <Icon name="cloud" size="sm" aria-hidden />
         <span>
-          与 <strong>Vxture 平台</strong>（云端工作区）、<strong>Runos</strong>（云端能力面）
-          <strong>同出一份能力登记册</strong>；这里显示的是 <strong>RUYIN 智能工作台</strong>
-          （本机）此刻真正装着的那一份。
+          能力供给与 <strong>Vxture</strong> 云端 <strong>Runos</strong> 同步，本机提供
+          <strong>Runtime</strong> 执行环境。
         </span>
       </p>
       {routing && (
@@ -1800,13 +1837,23 @@ function SkillsSection({ api }: { api: Api }) {
         icon="sparkles"
         collapsible
         count={items.length}
-        title="技能"
+        title="本机技能"
         desc="本机装着的指令包（Agent Skills）：预置 → 产品分发 → 用户 → 项目，同名近者优先。只有产品在契约里声明了的任务能读到它们"
         aside={
           unavailable ? undefined : (
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}>
-              {busy ? "刷新中…" : "刷新"}
-            </Button>
+            // 筛选紧挨着刷新按钮、一起右对齐（owner 2026-09-15）：原来这个筛选是
+            // 内容区里一个全宽的 <select>，挪到标题行、压缩到按钮宽度。
+            <>
+              <FilterMenu
+                ariaLabel="按来源层筛选"
+                options={LAYER_FILTER_OPTIONS}
+                value={layer}
+                onChange={setLayer}
+              />
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}>
+                {busy ? "刷新中…" : "刷新"}
+              </Button>
+            </>
           )
         }
       >
@@ -1817,22 +1864,7 @@ function SkillsSection({ api }: { api: Api }) {
           <p className="set-note">…</p>
         ) : (
           <>
-            {/* 计数一行、筛选一行：挤在同一行里，计数会在选择框旁边折成两行。 */}
             <p className="set-note">{layerSummary || "尚无技能"}</p>
-            <div className="row-item">
-              <NativeSelect
-                aria-label="按来源层筛选"
-                value={layer}
-                onChange={(e) => setLayer(e.target.value as "all" | SkillLayer)}
-              >
-                <option value="all">全部来源</option>
-                {(["bundled", "distributed", "user", "project"] as SkillLayer[]).map((l) => (
-                  <option key={l} value={l}>
-                    {LAYER_LABEL[l]}
-                  </option>
-                ))}
-              </NativeSelect>
-            </div>
             {items.length === 0 ? (
               <p className="set-note">
                 {listing.items.length === 0
@@ -1887,8 +1919,18 @@ function SkillsSection({ api }: { api: Api }) {
         icon="plugs-connected"
         collapsible
         count={tools?.length ?? 0}
-        title="工具"
+        title="本机工具"
         desc="可执行的能力：运行时内建的、已装连接器暴露的、预置清单登记的 MCP 服务器。每一次调用都过 Tool Gate"
+        aside={
+          tools && tools.length > 0 ? (
+            <FilterMenu
+              ariaLabel="按类别筛选"
+              options={TOOL_KIND_FILTER_OPTIONS}
+              value={toolKind}
+              onChange={setToolKind}
+            />
+          ) : undefined
+        }
       >
         {tools === null ? (
           <p className="set-note">…</p>
@@ -1896,8 +1938,11 @@ function SkillsSection({ api }: { api: Api }) {
           <p className="set-note">没有工具登记册。</p>
         ) : (
           <>
-            {/* 常驻的一句事实：随包的与要获取的各多少。用户不必点开每一行去数。 */}
+            {/* 常驻的一句事实：随包的与要获取的各多少（按登记册全量算，不随筛选变——
+                这是「这台机器总共有多少」，不是「筛出来看见几个」）。用户不必点开
+                每一行去数。 */}
             <p className="set-note">{bundledSummary(tools)}</p>
+            {toolItems.length === 0 && <p className="set-note">这一类没有工具。</p>}
             <Accordion type="multiple" className="cap-groups">
               {toolGroups.map(({ group, items: rows }) => (
                 <AccordionItem key={group.id} value={group.id} className="cap-group">
@@ -1997,17 +2042,29 @@ function SkillsSection({ api }: { api: Api }) {
           icon="cloud"
           collapsible
           {...(catalog.source.total === undefined ? {} : { count: catalog.source.total })}
-          title="Runos 清单"
+          title="云端能力清单 RUNOS"
           desc="这是平台 Runos 能力目录的清单，不是安装：条目不会下载到本机，本机能用什么以上面的技能与工具为准。"
           aside={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={catalogBusy || catalog.source.state === "unavailable"}
-              onClick={() => void refreshCatalog()}
-            >
-              {catalogBusy ? "刷新中…" : "刷新"}
-            </Button>
+            <>
+              {/* 筛选与工具板块同一个组件（owner 2026-09-15：「多维度筛选下拉」）。
+                  一条都没有时不给一个永远筛不出东西的按钮。 */}
+              {(catalog.source.total ?? 0) > 0 && (
+                <FilterMenu
+                  ariaLabel="按类型筛选"
+                  options={CATALOG_FILTERS}
+                  value={catalogType}
+                  onChange={setCatalogType}
+                />
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={catalogBusy || catalog.source.state === "unavailable"}
+                onClick={() => void refreshCatalog()}
+              >
+                {catalogBusy ? "刷新中…" : "刷新"}
+              </Button>
+            </>
           }
         >
           {catalogFailed && <div className="update-line update-line--warn">{catalogFailed}</div>}
@@ -2019,12 +2076,6 @@ function SkillsSection({ api }: { api: Api }) {
           {(catalog.source.total ?? 0) > 0 && (
             <>
               <div className="row-item">
-                <SegmentedControl
-                  ariaLabel="按类型筛选 Runos 清单"
-                  items={CATALOG_FILTERS}
-                  value={catalogType}
-                  onChange={(v) => setCatalogType(v as CatalogFilter)}
-                />
                 <Input
                   id="catalog-search"
                   aria-label="搜索 Runos 清单"
@@ -2104,9 +2155,12 @@ function ModelsSection({ api }: { api: Api }) {
     <SettingsBlock
       icon="cpu"
       title="可用模型"
-      desc="本工作区在 Atlas 上被授权使用的模型。这里只展示：模型由各智能体直接对接 Atlas 调用，本机不配置、不调用模型；用量与配额在平台查看。"
+      // 一句话说完（owner 2026-09-15：原句太长，标题行放不下会回行）。「本机不配置、
+      // 不调用模型」这句边界不丢——挪到下面正文里单独一行，不挤在标题行的说明里。
+      desc="模型服务与 Vxture 云端 Atlas 同步，智能体按需调用。"
       {...(state.kind === "ready" ? { count: state.models.length } : {})}
     >
+      <p className="set-note text-muted-foreground">本机不配置、不调用模型；用量与配额在平台查看。</p>
       {state.kind === "loading" && <p className="set-note">正在从平台读取模型…</p>}
       {state.kind === "message" && <p className="set-note">{state.text}</p>}
       {state.kind === "failed" && (
