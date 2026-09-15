@@ -80,6 +80,7 @@ import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
 import { PlatformSession } from "./platform-session.js";
 import { loadRoutingPolicy } from "./capability-routing.js";
+import { CapabilityCatalog, platformCatalogSource } from "./capability-catalog.js";
 import { FolderPick } from "./folder-pick.js";
 import {
   startMigrationServer,
@@ -393,6 +394,27 @@ console.log(
   }`,
 );
 
+/*
+ * Runos 能力清单（ADR-020 §6.3，RY-204）。平台源是唯一正式源；平台还没给端点地址
+ * （vxture-platform#339），所以缺省不配 —— 状态恒为 unavailable，界面如实说。平台给了地址
+ * 之后写进默认值；在那之前可经 RUYIN_RUNOS_CATALOG_PATH 先接上验证。
+ */
+const capabilityCatalog = new CapabilityCatalog(
+  dataDir,
+  platformCatalogSource({
+    path: process.env["RUYIN_RUNOS_CATALOG_PATH"],
+    signedIn: () => platformSession.signedIn(),
+    read: async (path) => {
+      const res = await platformSession.fetch(path);
+      if (!res.ok) throw new Error(`${path} failed: HTTP ${res.status}`);
+      const etag = res.headers.get("etag");
+      return { body: (await res.json()) as unknown, ...(etag ? { etag } : {}) };
+    },
+  }),
+);
+// 带着恢复出来的会话启动，按「焦点回来」对待：6 小时内取过就不重取。sync 不抛。
+if (platformSession.signedIn()) void capabilityCatalog.sync("focus");
+
 // 事件总线（TD-027）：任务动了就通知订阅者，替掉界面那几处轮询。
 const events = new EventBus();
 const tasks = new TaskRunner(runtime, cancelledTasks, events);
@@ -481,6 +503,12 @@ const server = createLocalApi({
   hardwareInfo: () => getHardwareInfo(),
   // 能力路由（ADR-025）：每次问都重读策略文件，改了不必重启。没有文件 = 只许本机。
   capabilityRouting: () => loadRoutingPolicy(dataDir),
+  // 能力清单（RY-204）。本机事实只给技能：连接器的显式对照表今天是空的，给了随包服务器
+  // 的状态也标不出任何一条，等对照表有条目时再接上 servers。
+  capabilityCatalog: {
+    catalog: capabilityCatalog,
+    localFacts: () => ({ skills: skillRegistry.list().items }),
+  },
   reindex: (projectId, binding) => {
     // 按绑定记的连接器取，不再钉死 local-fs（ADR-005 接缝 ②）。
     const connector = connectors.get(binding.connector);

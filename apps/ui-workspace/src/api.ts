@@ -1043,6 +1043,24 @@ export class Api {
   quotaUsage = () => this.call<QuotaUsage>("/platform/quota-usage");
   /** 能力调用走本机还是云端（ADR-025）：当前档位、档位来源、那句必须带着的说明。 */
   capabilityRouting = () => this.call<CapabilityRouting>("/capabilities/routing");
+  /**
+   * Runos 能力清单（ADR-020 §6.2，RY-204）—— 平台目录的清单，不是安装。回的是整个
+   * 对象（带 `source` 说清这份清单从哪来、新不新），不是裸列表，所以不走 `list()`。
+   * 只把给了的条件拼进查询串。
+   */
+  capabilityCatalog = (
+    params: { type?: string; category?: string; q?: string; cursor?: string; limit?: number } = {},
+  ) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    }
+    const qs = query.toString();
+    return this.call<CapabilityCatalogPage>(`/capabilities/catalog${qs ? `?${qs}` : ""}`);
+  };
+  /** 立刻取一次清单。`focus` 由守护进程按 6 小时节流（RY-204 D3），登录与手动总是取。 */
+  refreshCapabilityCatalog = (reason: "login" | "focus" | "manual" = "manual") =>
+    this.call<CapabilityCatalogRefresh>("/capabilities/catalog/refresh", "POST", { reason });
 }
 
 /** 能力路由（ADR-025）。三档：只许本机 / 优先本机 / 优先云端；默认只许本机。 */
@@ -1060,6 +1078,41 @@ export interface CapabilityRouting {
     source: "capability" | "workspace" | "tenant" | "default";
     label: string;
   };
+}
+
+/** Runos 清单里的一条（RY-204）。只有元数据；`local` 是守护进程按本机登记册核对出来的。 */
+export interface CatalogItem {
+  capabilityId: string;
+  primitiveType: "skill" | "connector" | "executor" | "asset";
+  title: string;
+  displayName?: Record<string, string>;
+  category?: string;
+  tags: string[];
+  summary?: string;
+  local: { runnable: boolean; via?: "preset-skill" | "bundled-server" };
+}
+
+/** 这份清单从哪来、新不新。界面据它说话，不据条数猜。 */
+export interface CatalogSourceStatus {
+  kind: "platform";
+  state: "unavailable" | "never" | "synced" | "stale";
+  ref?: string;
+  fetchedAt?: string;
+  total?: number;
+  reason?: string;
+  diff?: { added: number; removed: number; changed: number };
+}
+
+export interface CapabilityCatalogPage {
+  items: CatalogItem[];
+  total: number;
+  nextCursor?: string;
+  source: CatalogSourceStatus;
+}
+
+export interface CapabilityCatalogRefresh {
+  outcome: "synced" | "skipped";
+  source: CatalogSourceStatus;
 }
 
 /**

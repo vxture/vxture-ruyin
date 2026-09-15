@@ -44,6 +44,9 @@ import {
   type ComponentState,
   type ToolView,
   type CapabilityRouting,
+  type CapabilityCatalogPage,
+  type CatalogItem,
+  type CatalogSourceStatus,
   type DataDirCheck,
   type HardwareInfo,
   type SessionInfo,
@@ -1552,6 +1555,48 @@ const TOOL_KIND: Record<ToolView["kind"], string> = {
   "mcp-server": "MCP 服务器",
 };
 
+/**
+ * Runos 清单（ADR-020 §6.2，RY-204）的筛选。资产（asset）Runos 目前登记即拒，不给它
+ * 一个永远是空的按钮。
+ */
+type CatalogFilter = "all" | "skill" | "connector" | "executor";
+const CATALOG_FILTERS: { value: CatalogFilter; label: string }[] = [
+  { value: "all", label: "全部" },
+  { value: "skill", label: "技能" },
+  { value: "connector", label: "连接器" },
+  { value: "executor", label: "执行器" },
+];
+
+function catalogTime(iso: string | undefined): string {
+  return iso ? new Date(iso).toLocaleString("zh-CN", { hour12: false }) : "—";
+}
+
+/** 四种状态各说各的（RY-204 §状态）：拿不到就说拿不到，旧的就说是旧的。 */
+function catalogStateLine(source: CatalogSourceStatus): string {
+  switch (source.state) {
+    case "unavailable":
+      return "平台尚未提供能力目录，暂时没有清单。";
+    case "never":
+      return "还没有取到 Runos 清单。";
+    case "synced":
+      return `共 ${source.total ?? 0} 项 · 更新于 ${catalogTime(source.fetchedAt)}`;
+    case "stale":
+      return `显示的是 ${catalogTime(source.fetchedAt)} 时的清单，之后没能更新。`;
+  }
+}
+
+function catalogDiffLine(source: CatalogSourceStatus): string | null {
+  const d = source.diff;
+  if (source.state !== "synced" || !d || d.added + d.removed + d.changed === 0) return null;
+  return `本次新增 ${d.added} · 下线 ${d.removed} · 变更 ${d.changed}`;
+}
+
+/** D4：只按守护进程核对出来的事实标；技能没有就是「本机无」，其余在 Runos 远端跑。 */
+function catalogLocalLabel(item: CatalogItem): string {
+  if (item.local.runnable) return "本机可运行";
+  return item.primitiveType === "skill" ? "本机无" : "仅云端";
+}
+
 function SkillsSection({ api }: { api: Api }) {
   const [listing, setListing] = useState<SkillListing | null>(null);
   const [tools, setTools] = useState<ToolView[] | null>(null);
@@ -1561,6 +1606,47 @@ function SkillsSection({ api }: { api: Api }) {
   const [failed, setFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [layer, setLayer] = useState<"all" | SkillLayer>("all");
+  /** Runos 清单。null = 这套装配没有清单（503）或读不到 —— 那时整块不显示，不猜。 */
+  const [catalog, setCatalog] = useState<CapabilityCatalogPage | null>(null);
+  const [catalogType, setCatalogType] = useState<CatalogFilter>("all");
+  const [catalogQ, setCatalogQ] = useState("");
+  const [catalogBusy, setCatalogBusy] = useState(false);
+  const [catalogFailed, setCatalogFailed] = useState<string | null>(null);
+
+  const loadCatalog = async (more = false) => {
+    const cursor = more ? catalog?.nextCursor : undefined;
+    try {
+      const page = await api.capabilityCatalog({
+        ...(catalogType === "all" ? {} : { type: catalogType }),
+        ...(catalogQ.trim() ? { q: catalogQ.trim() } : {}),
+        ...(cursor ? { cursor } : {}),
+      });
+      setCatalog((prev) => (more && prev ? { ...page, items: [...prev.items, ...page.items] } : page));
+    } catch (e) {
+      // 翻页失败：已经列出来的留着，说一句；首次就读不到：整块不显示。
+      if (more) setCatalogFailed(String((e as Error).message));
+      else setCatalog(null);
+    }
+  };
+  useEffect(() => {
+    void loadCatalog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, catalogType, catalogQ]);
+
+  const refreshCatalog = async () => {
+    setCatalogBusy(true);
+    setCatalogFailed(null);
+    let message: string | null = null;
+    try {
+      await api.refreshCapabilityCatalog("manual");
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    await loadCatalog();
+    setCatalogBusy(false);
+    // 重读之后再放这句话，同 acquire 那一处：先设会被重读抹掉。
+    if (message) setCatalogFailed(message);
+  };
 
   const reload = async () => {
     try {
@@ -1899,6 +1985,74 @@ function SkillsSection({ api }: { api: Api }) {
           </>
         )}
       </SettingsBlock>
+      {catalog && (
+        /* Runos 清单（ADR-020 §6.2，RY-204 D2）：平台目录的投影，与上面「本机装着的」
+           两块不是一回事 —— 所以它自己一块，且第一句话就说它不是安装。 */
+        <SettingsBlock
+          icon="cloud"
+          collapsible
+          {...(catalog.source.total === undefined ? {} : { count: catalog.source.total })}
+          title="Runos 清单"
+          desc="这是平台 Runos 能力目录的清单，不是安装：条目不会下载到本机，本机能用什么以上面的技能与工具为准。"
+          aside={
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={catalogBusy || catalog.source.state === "unavailable"}
+              onClick={() => void refreshCatalog()}
+            >
+              {catalogBusy ? "刷新中…" : "刷新"}
+            </Button>
+          }
+        >
+          {catalogFailed && <div className="update-line update-line--warn">{catalogFailed}</div>}
+          <p className="set-note">{catalogStateLine(catalog.source)}</p>
+          {catalog.source.state !== "synced" && catalog.source.reason && (
+            <p className="set-note text-muted-foreground">{catalog.source.reason}</p>
+          )}
+          {catalogDiffLine(catalog.source) && <p className="set-note">{catalogDiffLine(catalog.source)}</p>}
+          {(catalog.source.total ?? 0) > 0 && (
+            <>
+              <div className="row-item">
+                <SegmentedControl
+                  ariaLabel="按类型筛选 Runos 清单"
+                  items={CATALOG_FILTERS}
+                  value={catalogType}
+                  onChange={(v) => setCatalogType(v as CatalogFilter)}
+                />
+                <Input
+                  id="catalog-search"
+                  aria-label="搜索 Runos 清单"
+                  value={catalogQ}
+                  onChange={(e) => setCatalogQ(e.target.value)}
+                  placeholder="按名称、id、标签搜索"
+                />
+              </div>
+              {catalog.items.length === 0 ? (
+                <p className="set-note">没有符合条件的条目。</p>
+              ) : (
+                <ul className="row-list" aria-label="Runos 清单条目">
+                  {catalog.items.map((c) => (
+                    <li key={c.capabilityId} className="row-item">
+                      <span className="row-main" title={c.summary}>
+                        {c.displayName?.["zh-CN"] ?? c.title}
+                      </span>
+                      <code className="text-body-sm text-muted-foreground">{c.capabilityId}</code>
+                      {c.category && <span className="row-tag">{c.category}</span>}
+                      <StatusBadge tone={c.local.runnable ? "success" : "neutral"}>{catalogLocalLabel(c)}</StatusBadge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {catalog.nextCursor && (
+                <Button variant="ghost" size="sm" onClick={() => void loadCatalog(true)}>
+                  再显示更多
+                </Button>
+              )}
+            </>
+          )}
+        </SettingsBlock>
+      )}
     </>
   );
 }

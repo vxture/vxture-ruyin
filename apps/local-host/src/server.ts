@@ -73,6 +73,13 @@ import {
   modeFor,
   type loadRoutingPolicy,
 } from "./capability-routing.js";
+import {
+  localRunnableIndex,
+  REFRESH_REASONS,
+  type CapabilityCatalog,
+  type LocalFacts,
+  type RefreshReason,
+} from "./capability-catalog.js";
 
 /**
  * server.ts 只依赖这几个动作；实现见 connector-registry.ts。`install`/`probe`
@@ -339,6 +346,15 @@ export interface LocalApiDeps {
    * 如实回 503 —— 不拿默认值冒充「问过了」。
    */
   capabilityRouting?: () => ReturnType<typeof loadRoutingPolicy>;
+  /**
+   * Runos 能力清单（ADR-020 §6.3，RY-204）。缺省 = 这套装配没接这一路，两个
+   * `/capabilities/catalog*` 如实回 503。`localFacts` 是登记册那边的事实，清单只读它
+   * 来标「本机可运行」，从不喂它。
+   */
+  capabilityCatalog?: {
+    catalog: Pick<CapabilityCatalog, "list" | "status" | "sync">;
+    localFacts: () => LocalFacts | Promise<LocalFacts>;
+  };
 }
 
 /**
@@ -1010,6 +1026,69 @@ async function handle(
     return;
   }
 
+  // GET /capabilities/catalog - Runos 能力清单（ADR-020 §6.3，RY-204）。清单，不是安装：
+  // 从未取到时是空列表加一句为什么，不是 404；每条带「本机可运行」，按登记册的事实算。
+  if (method === "GET" && path === "/capabilities/catalog") {
+    if (!deps.capabilityCatalog) {
+      send(res, 503, apiError("CAPABILITY_CATALOG_NOT_CONFIGURED", "这套装配没有能力清单"));
+      return;
+    }
+    const { catalog, localFacts } = deps.capabilityCatalog;
+    const q = url.searchParams;
+    const limit = Number.parseInt(q.get("limit") ?? "", 10);
+    const page = catalog.list({
+      ...(q.get("type") ? { type: q.get("type")! } : {}),
+      ...(q.get("category") ? { category: q.get("category")! } : {}),
+      ...(q.get("q") ? { q: q.get("q")! } : {}),
+      ...(q.get("cursor") ? { cursor: q.get("cursor")! } : {}),
+      ...(Number.isNaN(limit) ? {} : { limit }),
+    });
+    const runnable = localRunnableIndex(await localFacts());
+    send(res, 200, {
+      items: page.items.map((e) => ({ ...e, local: runnable(e) })),
+      total: page.total,
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+      source: catalog.status(),
+    });
+    return;
+  }
+
+  // POST /capabilities/catalog/refresh { reason? } - 同步一次（登录后 / 焦点回来 / 手动，D3）。
+  // 失败保留上一份：502 只说这一次没取成，界面照样显示旧的那份并标 stale。
+  if (method === "POST" && path === "/capabilities/catalog/refresh") {
+    if (!deps.capabilityCatalog) {
+      send(res, 503, apiError("CAPABILITY_CATALOG_NOT_CONFIGURED", "这套装配没有能力清单"));
+      return;
+    }
+    const body = await readJson(req);
+    const reason = body["reason"] ?? "manual";
+    if (typeof reason !== "string" || !(REFRESH_REASONS as readonly string[]).includes(reason)) {
+      send(res, 400, apiError("REQUEST_MALFORMED", "reason 只能是 login / focus / manual", { field: "reason" }));
+      return;
+    }
+    const { catalog } = deps.capabilityCatalog;
+    // 先说「没有来源」：今天这就是答案，与登没登录无关。
+    if (catalog.status().state === "unavailable") {
+      send(res, 503, apiError("CAPABILITY_CATALOG_SOURCE_UNAVAILABLE", catalog.status().reason ?? "没有可取的能力目录"));
+      return;
+    }
+    if (!deps.platformSession?.signedIn()) {
+      send(res, 401, apiError("AUTH_REQUIRED", "登录平台后才能取能力目录"));
+      return;
+    }
+    const outcome = await catalog.sync(reason as RefreshReason);
+    if (outcome.status === "failed") {
+      send(res, 502, apiError("CAPABILITY_CATALOG_SYNC_FAILED", outcome.error, { retryable: true }));
+      return;
+    }
+    if (outcome.status === "unavailable") {
+      send(res, 503, apiError("CAPABILITY_CATALOG_SOURCE_UNAVAILABLE", outcome.reason));
+      return;
+    }
+    send(res, 200, { outcome: outcome.status, source: catalog.status() });
+    return;
+  }
+
   // --- Vxture platform: C1 identity + C2 entitlements (liaison L3) ---
   if (deps.platform) {
     if (method === "GET" && path === "/auth/session") {
@@ -1052,7 +1131,11 @@ async function handle(
       /* 返回地址给 UI 去开系统浏览器；随即在后台轮询领取。
          **不等它**——领取要等用户输密码，最长 5 分钟，HTTP 请求不该挂那么久。 */
       const authorizeUrl = deps.platformSession.beginLogin();
-      void deps.platformSession.completeLogin().catch(() => {
+      void deps.platformSession
+        .completeLogin()
+        // 登录成功后取一次能力清单（D3）。sync 自己不抛；没有数据源时它什么都不做。
+        .then(() => deps.capabilityCatalog?.catalog.sync("login"))
+        .catch(() => {
         /* 超时或被拒：本地会话保持未登录，UI 轮询 /auth/session 自然看得到。
            这里不记日志——用户放弃登录是正常行为，不是异常。 */
       });

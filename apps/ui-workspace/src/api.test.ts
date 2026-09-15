@@ -468,6 +468,33 @@ const WRAPPER_CASES: WrapperCase[] = [
     method: "GET",
     path: "/capabilities/routing",
   },
+  { name: "capabilityCatalog", call: (api) => api.capabilityCatalog(), method: "GET", path: "/capabilities/catalog" },
+  {
+    name: "capabilityCatalog(filters + page)",
+    call: (api) => api.capabilityCatalog({ type: "skill", q: "excel", cursor: "100", limit: 50 }),
+    method: "GET",
+    path: "/capabilities/catalog?type=skill&q=excel&cursor=100&limit=50",
+  },
+  {
+    name: "capabilityCatalog(empty q is not sent)",
+    call: (api) => api.capabilityCatalog({ q: "", category: "office" }),
+    method: "GET",
+    path: "/capabilities/catalog?category=office",
+  },
+  {
+    name: "refreshCapabilityCatalog",
+    call: (api) => api.refreshCapabilityCatalog(),
+    method: "POST",
+    path: "/capabilities/catalog/refresh",
+    body: { reason: "manual" },
+  },
+  {
+    name: "refreshCapabilityCatalog(focus)",
+    call: (api) => api.refreshCapabilityCatalog("focus"),
+    method: "POST",
+    path: "/capabilities/catalog/refresh",
+    body: { reason: "focus" },
+  },
 ];
 
 for (const c of WRAPPER_CASES) {

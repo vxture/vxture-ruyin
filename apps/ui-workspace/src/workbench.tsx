@@ -239,6 +239,9 @@ export function Workbench({
         .then((list) => setProducts(list))
         // 拉不到就沿用现有判定（ADR-003），不把用户锁住，也不报错打扰他。
         .catch(() => {});
+      // Runos 清单（RY-204 D3）：守护进程按 6 小时节流。取不到什么都不说、也不挡任何事 ——
+      // 清单拿不到不阻塞执行（ADR-020 §6.2）。
+      void api.refreshCapabilityCatalog("focus").catch(() => {});
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);

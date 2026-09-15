@@ -147,6 +147,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
     products: vi.fn().mockResolvedValue([]),
     projects: vi.fn().mockResolvedValue(projectList([])),
     refreshEntitlements: vi.fn().mockResolvedValue([]),
+    refreshCapabilityCatalog: vi.fn().mockResolvedValue({ outcome: "skipped", source: { kind: "platform", state: "unavailable" } }),
     subscribe: vi.fn().mockReturnValue(() => {}),
     ...over,
   } as unknown as Api;
@@ -402,6 +403,18 @@ void test("Workbench: window focus triggers an entitlements refresh (D5) without
 
   window.dispatchEvent(new Event("focus"));
   await vi.waitFor(() => expect(refreshEntitlements).toHaveBeenCalledTimes(1));
+});
+
+void test("Workbench: window focus also asks for a throttled Runos catalog refresh (RY-204 D3); a failure stays silent", async () => {
+  const { Workbench } = await import("./workbench");
+  const refreshCapabilityCatalog = vi.fn().mockRejectedValue(new Error("503 CAPABILITY_CATALOG_SOURCE_UNAVAILABLE"));
+  const api = fakeApi({ refreshCapabilityCatalog });
+  render(<Workbench api={api} onSignedOut={() => {}} />);
+  await screen.findByTestId("home-stub");
+
+  window.dispatchEvent(new Event("focus"));
+  await vi.waitFor(() => expect(refreshCapabilityCatalog).toHaveBeenCalledWith("focus"));
+  expect(screen.queryByText(/CAPABILITY_CATALOG/)).not.toBeInTheDocument();
 });
 
 void test("Workbench: opening a project with same-product siblings lists them in the sidebar", async () => {
