@@ -536,23 +536,32 @@ void test("UpdatesSection: no path in the feed means no link - never a guessed U
   expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
 });
 
-void test("UpdatesSection: unreachable is a distinct status, never folded into 'current'", async () => {
-  const api = fakeApi({
-    checkUpdate: vi.fn().mockResolvedValue({
-      status: "unreachable",
-      current: "0.2.0",
-      reason: "渠道 feed 无法访问",
-      channel: "stable",
-      checkedAt: "2026-09-02T00:00:00Z",
-    }),
+/**
+ * unreachable 不再弹提示（owner 2026-09-16 明确要求删掉）：本仓当前只发过
+ * beta，从没有过 stable 标签，检查默认只问 stable 渠道——这一档因此几乎每次
+ * 都命中，天天弹一条「没查到」除了添堵没有别的作用。
+ *
+ * 但**绝不能因此悄悄折叠成「已是最新」**——那正是这个功能上一版真的犯过的
+ * 错（TD-021）。删掉的是提示，不是这条底线：不显示和显示错都要拦。
+ */
+void test("UpdatesSection: unreachable 不再弹提示，但绝不能悄悄说成「已是最新」", async () => {
+  const checkUpdate = vi.fn().mockResolvedValue({
+    status: "unreachable",
+    current: "0.2.0",
+    reason: "渠道 feed 无法访问",
+    channel: "stable",
+    checkedAt: "2026-09-02T00:00:00Z",
   });
+  const api = fakeApi({ checkUpdate });
   renderSection("updates", api);
   await clickCheck();
-  expect(await screen.findByText(/没查到——渠道 feed 无法访问/)).toBeInTheDocument();
-  expect(screen.getByText(/这不代表你已是最新/)).toBeInTheDocument();
-  // 「已是最新」这几个字本身也出现在上面那句提醒里（"这不代表你已是最新"），
-  // 真正要排除的是 current 状态那一整行——认括号前缀，不认子串。
+  // 挂载时的自动检查也会问一次，所以不钉「恰好一次」，只钉「问完了」
+  // （手动这次点完之后按钮应该已经落回「检查更新」，不再是忙碌态）。
+  await screen.findByRole("button", { name: "检查更新" });
+  expect(checkUpdate).toHaveBeenCalled();
+  expect(screen.queryByText(/没查到/)).not.toBeInTheDocument();
   expect(screen.queryByText(/已是最新（/)).not.toBeInTheDocument();
+  expect(document.querySelector(".update-notice")).not.toBeInTheDocument();
 });
 
 void test("UpdatesSection: checkUpdate() rejecting reads '检查失败', not silently 'current'", async () => {

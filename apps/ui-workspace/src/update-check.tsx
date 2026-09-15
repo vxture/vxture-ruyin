@@ -165,16 +165,12 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
     );
   }
 
-  // status === "unreachable"
-  return (
-    <div className="set-callout set-callout--warning update-notice" role="status">
-      <Icon name="warning" size="sm" />
-      <span>没查到——{result!.reason}。这不代表你已是最新，只代表这次没问到。</span>
-      <button type="button" className="notice-bar-close" aria-label="关闭提醒" onClick={dismiss}>
-        <Icon name="x" size="xs" />
-      </button>
-    </div>
-  );
+  // status === "unreachable"：不再显示（owner 2026-09-16 明确要求删掉）。
+  // 本仓当前只有 beta 发布，从没有过 stable 标签，`checkForUpdate` 默认只问
+  // stable 渠道——在一个从未发布过 stable 的仓库里，这一档几乎每次都会命中，
+  // 天天弹一条「没查到」除了添堵没有别的作用。状态本身继续存在（不折叠进
+  // "current"，不假装已是最新），只是不再渲染成一条看得见的提示。
+  return null;
 }
 
 /**
