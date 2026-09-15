@@ -237,6 +237,10 @@ body {
   .status-cards { grid-template-columns: 1fr; }
 }
 /* 图标一列占两行，右边名称 / 结论两行左对齐；留白放宽（owner 2026-09-03 定）。 */
+/* 淡化（owner 2026-09-16）：这三条平时都对，不该跟下面的智能体卡片抢注意力
+   ——去掉实色底、只留描边。**只淡「一切正常」那两种**（ok / muted），warn /
+   danger 不淡：淡化是为了让「不出事」的日常状态往后退，但出事时这一屏
+   本来就是唯一的红点来源，不能让「整体淡化」把警示一起淡没了。 */
 .status-card {
   display: flex;
   align-items: center;
@@ -245,8 +249,9 @@ body {
   padding: var(--spacing-sm) var(--spacing-md);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md, 8px);
-  background: var(--color-card, transparent);
+  background: transparent;
 }
+.status-card--ok, .status-card--muted { opacity: 0.82; }
 .status-card-icon {
   display: inline-flex;
   align-items: center;
@@ -306,6 +311,11 @@ body {
 /* ---------- 产品卡 ---------- */
 /* 一条对齐轴：内容全部左对齐，只有两处靠右 —— 标题行的状态徽章、卡片底部的
    动作。这两处是卡片的固定位置，扫一列卡片时不必每张重新找。 */
+/* 渐变底，比设置页那份更深一档（owner 2026-09-16）：`--surface-1` →
+   `--background`——浅色 neutral-200 到 neutral-100，深色 neutral-900 到
+   neutral-950，纯中性面阶、不带品牌色相（同一条 09-16 的「深色不要蓝」）。
+   设置页那份是 `--card` → `--surface-1`，浅一档；两页各自的渐变起点刚好接上
+   对方的终点，深浅关系读起来是连续的，不是各画各的。 */
 .pcard {
   display: flex;
   flex-direction: column;
@@ -313,7 +323,7 @@ body {
   padding: var(--spacing-md);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg, 12px);
-  background: var(--color-card, transparent);
+  background: linear-gradient(155deg, var(--surface-1), var(--background));
   min-width: 0;
 }
 .pcard--blocked { opacity: 0.82; }
@@ -617,13 +627,14 @@ select optgroup {
    删除：设置有了自己的框架，分区在侧栏里。留着这些规则，下一个人会以为页面
    里还该有第二根导航。） */
 /* 设置页各板块用渐变底，不是纯色（owner 2026-09-15）：浅色模式下大片纯白显得
-   平；换用 DS 已有的语义渐变令牌 `--gradient-card-*`——浅色是白到品牌浅色
-   （brand-50）的极轻过渡，深色是中性深灰到品牌深色（brand-950）的过渡，两套
-   值都由 DS 按主题给（`.dark`/`:root.dark` 已经定义好了两份），这里不重复写
-   深浅两套判断。**只在设置页生效**（选择器带 `.settings-page` 前缀），不改
-   首页 / 项目面板里同样用 `.card` 的卡片观感。 */
+   平。**不用 DS 的 `--gradient-card-*`**（owner 2026-09-16 指出深色那一档
+   `brand-950` 是藏青色，深色模式不该带蓝）——改用纯中性面阶 `--card` →
+   `--surface-1`：浅色白到浅灰（neutral-200）的轻过渡，深色 neutral-800 到
+   neutral-900 的过渡，都不带品牌色相，两套值同样由 DS 按主题给。**只在设置页
+   生效**（选择器带 `.settings-page` 前缀），不改首页 / 项目面板里同样用
+   `.card` 的卡片观感——首页那份更深一档，见「首页」小节。 */
 .settings-page .card {
-  background: linear-gradient(155deg, var(--gradient-card-from), var(--gradient-card-to));
+  background: linear-gradient(155deg, var(--card), var(--surface-1));
 }
 /* ---------- 单行类的行：一处定义，账户 / 通用设置 / 软件更新 共用 ----------
    行高一个值、虚下划线一种画法（owner 2026-09-04 第 7 条：全局一致）。
@@ -736,10 +747,17 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
 .account-name { font-weight: 600; font-size: var(--title-md-font-size, 16px); }
 .account-email { color: var(--muted-foreground); font-size: var(--body-sm-font-size); }
 
-/* 左对齐（owner 2026-09-15，原先整块居中）：品牌区做成图形标 + 两行文字的
-   横向锁定组合之后，居中排版会把 logo 推到内容中轴上、和下面的条款按钮对不上
-   边——干脆整块左对齐，读起来是一个左边界，不是每行各自居中的一叠。 */
-.about-block { padding: var(--spacing-lg) 0; }
+/* 居中（owner 2026-09-16：又改回来了——09-15 那次改左对齐是「logo 推到中轴、
+   跟条款按钮对不上边」，owner 09-16 真机看过之后明确要求整块居中，包括图形标
+   + 两行文字这一组）。图形标那一行作为一个整体在 `.about-block` 里居中
+   （`align-items: center`），行内每一段文字各自也居中（`text-align: center`）。 */
+.about-block {
+  padding: var(--spacing-lg) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
 /* 品牌区到下面这串事实之间的间距，与事实彼此之间的间距，是两个不同量级
    （owner 2026-09-15：原来是散落的行内像素值 10 / 0 / 12，看起来忽近忽远）：
    品牌 → 简介，正常一档（这是新的一段）；简介 → 版本号，收紧（同一句「这是
@@ -752,7 +770,7 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
 /* 图形标 + 两行文字（RUYIN / Intelligent Workbench），logo 高度跨两行。 */
 .about-brand { display: flex; align-items: center; gap: var(--spacing-md); }
 .about-mark { width: 56px; height: 56px; flex-shrink: 0; }
-.about-brand-text { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.about-brand-text { display: flex; flex-direction: column; gap: 2px; text-align: center; }
 /* RUYIN 用品牌色（owner 2026-09-15）：只在这一处，不改 `.brand-name` 本身——
    登录页用同一个类，那一屏的配色是另一件事，不该被这里的改动带着变。 */
 .about-brand-text .brand-name { color: var(--primary); }
@@ -1382,7 +1400,9 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
    整块左对齐走，不再单独居中出一行。 */
 .about-legal {
   display: flex;
-  justify-content: flex-start;
+  /* 居中（owner 2026-09-16，随整块改回居中）：换行时也要居中，不只是外层
+     `align-items: center` 把这一行整体摆中间——那只管没换行的那一次。 */
+  justify-content: center;
   flex-wrap: wrap;
   gap: var(--spacing-sm);
   /* 与上面的版权行拉开一段（24 → 48px）：它们是**另一类东西** —— 上面是

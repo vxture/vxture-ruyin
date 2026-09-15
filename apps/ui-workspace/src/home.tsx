@@ -694,9 +694,11 @@ export function HomePage({
 /**
  * 平台上订了、本机还没有的智能体。
  *
- * 和本地卡片同一种卡（pcard），扫过去是一栏；差别只在动作：这里没有「打开」——
- * 本机没有它的契约，打不开。给的是它能兑现的：在线使用（落应用中心），或者
- * 订阅已失效时去续订。「本机未安装」与订阅徽章并列，两件事都成立。
+ * 和本地卡片同一种卡（pcard），版式也跟本地卡片同一套（owner 2026-09-16：
+ * 原来自己另起一套——版本号塞在描述里、没有档位标签——扫过去不像同一页）：
+ * 属性标签（档位 · 订阅状态 · 本机装没装）在标题行右侧，产品介绍在中间，
+ * 版本号在左下角。差别只在动作：这里没有「打开」——本机没有它的契约，打不
+ * 开。给的是它能兑现的：在线使用（落应用中心），或者订阅已失效时去续订。
  */
 function SubscribedElsewhereCard({
   row,
@@ -720,6 +722,7 @@ function SubscribedElsewhereCard({
           <p className="pcard-ident" title={`产品标识 ${row.productCode}`}>{row.productCode}</p>
         </span>
         <span className="pcard-badges">
+          {row.tier && <StatusBadge tone="neutral">{row.tier}</StatusBadge>}
           {expired ? (
             <StatusBadge tone="warning">已过期</StatusBadge>
           ) : (
@@ -729,12 +732,16 @@ function SubscribedElsewhereCard({
         </span>
       </header>
       <div className="pcard-body">
-        <p className="pcard-desc">
-          {`套餐 ${row.planName}${row.releaseVersion ? ` · v${row.releaseVersion}` : ""}`}
-        </p>
+        <p className="pcard-desc">{BLURBS[row.productCode] ?? "Vxture 智能体"}</p>
       </div>
       <footer className="pcard-foot">
-        <span className="pcard-meta" />
+        <span className="pcard-meta">
+          {row.releaseVersion && (
+            <span className="pcard-version" title={`平台上的版本 ${row.releaseVersion}`}>
+              v{row.releaseVersion}
+            </span>
+          )}
+        </span>
         <span className="pcard-actions">
           {expired ? (
             <Button
