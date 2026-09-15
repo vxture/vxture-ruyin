@@ -565,7 +565,7 @@ export function Workbench({
           {/* 搜索在右侧一簇的**最左边**：9-04 定的顺序（租户 → 未决 → 设置固定最右）不动。 */}
           <HeaderSearch query={query} onQueryChange={setQuery} groups={searchGroups} />
           {session && workspaceName && (
-            <TenantMenu api={api} session={session} productIds={products.map((p) => p.id)} />
+            <TenantMenu api={api} session={session} />
           )}
           {/* 常驻：未决确认在哪个视图都看得见。放进某个页面里等于又要求
               用户先找对地方，而那正是这条要修的问题。 */}

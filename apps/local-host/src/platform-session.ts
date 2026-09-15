@@ -99,6 +99,123 @@ export const PLATFORM_PATHS = {
   logout: "/auth/logout",
 } as const;
 
+/**
+ * console-bff 上**带会话**的读接口。与上面那张表相反：它们全在 `/api/` 下，
+ * 全要求会话——鉴权中间件就挂在那个前缀上，工作区也由它从会话里解出来。
+ *
+ * 身份这三条（`me` / `tenantContext` / `myWorkspaces`）是 #232 之后漏接的那一半：
+ * 登录换成了会话，界面要的用户、租户、工作区却还在读旧 OIDC 路径的 claims，而
+ * 那条路径上已经没有令牌——于是界面一律显示兜底文案，当前工作区恒为空，建项目、
+ * 开项目全被 ADR-015 拒掉。
+ */
+export const PLATFORM_READS = {
+  me: "/api/me",
+  tenantContext: "/api/tenant-context",
+  myWorkspaces: "/api/me/workspaces",
+  subscribedProducts: "/api/subscription/subscribed-products",
+  entitlements: "/api/subscription/entitlements",
+  quotaUsage: "/api/subscription/quota-usage",
+} as const;
+
+/** 给 UI 与宿主的身份投射。字段缺失 = 平台这次没给，**不补、不猜**。 */
+export interface SessionIdentity {
+  profile?: {
+    sub: string;
+    name?: string;
+    username?: string;
+    email?: string;
+    phone?: string;
+    picture?: string;
+    roles?: string[];
+  };
+  org?: { id?: string; name?: string; type?: string };
+  workspace?: { id?: string; name?: string };
+}
+
+/**
+ * 工作区 id 里不算数的值。
+ *
+ * console-bff 的 `TenantContext.workspace` 在解不出工作区时写的是字面量
+ * `"default"`（租户态）或 `"PLATFORM"`（平台态）——那是它内部路由用的占位，
+ * 不是一个工作区。拿它当项目归属，**所有租户的项目会落进同一个 "default"**，
+ * 跨租户串数据，而且不报错。所以真实 id 只从 `/api/me/workspaces` 取，并且
+ * 连那里也挡一遍。
+ */
+const NOT_A_WORKSPACE_ID = new Set(["", "default", "PLATFORM"]);
+
+/**
+ * 平台三条身份读 → {@link SessionIdentity}。纯函数，脱离网络可测。
+ *
+ * - 用户：`/api/me`。邮箱缺失时平台会合成 `<account>@local.vxture`——那不是
+ *   用户的邮箱，照原样显示就是一句假话，所以丢掉。
+ * - 租户：`/api/tenant-context`，只认 `mode === "tenant"`；平台态说明这个人
+ *   没有任何组织，不该投射出一个「Vxture Platform」租户。
+ * - 工作区：`/api/me/workspaces` 里**当前租户**那一行（优先 `isCurrent`）。
+ *   订阅读取（`/api/subscription/*`）用的也是租户默认工作区，两边因此一致。
+ */
+export function projectIdentity(
+  me: unknown,
+  tenantContext: unknown,
+  myWorkspaces: unknown,
+): SessionIdentity {
+  const out: SessionIdentity = {};
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.length > 0 ? v : undefined;
+
+  if (me && typeof me === "object") {
+    const m = me as Record<string, unknown>;
+    const sub = str(m["id"]);
+    if (sub) {
+      const email = str(m["email"]);
+      const role = str(m["roleLabel"]);
+      out.profile = {
+        sub,
+        ...(str(m["displayName"]) ?? str(m["name"])
+          ? { name: (str(m["displayName"]) ?? str(m["name"]))! }
+          : {}),
+        ...(str(m["username"]) ? { username: str(m["username"])! } : {}),
+        ...(email && !email.endsWith("@local.vxture") ? { email } : {}),
+        ...(str(m["phone"]) ? { phone: str(m["phone"])! } : {}),
+        ...(str(m["picture"]) ? { picture: str(m["picture"])! } : {}),
+        ...(role ? { roles: [role] } : {}),
+      };
+    }
+  }
+
+  let tenantId: string | undefined;
+  let fallbackWorkspaceName: string | undefined;
+  if (tenantContext && typeof tenantContext === "object") {
+    const t = tenantContext as Record<string, unknown>;
+    if (t["mode"] === "tenant" && str(t["id"])) {
+      tenantId = str(t["id"]);
+      out.org = {
+        id: tenantId,
+        ...(str(t["name"]) ? { name: str(t["name"])! } : {}),
+        ...(str(t["tenantType"]) ? { type: str(t["tenantType"])! } : {}),
+      };
+      fallbackWorkspaceName = str(t["workspaceName"]);
+    }
+  }
+
+  if (tenantId) {
+    // 列表没拉到时名字仍可从租户上下文来；id 只从列表来，所以那时就是有名无 id。
+    const rows = (Array.isArray(myWorkspaces) ? myWorkspaces : []).filter(
+      (r): r is Record<string, unknown> =>
+        !!r && typeof r === "object" && (r as Record<string, unknown>)["tenantId"] === tenantId,
+    );
+    const row = rows.find((r) => r["isCurrent"] === true) ?? rows[0];
+    const id = row ? str(row["workspaceId"]) : undefined;
+    const name = (row ? str(row["workspaceName"]) : undefined) ?? fallbackWorkspaceName;
+    if ((id && !NOT_A_WORKSPACE_ID.has(id)) || name) {
+      out.workspace = {
+        ...(id && !NOT_A_WORKSPACE_ID.has(id) ? { id } : {}),
+        ...(name ? { name } : {}),
+      };
+    }
+  }
+  return out;
+}
+
 // ============================================================================
 // Service
 // ============================================================================
@@ -332,12 +449,57 @@ export class PlatformSession {
    * 凭据无关，是 product_220 §3 的要求。
    */
   async subscribedProducts(): Promise<unknown> {
-    return this.cachedGet("/api/subscription/subscribed-products");
+    return this.cachedGet(PLATFORM_READS.subscribedProducts);
   }
 
   /** 本工作区的权益概览（档位 / 状态 / 限额）。 */
   async entitlements(): Promise<unknown> {
-    return this.cachedGet("/api/subscription/entitlements");
+    return this.cachedGet(PLATFORM_READS.entitlements);
+  }
+
+  /**
+   * 本工作区的配额用量 `{storage, aiCredit}`，每项 `{used, limit}`。
+   *
+   * 只读展示（ADR-006）：它是平台上那个数字的镜子，桌面端不据此门控、不计量。
+   */
+  async quotaUsage(): Promise<unknown> {
+    return this.cachedGet(PLATFORM_READS.quotaUsage);
+  }
+
+  // --------------------------------------------------------------------------
+  // 身份
+  // --------------------------------------------------------------------------
+
+  /**
+   * 当前会话的用户、租户、工作区。
+   *
+   * 三条读并发发出，**任何一条失败都只让那一块缺席**，不让整份身份失败：
+   * 界面上「名字没拉到」和「整个人没登录」是两件事，混成一件会把一次网关抖动
+   * 显示成掉线。会话被平台拒（401）时 `fetch` 已就地清掉本地会话，这里回空。
+   *
+   * 缓存与权益读同一套（内存、遵 Cache-Control、登出即清）。「显示三天前的名字」
+   * 这种缺陷不报错，所以不落盘。
+   */
+  async identity(): Promise<SessionIdentity> {
+    if (!this.signedIn()) return {};
+    const read = (path: string) => this.cachedGet(path).catch(() => undefined);
+    const [me, tenantContext, myWorkspaces] = await Promise.all([
+      read(PLATFORM_READS.me),
+      read(PLATFORM_READS.tenantContext),
+      read(PLATFORM_READS.myWorkspaces),
+    ]);
+    if (!this.signedIn()) return {};
+    return projectIdentity(me, tenantContext, myWorkspaces);
+  }
+
+  /**
+   * 项目归属用的工作区 id（ADR-015），拿不到就是 undefined——**没有兜底**。
+   *
+   * 这是当前租户的默认工作区：桌面会话目前切不了工作区（平台的切换入口只认
+   * 浏览器 cookie），订阅读取取的也是它，所以数据归属与订阅判定落在同一个工作区上。
+   */
+  async activeWorkspaceId(): Promise<string | undefined> {
+    return (await this.identity()).workspace?.id;
   }
 
   /**
@@ -380,7 +542,12 @@ export class PlatformSession {
     this.signOutLocal();
     if (!rpsid) return;
     /* 通知服务端销毁那条会话。收不掉也不该让登出失败——本地已经清了，
-       服务端那份到 TTL 自己会走。 */
+       服务端那份到 TTL 自己会走。
+
+       **如实说：今天这一下销毁不了服务端会话。** console-bff 的 `/auth/logout`
+       只从 cookie 读 rpsid，不认 `X-Vxture-Session`（oidc-auth.router.ts），而平台
+       还没有给头部会话的登出端点——已向平台提出。留着这一下，是为了平台补上
+       之后这里不必再改调用点；在那之前，本机清掉就是全部。 */
     await fetch(new URL(PLATFORM_PATHS.logout, this.config.consoleBase), {
       method: "POST",
       headers: { "x-vxture-session": rpsid },

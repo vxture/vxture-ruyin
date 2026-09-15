@@ -1165,3 +1165,177 @@ void test("更新: 能力面没接时，按钮是关着的，启动也不去问 
   expect(fetchProduct).not.toHaveBeenCalled();
   expect(onError).not.toHaveBeenCalled();
 });
+
+function subscription(over: Record<string, unknown> = {}) {
+  return {
+    subscriptionId: "s1",
+    productCode: "vxtpl",
+    productName: "产品范本",
+    productNick: null,
+    planName: "Starter",
+    tier: "starter",
+    status: "active",
+    releaseVersion: "2.1.0",
+    endAt: null,
+    ...over,
+  };
+}
+
+function signedInApi(subscribedProducts: ReturnType<typeof vi.fn>) {
+  return fakeApi({
+    session: vi.fn().mockResolvedValue({ signedIn: true, consoleBase: "https://vxture.com" } as SessionInfo),
+    subscribedProducts,
+  } as Partial<Api>);
+}
+
+/*
+ * 首页以平台订阅为准（owner 2026-09-15）。此前「我的智能体」只列本机装了的，
+ * 平台订阅只给本地卡片贴标签 —— 于是用户订了 vxtpl、arda，首页上却只有随包的
+ * 测试夹具，看起来像是一个都没订。
+ */
+void test("HomePage: 平台上订了、本机没装的智能体照样列出，标「本机未安装」；过期的给续订入口", async () => {
+  const subscribedProducts = vi.fn().mockResolvedValue([
+    subscription(),
+    subscription({ subscriptionId: "s2", productCode: "arda", productName: null, productNick: "发票助手", status: "expired", releaseVersion: null }),
+    subscription({ subscriptionId: "s3", productCode: "nameless", productName: null, productNick: null, releaseVersion: "3.0.0" }),
+    // 本机已装的由本地卡片承载，不重复出一张
+    subscription({ subscriptionId: "s4", productCode: "bidproposal" }),
+    // 没有产品码的订阅行对不上任何东西，不渲染
+    subscription({ subscriptionId: "s5", productCode: null, productName: "无码" }),
+  ]);
+  render(
+    <HomePage
+      api={signedInApi(subscribedProducts)}
+      products={[product({ entitled: null })]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  expect(await screen.findByText("产品范本")).toBeInTheDocument();
+  expect(screen.getByText("发票助手")).toBeInTheDocument();
+  // 名字都没有时退到产品码（标题与标识行各一次）
+  expect(screen.getAllByText("nameless")).toHaveLength(2);
+  expect(screen.queryByText("无码")).not.toBeInTheDocument();
+  expect(screen.getAllByText("本机未安装")).toHaveLength(3);
+  expect(screen.getByText("已过期")).toBeInTheDocument();
+  expect(screen.getByText("套餐 Starter · v2.1.0")).toBeInTheDocument();
+  expect(screen.getByText("套餐 Starter")).toBeInTheDocument();
+  // 本地卡只有 bidproposal 一张
+  expect(screen.getAllByText("bidproposal")).toHaveLength(1);
+  // 订阅清单问到了：「订阅状态尚未接通」那句不再出现
+  expect(screen.queryByText("订阅状态尚未接通，以下为本地运行时已安装的产品。")).not.toBeInTheDocument();
+
+  const renew = screen.getByRole("button", { name: "续订" });
+  await userEvent.setup().click(renew);
+  expect(window.open).toHaveBeenCalledWith(
+    "https://vxture.com/subscribe?product=arda&intent=renew",
+    "_blank",
+    "noopener",
+  );
+  const card = screen.getByText("产品范本").closest("article") as HTMLElement;
+  await userEvent.setup().click(within(card).getByRole("button", { name: /在线使用/ }));
+  expect(window.open).toHaveBeenCalledWith("https://vxture.com/zh-CN/appcenter", "_blank", "noopener");
+});
+
+void test("HomePage: 本机一个都没装、平台上有订阅 —— 不显示「没有可用的智能体」，而是列出订阅", async () => {
+  render(
+    <HomePage
+      api={signedInApi(vi.fn().mockResolvedValue([subscription()]))}
+      products={[]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  expect(await screen.findByText("产品范本")).toBeInTheDocument();
+  expect(screen.queryByText("当前账号没有可用的智能体")).not.toBeInTheDocument();
+});
+
+void test("HomePage: 订阅清单问失败、或返回的不是数组 —— 当作不知道，不渲染成「没有订阅」", async () => {
+  for (const subscribedProducts of [
+    vi.fn().mockRejectedValue(new Error("网关 502")),
+    vi.fn().mockResolvedValue({ unexpected: true }),
+  ]) {
+    const view = render(
+      <HomePage
+        api={signedInApi(subscribedProducts)}
+        products={[product({ entitled: null })]}
+        workspaces={[]}
+        health={{ ok: true }}
+        onOpen={noop}
+        onCreated={noop}
+        onRefresh={noop}
+        onError={noop}
+      />,
+    );
+    await vi.waitFor(() => expect(subscribedProducts).toHaveBeenCalled());
+    expect(screen.getByText("订阅状态尚未接通，以下为本地运行时已安装的产品。")).toBeInTheDocument();
+    expect(screen.queryByText("本机未安装")).not.toBeInTheDocument();
+    view.unmount();
+  }
+});
+
+void test("HomePage: 没登录不去问订阅清单", async () => {
+  const subscribedProducts = vi.fn();
+  const session = vi.fn().mockResolvedValue({ signedIn: false } as SessionInfo);
+  render(
+    <HomePage
+      api={fakeApi({ session, subscribedProducts } as Partial<Api>)}
+      products={[product()]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  await vi.waitFor(() => expect(session).toHaveBeenCalled());
+  await new Promise((r) => setTimeout(r, 20));
+  expect(subscribedProducts).not.toHaveBeenCalled();
+});
+
+/*
+ * 随包的 bidproposal 是测试夹具（TD-006 / TD-033），它得看起来就是夹具：标成
+ * 「本地已装」会让人以为那是一个自己拥有的产品。平台说订了（entitled=true）时
+ * 以平台为准。
+ */
+void test("ProductCard: 随包夹具没有订阅事实时标「测试夹具」，平台说订了就是「已订阅」", () => {
+  const view = render(
+    <HomePage
+      api={fakeApi()}
+      products={[product({ supply: "builtin", entitled: null })]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  expect(screen.getByText("测试夹具")).toBeInTheDocument();
+  expect(screen.queryByText("本地已装")).not.toBeInTheDocument();
+  view.unmount();
+
+  render(
+    <HomePage
+      api={fakeApi()}
+      products={[product({ supply: "builtin", entitled: true })]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  expect(screen.getByText("已订阅")).toBeInTheDocument();
+  expect(screen.queryByText("测试夹具")).not.toBeInTheDocument();
+});

@@ -1031,4 +1031,32 @@ export class Api {
     this.call<EntitlementsBatch>(
       `/entitlements?products=${encodeURIComponent(products.join(","))}`,
     );
+  /** 平台上本工作区订阅的全部智能体（守护进程代读，工作区由会话决定）。 */
+  subscribedProducts = () =>
+    this.call<SubscribedProduct[]>("/platform/subscribed-products");
+  /** 本工作区的配额用量，只读展示。 */
+  quotaUsage = () => this.call<QuotaUsage>("/platform/quota-usage");
+}
+
+/**
+ * 平台上本工作区的一条订阅（console `/api/subscription/subscribed-products`）。
+ * 只列界面用得到的字段；平台多给的照收不用。`productCode` 就是契约 id。
+ */
+export interface SubscribedProduct {
+  subscriptionId: string;
+  productCode: string | null;
+  productName: string | null;
+  productNick: string | null;
+  planName: string;
+  tier: string | null;
+  /** 平台不回 cancelled；expired 会回——那是「曾订阅、已失效」，要引导续费。 */
+  status: string;
+  releaseVersion: string | null;
+  endAt: string | null;
+}
+
+/** 配额用量（console `/api/subscription/quota-usage`）。只读，不门控。 */
+export interface QuotaUsage {
+  storage: { used: number; limit: number };
+  aiCredit: { used: number; limit: number };
 }
