@@ -75,7 +75,7 @@ import { groupCapabilities } from "./capability-groups";
 import { useHostChrome } from "./host-chrome";
 
 import { ThirdPartyNotices } from "./third-party-notices";
-import { UpdateNotice, useUpdateCheck, type UpdateCheckState } from "./update-check";
+import { UpdateNotice, type UpdateCheckState } from "./update-check";
 const UI_VERSION = "0.2.0";
 
 /**
@@ -88,13 +88,24 @@ function go(href: string): void {
 /** 界面语言偏好（本机）。DS 管排版三轴，语言这一项归本文件。 */
 const LANG_KEY = "ruyin-language";
 
-export function SettingsView({ api, section }: { api: Api; section: SectionId }) {
+export function SettingsView({
+  api,
+  section,
+  updateCheck,
+}: {
+  api: Api;
+  section: SectionId;
+  /**
+   * 检查更新的共享状态，从工作台那一层传下来（owner 2026-09-15：自动检查的
+   * 挂载点从设置页挪到工作台，好让它在**登录后应用一起来**那一刻问，而不是
+   * 「下次打开设置页」才问）。结果要能在**任何**分区的顶部露出来——自动检查
+   * 可能在用户正看着别的分区时问完。
+   */
+  updateCheck: UpdateCheckState;
+}) {
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // 检查更新的状态挂在这一层（不是「软件更新」那一页）：结果要能在**任何**分区的
-  // 顶部露出来——自动检查可能在用户正看着别的分区时问完（owner 2026-09-15）。
-  const updateCheck = useUpdateCheck(api);
 
   useEffect(() => {
     api
@@ -434,12 +445,13 @@ function PreferencesBlock() {
 
 /* ---------------- 通用设置（原「数据与隐私」的内容）---------------- */
 
-/** 数据加密那几行里的关键词高亮（owner 2026-09-15）：对勾 + 淡底，扫一眼就找到
- *  「用的是什么算法 / 什么机制」，不必读完整句话。 */
+/** 数据加密那几行里的关键词高亮（owner 2026-09-15）：盾牌 + 淡底，扫一眼就找到
+ *  「用的是什么算法 / 什么机制」，不必读完整句话。图标改盾牌（对勾读作「已完成」，
+ *  这里说的是「有什么在把关」，盾牌更贴）。 */
 function CryptoTag({ children }: { children: React.ReactNode }) {
   return (
     <span className="crypto-tag">
-      <Icon name="check" size="xs" />
+      <Icon name="shield-check" size="xs" />
       {children}
     </span>
   );
@@ -505,10 +517,6 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
                 </span>
               </li>
             </ul>
-            {/* 说清楚哪些**没**加密，比多列两个算法名更能说明这段话可信。 */}
-            <p className="crypto-note">
-              会话凭证由主密钥单独密封；产品契约与本机配置不加密 —— 它们按设计就是公开信息。
-            </p>
             {/* 成功那一侧原来还有个徽章「主密钥由 Windows DPAPI 保护」——**与上面
                 「主密钥」那一行说了同一件事**（owner 2026-09-04 第 2 条），删掉。
                 明文这一侧留着：它多说了一句「不可用于真实数据」，那是行里没有的
@@ -1221,7 +1229,7 @@ function UpdatesSection({
         title="安装方式"
         desc="本应用不会自动下载或自动安装 —— 更新由你自己决定什么时候装"
       >
-        <FactRow label="检查" value="手动点一下，或开着「自动检查」时每次打开设置页问一次" />
+        <FactRow label="检查" value="手动点一下，或开着「自动检查」时每次启动软件问一次" />
         <FactRow label="下载" value="浏览器下载，安装包落在你的下载目录" />
         <FactRow label="安装" value="双击安装包，覆盖安装，业务数据不动" />
         {/* 这里原本还有一条 SmartScreen 提醒（语气块）。**移到「关于」页底部了**
@@ -1370,80 +1378,80 @@ function AboutSection({
       </div>
 
       {/* 「本机配置」——独立一张卡（owner 2026-09-15 从「关于」拆出来），按需高度，
-          不参与上面那张卡的黄金分割。 */}
-      <div className="card about-hardware-card">
-        <div className="about-hardware">
-          <p className="about-hardware-title">本机配置</p>
-          <p className="about-hardware-desc">
-            为保障处理过程中的数据不出域，Ruyin
-            在本机构建沙箱执行分析与计算——以下信息用于确定沙箱运行在什么机器上，仅本机读取、本机展示，不上传、不计费、不进遥测
+          不参与上面那张卡的黄金分割。版式改用 `SettingsBlock`（owner 2026-09-15
+          第二次修正）：原来是手写的居中标题 + 居中说明，与设置页其它每一块「图标 +
+          标题 + 说明，左对齐、内容缩进」的统一版式（owner 2026-09-04 定）对不上，
+          单独一张卡看不出是同一套设置页。 */}
+      <SettingsBlock
+        icon="cpu"
+        title="本机配置"
+        desc="为保障处理过程中的数据不出域，Ruyin 在本机构建沙箱执行分析与计算——以下信息用于确定沙箱运行在什么机器上，仅本机读取、本机展示，不上传、不计费、不进遥测"
+      >
+        {hardwareUnavailable ? (
+          <p className="text-body-sm text-muted-foreground">
+            本机固件信息暂不可用（守护进程未提供这一项，不影响其它功能）。
           </p>
-          {hardwareUnavailable ? (
-            <p className="text-body-sm text-muted-foreground">
-              本机固件信息暂不可用（守护进程未提供这一项，不影响其它功能）。
-            </p>
-          ) : (
-            <>
-              <FactRow
-                label="处理器"
-                value={
-                  hardware?.cpu
-                    ? [
-                        hardware.cpu.brand,
-                        hardware.cpu.cores ? `${hardware.cpu.cores} 核` : undefined,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")
-                    : hardware
-                      ? undefined
-                      : "…"
-                }
-              />
-              <FactRow label="内存" value={hardware ? gb(hardware.memoryTotalBytes) : "…"} />
-              <FactRow label="主板 / BIOS" value={board} />
-              <FactRow
-                label="操作系统"
-                value={
-                  hardware?.os
-                    ? [
-                        hardware.os.distro,
-                        hardware.os.build ? `build ${hardware.os.build}` : undefined,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")
-                    : hardware
-                      ? undefined
-                      : "…"
-                }
-              />
-              <FactRow
-                label="磁盘"
-                value={
-                  hardware?.disks && hardware.disks.length > 0
-                    ? hardware.disks
-                        .map((d) =>
-                          [d.name ?? d.vendor, gb(d.sizeBytes)].filter(Boolean).join(" · "),
-                        )
-                        .join("；")
-                    : hardware
-                      ? undefined
-                      : "…"
-                }
-              />
-              <FactRow
-                label="网卡 MAC 地址"
-                value={hardware?.macAddresses?.join("、") ?? (hardware ? undefined : "…")}
-                mono
-              />
-              <FactRow
-                label="机器 ID"
-                value={hardware?.machineId ?? (hardware ? undefined : "…")}
-                mono
-              />
-            </>
-          )}
-        </div>
-      </div>
+        ) : (
+          <>
+            <FactRow
+              label="处理器"
+              value={
+                hardware?.cpu
+                  ? [
+                      hardware.cpu.brand,
+                      hardware.cpu.cores ? `${hardware.cpu.cores} 核` : undefined,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : hardware
+                    ? undefined
+                    : "…"
+              }
+            />
+            <FactRow label="内存" value={hardware ? gb(hardware.memoryTotalBytes) : "…"} />
+            <FactRow label="主板 / BIOS" value={board} />
+            <FactRow
+              label="操作系统"
+              value={
+                hardware?.os
+                  ? [
+                      hardware.os.distro,
+                      hardware.os.build ? `build ${hardware.os.build}` : undefined,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : hardware
+                    ? undefined
+                    : "…"
+              }
+            />
+            <FactRow
+              label="磁盘"
+              value={
+                hardware?.disks && hardware.disks.length > 0
+                  ? hardware.disks
+                      .map((d) =>
+                        [d.name ?? d.vendor, gb(d.sizeBytes)].filter(Boolean).join(" · "),
+                      )
+                      .join("；")
+                  : hardware
+                    ? undefined
+                    : "…"
+              }
+            />
+            <FactRow
+              label="网卡 MAC 地址"
+              value={hardware?.macAddresses?.join("、") ?? (hardware ? undefined : "…")}
+              mono
+            />
+            <FactRow
+              label="机器 ID"
+              value={hardware?.machineId ?? (hardware ? undefined : "…")}
+              mono
+            />
+          </>
+        )}
+      </SettingsBlock>
 
       {system?.codeSigning === "unsigned" && (
         <div className="about-notice">
@@ -1814,25 +1822,29 @@ function SkillsSection({ api }: { api: Api }) {
         但绕（owner 2026-09-15：啰嗦晦涩，改成一句）。收成一句后就不再逐字断言
         「同一份登记册」这个精确说法了；不写「实时同步」的顾虑仍然成立（下面这句
         「同步」指的是能力供给的来源，不是「此刻逐条相同」），所以只说到「同步」
-        为止，不展开成「登记册」那层技术说法。 */}
+        为止，不展开成「登记册」那层技术说法。
+
+        调用路径（ADR-025）原来单独占一整句，owner 2026-09-15 再收：两条信息挤成
+        一条，路径信息收成标签贴在句尾 —— 图标改用第二条的盾牌（这一屏在说「谁
+        在把关」，盾牌比云朵更贴）。叫 Runos 好理解，但本机跑的不是云端 Runos
+        服务：名字出现的地方，说明必须一起出现（同一条 owner 决定），所以标签
+        文字仍是「Runos（兼容 Runos 协议的本地能力面）」整段，不拆开。 */}
       <p className="cap-sync">
-        <Icon name="cloud" size="sm" aria-hidden />
+        <Icon name="shield-check" size="sm" aria-hidden />
         <span>
           能力供给与 <strong>Vxture</strong> 云端 <strong>Runos</strong> 同步，本机提供
           <strong>Runtime</strong> 执行环境。
         </span>
-      </p>
-      {routing && (
-        /* 调用路径（ADR-025）。叫 Runos 好理解，但本机跑的不是云端 Runos 服务 —— 名字
-           出现的地方，说明必须一起出现（owner 2026-09-15）。 */
-        <p className="cap-sync">
-          <Icon name="shield-check" size="sm" aria-hidden />
-          <span>
-            能力调用路径：<strong>{routing.current.label}</strong> · {routing.name}（{routing.note}）
-            {routing.cloudOpen ? "" : "。云端 Runos 通路尚未开放，任何配置都按本机执行"}
+        {routing && (
+          <span className="cap-sync-tags">
+            <StatusBadge tone="neutral">{routing.current.label}</StatusBadge>
+            <StatusBadge tone="neutral">
+              {routing.name}（{routing.note}）
+            </StatusBadge>
+            {!routing.cloudOpen && <StatusBadge tone="warning">云端未开放</StatusBadge>}
           </span>
-        </p>
-      )}
+        )}
+      </p>
       <SettingsBlock
         icon="sparkles"
         collapsible
