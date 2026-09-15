@@ -326,10 +326,17 @@ export interface LocalApiDeps {
 
 /**
  * The workspace the user is currently signed in to, or undefined when signed
- * out. Read from the session claims, never from the request body: a body field
- * naming a workspace would be the caller choosing its own data boundary.
+ * out. Read from the platform session, never from the request body: a body
+ * field naming a workspace would be the caller choosing its own data boundary.
+ *
+ * 平台会话（rpsid）登着就只认它 —— #232 之后登录只走这一条，旧 OIDC 路径上已经
+ * 没有令牌，还读它的 claims 就是「登录了却永远没有工作区」，建项目、开项目全被
+ * 拒。只有会话没登时才退回旧路径，那是留给回滚的，不是并存。
  */
-function activeWorkspace(deps: LocalApiDeps): string | undefined {
+async function activeWorkspace(deps: LocalApiDeps): Promise<string | undefined> {
+  if (deps.platformSession?.signedIn()) {
+    return deps.platformSession.activeWorkspaceId().catch(() => undefined);
+  }
   const id = deps.platform?.session().workspace?.id;
   return id && id.length > 0 ? id : undefined;
 }
@@ -960,9 +967,35 @@ async function handle(
   // --- Vxture platform: C1 identity + C2 entitlements (liaison L3) ---
   if (deps.platform) {
     if (method === "GET" && path === "/auth/session") {
-      /* 给 UI 的**只有状态**，没有会话号——取凭据是 `rpsid()`，两者刻意不重名。
-         这是本仓 browser-zero-token 的底线：渲染层从来拿不到能调平台的东西。 */
-      send(res, 200, deps.platformSession?.status() ?? { signedIn: false });
+      /* 给 UI 的是**状态与身份投射**，没有会话号——取凭据是 `rpsid()`，两者刻意不重名。
+         这是本仓 browser-zero-token 的底线：渲染层从来拿不到能调平台的东西。
+
+         身份（用户 / 租户 / 工作区）向平台现拉，形状与旧 `PlatformService.session()`
+         给界面的那份一致，界面各处不必跟着改。#232 之后这里一度只回
+         `{signedIn, expiresAt}`，界面于是一律显示「Vxture 用户 / 未命名租户 /
+         未选定工作区」—— 登录是通的，看起来却像没登上。 */
+      const summary = deps.platform.session();
+      if (!deps.platformSession) {
+        send(res, 200, {
+          signedIn: false,
+          issuer: summary.issuer,
+          consoleBase: summary.consoleBase,
+          entitlementsConfigured: false,
+        });
+        return;
+      }
+      const identity = deps.platformSession.signedIn()
+        ? await deps.platformSession.identity()
+        : {};
+      // 读身份的途中会话可能被平台拒掉（401 就地清会话），状态要在读完之后取。
+      const status = deps.platformSession.status();
+      send(res, 200, {
+        ...status,
+        ...(status.signedIn ? identity : {}),
+        issuer: summary.issuer,
+        consoleBase: summary.consoleBase,
+        entitlementsConfigured: status.signedIn,
+      });
       return;
     }
     if (method === "POST" && path === "/auth/login") {
@@ -1005,6 +1038,16 @@ async function handle(
         return;
       }
       send(res, 200, await deps.platformSession.entitlements());
+      return;
+    }
+    // 配额用量（只读展示，ADR-006）。标题栏租户菜单读它；配额属于工作区，
+    // 不再按「本机碰巧装了哪几个产品」逐个拼。
+    if (method === "GET" && path === "/platform/quota-usage") {
+      if (!deps.platformSession) {
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
+        return;
+      }
+      send(res, 200, await deps.platformSession.quotaUsage());
       return;
     }
     if (method === "POST" && path === "/auth/logout") {
@@ -1669,7 +1712,7 @@ async function handle(
     }
     // 项目必须归属工作区（ADR-015）。没有登录态就没有工作区，也就无从新建 ——
     // 这不是把功能藏起来，是这个动作缺少它的主体。
-    const workspaceId = activeWorkspace(deps);
+    const workspaceId = await activeWorkspace(deps);
     if (!workspaceId) {
       send(
         res,
@@ -1697,7 +1740,7 @@ async function handle(
   // 划）。别的工作区的项目**只报数量不报名字**：隔离照做，但让人知道数据还在
   // ——「切换一下项目全没了」与「数据丢了」在用户那里分不开。
   if (method === "GET" && path === "/projects") {
-    const workspaceId = activeWorkspace(deps);
+    const workspaceId = await activeWorkspace(deps);
     const all = await deps.runtime.listProjects();
     // `workspaceId &&` 不是多余的：未登录时它是 undefined，而未归属项目的
     // workspaceId 也是 undefined —— 光比相等会把「没有归属」当成「归属于没有」，
@@ -1729,7 +1772,7 @@ async function handle(
     // 都看得见（ADR-015），所以这里放行 —— 挡住它，导入这条路就没了。
     const projectMeta = (await deps.runtime.listProjects()).find((p) => p.id === projectId);
     const owner = projectMeta?.workspaceId;
-    const active = activeWorkspace(deps);
+    const active = await activeWorkspace(deps);
     if (owner && owner !== active) {
       // 同样是拒绝，理由要分清楚 —— 没登录时说「属于另一个工作区」不是实话，
       // 而一句不实的拒绝会把人送去切工作区，那里什么也解决不了。
@@ -1792,7 +1835,7 @@ async function handle(
       // 导出是**认证过的操作**（owner 定）：一份带完整审计链的项目档案离开
       // 本机，不该在没有账号的情况下发生。注销本身就该先备份、导完再注销，
       // 而不是反过来给「离线随便导」开一条路。
-      if (!activeWorkspace(deps)) {
+      if (!await activeWorkspace(deps)) {
         send(
           res,
           409,
@@ -1868,7 +1911,7 @@ async function handle(
       segments.length === 3 &&
       segments[2] === "import"
     ) {
-      const workspaceId = activeWorkspace(deps);
+      const workspaceId = await activeWorkspace(deps);
       if (!workspaceId) {
         send(
           res,

@@ -436,6 +436,13 @@ const WRAPPER_CASES: WrapperCase[] = [
     method: "GET",
     path: "/entitlements?products=bidproposal%2Cvxture.crm",
   },
+  {
+    name: "subscribedProducts",
+    call: (api) => api.subscribedProducts(),
+    method: "GET",
+    path: "/platform/subscribed-products",
+  },
+  { name: "quotaUsage", call: (api) => api.quotaUsage(), method: "GET", path: "/platform/quota-usage" },
 ];
 
 for (const c of WRAPPER_CASES) {

@@ -484,6 +484,13 @@ void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 Plat
   let logoutCalls = 0;
   const platformSession = {
     status: () => ({ signedIn: true, expiresAt: Date.now() + 3600_000 }),
+    signedIn: () => true,
+    identity: async () => ({
+      profile: { sub: "u1", name: "张三" },
+      org: { id: "t1", name: "某公司", type: "organization" },
+      workspace: { id: "ws-1", name: "主工作区" },
+    }),
+    activeWorkspaceId: async () => "ws-1",
     beginLogin: () => {
       loginCalls++;
       return "https://console.vxture.com/auth/login?surface=native&handle=abc";
@@ -491,24 +498,51 @@ void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 Plat
     completeLogin: async () => {},
     subscribedProducts: async () => [{ productCode: "vxtpl" }],
     entitlements: async () => [{ productCode: "vxtpl", tier: "starter" }],
+    quotaUsage: async () => ({ storage: { used: 1, limit: 2 }, aiCredit: { used: 3, limit: 4 } }),
     logout: async () => {
       logoutCalls++;
     },
   } as unknown as PlatformSession;
 
-  const rig = await startServer({ platform: signedInTo("wsp_x"), platformSession });
+  const rig = await startServer({
+    platform: signedInTo("wsp_x", {
+      session: () =>
+        ({
+          signedIn: true,
+          workspace: { id: "wsp_x", name: "旧路径的工作区" },
+          issuer: "https://accounts.vxture.com",
+          consoleBase: "https://vxture.com",
+          entitlementsConfigured: false,
+        }) as ReturnType<PlatformService["session"]>,
+    }),
+    platformSession,
+  });
   try {
-    // ① /auth/session 给 UI 的**只有状态**，没有会话号
+    // ① /auth/session 给 UI 的是状态 + 向平台现拉的身份，没有会话号
     const raw = await (
       await fetch(`${rig.base}/auth/session`, { headers: rig.headers })
     ).text();
-    const session = JSON.parse(raw) as { signedIn: boolean };
+    const session = JSON.parse(raw) as {
+      signedIn: boolean;
+      profile?: { name?: string };
+      org?: { name?: string };
+      workspace?: { id?: string; name?: string };
+      consoleBase: string;
+      entitlementsConfigured: boolean;
+    };
     assert.equal(session.signedIn, true);
     assert.equal(
       /rpsid|sess[-_]/i.test(raw),
       false,
       "给 UI 的响应里出现了会话号——browser-zero-token 被破了",
     );
+    /* 身份来自会话，不来自旧 OIDC 路径的 claims —— 两者同时在时，旧的那份
+       （「旧路径的工作区」）一个字都不能漏进来。 */
+    assert.equal(session.profile?.name, "张三");
+    assert.equal(session.org?.name, "某公司");
+    assert.deepEqual(session.workspace, { id: "ws-1", name: "主工作区" });
+    assert.equal(session.consoleBase, "https://vxture.com");
+    assert.equal(session.entitlementsConfigured, true);
 
     // ② /auth/login 回的地址指向 console-bff，且带 surface=native
     const login = await fetch(`${rig.base}/auth/login`, {
@@ -543,6 +577,104 @@ void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 Plat
       const body = (await res.json()) as Array<{ productCode: string }>;
       assert.equal(body[0]?.productCode, "vxtpl");
     }
+    const quota = await fetch(`${rig.base}/platform/quota-usage`, { headers: rig.headers });
+    assert.equal(quota.status, 200, "/platform/quota-usage 没接上");
+    assert.deepEqual(await quota.json(), {
+      storage: { used: 1, limit: 2 },
+      aiCredit: { used: 3, limit: 4 },
+    });
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/*
+ * #232 之后的真实缺陷：登录走会话，当前工作区却还读旧 OIDC 路径的 claims，
+ * 于是「登录了、永远没有工作区」，建项目开项目全被 ADR-015 拒掉。
+ *
+ * 钉三件：会话登着时**只认会话给的工作区**（旧 claims 里的不能漏进来）；
+ * 会话说不出工作区时是没有工作区，**不退回旧 claims**；会话没登时才退回旧路径。
+ */
+void test("当前工作区：会话登着只认会话；会话说不出就是没有；会话没登才退回旧路径", async () => {
+  const sessionOn = (workspace: string | undefined) =>
+    ({
+      status: () => ({ signedIn: true, expiresAt: Date.now() + 3600_000 }),
+      signedIn: () => true,
+      identity: async () => (workspace ? { workspace: { id: workspace } } : {}),
+      activeWorkspaceId: async () => workspace,
+    }) as unknown as PlatformSession;
+
+  let rig = await startServer({
+    platform: signedInTo("wsp_legacy"),
+    platformSession: sessionOn("ws-1"),
+  });
+  try {
+    const mine = await projectIn(rig, "ws-1");
+    const legacy = await projectIn(rig, "wsp_legacy");
+    const list = (await (await fetch(`${rig.base}/projects`, { headers: rig.headers })).json()) as {
+      items: Array<{ id: string }>;
+      elsewhere: number;
+    };
+    assert.deepEqual(list.items.map((p) => p.id), [mine]);
+    assert.equal(list.elsewhere, 1);
+    const blocked = await fetch(`${rig.base}/projects/${legacy}`, { headers: rig.headers });
+    assert.equal(blocked.status, 403, "旧 claims 的工作区漏进来了");
+  } finally {
+    closeRig(rig);
+  }
+
+  rig = await startServer({
+    platform: signedInTo("wsp_legacy"),
+    platformSession: sessionOn(undefined),
+  });
+  try {
+    await projectIn(rig, "wsp_legacy");
+    const list = (await (await fetch(`${rig.base}/projects`, { headers: rig.headers })).json()) as {
+      items: unknown[];
+    };
+    assert.deepEqual(list.items, [], "会话说不出工作区时退回了旧 claims");
+  } finally {
+    closeRig(rig);
+  }
+
+  rig = await startServer({
+    platform: signedInTo("wsp_legacy"),
+    platformSession: {
+      status: () => ({ signedIn: false, expiresAt: null }),
+      signedIn: () => false,
+    } as unknown as PlatformSession,
+  });
+  try {
+    const legacy = await projectIn(rig, "wsp_legacy");
+    const list = (await (await fetch(`${rig.base}/projects`, { headers: rig.headers })).json()) as {
+      items: Array<{ id: string }>;
+    };
+    assert.deepEqual(list.items.map((p) => p.id), [legacy]);
+    const session = (await (await fetch(`${rig.base}/auth/session`, { headers: rig.headers })).json()) as {
+      signedIn: boolean;
+      workspace?: unknown;
+      entitlementsConfigured: boolean;
+    };
+    /* 会话没登：界面看到的是未登录，旧 claims 不冒充身份。 */
+    assert.equal(session.signedIn, false);
+    assert.equal(session.workspace, undefined);
+    assert.equal(session.entitlementsConfigured, false);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("未配置 platformSession 时 /auth/session 回未登录，不拿旧 claims 冒充身份", async () => {
+  const rig = await startServer({ platform: signedInTo("wsp_x") });
+  try {
+    const body = (await (await fetch(`${rig.base}/auth/session`, { headers: rig.headers })).json()) as {
+      signedIn: boolean;
+      workspace?: unknown;
+      entitlementsConfigured: boolean;
+    };
+    assert.equal(body.signedIn, false);
+    assert.equal(body.workspace, undefined);
+    assert.equal(body.entitlementsConfigured, false);
   } finally {
     closeRig(rig);
   }
@@ -553,7 +685,7 @@ void test("未配置 platformSession 时平台读回 503，而不是空数组", 
      503 才说得出实情:这台机器还没接上平台。 */
   const rig = await startServer({ platform: signedInTo("wsp_x") });
   try {
-    for (const ep of ["subscribed-products", "entitlements"]) {
+    for (const ep of ["subscribed-products", "entitlements", "quota-usage"]) {
       const res = await fetch(`${rig.base}/platform/${ep}`, {
         headers: rig.headers,
       });

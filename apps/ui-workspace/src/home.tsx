@@ -9,8 +9,10 @@
  * 「热门智能体」是另一句话：「平台上有这些」，不声称所有权，动作只有外链。它的
  * 数据是平台目录的静态快照（catalog.ts，有出处有日期），接上目录端点后即删。
  *
- * 订阅数据面（C2 entitlements）尚无桌面可达端点（liaison L3-b）：未接通时诚实
- * 降级——展示本地运行时已装的产品，并标明订阅状态未接通，而不是虚构一份清单。
+ * 「我的智能体」以平台订阅为准（owner 2026-09-15）：登录后向守护进程要本工作区的
+ * 订阅清单（console `/api/subscription/subscribed-products`），本机已装的出本地卡片，
+ * 订了没装的出「本机未安装」卡。问不到（没登录、失败）时诚实降级——展示本地运行时
+ * 已装的产品，并标明订阅状态未接通，而不是虚构一份清单。
  *
  * **页面只到「进入产品」为止。** 新建/停用/版本回滚这些具体操作都不在这里——
  * 进了产品就是进了另一套框架，让产品自己设计它的构建流程（与 workbench.tsx
@@ -38,6 +40,7 @@ import {
   type ProductInfo,
   type SessionInfo,
   type ProjectMeta,
+  type SubscribedProduct,
 } from "./api";
 import { CATALOG_SOURCE, RECOMMENDED } from "./catalog";
 
@@ -382,11 +385,23 @@ export function HomePage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [products.length, system?.capabilitySurface]);
 
+  /**
+   * 平台上本工作区的订阅清单。null = 不知道（没登录、没问到、问失败了）——
+   * 与「问到了、是空的」是两件事，前者不能渲染成「你没有订阅」。
+   */
+  const [subscribed, setSubscribed] = useState<SubscribedProduct[] | null>(null);
+
   useEffect(() => {
     let alive = true;
     api
       .session()
-      .then((s) => alive && setSession(s))
+      .then(async (s) => {
+        if (!alive) return;
+        setSession(s);
+        if (!s?.signedIn) return;
+        const rows = await api.subscribedProducts();
+        if (alive && Array.isArray(rows)) setSubscribed(rows);
+      })
       .catch(() => {});
     api
       .system()
@@ -410,7 +425,19 @@ export function HomePage({
       ? `${consoleBase}/subscribe?product=${encodeURIComponent(productId)}&intent=${intent}`
       : `${consoleBase}/subscribe`;
 
-  const subscriptionKnown = products.some((p) => p.entitled !== null);
+  // 平台订阅清单问到了，或者任何一个本地产品有了订阅事实，都算「订阅状态已知」。
+  const subscriptionKnown =
+    subscribed !== null || products.some((p) => p.entitled !== null);
+  /**
+   * 平台上订了、本机还没有的智能体。首页以平台订阅为准（owner 2026-09-15）：
+   * 它们不能因为本机没装就从「我的智能体」里消失 —— 那等于告诉用户他没订。
+   * 本机已装的由本地卡片承载，这里不重复。
+   */
+  const localIds = new Set(products.map((p) => p.id));
+  const remoteOnly = (subscribed ?? []).filter(
+    (r): r is SubscribedProduct & { productCode: string } =>
+      !!r.productCode && !localIds.has(r.productCode),
+  );
   const encrypted = system?.keyProtection === "dpapi";
   // 能力面没接时，任务拿到的是 MockAIGateway 的字面量占位输出，而它会一路走到
   // 用户面前当成工作成果（TD-033）。守护进程日志已如实播报，但日志到不了用户
@@ -527,7 +554,7 @@ export function HomePage({
           </span>
         }
       >
-        {products.length === 0 ? (
+        {products.length === 0 && remoteOnly.length === 0 ? (
           // 0 订阅：环境仍在，引导到平台订阅（主体在平台）。
           <EmptyState
             icon="package"
@@ -567,6 +594,14 @@ export function HomePage({
                 onCreated={onCreated}
                 onRefresh={onRefresh}
                 onError={onError}
+              />
+            ))}
+            {remoteOnly.map((row) => (
+              <SubscribedElsewhereCard
+                key={row.subscriptionId}
+                row={row}
+                consoleBase={consoleBase}
+                subscribeUrl={subscribeUrl}
               />
             ))}
           </ListCardGrid>
@@ -653,6 +688,75 @@ export function HomePage({
       </Section>
       </div>
     </div>
+  );
+}
+
+/**
+ * 平台上订了、本机还没有的智能体。
+ *
+ * 和本地卡片同一种卡（pcard），扫过去是一栏；差别只在动作：这里没有「打开」——
+ * 本机没有它的契约，打不开。给的是它能兑现的：在线使用（落应用中心），或者
+ * 订阅已失效时去续订。「本机未安装」与订阅徽章并列，两件事都成立。
+ */
+function SubscribedElsewhereCard({
+  row,
+  consoleBase,
+  subscribeUrl,
+}: {
+  row: SubscribedProduct & { productCode: string };
+  consoleBase: string;
+  subscribeUrl: (id?: string, intent?: "subscribe" | "renew") => string;
+}) {
+  const expired = row.status === "expired";
+  const title = row.productName ?? row.productNick ?? row.productCode;
+  return (
+    <article className="pcard">
+      <header className="pcard-head">
+        <span className="pcard-icon" aria-hidden>
+          <Icon name="cube" size="lg" />
+        </span>
+        <span className="pcard-titles">
+          <h3 className="pcard-title">{title}</h3>
+          <p className="pcard-ident" title={`产品标识 ${row.productCode}`}>{row.productCode}</p>
+        </span>
+        <span className="pcard-badges">
+          {expired ? (
+            <StatusBadge tone="warning">已过期</StatusBadge>
+          ) : (
+            <StatusBadge tone="success">已订阅</StatusBadge>
+          )}
+          <StatusBadge tone="neutral">本机未安装</StatusBadge>
+        </span>
+      </header>
+      <div className="pcard-body">
+        <p className="pcard-desc">
+          {`套餐 ${row.planName}${row.releaseVersion ? ` · v${row.releaseVersion}` : ""}`}
+        </p>
+      </div>
+      <footer className="pcard-foot">
+        <span className="pcard-meta" />
+        <span className="pcard-actions">
+          {expired ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(subscribeUrl(row.productCode, "renew"), "_blank", "noopener")}
+            >
+              续订
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(APPCENTER_URL(consoleBase), "_blank", "noopener")}
+            >
+              在线使用
+              <Icon name="external-link" size="xs" />
+            </Button>
+          )}
+        </span>
+      </footer>
+    </article>
   );
 }
 
@@ -761,6 +865,10 @@ function ProductCard({
       <StatusBadge tone="neutral">已停用</StatusBadge>
     ) : product.entitled === true ? (
       <StatusBadge tone="success">已订阅</StatusBadge>
+    ) : product.supply === "builtin" ? (
+      /* 随包的是测试夹具（TD-006 / TD-033），得看起来就是夹具：标「本地已装」会让人
+         以为那是一个自己拥有的产品。平台说订了（上一支）时以平台为准。 */
+      <StatusBadge tone="neutral">测试夹具</StatusBadge>
     ) : (
       <StatusBadge tone="neutral">本地已装</StatusBadge>
     );

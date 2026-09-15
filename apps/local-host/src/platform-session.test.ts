@@ -23,6 +23,8 @@ import {
   PlatformSession,
   type PlatformSessionConfig,
   PLATFORM_PATHS,
+  PLATFORM_READS,
+  projectIdentity,
 } from "./platform-session.js";
 import type { KeyManager } from "./keys.js";
 
@@ -339,6 +341,156 @@ describe("platform-session", () => {
     await s.completeLogin();
     /* 缓存没清的话这里会拿回 A 的那一份——而它不报错。 */
     assert.deepEqual(await s.subscribedProducts(), ["B 的订阅"]);
+  });
+
+  it("带会话的读全在 /api/ 下——与会话端点相反，它们要鉴权中间件解出工作区", () => {
+    for (const p of Object.values(PLATFORM_READS)) {
+      assert.ok(p.startsWith("/api/"), `${p} 不在 /api/ 下，拿不到会话里的租户上下文`);
+    }
+  });
+
+  it("projectIdentity：用户、租户、工作区各取各的，平台合成的邮箱不当真", () => {
+    const id = projectIdentity(
+      {
+        id: "u1",
+        name: "zhang",
+        displayName: "张三",
+        email: "zhang@local.vxture",
+        username: "zhang",
+        phone: "138",
+        picture: "https://x/p.png",
+        roleLabel: "Owner",
+      },
+      { id: "t1", name: "某公司", mode: "tenant", workspace: "default", tenantType: "organization", workspaceName: "默认" },
+      [
+        { tenantId: "t0", workspaceId: "ws-other", workspaceName: "别的", isCurrent: false },
+        { tenantId: "t1", workspaceId: "ws-1", workspaceName: "主工作区", isCurrent: true },
+      ],
+    );
+    assert.deepEqual(id, {
+      profile: {
+        sub: "u1",
+        name: "张三",
+        username: "zhang",
+        phone: "138",
+        picture: "https://x/p.png",
+        roles: ["Owner"],
+      },
+      org: { id: "t1", name: "某公司", type: "organization" },
+      workspace: { id: "ws-1", name: "主工作区" },
+    });
+  });
+
+  /*
+   * 这一条钉的是一次会串数据的错：`TenantContext.workspace` 解不出时是字面量
+   * "default"。若把它当工作区 id，所有租户的项目都归到同一个 "default" 下。
+   */
+  it("projectIdentity：工作区 id 只认 /api/me/workspaces 的真实 id，占位值一律不算", () => {
+    const ctx = { id: "t1", name: "T", mode: "tenant", workspace: "default", workspaceName: "默认工作区" };
+    // 没有工作区列表：有名字、没有 id —— 宁可建不了项目，也不归到占位值下
+    assert.deepEqual(projectIdentity(undefined, ctx, undefined).workspace, { name: "默认工作区" });
+    // 列表里的 id 是占位值：同样不算
+    assert.deepEqual(
+      projectIdentity(undefined, ctx, [{ tenantId: "t1", workspaceId: "default", workspaceName: null }]).workspace,
+      { name: "默认工作区" },
+    );
+    // 别的租户的行不能冒充当前租户的；没有 isCurrent 时取当前租户的第一行
+    assert.deepEqual(
+      projectIdentity(undefined, ctx, [
+        { tenantId: "t9", workspaceId: "ws-9", isCurrent: true },
+        { tenantId: "t1", workspaceId: "ws-1" },
+      ]).workspace,
+      { id: "ws-1", name: "默认工作区" },
+    );
+    // 平台态（没有任何组织）不投射租户，也就没有工作区
+    assert.deepEqual(
+      projectIdentity(undefined, { id: "platform:u1", mode: "platform", workspace: "PLATFORM" }, [
+        { tenantId: "platform:u1", workspaceId: "ws-x" },
+      ]),
+      {},
+    );
+    // 形状不对的输入不抛，只是缺席
+    assert.deepEqual(projectIdentity("oops", 42, { not: "an array" }), {});
+    assert.deepEqual(projectIdentity({ name: "没有 id" }, null, []), {});
+    assert.deepEqual(projectIdentity({ id: "u2", email: "a@b.c" }, { id: "t", mode: "tenant" }, []), {
+      profile: { sub: "u2", email: "a@b.c" },
+      org: { id: "t" },
+    });
+  });
+
+  it("identity() 并发读三条；某一条失败只让那一块缺席，未登录直接空", async () => {
+    const notSignedIn = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    assert.deepEqual(await notSignedIn.identity(), {});
+    assert.equal(await notSignedIn.activeWorkspaceId(), undefined);
+
+    const replies: Record<string, { status: number; body?: unknown }> = {
+      "/auth/native/claim": { status: 200, body: { rpsid: "sess-id", expiresInSec: 3600 } },
+      "/api/me": { status: 200, body: { id: "u1", name: "张三" } },
+      "/api/tenant-context": { status: 500 },
+      "/api/me/workspaces": { status: 200, body: [{ tenantId: "t1", workspaceId: "ws-1" }] },
+    };
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: URL | string) => {
+      const path = new URL(String(input)).pathname;
+      calls.push(path);
+      const r = replies[path] ?? { status: 404 };
+      return {
+        ok: r.status >= 200 && r.status < 300,
+        status: r.status,
+        json: async () => r.body ?? {},
+        headers: { get: () => null } as unknown as Headers,
+      } as Response;
+    }) as typeof fetch;
+    restores.push(() => void (globalThis.fetch = original));
+
+    const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    s.beginLogin();
+    await s.completeLogin();
+    /* 租户上下文那条 500：没有租户，工作区也就无从对上 —— 但名字照样在。 */
+    assert.deepEqual(await s.identity(), { profile: { sub: "u1", name: "张三" } });
+    assert.equal(await s.activeWorkspaceId(), undefined);
+
+    replies["/api/tenant-context"] = { status: 200, body: { id: "t1", mode: "tenant", name: "T" } };
+    /* 失败的读没有进缓存，下一次会重新问；成功的读在缓存期内不再发。 */
+    const before = calls.filter((c) => c === "/api/me").length;
+    assert.equal(await s.activeWorkspaceId(), "ws-1");
+    assert.equal(calls.filter((c) => c === "/api/me").length, before, "缓存期内重复请求了 /api/me");
+    assert.ok(!calls.some((c) => c.includes("sess-id")), "rpsid 漏进了 URL");
+  });
+
+  it("identity()：读的过程中会话被平台拒（401），回空而不是半份身份", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: URL | string) => {
+      const path = new URL(String(input)).pathname;
+      const ok = path === "/auth/native/claim";
+      return {
+        ok,
+        status: ok ? 200 : path === "/api/me" ? 200 : 401,
+        json: async () => (ok ? { rpsid: "sess-401", expiresInSec: 3600 } : { id: "u1" }),
+        headers: { get: () => null } as unknown as Headers,
+      } as Response;
+    }) as typeof fetch;
+    restores.push(() => void (globalThis.fetch = original));
+
+    const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    s.beginLogin();
+    await s.completeLogin();
+    assert.deepEqual(await s.identity(), {});
+    assert.equal(s.signedIn(), false);
+  });
+
+  it("quotaUsage 走 console-bff 的配额读", async () => {
+    const f = stubFetch([
+      { status: 200, body: { rpsid: "sess-q", expiresInSec: 3600 } },
+      { status: 200, body: { storage: { used: 1, limit: 2 }, aiCredit: { used: 3, limit: 4 } } },
+    ]);
+    restores.push(f.restore);
+    const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    s.beginLogin();
+    await s.completeLogin();
+    assert.deepEqual(await s.quotaUsage(), { storage: { used: 1, limit: 2 }, aiCredit: { used: 3, limit: 4 } });
+    assert.match(f.calls.at(-1)!.url, /\/api\/subscription\/quota-usage$/);
   });
 
   it("每次 beginLogin 生成新的 secret——重开登录不复用旧的", () => {
