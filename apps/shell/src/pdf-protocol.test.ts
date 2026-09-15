@@ -9,7 +9,23 @@
 
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { isRenderPdfRequest, parsePdfSelfCheck } from "./pdf-protocol.js";
+import { PDF_SELF_CHECK_WAIT_MS, isRenderPdfRequest, parsePdfSelfCheck } from "./pdf-protocol.js";
+
+/*
+ * RY-001 #22：冒烟里壳等 PDF 标记的上限，必须盖得住排在它前面的那几件事的上限之和。
+ * 60 秒的旧值连「种子复制 + 一次 uvx 启动」都盖不住，PR #259 的只读那一轮就是这样红的。
+ * 这里把账写成数，谁再把它改小就会在这儿先看到为什么不行。
+ */
+void test("PDF_SELF_CHECK_WAIT_MS covers every self-check queued before it (RY-001 #22)", () => {
+  const mcpStartMs = 60_000; // local-host mcp-client.ts DEFAULT_START_TIMEOUT_MS (#16)
+  const seedCopyMeasuredMs = 45_400; // CI runner, read-only smoke round, 2026-09-15
+  const toolsSelfCheck = mcpStartMs;
+  const uvxSelfCheck = seedCopyMeasuredMs + mcpStartMs;
+  assert.ok(
+    PDF_SELF_CHECK_WAIT_MS > toolsSelfCheck + uvxSelfCheck,
+    `${PDF_SELF_CHECK_WAIT_MS} ms 盖不住 tools ${toolsSelfCheck} + uvx ${uvxSelfCheck} ms`,
+  );
+});
 
 void test("isRenderPdfRequest: accepts a well-formed request", () => {
   assert.equal(
