@@ -1884,11 +1884,22 @@ test("Runos 清单：平台还没有目录端点时如实说没有 —— 刷新
       }),
     } as Partial<Api>),
   );
-  expect(await screen.findByText("平台尚未提供能力目录，暂时没有清单。")).toBeInTheDocument();
-  expect(screen.getByText(/vxture-platform#339/)).toBeInTheDocument();
+  // 一句话说完，issue 号在里面；原因不再单独重复一行（RY-001 #23）。
+  expect(await screen.findByText("平台尚未提供能力目录（vxture-platform#339），暂时没有清单。")).toBeInTheDocument();
+  expect(screen.getAllByText(/平台尚未提供能力目录/)).toHaveLength(1);
   expect(screen.getByText(/不是安装：条目不会下载到本机/)).toBeInTheDocument();
   expect(within(await catalogBlock()).getByRole("button", { name: "刷新" })).toBeDisabled();
   expect(screen.queryByRole("textbox", { name: "搜索 Runos 清单" })).not.toBeInTheDocument();
+});
+
+test("Runos 清单：没有数据源、守护进程也没给原因 —— 仍是一句完整的话", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      capabilityCatalog: vi.fn().mockResolvedValue({ items: [], total: 0, source: { kind: "platform", state: "unavailable" } }),
+    } as Partial<Api>),
+  );
+  expect(await screen.findByText("平台尚未提供能力目录，暂时没有清单。")).toBeInTheDocument();
 });
 
 test("Runos 清单：有数据源、还没取到过 —— 说还没有，并转达上次失败的原因", async () => {
