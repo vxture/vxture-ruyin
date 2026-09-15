@@ -740,6 +740,15 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
    横向锁定组合之后，居中排版会把 logo 推到内容中轴上、和下面的条款按钮对不上
    边——干脆整块左对齐，读起来是一个左边界，不是每行各自居中的一叠。 */
 .about-block { padding: var(--spacing-lg) 0; }
+/* 品牌区到下面这串事实之间的间距，与事实彼此之间的间距，是两个不同量级
+   （owner 2026-09-15：原来是散落的行内像素值 10 / 0 / 12，看起来忽近忽远）：
+   品牌 → 简介，正常一档（这是新的一段）；简介 → 版本号，收紧（同一句「这是
+   什么、哪个版本」）；版本号 → 版权，回到正常一档（版权是另一类信息，法律
+   身份，不是产品身份）。再往下到条款按钮那一档更大的间距不变，那是「另一
+   类东西」（见 `.about-legal`）。 */
+.about-desc { margin-top: var(--spacing-sm); }
+.about-runtime { margin-top: var(--spacing-2xs); }
+.about-copyright { margin-top: var(--spacing-sm); }
 /* 图形标 + 两行文字（RUYIN / Intelligent Workbench），logo 高度跨两行。 */
 .about-brand { display: flex; align-items: center; gap: var(--spacing-md); }
 .about-mark { width: 56px; height: 56px; flex-shrink: 0; }
@@ -1433,8 +1442,14 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
      一列（owner 2026-09-15）。 */
   padding-right: var(--spacing-sm);
 }
-/* 序号列：窄、右对齐——数字天然右对齐才整齐，个位数与两位数才能对齐右边缘。 */
-.third-party-idx { width: 2.5em; text-align: right; }
+/* 序号列：窄、右对齐——数字天然右对齐才整齐，个位数与两位数才能对齐右边缘。
+   宽度按 4 位数留（owner 2026-09-15：228 个组件已经是 3 位，`em` 量出来的宽度
+   跟着字号漂、不够留 4 位数的余地）——`ch` 是这个等宽字体一个数字的实际宽度，
+   量得准；`white-space: nowrap` 兜底，够宽也不会因为别的原因换行。 */
+.third-party-idx { width: 4ch; min-width: 4ch; text-align: right; white-space: nowrap; }
+/* 「所属模块」那一列——短标签飘在一列长空白的左边缘不好看，居中（owner
+   2026-09-15）。 */
+.third-party-part { text-align: center; }
 /* 事实行尾的动作（「打开目录」）：顶到右端，不去挤值那一列 —— 值是这一行的
    主角，路径本来就长。 */
 /* 行尾的动作位。可以放不止一个（数据目录那一行有「打开目录」和「更改…」），

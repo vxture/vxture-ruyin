@@ -18,7 +18,7 @@ test("ThirdPartyNotices: 入口只说是什么，不报数目——数目只在�
   expect(THIRD_PARTY.some((e) => e.name.startsWith("@vxture/"))).toBe(false);
 });
 
-test("ThirdPartyNotices: 打开后逐条列出序号、组件、版本、许可证与随哪一块；说清闭源、全文在哪、总数在描述里", async () => {
+test("ThirdPartyNotices: 打开后逐条列出序号、组件、版本、许可证与所属模块；说清闭源、全文在哪、总数在描述里", async () => {
   const entries = [
     { name: "react", version: "18.3.1", license: "MIT", usedBy: ["ui"] },
     { name: "jszip", version: "3.10.1", license: "(MIT OR GPL-3.0-or-later)", usedBy: ["daemon"] },
@@ -33,6 +33,8 @@ test("ThirdPartyNotices: 打开后逐条列出序号、组件、版本、许可�
   expect(within(dialog).getByText(/RUYIN 本身是闭源商业软件/)).toBeInTheDocument();
   expect(within(dialog).getByText(/THIRD-PARTY-NOTICES\.txt/)).toBeInTheDocument();
   expect(within(dialog).getByText(/LICENSES\.chromium\.html/)).toBeInTheDocument();
+  // 「随哪一块」读起来像半句话，改叫「所属模块」（owner 2026-09-15）。
+  expect(within(dialog).getByRole("columnheader", { name: "所属模块" })).toBeInTheDocument();
   const rows = within(dialog).getAllByRole("row").slice(1); // 去掉表头
   expect(rows).toHaveLength(4);
   expect(within(rows[0]!).getByText("1")).toBeInTheDocument();
