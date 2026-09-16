@@ -241,6 +241,20 @@ if (m.pythonRuntime?.uv) {
   }
 }
 
+// 随包 node.exe：与 pythonRuntime.uv 同一条规则（钉死 + 校验），只是给 node
+// 形态的服务器用，为的是不让它们借 Ruyin.exe 自己重执行时弹出空白 cmd 窗口。
+if (m.nodeRuntime) {
+  const nr = m.nodeRuntime;
+  const where = "nodeRuntime";
+  if (!/^https:\/\//.test(nr.upstream ?? "")) errors.push(`${where}: upstream 必须是 https`);
+  if (!/^[0-9a-f]{64}$/.test(nr.sha256 ?? "")) errors.push(`${where}: sha256 不是 64 位十六进制的钉死值`);
+  if (!Number.isInteger(nr.size) || nr.size <= 0) errors.push(`${where}: size 缺失`);
+  if (!nr.license || !nr.licenseSource) errors.push(`${where}: 许可证与出处都要写`);
+  if (!Array.isArray(nr.licenseFiles) || nr.licenseFiles.length === 0) {
+    errors.push(`${where}: licenseFiles 要列出随件落盘的许可证正文`);
+  }
+}
+
 // 汇报放在**所有**规则跑完之后。此前它夹在组件段与 pythonRuntime 段之间，
 // 于是 pythonRuntime 的每一条 push 都是死信 —— 检查在跑，结论没人读
 // （2026-09-09 顺带修）。

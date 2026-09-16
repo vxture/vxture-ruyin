@@ -66,6 +66,8 @@ resources/skills/
 resources/tools/
 # 随包的 Python 引导件（uv + CPython + 预取缓存），构建时由 seed-uv-cache.mjs 生成
 resources/uv/
+# 随包的真 node.exe，构建时由 seed-node-runtime.mjs 生成（owner 2026-09-16）
+resources/node/
 
 # playwright-mcp writes accessibility snapshots into its cwd. The fix is that
 # nothing runs it with the repo as cwd (pull-tools.mjs probes in a temp dir);
