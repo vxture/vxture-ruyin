@@ -125,7 +125,41 @@ void test("HomePage: the empty-state button opens the platform subscribe page in
   const user = userEvent.setup();
   await user.click(await screen.findByText("到 Vxture 平台订阅"));
   expect(globalThis.open).toHaveBeenCalledWith(
-    "https://vxture.com/subscribe",
+    "https://console.vxture.com/subscribe",
+    "_blank",
+    "noopener",
+  );
+});
+
+/**
+ * `/subscribe` 落在 console-bff 本体上，不是官网 consoleBase（owner 2026-09-16
+ * audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明——
+ * 第一版这里也误拼去了官网）。
+ */
+void test("HomePage: 订阅深链跟着 consoleAppBase 走，不是 consoleBase", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue({
+      signedIn: false,
+      consoleBase: "https://vxture.com",
+      consoleAppBase: "https://console.staging.vxture.com",
+    } as SessionInfo),
+  });
+  render(
+    <HomePage
+      api={api}
+      products={[]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  const user = userEvent.setup();
+  await user.click(await screen.findByText("到 Vxture 平台订阅"));
+  expect(globalThis.open).toHaveBeenCalledWith(
+    "https://console.staging.vxture.com/subscribe",
     "_blank",
     "noopener",
   );
@@ -476,7 +510,7 @@ void test("ProductCard: renew intent links to the renew flow, not first-purchase
   });
   await userEvent.click(screen.getByRole("button", { name: "去平台续费" }));
   expect(globalThis.open).toHaveBeenCalledWith(
-    "https://vxture.com/subscribe?product=vxture.crm&intent=renew",
+    "https://console.vxture.com/subscribe?product=vxture.crm&intent=renew",
     "_blank",
     "noopener",
   );
@@ -1239,7 +1273,7 @@ void test("HomePage: 平台上订了、本机没装的智能体照样列出，�
   const renew = screen.getByRole("button", { name: "续订" });
   await userEvent.setup().click(renew);
   expect(window.open).toHaveBeenCalledWith(
-    "https://vxture.com/subscribe?product=arda&intent=renew",
+    "https://console.vxture.com/subscribe?product=arda&intent=renew",
     "_blank",
     "noopener",
   );

@@ -317,7 +317,9 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
     );
   }
   const p = session.profile;
-  const profileUrl = `${session.consoleBase || "https://vxture.com"}/zh-CN/profile`;
+  // 「个人信息」页落在 console-bff 本体上，不是官网 consoleBase（owner 2026-09-16
+  // audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明）。
+  const profileUrl = `${session.consoleAppBase || "https://console.vxture.com"}/profile`;
   const name = p?.name ?? p?.email ?? "Vxture 用户";
   const verified = (ok?: boolean) =>
     ok === undefined ? undefined : ok ? (

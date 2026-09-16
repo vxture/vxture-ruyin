@@ -931,13 +931,38 @@ void test("Settings/账户: signed in shows the identity - name, email, tenant, 
   // 「租户管理 → 平台」，两处都能切是同一件事写了两遍。
   expect(within(tenantRow).queryByRole("button")).not.toBeInTheDocument();
   // 「账户中心」那一行链接去掉了（owner 2026-09-04）：右上角的「在线修改」已经是同一个去处。
-  expect(screen.queryByRole("link", { name: "https://vxture.com/zh-CN/profile" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "https://console.vxture.com/profile" })).not.toBeInTheDocument();
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "在线修改" }));
-  expect(open).toHaveBeenCalledWith("https://vxture.com/zh-CN/profile", "_blank", "noopener");
+  expect(open).toHaveBeenCalledWith("https://console.vxture.com/profile", "_blank", "noopener");
   open.mockRestore();
   expect(screen.queryByText("账户由左下角的账户菜单管理")).not.toBeInTheDocument();
+});
+
+/**
+ * 「个人信息」页落在 console-bff 本体上，不是官网 consoleBase（owner 2026-09-16
+ * audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明——
+ * 第一版这里也误拼去了官网）。
+ */
+void test("Settings/账户: 「在线修改」跟着 consoleAppBase 走，不是 consoleBase", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue({
+      signedIn: true,
+      profile: { sub: "u1", name: "郭彦豪" },
+      issuer: "",
+      consoleBase: "https://vxture.com",
+      consoleAppBase: "https://console.staging.vxture.com",
+      entitlementsConfigured: false,
+    }),
+  });
+  renderSection("account", api);
+  await screen.findAllByText("郭彦豪");
+  const open = vi.spyOn(window, "open").mockImplementation(() => null);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "在线修改" }));
+  expect(open).toHaveBeenCalledWith("https://console.staging.vxture.com/profile", "_blank", "noopener");
+  open.mockRestore();
 });
 
 /** 租户类型的徽标（owner 2026-09-15）：「团队」不对，应为「个人租户 / 组织租户」。 */

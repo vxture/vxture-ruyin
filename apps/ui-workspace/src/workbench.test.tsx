@@ -709,7 +709,7 @@ void test("Header workspace control: icon + name only (no 工作区 label); open
   expect(await screen.findByText("某租户")).toBeInTheDocument();
   expect(screen.getByText("工作区：某工作区")).toBeInTheDocument();
   expect((screen.getByRole("link", { name: /租户管理/ }) as HTMLAnchorElement).href).toBe(
-    "https://vxture.com/zh-CN/tenant-settings",
+    "https://console.vxture.com/tenant-settings",
   );
 
   // 2026-09-04 layout: workspace + Runtime sit right after the brand (leading, .app-header-context);

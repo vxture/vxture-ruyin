@@ -432,6 +432,11 @@ export function HomePage({
   }, [api]);
 
   const consoleBase = session?.consoleBase ?? "https://vxture.com";
+  // `/subscribe` 落在 console-bff 本体上，不是官网（consoleBase）——官网自己的
+  // 「去订阅」入口也是跳去 console 的同一条路径，官网自身没有这个路由（owner
+  // 2026-09-16 audit，见 apps/ui-workspace/src/user.tsx 的 consoleAppBase 说明；
+  // 同一类错此前已在「用户中心」「配额用量」两条上现场纠过一次）。
+  const consoleAppBase = session?.consoleAppBase ?? "https://console.vxture.com";
   // 主体在平台：订阅动作一律回 console，**仅显式点击触发，永不自动跳转**。
   // intent 由 daemon 依 C2 信封判定 —— 从未订阅是首购，曾有已失效是续费。
   // 写死 intent=subscribe 会把续费的用户引去首购页（TD-014 D4）。
@@ -441,8 +446,8 @@ export function HomePage({
     intent: "subscribe" | "renew" = "subscribe",
   ) =>
     productId
-      ? `${consoleBase}/subscribe?product=${encodeURIComponent(productId)}&intent=${intent}`
-      : `${consoleBase}/subscribe`;
+      ? `${consoleAppBase}/subscribe?product=${encodeURIComponent(productId)}&intent=${intent}`
+      : `${consoleAppBase}/subscribe`;
 
   // 平台订阅清单问到了，或者任何一个本地产品有了订阅事实，都算「订阅状态已知」。
   const subscriptionKnown =
