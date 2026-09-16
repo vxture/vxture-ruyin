@@ -77,7 +77,9 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
     | { status: "unavailable"; reason: string }
   >({ status: "idle" });
 
-  const consoleBase = session.consoleBase || "https://vxture.com";
+  // 「租户管理」落在 console-bff 本体上，不是官网 consoleBase（owner 2026-09-16
+  // audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明）。
+  const consoleAppBase = session.consoleAppBase || "https://console.vxture.com";
   const tenantName = session.org?.name ?? "未命名租户";
   const workspaceName = session.workspace?.name ?? "未选定工作区";
 
@@ -145,7 +147,7 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
           <ShellPanelRow
             icon="settings"
             label="租户管理"
-            href={`${consoleBase}/zh-CN/tenant-settings`}
+            href={`${consoleAppBase}/tenant-settings`}
             newTab
             trailingIcon="external-link"
           />

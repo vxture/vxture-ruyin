@@ -69,8 +69,28 @@ test("TenantMenu: trigger shows the workspace name only; opening shows tenant, w
   expect(screen.getByText("已用 1.0 GB / 10.0 GB · 剩余 9.0 GB")).toBeInTheDocument();
   expect(quotaUsage).toHaveBeenCalledTimes(1);
   const admin = screen.getByRole("link", { name: /租户管理/ }) as HTMLAnchorElement;
-  expect(admin.href).toBe("https://vxture.com/zh-CN/tenant-settings");
+  expect(admin.href).toBe("https://console.vxture.com/tenant-settings");
   expect(admin.target).toBe("_blank");
+});
+
+/**
+ * 「租户管理」落在 console-bff 本体上，不是官网 consoleBase（owner 2026-09-16
+ * audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明——
+ * 第一版这里也误拼去了官网）。
+ */
+test("TenantMenu: 「租户管理」跟着 consoleAppBase 走，不是 consoleBase", async () => {
+  render(
+    <TenantMenu
+      api={fakeApi()}
+      session={session({
+        consoleBase: "https://vxture.com",
+        consoleAppBase: "https://console.staging.vxture.com",
+      })}
+    />,
+  );
+  await userEvent.setup().click(screen.getByRole("button", { name: /某工作区/ }));
+  const admin = (await screen.findByRole("link", { name: /租户管理/ })) as HTMLAnchorElement;
+  expect(admin.href).toBe("https://console.staging.vxture.com/tenant-settings");
 });
 
 test("TenantMenu: no quota at all says so; a metric without a limit shows used only", async () => {
@@ -107,14 +127,17 @@ test("TenantMenu: entitlements not configured, or a failed fetch, each say why -
   expect(await screen.findByText("网关 502")).toBeInTheDocument();
 });
 
-test("TenantMenu: missing tenant / workspace names fall back to explicit placeholders, and the console base defaults", async () => {
+test("TenantMenu: missing tenant / workspace names fall back to explicit placeholders, and the console-app base defaults", async () => {
   const user = userEvent.setup();
   render(
-    <TenantMenu api={fakeApi()} session={session({ org: undefined, workspace: undefined, consoleBase: "" })} />,
+    <TenantMenu
+      api={fakeApi()}
+      session={session({ org: undefined, workspace: undefined, consoleAppBase: "" })}
+    />,
   );
   await user.click(screen.getByRole("button", { name: /未选定工作区/ }));
   expect(await screen.findByText("未命名租户")).toBeInTheDocument();
   expect((screen.getByRole("link", { name: /租户管理/ }) as HTMLAnchorElement).href).toBe(
-    "https://vxture.com/zh-CN/tenant-settings",
+    "https://console.vxture.com/tenant-settings",
   );
 });
