@@ -1,7 +1,8 @@
 /**
- * 检查更新的共享状态（owner 2026-09-15，当天两次修正）：自动检查（开着这个
- * 偏好时问一次）与手动点「检查更新」**看的是同一份状态** —— 谁问到的都写这里，
- * 两处展示都不用关心是谁触发的。
+ * 检查更新的共享状态（owner 2026-09-15，当天两次修正；2026-09-16 第三次：手动
+ * 检查必须始终有反馈）：自动检查（开着这个偏好时问一次）与手动点「检查更新」
+ * **看的是同一份状态** —— 谁问到的都写这里，两处展示都不用关心是谁触发的，
+ * 只多记一件事：**这次是不是手动问的**（`manual`）。
  *
  * 「自动检查」的时机：**工作台挂载时**（登录后整个应用起来那一刻），不再挂在
  * 设置页 —— 原来挂在设置页只在打开设置页时才问一次，被指出来不是字面的「软件
@@ -10,8 +11,11 @@
  *
  * 两处展示：`UpdateToast` 是启动时那次自动检查专用的右下角浮层，**只在「有新
  * 版本」时弹出**（已是最新 / 没查到 / 检查失败都没有值得打断用户的动作，弹出来
- * 反而是噪音）；`UpdateNotice` 是设置页顶部那条，四种结果都显示——手动点「检查
- * 更新」问的就是这一条，用户主动点了就该看到完整结果，不止「有更新」这一种。
+ * 反而是噪音）；`UpdateNotice` 是设置页顶部那条——手动点「检查更新」之后**必须
+ * 每次都有反馈**（点了按钮却什么都没发生，用户会以为按钮坏了），四种结果全显示；
+ * 而自动检查命中 `unreachable` 时仍然不显示（owner 2026-09-16 明确要求删掉过
+ * 一次：本仓从未发布过 stable，自动检查天天撞见它只会是噪音）——同一个状态，
+ * 手动问的要给回应，自动问的不打扰，取决于 `manual` 这个标记，不是状态本身。
  *
  * 只问一次：**不下载、不安装**，本应用从不自动做后面两件事（软件更新页「安装
  * 方式」板块那句话不变）。
@@ -38,8 +42,11 @@ export interface UpdateCheckState {
   busy: boolean;
   result: UpdateCheck | null;
   failed: string | null;
-  /** 手动触发一次；自动检查内部也调它，两条路径共用同一份状态与同一段逻辑。 */
-  check: () => Promise<void>;
+  /** 这一份 result/failed 是不是手动问出来的——决定 `unreachable` 该不该显示。 */
+  manual: boolean;
+  /** 手动触发一次；自动检查内部也调它（`manual: false`），两条路径共用同一份
+   *  状态与同一段逻辑，只是标记不同。 */
+  check: (manual?: boolean) => Promise<void>;
   /** 关掉页面顶部那条提示。「有新版本」那一档等价于「放弃这次更新」——不装。 */
   dismiss: () => void;
 }
@@ -49,6 +56,7 @@ export function useUpdateCheck(api: Api): UpdateCheckState {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<UpdateCheck | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [manual, setManual] = useState(false);
   // 这个组件实例这次挂载期间只自动问一次——不用它来判断「本次启动问没问过」，
   // 那需要一个挂在更早处的单例，眼下没有。
   const autoFired = useRef(false);
@@ -62,9 +70,10 @@ export function useUpdateCheck(api: Api): UpdateCheckState {
     setAutoCheckState(v);
   };
 
-  const check = async () => {
+  const check = async (isManual = false) => {
     setBusy(true);
     setFailed(null);
+    setManual(isManual);
     try {
       setResult(await api.checkUpdate());
     } catch (e) {
@@ -79,7 +88,7 @@ export function useUpdateCheck(api: Api): UpdateCheckState {
   useEffect(() => {
     if (autoCheck && !autoFired.current) {
       autoFired.current = true;
-      void check();
+      void check(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api]);
@@ -90,6 +99,7 @@ export function useUpdateCheck(api: Api): UpdateCheckState {
     busy,
     result,
     failed,
+    manual,
     check,
     dismiss: () => {
       setResult(null);
@@ -107,7 +117,7 @@ export function useUpdateCheck(api: Api): UpdateCheckState {
  * 其余几档（已是最新 / 没查到 / 检查失败）没有可做的动作，只给一个叉号关掉。
  */
 export function UpdateNotice({ state }: { state: UpdateCheckState }) {
-  const { result, failed, dismiss } = state;
+  const { result, failed, manual, dismiss } = state;
   if (!result && !failed) return null;
 
   if (failed) {
@@ -165,11 +175,24 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
     );
   }
 
-  // status === "unreachable"：不再显示（owner 2026-09-16 明确要求删掉）。
-  // 本仓当前只有 beta 发布，从没有过 stable 标签，`checkForUpdate` 默认只问
-  // stable 渠道——在一个从未发布过 stable 的仓库里，这一档几乎每次都会命中，
-  // 天天弹一条「没查到」除了添堵没有别的作用。状态本身继续存在（不折叠进
-  // "current"，不假装已是最新），只是不再渲染成一条看得见的提示。
+  // status === "unreachable"：**手动问的要给回应，自动问的不打扰**（owner
+  // 2026-09-16 第三次修正）。本仓当前只有 beta 发布，从没有过 stable 标签，
+  // `checkForUpdate` 默认只问 stable 渠道——在一个从未发布过 stable 的仓库里，
+  // 这一档几乎每次都会命中；自动检查天天弹一条「没查到」除了添堵没有别的
+  // 作用，继续不显示。但用户手动点了「检查更新」——点了按钮却什么都不发生，
+  // 比弹一条「没查到」更糟：那会让人以为按钮坏了。状态本身不折叠进
+  // "current"（不假装已是最新），有没有可见提示只取决于 `manual`。
+  if (manual) {
+    return (
+      <div className="set-callout update-notice" role="status">
+        <Icon name="warning" size="sm" />
+        <span>没查到新版本：{result!.reason}</span>
+        <button type="button" className="notice-bar-close" aria-label="关闭提醒" onClick={dismiss}>
+          <Icon name="x" size="xs" />
+        </button>
+      </div>
+    );
+  }
   return null;
 }
 

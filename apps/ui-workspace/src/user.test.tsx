@@ -261,7 +261,7 @@ void test("UserSlot: 退出登录会通知上层（否则只有这一格退了�
   );
   await openPopover();
   const user = userEvent.setup();
-  await user.click(await screen.findByText("退出登录"));
+  await user.click(await screen.findByText("退出"));
 
   expect(logout).toHaveBeenCalledTimes(1);
   await vi.waitFor(() => expect(onSignedOut).toHaveBeenCalledTimes(1));
@@ -282,7 +282,7 @@ void test("UserSlot: `api.logout()` 失败时同样通知上层（上层是重�
   );
   await openPopover();
   const user = userEvent.setup();
-  await user.click(await screen.findByText("退出登录"));
+  await user.click(await screen.findByText("退出"));
 
   await vi.waitFor(() => expect(onSignedOut).toHaveBeenCalledTimes(1));
 });
@@ -323,8 +323,8 @@ void test("UserSlot panel: 环境三行已挪去 Runtime 下拉，这一格只�
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /账户/ }));
   // 等到面板真的展开，再断言那三行不在 —— 否则是在断言一个还没渲染的空面板。
-  // 锚点用「退出登录」：它只在面板里；「已登录」徽标与副标题各有一处，不唯一。
-  expect(await screen.findByText("退出登录")).toBeInTheDocument();
+  // 锚点用「退出」：它只在面板里；「已登录」徽标与副标题各有一处，不唯一。
+  expect(await screen.findByText("退出")).toBeInTheDocument();
   for (const gone of ["运行环境", "数据加密", "平台连接", "订阅"]) {
     expect(screen.queryByText(gone)).not.toBeInTheDocument();
   }

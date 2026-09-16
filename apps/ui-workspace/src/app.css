@@ -1178,6 +1178,10 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
   cursor: pointer;
   box-sizing: border-box;
 }
+/* 没内容可展开时标题不是按钮，用同样布局的 <span> 占住「左边那一组」——
+   `.connector-card-head` 下必须永远只有两个直接子节点，`space-between`
+   才对得上（否则图标、标题、trailing 三个各自散开，标题会飘到中间）。 */
+.connector-card-head-static { display: flex; align-items: center; gap: var(--spacing-xs); min-width: 0; }
 .connector-card-icon {
   display: inline-flex;
   align-items: center;
@@ -1594,14 +1598,26 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 .move-dlg .fact-row:first-child { border-top: none; }
 
 /* ---------- 设置：二级板块（owner 2026-09-04 的统一标题模式）---------- */
-/* 小图标 + 标题 + 说明，内容缩进到标题文字的左缘（图标 24 + gap 8 = 32px）。 */
+/* 小图标 + 标题 + 说明，内容缩进到标题文字的左缘（图标 24 + gap 8 = 32px）。
+   标题行只分两组、不是三个各自散落的 flex item（owner 2026-09-16 第三次
+   修正：与 `.connector-card-head` 同一个手法）——标题在左，「筛选/刷新/
+   折叠箭头」等操作拼成 `.set-block-trailing` 一组一起靠右，`space-between`
+   只用在两组之间。此前标题没有外层包一层，`margin-right: auto` 挂在
+   `.set-block-titles` 上；可折叠板块把标题包进 `.set-block-head-hit`
+   （`all: unset` 的按钮）之后，auto margin 就锁在按钮内部、推不动按钮外面
+   的兄弟节点了——于是操作区看起来「紧跟在标题后面」而不是「贴在最右」。 */
 .set-block { display: flex; flex-direction: column; gap: var(--spacing-sm); }
 .set-block-head {
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--spacing-sm);
   min-width: 0;
 }
+/* 不可折叠板块：标题不是按钮，用一个同样布局的 <span> 占住「左边那一组」，
+   保证 `.set-block-head` 下永远只有两个直接子节点。 */
+.set-block-head-static { display: flex; align-items: flex-start; gap: var(--spacing-sm); min-width: 0; }
 .set-block-icon {
   display: inline-flex;
   align-items: center;
@@ -1613,7 +1629,7 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   color: var(--muted-foreground);
   flex-shrink: 0;
 }
-.set-block-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-right: auto; }
+.set-block-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .set-block-title {
   margin: 0;
   font-size: var(--body-md-font-size);
@@ -1626,6 +1642,8 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   color: var(--muted-foreground);
   max-width: 62em;
 }
+/* 「右边那一组」：筛选/刷新/折叠箭头等操作拼盘，永远贴着标题行最右侧。 */
+.set-block-trailing { display: inline-flex; align-items: center; gap: var(--spacing-md); flex-shrink: 0; }
 /* 标题行右侧可能不止一个东西（筛选 + 刷新按钮；勾选 + 提示 + 检查按钮），
    给它一条 gap，多个控件才不会贴在一起（owner 2026-09-15）。只有一个子项时
    gap 不生效，不影响原来只放一个按钮的那些地方。 */
@@ -1760,12 +1778,13 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   font-weight: 400;
   vertical-align: middle;
 }
-.set-block-toggle { margin-left: var(--spacing-xs); flex: 0 0 auto; }
-/* 箭头版折叠钮（owner 2026-09-16，目前只有连接器管理用）：标题行本身也是
-   一个按钮——点图标、点标题文字都能展开/收起，不必精确点中那个小箭头。
+.set-block-toggle { flex: 0 0 auto; }
+/* 箭头版折叠钮（owner 2026-09-16，全站统一版式）：标题行本身也是一个
+   按钮——点图标、点标题文字都能展开/收起，不必精确点中那个小箭头。
    `all: unset` 清掉原生 <button> 的边框/底色/字体继承问题，再把原来
    `.set-block-head` 直接摆 icon+titles 那两条布局属性搬过来，视觉上跟不可
-   点的版本长得一样。 */
+   点的版本长得一样。间距交给外层 `.set-block-trailing` 的 gap，这里不用再
+   自己加 margin-left。 */
 .set-block-head-hit {
   all: unset;
   display: flex;

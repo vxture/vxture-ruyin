@@ -75,6 +75,7 @@ function stubUpdateCheck(): UpdateCheckState {
     busy: false,
     result: null,
     failed: null,
+    manual: false,
     check: async () => {},
     dismiss: () => {},
   };
@@ -324,43 +325,16 @@ void test("AboutSection: 外链基址取自会话的 consoleBase，未登录则�
 });
 
 /**
- * 底部那条未签名提醒是**判断式**的（owner 2026-09-10）：签了就自己没了，不需要
- * 有人回来删这段文案。
- *
- * 三种状态各钉一条，**中间那条最要紧**：`unpackaged` 绝不能当成「未签名」——
- * 从仓里直接跑时根本没有安装包可谈，那时挂一条讲 SmartScreen 的提醒是错的。
- * 缺失 ≠ 否定，同 `capabilitySurface` 的纪律。
+ * 未签名提醒**不在「关于」页了**（owner 2026-09-16：挪去「软件更新」页的
+ * 「安装方式」板块——那才是用户正要下载安装包、这句话真正管用的地方）。
+ * 全平台只留一处，这条断言盯着它别回到「关于」页。
  */
-void test("AboutSection: 未签名才提醒；已签名与开发态都不提醒", async () => {
-  const withSigning = (v: SystemInfo["codeSigning"]) =>
-    fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ codeSigning: v })) });
-
-  const unsignedRender = renderSection("about", withSigning("unsigned"));
-  expect(await screen.findByText(/SmartScreen/)).toBeInTheDocument();
-  // 只讲 SmartScreen 会误导开着智能应用控制的用户：那里是封锁，不是警告（TD-001 补记）。
-  expect(screen.getByText(/智能应用控制/)).toBeInTheDocument();
-  expect(unsignedRender.container.querySelector(".about-notice")).toBeInTheDocument();
-  cleanup();
-
-  renderSection("about", withSigning("signed"));
+void test("AboutSection: 不再显示未签名提醒（已挪去「软件更新」页）", async () => {
+  const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ codeSigning: "unsigned" })) });
+  const { container } = renderSection("about", api);
   await screen.findByText("RUYIN");
   expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
-  cleanup();
-
-  renderSection("about", withSigning("unpackaged"));
-  await screen.findByText("RUYIN");
-  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
-});
-
-/**
- * 提醒**只留一处**（owner 2026-09-10）。原来「软件更新」页上还有一条无条件的
- * 同款语气块 —— 那一条签名那天会原地变成一句假话，而没有任何东西会提醒谁回来
- * 删它。这条断言盯着它别回来。
- */
-void test("软件更新页不再重复那条 SmartScreen 提醒（只留关于页那一处）", async () => {
-  renderSection("updates");
-  await screen.findByText("检查");
-  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
+  expect(container.querySelector(".about-notice")).not.toBeInTheDocument();
 });
 
 void test("偏好设置（在账户之下）: language + the three axes, in that order, each persisted on this machine", async () => {
@@ -537,14 +511,16 @@ void test("UpdatesSection: no path in the feed means no link - never a guessed U
 });
 
 /**
- * unreachable 不再弹提示（owner 2026-09-16 明确要求删掉）：本仓当前只发过
- * beta，从没有过 stable 标签，检查默认只问 stable 渠道——这一档因此几乎每次
- * 都命中，天天弹一条「没查到」除了添堵没有别的作用。
+ * unreachable：**自动检查静默，手动检查必须给反馈**（owner 2026-09-16 第三次
+ * 修正）。本仓当前只发过 beta，从没有过 stable 标签，检查默认只问 stable
+ * 渠道——这一档因此几乎每次都命中；自动检查天天弹一条「没查到」除了添堵没有
+ * 别的作用，继续静默。但用户手动点了「检查更新」——点了按钮却什么都不发生，
+ * 比看到「没查到」更糟：那会让人以为按钮坏了或者没点中。
  *
- * 但**绝不能因此悄悄折叠成「已是最新」**——那正是这个功能上一版真的犯过的
- * 错（TD-021）。删掉的是提示，不是这条底线：不显示和显示错都要拦。
+ * 无论哪种触发，都**绝不能悄悄折叠成「已是最新」**——那正是这个功能上一版真的
+ * 犯过的错（TD-021）。
  */
-void test("UpdatesSection: unreachable 不再弹提示，但绝不能悄悄说成「已是最新」", async () => {
+void test("UpdatesSection: unreachable 时自动检查静默、手动检查给反馈，都绝不能悄悄说成「已是最新」", async () => {
   const checkUpdate = vi.fn().mockResolvedValue({
     status: "unreachable",
     current: "0.2.0",
@@ -554,13 +530,20 @@ void test("UpdatesSection: unreachable 不再弹提示，但绝不能悄悄说�
   });
   const api = fakeApi({ checkUpdate });
   renderSection("updates", api);
-  await clickCheck();
-  // 挂载时的自动检查也会问一次，所以不钉「恰好一次」，只钉「问完了」
-  // （手动这次点完之后按钮应该已经落回「检查更新」，不再是忙碌态）。
+  // 挂载时的自动检查先问一次——这一次不给反馈。
   await screen.findByRole("button", { name: "检查更新" });
-  expect(checkUpdate).toHaveBeenCalled();
+  expect(checkUpdate).toHaveBeenCalledTimes(1);
   expect(screen.queryByText(/没查到/)).not.toBeInTheDocument();
+  expect(document.querySelector(".update-notice")).not.toBeInTheDocument();
+
+  // 手动点一次——这次必须有反馈。
+  await clickCheck();
+  expect(await screen.findByText(/没查到新版本/)).toBeInTheDocument();
+  expect(screen.getByText(/渠道 feed 无法访问/)).toBeInTheDocument();
   expect(screen.queryByText(/已是最新（/)).not.toBeInTheDocument();
+
+  // 关得掉，跟其余几档同一个叉号。
+  await userEvent.setup().click(screen.getByRole("button", { name: "关闭提醒" }));
   expect(document.querySelector(".update-notice")).not.toBeInTheDocument();
 });
 
@@ -1421,6 +1404,34 @@ void test("Settings/软件更新: three blocks (检查更新收进「当前版�
   expect(channel.disabled).toBe(true);
   expect(Array.from(channel.options).map((o) => o.value)).toEqual(["stable"]);
   expect(document.body.textContent).toContain("不会自动下载或自动安装");
+});
+
+/**
+ * 未签名提醒挪到「安装方式」这一块了（owner 2026-09-16，从「关于」页搬回来）：
+ * 用户正要点下载的这一刻，才是这句话真正管用的地方。判断式：签了就自己没了。
+ *
+ * 三种状态各钉一条，**中间那条最要紧**：`unpackaged` 绝不能当成「未签名」——
+ * 从仓里直接跑时根本没有安装包可谈，那时挂一条讲 SmartScreen 的提醒是错的。
+ * 缺失 ≠ 否定，同 `capabilitySurface` 的纪律。
+ */
+void test("Settings/软件更新: 未签名才提醒；已签名与开发态都不提醒", async () => {
+  const withSigning = (v: SystemInfo["codeSigning"]) =>
+    fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ codeSigning: v })) });
+
+  const unsignedRender = renderSection("updates", withSigning("unsigned"));
+  expect(await screen.findByText(/SmartScreen/)).toBeInTheDocument();
+  // 只讲 SmartScreen 会误导开着智能应用控制的用户：那里是封锁，不是警告（TD-001 补记）。
+  expect(screen.getByText(/智能应用控制/)).toBeInTheDocument();
+  cleanup();
+
+  renderSection("updates", withSigning("signed"));
+  await screen.findByText("检查更新");
+  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
+  cleanup();
+
+  renderSection("updates", withSigning("unpackaged"));
+  await screen.findByText("检查更新");
+  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
 });
 
 /**
