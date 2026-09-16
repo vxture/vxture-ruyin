@@ -657,53 +657,85 @@ function ConnectorsSection({ api }: { api: Api }) {
       ) : items.length === 0 ? (
         <p className="set-note">尚未安装任何连接器。</p>
       ) : (
-        <ul className="row-list" aria-label="已安装的连接器">
-          {items.map((c) => (
-            <li key={c.id} className="row-item">
-              <code
-                className="row-main"
-                title={c.transport === "streamable_http" ? c.url : `${c.command} ${c.args.join(" ")}`}
+        /* 每个连接器一张卡（owner 2026-09-16，原来共用「一行就是一行」的
+           `.row-list`）：启用后要展开一段工具清单，塞进那个给「一条授权 /
+           一条绑定」用的窄行里，启用的那一条把其它列全挤没了——这不是同一类
+           内容，改用连接器专属的卡片版式，不动 `.row-list` 影响到别处。 */
+        <ul className="connector-list" aria-label="已安装的连接器">
+          {items.map((c) => {
+            const running = c.state === "active";
+            return (
+              <li
+                key={c.id}
+                className={`connector-card${running ? " connector-card--running" : ""}`}
               >
-                {c.id}
-              </code>
-              <span className="row-tag">{c.source === "bundled" ? "预置" : c.source}</span>
-              {/* 暴露了哪些工具：契约里 provider: connector 的工具要靠同名才接得上，
-                  用户对着契约就能看出接没接。 */}
-              {c.tools.length > 0 && (
-                <span className="text-body-sm text-muted-foreground mono">
-                  {`工具：${c.tools.join("、")}`}
-                </span>
-              )}
-              {/* 三种状态各说各的：暂存 ≠ 装了但没跑起来。前者是用户当时的选择，
-                  后者是这一刻的故障 —— 混成一句话，用户不知道该改配置还是该点启用。 */}
-              {c.state === "stashed" ? (
-                <StatusBadge tone="neutral">已暂存</StatusBadge>
-              ) : (
-                <StatusBadge tone={c.health.ok ? "success" : "warning"}>
-                  {c.health.ok
-                    ? "运行中"
-                    : `未运行${c.health.detail ? "：" + c.health.detail : ""}`}
-                </StatusBadge>
-              )}
-              {c.state === "stashed" && (
-                <Button variant="outline" size="sm" onClick={() => void enable(c.id)}>
-                  启用
-                </Button>
-              )}
-              {/* 预置的随安装包来，卸不掉，只能停用；用户装的才有「卸载」。 */}
-              {c.source === "bundled" ? (
-                c.state === "active" && (
-                  <Button variant="ghost" size="sm" onClick={() => void stop(c.id)}>
-                    停用
-                  </Button>
-                )
-              ) : (
-                <Button variant="ghost" size="sm" onClick={() => void remove(c.id)}>
-                  卸载
-                </Button>
-              )}
-            </li>
-          ))}
+                <div className="connector-card-head">
+                  <span className="connector-card-icon" aria-hidden>
+                    <Icon name="plugs-connected" size="md" />
+                  </span>
+                  <span className="connector-card-title">
+                    <code
+                      className="connector-card-id"
+                      title={c.transport === "streamable_http" ? c.url : `${c.command} ${c.args.join(" ")}`}
+                    >
+                      {c.id}
+                    </code>
+                    {/* 「系统预置」而不是「预置」（owner 2026-09-16）：这个标签是
+                        用户唯一能看到「为什么这张卡没有删除按钮」的地方——预置的
+                        随安装包来，后端硬性拒绝卸载（ConnectorBundledError），只能
+                        停用。标签说清楚就够了，不必再另外弹一句解释。 */}
+                    <span className="row-tag">{c.source === "bundled" ? "系统预置" : c.source}</span>
+                  </span>
+                  <span className="connector-card-side">
+                    {/* 三种状态各说各的：暂存 ≠ 装了但没跑起来。前者是用户当时的选择，
+                        后者是这一刻的故障 —— 混成一句话，用户不知道该改配置还是该点启用。 */}
+                    {c.state === "stashed" ? (
+                      <StatusBadge tone="neutral">已暂存</StatusBadge>
+                    ) : (
+                      <StatusBadge tone={c.health.ok ? "success" : "warning"}>
+                        {c.health.ok
+                          ? "运行中"
+                          : `未运行${c.health.detail ? "：" + c.health.detail : ""}`}
+                      </StatusBadge>
+                    )}
+                    {c.state === "stashed" && (
+                      <Button variant="outline" size="sm" onClick={() => void enable(c.id)}>
+                        启用
+                      </Button>
+                    )}
+                    {/* 预置的随安装包来，卸不掉，只能停用；用户装的才有「卸载」。 */}
+                    {c.source === "bundled" ? (
+                      c.state === "active" && (
+                        <Button variant="ghost" size="sm" onClick={() => void stop(c.id)}>
+                          停用
+                        </Button>
+                      )
+                    ) : (
+                      <Button variant="ghost" size="sm" onClick={() => void remove(c.id)}>
+                        卸载
+                      </Button>
+                    )}
+                  </span>
+                </div>
+                {/* 启用 = 下面这块自动展开，停用就收起（owner 2026-09-16）——不是
+                    另一个手动点开的折叠钮，状态自己说了算。工具清单从一段逗号
+                    连着的长文字改成一排排整齐的小方块，空间有限时也不会挤成
+                    一坨看不清哪个是哪个。 */}
+                {running && c.tools.length > 0 && (
+                  <div className="connector-card-tools">
+                    <span className="connector-card-tools-label">暴露的工具</span>
+                    <div className="connector-card-tools-grid">
+                      {c.tools.map((t) => (
+                        <code key={t} className="connector-tool-chip">
+                          {t}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </SettingsBlock>
