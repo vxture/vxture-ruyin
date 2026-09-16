@@ -599,8 +599,10 @@ void test("Settings/连接器: lists installed connectors with live health, and 
   expect(within(list).getByText("运行中")).toBeInTheDocument();
   expect(within(list).getByText("未运行：not running")).toBeInTheDocument();
   // 工具清单从一句逗号连着的长文字改成一排排小方块（owner 2026-09-16），
-  // 启用时（state: "active"）自动展开——每个工具名各自一块。
-  expect(within(list).getByText("暴露的工具")).toBeInTheDocument();
+  // 启用时（state: "active"）自动展开——每个工具名各自一块。「暴露的工具」
+  // 不够人话，改叫「工具清单」并加一句概要。
+  expect(within(list).getByText("工具清单")).toBeInTheDocument();
+  expect(within(list).getByText("契约里声明了同名工具才能调用")).toBeInTheDocument();
   expect(within(list).getByText("lookup_account")).toBeInTheDocument();
   expect(within(list).getByText("update_account")).toBeInTheDocument();
   const user = userEvent.setup();
@@ -622,8 +624,40 @@ void test("Settings/连接器: 展开跟着启用状态走——暂存的即便�
   });
   renderRouted("connectors", api);
   await screen.findByText("stashed-with-tools");
-  expect(screen.queryByText("暴露的工具")).not.toBeInTheDocument();
+  expect(screen.queryByText("工具清单")).not.toBeInTheDocument();
   expect(screen.queryByText("leftover_tool")).not.toBeInTheDocument();
+});
+
+/**
+ * 「连接器管理」板块本身可以收起（owner 2026-09-16）：箭头按钮在标题行最
+ * 右侧，点标题行（不只是那个小箭头）也能触发——不必精确点中箭头。这与
+ * 「技能」「工具」两个大类仍然用的文字按钮「收起/展开」是两套版式，互不
+ * 影响（那两处的用例照旧钉着文字按钮）。
+ */
+void test("Settings/连接器: 「连接器管理」板块可以收起——点标题行或点箭头都行", async () => {
+  const api = fakeApi({ connectors: vi.fn().mockResolvedValue({ items: [crmView] }) });
+  renderRouted("connectors", api);
+  await screen.findByText("crm");
+  const toggle = screen.getByRole("button", { name: "收起" });
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+  await userEvent.click(screen.getByRole("heading", { name: /连接器管理/ }));
+  expect(screen.queryByText("crm")).not.toBeInTheDocument();
+  const reopened = screen.getByRole("button", { name: "展开" });
+  expect(reopened).toHaveAttribute("aria-expanded", "false");
+
+  await userEvent.click(reopened);
+  expect(await screen.findByText("crm")).toBeInTheDocument();
+});
+
+void test("Settings/连接器: 用户自己加的连接器标「自定义」，不直接显示 lan / private 这种内部分类值", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({ items: [{ ...crmView, source: "private" }] }),
+  });
+  renderRouted("connectors", api);
+  await screen.findByText("crm");
+  expect(screen.getByText("自定义")).toBeInTheDocument();
+  expect(screen.queryByText("private")).not.toBeInTheDocument();
 });
 
 void test("Settings/连接器: a streamable_http connector shows its url, not a command/args tooltip", async () => {

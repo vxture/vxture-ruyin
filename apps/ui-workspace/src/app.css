@@ -772,8 +772,16 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
 .about-mark { width: 56px; height: 56px; flex-shrink: 0; }
 .about-brand-text { display: flex; flex-direction: column; gap: 2px; text-align: center; }
 /* RUYIN 用品牌色（owner 2026-09-15）：只在这一处，不改 `.brand-name` 本身——
-   登录页用同一个类，那一屏的配色是另一件事，不该被这里的改动带着变。 */
+   登录页用同一个类，那一屏的配色是另一件事，不该被这里的改动带着变。
+   深色模式改回白色（owner 2026-09-16）：浅色保持品牌蓝，深色换成 `--foreground`
+   （深色主题下即近白色）——`.dark`/`:root.dark` 是 DS 实际用的深色选择器
+   （见 @vxture/design-tokens 的 color-semantic.css），不是这份文档自己另起
+   一套判断。 */
 .about-brand-text .brand-name { color: var(--primary); }
+.dark .about-brand-text .brand-name,
+:root.dark .about-brand-text .brand-name {
+  color: var(--foreground);
+}
 
 .logo-cn { font-weight: 700; font-size: var(--title-xl-font-size, 20px); }
 .logo-en { color: var(--muted-foreground); letter-spacing: 0.18em; }
@@ -1177,7 +1185,11 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
    与标题行的图标对不齐也没关系：这一块是「详情」，本来就该退后一步，缩进
    越大越读得出「这是附属信息」。 */
 .connector-card-tools { padding: var(--space-md) var(--space-5xl); border-top: 1px solid var(--color-border); }
-.connector-card-tools-label { display: block; margin-bottom: var(--spacing-xs); font-size: var(--body-sm-font-size); color: var(--color-muted-foreground); }
+.connector-card-tools-label { display: block; font-size: var(--body-sm-font-size); font-weight: 600; color: var(--foreground); }
+/* 概要句撑满这一块的宽度（owner 2026-09-16：「必须容器满宽布局」）——`p` 本来
+   就是块级元素，这里只是显式声明，避免以后有人把它跟 chip 那行搞混改成
+   inline。 */
+.connector-card-tools-caption { display: block; width: 100%; margin: 2px 0 var(--spacing-sm); font-size: var(--body-sm-font-size); color: var(--color-muted-foreground); }
 /* 长文字段落改成一排排小方块（owner 2026-09-16）：空间有限时自动换行，
    每个工具名各自一块，不再是一条逗号顿号连起来的长句，找哪个工具接没接
    不用再从头数逗号。 */
@@ -1709,6 +1721,34 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   vertical-align: middle;
 }
 .set-block-toggle { margin-left: var(--spacing-xs); flex: 0 0 auto; }
+/* 箭头版折叠钮（owner 2026-09-16，目前只有连接器管理用）：标题行本身也是
+   一个按钮——点图标、点标题文字都能展开/收起，不必精确点中那个小箭头。
+   `all: unset` 清掉原生 <button> 的边框/底色/字体继承问题，再把原来
+   `.set-block-head` 直接摆 icon+titles 那两条布局属性搬过来，视觉上跟不可
+   点的版本长得一样。 */
+.set-block-head-hit {
+  all: unset;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  min-width: 0;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.set-block-toggle--chevron {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.set-block-toggle--chevron:hover { background: var(--surface-3, rgba(127, 127, 127, 0.12)); color: var(--foreground); }
 
 /* 业务小类：一行一个，标题行里是「名称 · 条数 · 一句说明」。
    说明在窄屏先被截掉 —— 名称与条数是找东西用的，说明是解释用的。 */

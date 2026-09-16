@@ -156,6 +156,7 @@ function SettingsBlock({
   collapsible = false,
   defaultOpen = true,
   count,
+  chevronToggle = false,
   children,
 }: {
   icon: React.ComponentProps<typeof Icon>["name"];
@@ -172,35 +173,64 @@ function SettingsBlock({
   defaultOpen?: boolean;
   /** 收起时仍然看得见的条数 —— 折叠不该把「这里有多少东西」一起藏掉。 */
   count?: number;
+  /**
+   * 折叠钮换成箭头图标、点标题行也能触发（owner 2026-09-16）：目前只有
+   * 连接器管理要这个版式；技能 / 工具 / Runos 清单继续用文字按钮「收起 /
+   * 展开」，不引入两套视觉又要迁移那三处已有用例。
+   */
+  chevronToggle?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const body = <div className="set-block-body">{children}</div>;
+  const toggle = () => setOpen((v) => !v);
+  const titleContent = (
+    <>
+      <span className="set-block-icon" aria-hidden>
+        <Icon name={icon} size="sm" />
+      </span>
+      <div className="set-block-titles">
+        <h3 className="set-block-title">
+          {title}
+          {typeof count === "number" && <span className="set-block-count">{count}</span>}
+        </h3>
+        {desc && <p className="set-block-desc">{desc}</p>}
+      </div>
+    </>
+  );
   return (
     <section className="card set-block">
       <header className="set-block-head">
-        <span className="set-block-icon" aria-hidden>
-          <Icon name={icon} size="sm" />
-        </span>
-        <div className="set-block-titles">
-          <h3 className="set-block-title">
-            {title}
-            {typeof count === "number" && <span className="set-block-count">{count}</span>}
-          </h3>
-          {desc && <p className="set-block-desc">{desc}</p>}
-        </div>
-        {aside && <span className="set-block-aside">{aside}</span>}
-        {collapsible && (
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-expanded={open}
-            onClick={() => setOpen((v) => !v)}
-            className="set-block-toggle"
-          >
-            {open ? "收起" : "展开"}
-          </Button>
+        {collapsible && chevronToggle ? (
+          <button type="button" className="set-block-head-hit" aria-expanded={open} onClick={toggle}>
+            {titleContent}
+          </button>
+        ) : (
+          titleContent
         )}
+        {aside && <span className="set-block-aside">{aside}</span>}
+        {collapsible &&
+          (chevronToggle ? (
+            <button
+              type="button"
+              className="set-block-toggle set-block-toggle--chevron"
+              aria-expanded={open}
+              aria-label={open ? "收起" : "展开"}
+              onClick={toggle}
+            >
+              <Icon name={open ? "chevron-up" : "chevron-down"} size="sm" />
+            </button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-expanded={open}
+              onClick={toggle}
+              className="set-block-toggle"
+            >
+              {open ? "收起" : "展开"}
+            </Button>
+          ))}
       </header>
       {(!collapsible || open) && body}
     </section>
@@ -638,8 +668,10 @@ function ConnectorsSection({ api }: { api: Api }) {
   return (
     <SettingsBlock
       icon="plugs-connected"
-      title="已安装的连接器"
-      desc="来源管理：添加、测试、授权本机 MCP 连接器（局域网 / 私有系统）；它们暴露的工具出现在「能力平台」的清单里，每个项目还要单独授权才能用"
+      title="连接器管理"
+      desc="来源管理：添加、测试、授权本机 MCP 连接器（局域网 / 私有系统）"
+      collapsible
+      chevronToggle
       aside={
         unavailable ? undefined : (
           // 走地址，不是换状态：添加页有自己的地址，返回是真的返回（第 5 条）。
@@ -683,8 +715,9 @@ function ConnectorsSection({ api }: { api: Api }) {
                     {/* 「系统预置」而不是「预置」（owner 2026-09-16）：这个标签是
                         用户唯一能看到「为什么这张卡没有删除按钮」的地方——预置的
                         随安装包来，后端硬性拒绝卸载（ConnectorBundledError），只能
-                        停用。标签说清楚就够了，不必再另外弹一句解释。 */}
-                    <span className="row-tag">{c.source === "bundled" ? "系统预置" : c.source}</span>
+                        停用。用户自己加的标「自定义」，不直接显示 lan / private
+                        这种内部分类值——那不是给用户读的词。 */}
+                    <span className="row-tag">{c.source === "bundled" ? "系统预置" : "自定义"}</span>
                   </span>
                   <span className="connector-card-side">
                     {/* 三种状态各说各的：暂存 ≠ 装了但没跑起来。前者是用户当时的选择，
@@ -723,7 +756,10 @@ function ConnectorsSection({ api }: { api: Api }) {
                     一坨看不清哪个是哪个。 */}
                 {running && c.tools.length > 0 && (
                   <div className="connector-card-tools">
-                    <span className="connector-card-tools-label">暴露的工具</span>
+                    <span className="connector-card-tools-label">工具清单</span>
+                    {/* 概要说清「这份清单是干嘛的」，不是重复标题（owner 2026-09-16：
+                        「暴露的工具」不够人话）。≤30 字，独占一行、撑满容器宽度。 */}
+                    <p className="connector-card-tools-caption">契约里声明了同名工具才能调用</p>
                     <div className="connector-card-tools-grid">
                       {c.tools.map((t) => (
                         <code key={t} className="connector-tool-chip">
