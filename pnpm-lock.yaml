@@ -75,8 +75,8 @@ importers:
   apps/ui-workspace:
     dependencies:
       '@vxture/design-system':
-        specifier: ^12.7.0
-        version: 12.7.0(@phosphor-icons/react@2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(next-themes@0.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss-animate@1.0.7(tailwindcss@4.3.3))(tailwindcss@4.3.3)
+        specifier: ^12.10.3
+        version: 12.10.3(@phosphor-icons/react@2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(next-themes@0.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss-animate@1.0.7(tailwindcss@4.3.3))(tailwindcss@4.3.3)
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -1629,8 +1629,8 @@ packages:
   '@vitest/utils@4.1.11':
     resolution: {integrity: sha512-zTCVGpyFsGWBhllOyKlTw/vnr6D9qxsfSDyfbyZmTyjHw5N/VuvzHpHoQjm2ZJzn4RJgx5w4r7V0er69CmLgPQ==}
 
-  '@vxture/design-system@12.7.0':
-    resolution: {integrity: sha512-foBqHviIEYVa5MY8ysQ7JwihWZ/v2H94YDlf3lhkPlkYODNmU7shMYsTvt6OI0abfB4LglyDXEscfBDh+H1LOw==, tarball: https://npm.pkg.github.com/download/@vxture/design-system/12.7.0/dfd1678ecdc48c21018559e7745ce9466f685920}
+  '@vxture/design-system@12.10.3':
+    resolution: {integrity: sha512-7QLe7Ek9s2Mt7YPEid2ouLzR89RhK7w67/jM16UJ9jNnA4SPBjDmewswQYR6EhynPUAU3FI68OmezbTIWOQAiA==, tarball: https://npm.pkg.github.com/download/@vxture/design-system/12.10.3/1f5a3af8216f2e71c3db3cabda402d2ed6acdbd0}
     engines: {node: '>=22.0.0'}
     peerDependencies:
       '@phosphor-icons/react': ^2.1.10
@@ -1640,13 +1640,13 @@ packages:
       tailwindcss: ^4.2.1
       tailwindcss-animate: ^1.0.7
 
-  '@vxture/design-tokens@3.2.0':
-    resolution: {integrity: sha512-qSp3yTEEUiRDwdROrsAkfH3z0Zugd1ctB2q4Gh7DYtzncwWRpIm3wkKspiFn3IiUwfaZFiGLADFoGAymEeDDfQ==, tarball: https://npm.pkg.github.com/download/@vxture/design-tokens/3.2.0/a76caa04a1d368860fb267d1be78dcc7901ce5c9}
+  '@vxture/design-tokens@3.3.0':
+    resolution: {integrity: sha512-HNUczZDdQsd4QdI+4/3b+cMYpo8iGcqJ2WlwXLZVv4xtZvPwpbk8T2eWnXw+q6wx10+OUcWq2NLST0OCGO3YOw==, tarball: https://npm.pkg.github.com/download/@vxture/design-tokens/3.3.0/236992b10a45f66fa18f6d1a80bd47cd5b84953c}
     peerDependencies:
       tailwindcss: ^4.0.0
 
-  '@vxture/design-ui@9.4.0':
-    resolution: {integrity: sha512-hMpfVh3HO/eZjG1oBs/uZp4tTqBaYq6Xasenj6iFYj0PzAEIhDDpct8/qbeu9JLBAIKslDRpUhHOeg3Jm3ndQA==, tarball: https://npm.pkg.github.com/download/@vxture/design-ui/9.4.0/fac90bc930bc1d9e187709a2ed8d952c183617f3}
+  '@vxture/design-ui@9.7.3':
+    resolution: {integrity: sha512-wwBJnzb3SQUwXiRqEk8vIuSIOX1iPJgARiFmKwAuRFB1F3DsMBDPdYrssN708ZMozUGeGjDgVuof8iS0IqXfsQ==, tarball: https://npm.pkg.github.com/download/@vxture/design-ui/9.7.3/c8e29ce15b1f3400fb25cef3824e356009071451}
     peerDependencies:
       '@phosphor-icons/react': ^2.1.10
       react: ^19.0.0
@@ -1731,8 +1731,12 @@ packages:
     resolution: {integrity: sha512-bEL/yUb/fNNiNTuUz979Z0Yg5L+LzLxGJz8x79lYmR54fmTIb6ob/hNQgkQnIUDWIFjZVQwl9Xs356I6BAMHfw==}
     engines: {node: '>= 6'}
 
-  archiver@5.3.1:
-    resolution: {integrity: sha512-8KyabkmbYrH+9ibcTScQ1xCJC/CGcugdVIwB+53f5sZziXgwUh3iXlAlANMxcZyDEfTHMe6+Z5FofV8nopXP7w==}
+  archiver-utils@3.0.4:
+    resolution: {integrity: sha512-KVgf4XQVrTjhyWmx6cte4RxonPLR9onExufI1jhvw/MQ4BB6IsZD5gT8Lq+u/+pRkWna/6JoHpiQioaqFP5Rzw==}
+    engines: {node: '>= 10'}
+
+  archiver@5.3.2:
+    resolution: {integrity: sha512-+25nxyyznAXF7Nef3y0EbBeqmGZgeN/BxHX29Rs39djAfaFalmQ89SE6CWyDCHzGL0yt/ycBtNOmGTW0FyGWNw==}
     engines: {node: '>= 10'}
 
   are-we-there-yet@3.0.1:
@@ -1811,11 +1815,18 @@ packages:
   bl@4.0.3:
     resolution: {integrity: sha512-fs4G6/Hu4/EE+F75J8DuN/0IpQqNjAdC7aEQv7Qt8MHGUH7Ckv2MwTEEeN9QehD0pfIDkMI1bkHYkKy7xHyKIg==}
 
+  bl@4.1.0:
+    resolution: {integrity: sha512-1W07cM9gS6DcLperZfFSj+bWLtaPGSOHWhPiGzXmvVJbRLdG82sH/Kn8EtW1VqWVA54AKf2h5k5BbnIbwF3h6w==}
+
   bluebird-lst@1.0.9:
     resolution: {integrity: sha512-7B1Rtx82hjnSD4PGLAjVWeYH3tHAcVUmChh85a3lltKQm6FresXh9ErQo6oAv6CqxttczC3/kEg8SY5NluPuUw==}
 
   bluebird@3.7.2:
     resolution: {integrity: sha512-XpNj6GDQzdfW+r2Wnn7xiSAd7TM3jzkxGXBGTtWKuSXv1xUV+azxAm8jdWZN06QTQk+2N2XB9jRDkvbmQmcRtg==}
+
+  brace-expansion@5.0.12:
+    resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
+    engines: {node: 20 || >=22}
 
   brace-expansion@5.0.9:
     resolution: {integrity: sha512-ScQ4IuvIEF1TMlP7Zt+vjJ//9zlPb2SDcxWxM3bk8s6t6GGdJ7KO1dCcTidOPJKePW30LE/2cT7wCyPho9/Wxg==}
@@ -1964,8 +1975,8 @@ packages:
     resolution: {integrity: sha512-pJDh5/4wrEnXX/VWRZvruAGHkzKdr46z11OlTPN+VrATlWWhSKewNCJ1futCO5C7eJB3nPMFZA1LeYtcFboZ2A==}
     engines: {node: '>=0.10.0'}
 
-  compress-commons@4.1.0:
-    resolution: {integrity: sha512-ofaaLqfraD1YRTkrRKPCrGJ1pFeDG/MVCkVVV2FNGeWquSlqw5wOrwOfPQ1xF2u+blpeWASie5EubHz+vsNIgA==}
+  compress-commons@4.1.2:
+    resolution: {integrity: sha512-D3uMHtGc/fcO1Gt1/L7i1e33VOvD4A9hfQLP+6ewd+BvG/gQ84Yh4oftEhAdjSMgBgwGL+jsppT7JYNpo6MHHg==}
     engines: {node: '>= 10'}
 
   config-file-ts@0.2.8-rc1:
@@ -2311,6 +2322,10 @@ packages:
 
   glob@7.2.0:
     resolution: {integrity: sha512-lmLf6gtyrPq8tTjSmrO94wBeQbFR3HbLHbuyD69wuyQkImp2hWqMGB47OX65FBkPffO641IP9jWa1z4ivqG26Q==}
+    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+
+  glob@7.2.3:
+    resolution: {integrity: sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==}
     deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
 
   gopd@1.2.0:
@@ -2872,6 +2887,10 @@ packages:
   minimatch@3.1.5:
     resolution: {integrity: sha512-VgjWUsnnT6n+NUk6eZq77zeFdpW2LWDzP6zFGrCbHXiYNul5Dzqk2HHQ5uFH2DNW5Xbp8+jVzaeNt94ssEEl4w==}
 
+  minimatch@5.1.9:
+    resolution: {integrity: sha512-7o1wEA2RyMP7Iu7GNba9vc0RWWGACJOCZBJX2GJWip0ikV+wcOsgVuY9uE8CPiyQhkGFSlhuSkZPavN7u1c2Fw==}
+    engines: {node: '>=10'}
+
   minimatch@9.0.9:
     resolution: {integrity: sha512-OBwBN9AL4dqmETlpS2zasx+vTeWclWzkblfZk7KTA5j3jeOONz/tRCnZomUyvNg83wL5Zv9Ss6HMJXAgL8R2Yg==}
     engines: {node: '>=16 || 14 >=14.17'}
@@ -3156,8 +3175,8 @@ packages:
       '@types/react':
         optional: true
 
-  react-resizable-panels@4.12.3:
-    resolution: {integrity: sha512-GHMJWnDXui/3RX4bT+cgBP+N3N2nkwcoZATr/2xLFpqQQe7TlBrE0cGM0dUa9ceT7A90tUrSRsiqgRG+g0/2AA==}
+  react-resizable-panels@4.12.4:
+    resolution: {integrity: sha512-SOsSj4e9U7vxL15MbgTfl35IO4vxSW4Xb0b1gtJVbRPWv7FOezcgOA00Mi0jP8XqC3y7jOQxpsGs/9zLKHPitA==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
@@ -3187,8 +3206,8 @@ packages:
     resolution: {integrity: sha512-9u/sniCrY3D5WdsERHzHE4G2YCXqoG5FTHUiCC4SIbr6XcLZBY05ya9EKjYek9O5xOAwjGq+1JdGBAS7Q9ScoA==}
     engines: {node: '>= 6'}
 
-  readdir-glob@1.0.0:
-    resolution: {integrity: sha512-km0DIcwQVZ1ZUhXhMWpF74/Wm5aFEd5/jDiVWF1Hkw2myPQovG8vCQ8+FQO2KXE9npQQvCnAMZhhWuUee4WcCQ==}
+  readdir-glob@1.1.3:
+    resolution: {integrity: sha512-v05I2k7xN8zXvPD9N+z/uhXPaj0sUFCe2rcWZIpBsqxfP7xXFQ0tipAd/wjj1YxWyWtUS5IDJpOG82JKt2EAVA==}
 
   redent@3.0.0:
     resolution: {integrity: sha512-6tDA8g98We0zd0GvVeMT9arEOnTw9qM03L9cJXaCjrip1OO764RDBLBfrB4cwzNGDj5OA5ioymC9GkizgWJDUg==}
@@ -3399,8 +3418,8 @@ packages:
     os: [darwin, linux, win32, freebsd, openbsd, netbsd, sunos, android]
     hasBin: true
 
-  tailwind-merge@3.6.0:
-    resolution: {integrity: sha512-uxL7qAVQriqRQPAyK3pj66VqskWqoZ37PW94jwOTwNfq/z9oyu1V+eqrZqtR2+fCiXdYOZe/Modt8GtvqNzu+w==}
+  tailwind-merge@3.7.0:
+    resolution: {integrity: sha512-XPPUyAc+cvspz3lHTcR/QgPfW2A0lv/xQNIjX3HGhLR+Nq2lHaLq5MtTesHn8GUr3W3DguT2KT5x3NVgRtYwmA==}
 
   tailwindcss-animate@1.0.7:
     resolution: {integrity: sha512-bl6mpH3T7I3UFxuvDEXLxy/VuFxBk5bbzplh7tXI68mwMokNYd1t9qPBHlnyTwfa4JGC4zP516I1hYYtQ/vspA==}
@@ -3759,8 +3778,8 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
-  zip-stream@4.1.0:
-    resolution: {integrity: sha512-zshzwQW7gG7hjpBlgeQP9RuyPGNxvJdzR8SUM3QhxCnLjWN2E7j3dOvpeDcQoETfHx0urRS7EtmVToql7YpU4A==}
+  zip-stream@4.1.1:
+    resolution: {integrity: sha512-9qv4rlDiopXg4E69k+vMHjNN63YFMe9sZMrdlvKnCjlCRWeCBswPPMPUfx+ipsAWq1LXHe70RcbaHdJJpS6hyQ==}
     engines: {node: '>= 10'}
 
   zwitch@2.0.4:
@@ -5152,14 +5171,14 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.1
 
-  '@vxture/design-system@12.7.0(@phosphor-icons/react@2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(next-themes@0.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss-animate@1.0.7(tailwindcss@4.3.3))(tailwindcss@4.3.3)':
+  '@vxture/design-system@12.10.3(@phosphor-icons/react@2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(next-themes@0.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss-animate@1.0.7(tailwindcss@4.3.3))(tailwindcss@4.3.3)':
     dependencies:
       '@fontsource/funnel-display': 5.3.0
       '@fontsource/geist-mono': 5.3.0
       '@fontsource/inter': 5.3.0
       '@phosphor-icons/react': 2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@vxture/design-tokens': 3.2.0(tailwindcss@4.3.3)
-      '@vxture/design-ui': 9.4.0(@phosphor-icons/react@2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)
+      '@vxture/design-tokens': 3.3.0(tailwindcss@4.3.3)
+      '@vxture/design-ui': 9.7.3(@phosphor-icons/react@2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)
       next-themes: 0.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
@@ -5169,12 +5188,12 @@ snapshots:
       - '@types/react'
       - '@types/react-dom'
 
-  '@vxture/design-tokens@3.2.0(tailwindcss@4.3.3)':
+  '@vxture/design-tokens@3.3.0(tailwindcss@4.3.3)':
     dependencies:
       tailwindcss: 4.3.3
       tailwindcss-animate: 1.0.7(tailwindcss@4.3.3)
 
-  '@vxture/design-ui@9.4.0(@phosphor-icons/react@2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)':
+  '@vxture/design-ui@9.7.3(@phosphor-icons/react@2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)':
     dependencies:
       '@phosphor-icons/react': 2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-accordion': 1.2.20(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -5201,7 +5220,7 @@ snapshots:
       '@radix-ui/react-toggle': 1.1.18(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-toggle-group': 1.1.19(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-tooltip': 1.2.16(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@vxture/design-tokens': 3.2.0(tailwindcss@4.3.3)
+      '@vxture/design-tokens': 3.3.0(tailwindcss@4.3.3)
       class-variance-authority: 0.7.1
       clsx: 2.1.1
       cmdk: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -5209,8 +5228,8 @@ snapshots:
       react: 19.2.8
       react-day-picker: 10.0.1(@types/react@19.2.17)(react@19.2.8)
       react-dom: 19.2.8(react@19.2.8)
-      react-resizable-panels: 4.12.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      tailwind-merge: 3.6.0
+      react-resizable-panels: 4.12.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      tailwind-merge: 3.7.0
     transitivePeerDependencies:
       - '@types/react'
       - '@types/react-dom'
@@ -5329,7 +5348,7 @@ snapshots:
 
   archiver-utils@2.1.0:
     dependencies:
-      glob: 7.2.0
+      glob: 7.2.3
       graceful-fs: 4.2.11
       lazystream: 1.0.1
       lodash.defaults: 4.2.0
@@ -5340,15 +5359,28 @@ snapshots:
       normalize-path: 3.0.0
       readable-stream: 2.3.8
 
-  archiver@5.3.1:
+  archiver-utils@3.0.4:
+    dependencies:
+      glob: 7.2.3
+      graceful-fs: 4.2.11
+      lazystream: 1.0.1
+      lodash.defaults: 4.2.0
+      lodash.difference: 4.5.0
+      lodash.flatten: 4.4.0
+      lodash.isplainobject: 4.0.6
+      lodash.union: 4.6.0
+      normalize-path: 3.0.0
+      readable-stream: 3.6.2
+
+  archiver@5.3.2:
     dependencies:
       archiver-utils: 2.1.0
       async: 3.2.6
       buffer-crc32: 0.2.13
       readable-stream: 3.6.2
-      readdir-glob: 1.0.0
+      readdir-glob: 1.1.3
       tar-stream: 2.2.0
-      zip-stream: 4.1.0
+      zip-stream: 4.1.1
 
   are-we-there-yet@3.0.1:
     dependencies:
@@ -5416,11 +5448,21 @@ snapshots:
       inherits: 2.0.4
       readable-stream: 3.6.2
 
+  bl@4.1.0:
+    dependencies:
+      buffer: 5.7.1
+      inherits: 2.0.4
+      readable-stream: 3.6.2
+
   bluebird-lst@1.0.9:
     dependencies:
       bluebird: 3.7.2
 
   bluebird@3.7.2: {}
+
+  brace-expansion@5.0.12:
+    dependencies:
+      balanced-match: 4.0.4
 
   brace-expansion@5.0.9:
     dependencies:
@@ -5600,7 +5642,7 @@ snapshots:
 
   compare-version@0.1.2: {}
 
-  compress-commons@4.1.0:
+  compress-commons@4.1.2:
     dependencies:
       buffer-crc32: 0.2.13
       crc32-stream: 4.0.3
@@ -5757,7 +5799,7 @@ snapshots:
   electron-builder-squirrel-windows@25.1.8(dmg-builder@25.1.8):
     dependencies:
       app-builder-lib: 25.1.8(patch_hash=8b345bb4a3009d7d04b424171405d9df8c1d53089a1c65e3c474885b2459127d)(dmg-builder@25.1.8)(electron-builder-squirrel-windows@25.1.8)
-      archiver: 5.3.1
+      archiver: 5.3.2
       builder-util: 25.1.7
       fs-extra: 10.1.0
     transitivePeerDependencies:
@@ -6007,6 +6049,15 @@ snapshots:
       path-scurry: 1.11.1
 
   glob@7.2.0:
+    dependencies:
+      fs.realpath: 1.0.0
+      inflight: 1.0.6
+      inherits: 2.0.4
+      minimatch: 3.1.5
+      once: 1.4.0
+      path-is-absolute: 1.0.1
+
+  glob@7.2.3:
     dependencies:
       fs.realpath: 1.0.0
       inflight: 1.0.6
@@ -6738,6 +6789,10 @@ snapshots:
     dependencies:
       brace-expansion: 5.0.9
 
+  minimatch@5.1.9:
+    dependencies:
+      brace-expansion: 5.0.12
+
   minimatch@9.0.9:
     dependencies:
       brace-expansion: 5.0.9
@@ -7017,7 +7072,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.17
 
-  react-resizable-panels@4.12.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  react-resizable-panels@4.12.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
@@ -7054,9 +7109,9 @@ snapshots:
       string_decoder: 1.3.0
       util-deprecate: 1.0.2
 
-  readdir-glob@1.0.0:
+  readdir-glob@1.1.3:
     dependencies:
-      minimatch: 3.1.5
+      minimatch: 5.1.9
 
   redent@3.0.0:
     dependencies:
@@ -7298,7 +7353,7 @@ snapshots:
 
   systeminformation@5.33.10: {}
 
-  tailwind-merge@3.6.0: {}
+  tailwind-merge@3.7.0: {}
 
   tailwindcss-animate@1.0.7(tailwindcss@4.3.3):
     dependencies:
@@ -7325,7 +7380,7 @@ snapshots:
 
   tar-stream@2.2.0:
     dependencies:
-      bl: 4.0.3
+      bl: 4.1.0
       end-of-stream: 1.4.5
       fs-constants: 1.0.0
       inherits: 2.0.4
@@ -7626,10 +7681,10 @@ snapshots:
 
   yocto-queue@0.1.0: {}
 
-  zip-stream@4.1.0:
+  zip-stream@4.1.1:
     dependencies:
-      archiver-utils: 2.1.0
-      compress-commons: 4.1.0
+      archiver-utils: 3.0.4
+      compress-commons: 4.1.2
       readable-stream: 3.6.2
 
   zwitch@2.0.4: {}
