@@ -111,7 +111,10 @@ function LoginScreen({
   onSignedIn: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [pendingUrl, setPendingUrl] = useState<string | null>(null);
+  /** 从「已发起、还没等到浏览器那边签完」到「签完或放弃」——只驱动按钮自身
+   *  的文案，不再另起一段提示（owner 2026-09-16：一个页面，按钮变文案就够，
+   *  不是两套内容）。 */
+  const [verifying, setVerifying] = useState(false);
   const pollRef = useRef<number | undefined>(undefined);
 
   useEffect(
@@ -125,9 +128,10 @@ function LoginScreen({
     setBusy(true);
     try {
       const { authorizeUrl } = await api.login();
-      setPendingUrl(authorizeUrl);
+      setVerifying(true);
       // Electron routes this to the system browser via the window-open handler;
-      // plain browsers may popup-block it, hence the fallback link.
+      // plain browsers may popup-block it - clicking 登录 again (still enabled
+      // while verifying) just reopens the same authorize URL.
       const win = window.open(authorizeUrl, "_blank");
       if (win) win.opener = null;
       if (pollRef.current !== undefined) clearInterval(pollRef.current);
@@ -139,6 +143,7 @@ function LoginScreen({
             clearInterval(pollRef.current);
             pollRef.current = undefined;
             onSignedIn();
+            return;
           }
         } catch {
           /* keep polling */
@@ -146,6 +151,9 @@ function LoginScreen({
         if (Date.now() - startedAt > LOGIN_POLL_MAX_MS) {
           clearInterval(pollRef.current);
           pollRef.current = undefined;
+          // 放弃轮询就得把「验证中」也放掉，否则按钮永远卡在验证态，
+          // 用户连重试都点不动。
+          setVerifying(false);
         }
       }, LOGIN_POLL_MS);
     } finally {
@@ -171,7 +179,7 @@ function LoginScreen({
           disabled={busy}
           onClick={() => void startLogin()}
         >
-          {busy ? "正在打开浏览器…" : "登录 Vxture 账号"}
+          {busy ? "正在打开浏览器…" : verifying ? "登录验证中…" : "登录 Vxture 账号"}
         </Button>
         {/* 登录之前先把状态说清楚 —— 这一段是 owner 2026-09-10 实测之后要的。
             当时的样子：退出登录，再点登录，**一路直接进来，没有任何验证过程**。
@@ -190,19 +198,6 @@ function LoginScreen({
         <p className="login-note text-body-sm text-muted-foreground">
           浏览器中若已登录则会直接登录，安全退出请退出浏览器登录态。
         </p>
-        {pendingUrl && (
-          <div className="login-hint text-body-sm text-muted-foreground">
-            在浏览器中完成登录后自动返回…{" "}
-            <a
-              className="text-primary-text underline"
-              href={pendingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              未打开？点此继续 ↗
-            </a>
-          </div>
-        )}
         {/* 这里曾有两个次级入口，都已移除，理由是同一条：入口不该承诺它
             兑现不了的东西。
 
