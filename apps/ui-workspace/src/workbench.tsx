@@ -25,6 +25,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type AnchorHTMLAttributes,
 } from "react";
@@ -107,16 +108,43 @@ const isTab = (s: string): s is TabId =>
 /** 侧栏「最近工作」最多几条（owner：不能无限长）。 */
 const RECENT_LIMIT = 8;
 
-function useWorkspaceSession(api: Api): SessionInfo | undefined {
+/**
+ * 会话被平台悄悄收回（不是用户自己点的退出——那条路走 `UserSlot.doLogout`，
+ * 直接调 `onSignedOut`）时，工作台原地不动的话，界面只是标题栏租户信息条、
+ * 首页订阅卡各自按自己的轮询悄悄消失，主体照样杵在工作台上，用户看不出
+ * 自己已经掉线了（owner 2026-09-16 现场遇到：daemon 的 `/auth/session` 已经
+ * 翻成 `signedIn:false`，工作台却还站在原地）。
+ *
+ * 这里补的是「曾经登录、这一轮不是了」这个**跳变**才通知会话闸门重读——不是
+ * 「这一轮不是」就通知：首次挂载时还没读到会话也是 undefined，跟真掉线是
+ * 两回事；接不上（`catch`）同样不算掉线，网络抖一下不该把人踢回登录页。
+ */
+function useWorkspaceSession(api: Api, onSignedOut: () => void): SessionInfo | undefined {
   const [session, setSession] = useState<SessionInfo | undefined>();
+  const wasSignedIn = useRef(false);
+  // ref 装最新回调：`onSignedOut` 这个 prop 在调用方往往是每次渲染都新建的
+  // 内联函数（`() => void refresh()`），放进依赖数组会让这个 effect 跟着每次
+  // 渲染重挂，30s 轮询被反复打断。
+  const onSignedOutRef = useRef(onSignedOut);
+  onSignedOutRef.current = onSignedOut;
   useEffect(() => {
     let alive = true;
     const read = async () => {
       try {
         const s = await api.session();
-        if (alive) setSession(s.signedIn ? s : undefined);
+        if (!alive) return;
+        if (s.signedIn) {
+          wasSignedIn.current = true;
+          setSession(s);
+          return;
+        }
+        setSession(undefined);
+        if (wasSignedIn.current) {
+          wasSignedIn.current = false;
+          onSignedOutRef.current();
+        }
       } catch {
-        /* 未接通时不显示，而不是显示一个猜的名字 */
+        /* 未接通时不显示，而不是显示一个猜的名字；接不上不算掉线 */
       }
     };
     void read();
@@ -343,7 +371,7 @@ export function Workbench({
   const [projectPending, setProjectPending] = useState(0);
   /** 首页卡片的选中态（owner 定的联动）：选中 → 侧栏「最近工作」只留该智能体的项目。 */
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
-  const session = useWorkspaceSession(api);
+  const session = useWorkspaceSession(api, onSignedOut);
   const workspaceName = session?.workspace?.name;
 
   // 滚动条平时隐藏，滚动时才现身（owner 定）：捕获阶段监听任何滚动，给根元素

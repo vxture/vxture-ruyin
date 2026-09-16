@@ -631,6 +631,63 @@ void test("Workbench: 侧栏那一格的退出被原样转给调用方（不是�
   expect(onSignedOut).toHaveBeenCalledTimes(1);
 });
 
+/**
+ * 会话被平台悄悄收回（不是用户自己点的退出）时，工作台原地不动的话，界面
+ * 只是标题栏租户信息条、首页订阅卡各自悄悄消失，主体还杵在原地，用户看不出
+ * 自己已经掉线了（owner 2026-09-16 现场遇到）。这里钉的是：会话轮询自己发现
+ * 「曾经登录、这一轮不是了」的跳变时，要跟侧栏那格退出走同一条通知
+ * ——不是接了个空函数，是真把 `onSignedOut` 那个值调用了。
+ */
+void test("Workbench: 会话被平台悄悄收回（并非用户主动退出）时，也会通知会话闸门重读", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const onSignedOut = vi.fn();
+  const session = vi
+    .fn()
+    .mockResolvedValueOnce({
+      signedIn: true,
+      workspace: { name: "某工作区" },
+      issuer: "",
+      consoleBase: "https://vxture.com",
+      entitlementsConfigured: false,
+    })
+    .mockResolvedValue({ signedIn: false, issuer: "", consoleBase: "https://vxture.com", entitlementsConfigured: false });
+  const { Workbench } = await import("./workbench");
+  render(<Workbench api={fakeApi({ session })} onSignedOut={onSignedOut} />);
+  await screen.findByText("某工作区");
+  expect(onSignedOut).not.toHaveBeenCalled();
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  expect(onSignedOut).toHaveBeenCalledTimes(1);
+  vi.useRealTimers();
+});
+
+/** 接不上平台（`session()` 拒绝）不算掉线——网络抖一下不该把人踢回登录页。 */
+void test("Workbench: session() 读失败（网络抖动）不触发退出通知", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const onSignedOut = vi.fn();
+  const session = vi
+    .fn()
+    .mockResolvedValueOnce({
+      signedIn: true,
+      workspace: { name: "某工作区" },
+      issuer: "",
+      consoleBase: "https://vxture.com",
+      entitlementsConfigured: false,
+    })
+    .mockRejectedValue(new Error("网关 502"));
+  const { Workbench } = await import("./workbench");
+  render(<Workbench api={fakeApi({ session })} onSignedOut={onSignedOut} />);
+  await screen.findByText("某工作区");
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  expect(onSignedOut).not.toHaveBeenCalled();
+  vi.useRealTimers();
+});
+
 void test("Workbench: the active workspace name shows in the header once signed in", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi({
