@@ -598,10 +598,32 @@ void test("Settings/连接器: lists installed connectors with live health, and 
   expect(within(list).getByText("crm")).toBeInTheDocument();
   expect(within(list).getByText("运行中")).toBeInTheDocument();
   expect(within(list).getByText("未运行：not running")).toBeInTheDocument();
-  expect(within(list).getByText("工具：lookup_account、update_account")).toBeInTheDocument();
+  // 工具清单从一句逗号连着的长文字改成一排排小方块（owner 2026-09-16），
+  // 启用时（state: "active"）自动展开——每个工具名各自一块。
+  expect(within(list).getByText("暴露的工具")).toBeInTheDocument();
+  expect(within(list).getByText("lookup_account")).toBeInTheDocument();
+  expect(within(list).getByText("update_account")).toBeInTheDocument();
   const user = userEvent.setup();
   await user.click(within(list).getAllByRole("button", { name: "卸载" })[0]!);
   expect(api.removeConnector).toHaveBeenCalledWith("crm");
+});
+
+/**
+ * 展开/收起跟着启用状态走（owner 2026-09-16）：不是另一个要手动点开的折叠钮，
+ * 是「启用 = 下面的工具清单自动展开，停用/暂存就收起」。即便暂存的那条已经
+ * 带着上一次测通时留下的工具名，只要没启用就不该展开——展开的是「现在能拿到
+ * 什么」，不是「历史上问到过什么」。
+ */
+void test("Settings/连接器: 展开跟着启用状态走——暂存的即便带着工具名也不展开，启用的才展开", async () => {
+  const api = fakeApi({
+    connectors: vi.fn().mockResolvedValue({
+      items: [{ ...crmView, id: "stashed-with-tools", state: "stashed", tools: ["leftover_tool"] }],
+    }),
+  });
+  renderRouted("connectors", api);
+  await screen.findByText("stashed-with-tools");
+  expect(screen.queryByText("暴露的工具")).not.toBeInTheDocument();
+  expect(screen.queryByText("leftover_tool")).not.toBeInTheDocument();
 });
 
 void test("Settings/连接器: a streamable_http connector shows its url, not a command/args tooltip", async () => {

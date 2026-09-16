@@ -1135,6 +1135,62 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
   color: var(--color-muted-foreground);
 }
 
+/* 已安装的连接器：一个连接器一张卡，不再共用 `.row-list`（owner 2026-09-16）
+   ——启用后要展开一段工具清单，塞进 `.row-item` 那种单行里，「工具：a、b、c」
+   一长串文字会把状态徽章、启用/停用按钮全部挤到一起，越是暴露的工具多的
+   连接器越挤。卡片高度按需长高，不再是固定一行的密度。 */
+.connector-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--spacing-sm); }
+.connector-card { border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-card); overflow: hidden; }
+/* 标题行：图标 + id + 来源标签是「这是什么」，靠左；状态与操作是「现在怎样、
+   能做什么」，靠右但留出呼吸空间——不是原来那样贴着彼此、贴着右边缘挤成
+   一串（owner 2026-09-16 第 4 条：「操作和状态信息可以松散一些布局」）。 */
+.connector-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+.connector-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3, rgba(127, 127, 127, 0.12));
+  color: var(--color-muted-foreground);
+  flex-shrink: 0;
+}
+.connector-card-title { display: flex; align-items: center; gap: var(--spacing-xs); min-width: 0; }
+.connector-card-id {
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connector-card-side { display: inline-flex; align-items: center; gap: var(--spacing-md); flex-shrink: 0; }
+/* 展开区：启用（`state === "active"`）就自动展开，停用就跟着收起——不是另一个
+   要手动点开的折叠钮。左右缩进给足（`--space-5xl` = 64px，owner 建议的量），
+   与标题行的图标对不齐也没关系：这一块是「详情」，本来就该退后一步，缩进
+   越大越读得出「这是附属信息」。 */
+.connector-card-tools { padding: var(--space-md) var(--space-5xl); border-top: 1px solid var(--color-border); }
+.connector-card-tools-label { display: block; margin-bottom: var(--spacing-xs); font-size: var(--body-sm-font-size); color: var(--color-muted-foreground); }
+/* 长文字段落改成一排排小方块（owner 2026-09-16）：空间有限时自动换行，
+   每个工具名各自一块，不再是一条逗号顿号连起来的长句，找哪个工具接没接
+   不用再从头数逗号。 */
+.connector-card-tools-grid { display: flex; flex-wrap: wrap; gap: var(--spacing-xs); }
+.connector-tool-chip {
+  font-family: var(--code-sm-font-family, ui-monospace, monospace);
+  font-size: var(--code-sm-font-size, 12px);
+  padding: 2px var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
 /* 审计：一条记录一行。撑开行高的三个元凶——完整 ISO 时间、会换行的动作名、
    无长度上限的 payload——各自钉住。 */
 .audit-row td { padding-block: var(--spacing-2xs); vertical-align: middle; }
