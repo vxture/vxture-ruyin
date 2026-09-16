@@ -8,6 +8,12 @@
  * 形状照 `runtime-menu.tsx`：自己拉一次 `system`（面板打开时才拉，不是首屏
  * 常驻就问——这份信息只在点开时才用得上）。
  *
+ * **走 Dialog，不走 Popover**（owner 2026-09-16 二次改版）：popover 挂在触发
+ * 点旁边、随点击位置漂移；这份信息是「关于本软件」，不是跟标题栏那一点有
+ * 关联的上下文菜单，该屏幕居中、比原来的浮层宽，而不是贴着 RUYIN 字标弹出。
+ * Radix `DialogContent` 本来就是屏幕居中定位、自带右上角关闭按钮，不用
+ * 另外拼位置或另外画一个关闭键。
+ *
  * 视觉上要长得跟原来的 `ShellBrand`一模一样（同一套 `vx-brand-*` 类），但
  * `ShellBrand` 自己只会渲成 `<a href>`，没有把点击行为交给调用方的口子——所以
  * 这里手写同样的标记，套一层 `all: unset` 的 `<button>`（`.app-brand-trigger`），
@@ -15,7 +21,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Popover, PopoverTrigger, ShellPanelContent, ShellPanelSection } from "@vxture/design-system";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@vxture/design-system";
 import type { Api, SessionInfo, SystemInfo } from "./api";
 import { BrandInfoBlock } from "./brand-info";
 
@@ -44,19 +50,21 @@ export function BrandInfoTrigger({
   }, [api, open]);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
         <button type="button" className="vx-brand-lockup app-brand app-brand-trigger" aria-label="RUYIN">
           <img className="vx-brand-mark" src="/logo.svg" alt="" aria-hidden width={24} height={24} draggable={false} />
           <span className="vx-brand-name">RUYIN</span>
           <span className="vx-brand-local-name">Intelligent Workbench</span>
         </button>
-      </PopoverTrigger>
-      <ShellPanelContent side="bottom" align="start" sideOffset={8} className="app-brand-panel">
-        <ShellPanelSection divided={false}>
-          <BrandInfoBlock system={system} session={session ?? null} />
-        </ShellPanelSection>
-      </ShellPanelContent>
-    </Popover>
+      </DialogTrigger>
+      <DialogContent className="brand-info-dialog">
+        {/* BrandInfoBlock 自己画出「RUYIN」这个可见标题，这里只补一个屏幕
+            阅读器用的无障碍标题（Radix 的 DialogContent 要求一个
+            DialogTitle 后代，没有会在控制台报错）——视觉上不重复一遍。 */}
+        <DialogTitle className="sr-only">RUYIN · Intelligent Workbench</DialogTitle>
+        <BrandInfoBlock system={system} session={session ?? null} />
+      </DialogContent>
+    </Dialog>
   );
 }

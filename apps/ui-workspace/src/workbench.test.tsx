@@ -149,6 +149,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
     refreshEntitlements: vi.fn().mockResolvedValue([]),
     refreshCapabilityCatalog: vi.fn().mockResolvedValue({ outcome: "skipped", source: { kind: "platform", state: "unavailable" } }),
     subscribe: vi.fn().mockReturnValue(() => {}),
+    orgLogo: vi.fn().mockResolvedValue(null),
     ...over,
   } as unknown as Api;
 }
@@ -707,7 +708,9 @@ void test("Header workspace control: icon + name only (no 工作区 label); open
   const user = userEvent.setup();
   await user.click(trigger);
   expect(await screen.findByText("某租户")).toBeInTheDocument();
-  expect(screen.getByText("工作区：某工作区")).toBeInTheDocument();
+  // 身份卡第二行不再带「工作区：」前缀（owner 2026-09-16）：与触发按钮同一个
+  // 裸名字，图标已经说明这是工作区，文字前缀是同一件事说两遍。
+  expect(screen.getAllByText("某工作区")).toHaveLength(2); // 触发按钮 + 身份卡各一次
   expect((screen.getByRole("link", { name: /租户管理/ }) as HTMLAnchorElement).href).toBe(
     "https://console.vxture.com/tenant-settings",
   );

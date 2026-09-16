@@ -115,6 +115,9 @@ export const PLATFORM_READS = {
   subscribedProducts: "/api/subscription/subscribed-products",
   entitlements: "/api/subscription/entitlements",
   quotaUsage: "/api/subscription/quota-usage",
+  /** 当前租户的自定义 logo（console-bff `me.router.ts`）；404 = 没传过，是
+   *  正常状态,不是错误。 */
+  orgLogo: "/api/me/organization/logo",
   /**
    * 本工作区被授权的模型（console-bff `atlas.router.ts`，经 S2S 代理 Atlas
    * `/tenancy/models`）。**只展示，不调用**（RY-001 #24）：模型由产品直接对接 Atlas
@@ -339,9 +342,17 @@ export class PlatformSession {
    * 隔离，**换账号是真实用例**。选它而不是 `prompt=login`：后者每次都逼着重输密码，
    * 对个人桌面应用是纯摩擦。
    *
-   * 这个参数平台侧原本**只认 `none`、其余静默忽略**（我们为此记过 TD-057，因为
-   * 未登录状态下任何 prompt 值的回应都一样，探针判定不了）。平台已在同批实现并
-   * 公布 `prompt_values_supported`，所以现在它真的生效。
+   * 这个参数平台侧**只认 `none`、其余静默忽略**（TD-057，open）。owner 2026-09-16
+   * 现场复核：读 auth-bff 的 `oidc.service.ts#authorize()`，`req.prompt` 只在
+   * `=== "none"` 这一支分岔（没有可用会话时回 `login_required`）；除此之外，
+   * 有可用会话一律静默签发授权码（从不弹选择器），没有可用会话一律走普通登录页
+   * （同样从不弹选择器）——`select_account` 这个值本身在 authorize() 里**没有任何
+   * 独立分支**。此前这里写着「平台已在同批实现并公布 prompt_values_supported，
+   * 所以现在它真的生效」，那是没有对着 authorize() 的真实逻辑核实过的误记，
+   * 已删——discovery 元数据公布了不等于处理逻辑接了。
+   *
+   * **代码里这一行仍然保留，不要拆**：无害、合规，且平台哪天真的在 authorize()
+   * 里给 `select_account` 接上独立分支，这里不用改一个字就自动生效。
    */
   /** 实际在用的会话/读接口基址。启动播报要按这条说话，不按退役变量说话。 */
   get baseUrl(): string {
@@ -519,6 +530,24 @@ export class PlatformSession {
   /** 本工作区被授权的模型（原样，未投影；投影在 server 那一层）。 */
   async atlasModels(): Promise<unknown> {
     return this.cachedGet(PLATFORM_READS.atlasModels);
+  }
+
+  /**
+   * 当前租户的自定义 logo 字节。`null` = 没有自定义 logo（界面自己兜底成
+   * 首字母/通用图标），404 是这条路的正常状态，不走 {@link PlatformReadError}。
+   *
+   * **不走 `cachedGet`**：那条把响应体当 JSON 解析，这里是图片字节。console-bff
+   * 自己已经给了 `Cache-Control: immutable` + `ETag`（logo 传一次极少换），
+   * 桌面这边不再叠一层内存缓存——反正只在租户菜单打开时才问一次。
+   */
+  async orgLogo(): Promise<{ data: Buffer; contentType: string } | null> {
+    const res = await this.fetch(PLATFORM_READS.orgLogo);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new PlatformReadError(PLATFORM_READS.orgLogo, res.status);
+    return {
+      data: Buffer.from(await res.arrayBuffer()),
+      contentType: res.headers.get("content-type") ?? "application/octet-stream",
+    };
   }
 
   // --------------------------------------------------------------------------

@@ -495,6 +495,54 @@ describe("platform-session", () => {
     assert.match(f.calls.at(-1)!.url, /\/api\/subscription\/quota-usage$/);
   });
 
+  /* orgLogo 不走 cachedGet（响应体是图片字节，不是 JSON），所以要自己搭一个
+     带得动 arrayBuffer() 与真 content-type 的桩，stubFetch 那份是给 JSON 读用的。 */
+  it("orgLogo 有自定义 logo 时把字节连同 content-type 一起交出来", async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    let call = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      call += 1;
+      if (call === 1) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ rpsid: "sess-logo", expiresInSec: 3600 }),
+          headers: { get: () => null } as unknown as Headers,
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => bytes.buffer,
+        headers: {
+          get: (k: string) => (k.toLowerCase() === "content-type" ? "image/png" : null),
+        } as unknown as Headers,
+      } as Response;
+    }) as typeof fetch;
+    restores.push(() => void (globalThis.fetch = original));
+
+    const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    s.beginLogin();
+    await s.completeLogin();
+    const logo = await s.orgLogo();
+    assert.ok(logo);
+    assert.equal(logo!.contentType, "image/png");
+    assert.deepEqual([...logo!.data], [1, 2, 3, 4]);
+  });
+
+  it("orgLogo 没传过（404）回 null，不当错误抛", async () => {
+    const f = stubFetch([
+      { status: 200, body: { rpsid: "sess-nologo", expiresInSec: 3600 } },
+      { status: 404 },
+    ]);
+    restores.push(f.restore);
+    const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    s.beginLogin();
+    await s.completeLogin();
+    assert.equal(await s.orgLogo(), null);
+  });
+
   /* 模型平台（RY-001 #24）：读 console-bff 的 atlas 模型；平台非 2xx 要带着状态码抛，
      server 那一层才分得清「这个角色不能看」（403）与「这次没取到」。 */
   it("atlasModels 走 console-bff 的 /api/atlas/models；非 2xx 抛带状态码的 PlatformReadError", async () => {

@@ -1187,6 +1187,26 @@ async function handle(
       send(res, 200, await deps.platformSession.quotaUsage());
       return;
     }
+    // 租户 logo（标题栏租户菜单的身份卡）。图片字节，不走 send()——那条是 JSON 专用。
+    // 没传过 logo 是正常状态（204），不是 404：404 在这条路上容易被当成「路由本身
+    // 不存在」误读，界面这边靠状态码分支去兜首字母图标，204 更准。
+    if (method === "GET" && path === "/platform/org-logo") {
+      if (!deps.platformSession) {
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
+        return;
+      }
+      const logo = await deps.platformSession.orgLogo();
+      if (!logo) {
+        res.writeHead(204).end();
+        return;
+      }
+      res.writeHead(200, {
+        "content-type": logo.contentType,
+        "content-length": logo.data.length,
+      });
+      res.end(logo.data);
+      return;
+    }
     // 模型平台（RY-001 #24）：本工作区被授权的模型，**只展示不调用** —— 模型由产品直接
     // 对接 Atlas（ADR-026 §2 第 3 条）。只投影展示字段：端点地址、密钥引用、运维配置不出
     // 守护进程。平台只授租户所有者 tenant.model.read：403 是角色事实，不是「这次没取到」。
