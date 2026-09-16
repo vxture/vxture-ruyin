@@ -237,11 +237,14 @@ export function UserSlot({
             </ShellPanelSection>
           )}
           <ShellPanelSection>
+            {/* 用户中心 / 配额用量落在 console-bff 本体上，不是 consoleBase
+                那个官网基址（owner 2026-09-16 现场纠错，见 SessionInfo 的
+                consoleAppBase 注释）——两条曾经都误拼去了 vxture.com。 */}
             <ShellPanelRow
               className="user-panel-row"
               icon="user-circle"
               label="用户中心"
-              href={`${session?.consoleBase ?? "https://vxture.com"}/profile`}
+              href={`${session?.consoleAppBase ?? "https://console.vxture.com"}/profile`}
               newTab
               trailingIcon="external-link"
             />
@@ -249,7 +252,7 @@ export function UserSlot({
               className="user-panel-row"
               icon="gauge"
               label="配额用量"
-              href={`${session?.consoleBase ?? "https://vxture.com"}/quotas`}
+              href={`${session?.consoleAppBase ?? "https://console.vxture.com"}/quotas`}
               newTab
               trailingIcon="external-link"
             />

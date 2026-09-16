@@ -575,7 +575,16 @@ export interface SessionInfo {
   org?: { id?: string; name?: string; type?: string };
   workspace?: { id?: string; name?: string };
   issuer: string;
+  /** 官网基址（去订阅 / 法律条款深链落点），例如 https://vxture.com。 */
   consoleBase: string;
+  /**
+   * console-bff 本体，例如 https://console.vxture.com——与上面的 `consoleBase`
+   * 不是同一个主机（owner 2026-09-16 现场纠错：两者曾被当成一回事，「用户
+   * 中心」「配额用量」误拼到了官网上）。未登录会话可能没有这个字段
+   * （daemon 侧尚未接通 `PlatformSession` 时），调用方落到
+   * `https://console.vxture.com`，与 daemon 侧默认值一致。
+   */
+  consoleAppBase?: string;
   entitlementsConfigured: boolean;
 }
 

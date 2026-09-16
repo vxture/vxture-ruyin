@@ -247,12 +247,31 @@ const BLURBS: Record<string, string> = {
 };
 
 /**
- * Console 的应用中心 —— 「在线使用」的落点。
+ * Console 的应用中心 —— 本地已装的产品「智能体介绍」/ 顶部「在线使用」的落点。
  *
- * 平台还没有 per-product 深链，所以只能落到应用中心这一层。**不拼一个猜出来的
- * 产品 URL** —— 猜错的深链比多点一步糟得多。
+ * 这几处仍然落应用中心，不落具体产品：顶部按钮管的是整个「我的智能体」板块，
+ * 不是某一个产品；本地卡片的「智能体介绍」是宣传页，不是"去用它"。
  */
 const APPCENTER_URL = (consoleBase: string) => `${consoleBase}/zh-CN/appcenter`;
+
+/**
+ * 产品的边缘地址——云端「一个产品一个二级域名」的落点（owner 2026-09-16 现场
+ * 确认）：`<productCode>.<consoleBase 的主机名>`，与本机 `product-ui-server.ts`
+ * 的 `<productId>.localhost:<port>` 是同一个模型（design 正文 §4.2 第 3 条
+ * Same Package, Any Runtime）。**只用在订阅了、本机没装的产品**（
+ * `SubscribedElsewhereCard`）——那张卡没有本地契约可进，「在线使用」是它唯一
+ * 能兑现的动作，此前落到应用中心是错的：那是个通用广场，不是这个产品自己的
+ * 入口。consoleBase 解析不出主机名时退到 `vxture.com`（生产的实际值）。
+ */
+function productEdgeUrl(consoleBase: string, productCode: string): string {
+  let host = "vxture.com";
+  try {
+    host = new URL(consoleBase).hostname;
+  } catch {
+    /* consoleBase 形状不对时用生产的实际主机名兜底，不留空。 */
+  }
+  return `https://${productCode}.${host}`;
+}
 
 type StripTone = "ok" | "warn" | "danger" | "muted";
 
@@ -698,7 +717,11 @@ export function HomePage({
  * 原来自己另起一套——版本号塞在描述里、没有档位标签——扫过去不像同一页）：
  * 属性标签（档位 · 订阅状态 · 本机装没装）在标题行右侧，产品介绍在中间，
  * 版本号在左下角。差别只在动作：这里没有「打开」——本机没有它的契约，打不
- * 开。给的是它能兑现的：在线使用（落应用中心），或者订阅已失效时去续订。
+ * 开。给的是它能兑现的：在线使用（落这个产品自己的边缘地址，见
+ * `productEdgeUrl`；同日现场纠错一次——第一版落到了通用的应用中心，
+ * 而这张卡就是为了「本机装不上，去平台上用同一个产品」而存在的，落到广场
+ * 而不是这个产品自己的入口，等于没给出它承诺的那件事），或者订阅已失效时
+ * 去续订。
  */
 function SubscribedElsewhereCard({
   row,
@@ -755,7 +778,7 @@ function SubscribedElsewhereCard({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => window.open(APPCENTER_URL(consoleBase), "_blank", "noopener")}
+              onClick={() => window.open(productEdgeUrl(consoleBase, row.productCode), "_blank", "noopener")}
             >
               在线使用
               <Icon name="external-link" size="xs" />

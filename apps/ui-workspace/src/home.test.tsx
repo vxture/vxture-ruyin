@@ -1243,9 +1243,36 @@ void test("HomePage: 平台上订了、本机没装的智能体照样列出，�
     "_blank",
     "noopener",
   );
+  // 「在线使用」落这个产品自己的边缘地址（owner 2026-09-16 现场纠错：第一版
+  // 落到了通用应用中心）——`<productCode>.<consoleBase 主机名>`，与本机
+  // `product-ui-server.ts` 的 `<productId>.localhost:<port>` 同一个模型。
   const card = screen.getByText("产品范本").closest("article") as HTMLElement;
   await userEvent.setup().click(within(card).getByRole("button", { name: /在线使用/ }));
-  expect(window.open).toHaveBeenCalledWith("https://vxture.com/zh-CN/appcenter", "_blank", "noopener");
+  expect(window.open).toHaveBeenCalledWith("https://vxtpl.vxture.com", "_blank", "noopener");
+});
+
+/** 边缘地址跟着会话的 consoleBase 走，不是写死 vxture.com——staging 会话应该落到 staging 的边缘域名。 */
+void test("HomePage: 边缘地址的主机名跟着会话的 consoleBase 走（staging 不落到生产域名）", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue({ signedIn: true, consoleBase: "https://staging.vxture.com" } as SessionInfo),
+    subscribedProducts: vi.fn().mockResolvedValue([subscription()]),
+  } as Partial<Api>);
+  vi.stubGlobal("open", vi.fn());
+  render(
+    <HomePage
+      api={api}
+      products={[]}
+      workspaces={[]}
+      health={{ ok: true }}
+      onOpen={noop}
+      onCreated={noop}
+      onRefresh={noop}
+      onError={noop}
+    />,
+  );
+  const card = (await screen.findByText("产品范本")).closest("article") as HTMLElement;
+  await userEvent.setup().click(within(card).getByRole("button", { name: /在线使用/ }));
+  expect(window.open).toHaveBeenCalledWith("https://vxtpl.staging.vxture.com", "_blank", "noopener");
 });
 
 void test("HomePage: 本机一个都没装、平台上有订阅 —— 不显示「没有可用的智能体」，而是列出订阅", async () => {
