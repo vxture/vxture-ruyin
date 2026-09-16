@@ -482,6 +482,7 @@ void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 Plat
    */
   let loginCalls = 0;
   let logoutCalls = 0;
+  let orgLogoCalls = 0;
   const platformSession = {
     baseUrl: "https://console.vxture.com",
     status: () => ({ signedIn: true, expiresAt: Date.now() + 3600_000 }),
@@ -500,6 +501,8 @@ void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 Plat
     subscribedProducts: async () => [{ productCode: "vxtpl" }],
     entitlements: async () => [{ productCode: "vxtpl", tier: "starter" }],
     quotaUsage: async () => ({ storage: { used: 1, limit: 2 }, aiCredit: { used: 3, limit: 4 } }),
+    orgLogo: async () =>
+      orgLogoCalls++ === 0 ? { data: Buffer.from([1, 2, 3]), contentType: "image/png" } : null,
     logout: async () => {
       logoutCalls++;
     },
@@ -589,6 +592,14 @@ void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 Plat
       storage: { used: 1, limit: 2 },
       aiCredit: { used: 3, limit: 4 },
     });
+
+    // ⑤ 租户 logo：有字节时原样转发（含 content-type）；没传过时 204，不是 JSON。
+    const withLogo = await fetch(`${rig.base}/platform/org-logo`, { headers: rig.headers });
+    assert.equal(withLogo.status, 200, "/platform/org-logo 没接上");
+    assert.equal(withLogo.headers.get("content-type"), "image/png");
+    assert.deepEqual([...new Uint8Array(await withLogo.arrayBuffer())], [1, 2, 3]);
+    const noLogo = await fetch(`${rig.base}/platform/org-logo`, { headers: rig.headers });
+    assert.equal(noLogo.status, 204);
   } finally {
     closeRig(rig);
   }

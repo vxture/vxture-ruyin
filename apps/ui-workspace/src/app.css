@@ -816,7 +816,7 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
    拥挤）：`ShellPanelRow` 默认给 `h-control-md`（DS 的 Tailwind 工具类，在
    `@layer utilities` 里）。这条规则不带 `@layer`，级联上天然压过它（未分层
    的规则总是赢分层的，与源码先后无关），不用跟 tailwind-merge 打交道、
-   也不需要 `!important`——与 `.app-brand-panel` 那条同一个道理。 */
+   也不需要 `!important`——与 `.brand-info-dialog` 那条同一个道理。 */
 .user-panel-row { height: var(--spacing-control-lg); }
 /* Single line, clear hierarchy: name carries weight+color, the status word
    drops a size (body-sm) and a color step (muted). Name truncates first. */
@@ -1086,12 +1086,22 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
   border-radius: var(--radius-sm, 6px);
 }
 .app-brand-trigger:hover { background: var(--surface-3, rgba(127, 127, 127, 0.12)); }
-/* 面板宽度自己适配（owner 2026-09-16）：`ShellPanelContent` 默认 320px（`w-80`，
-   给用户面板那种一行一行的列表用），但这里装的是「关于」页那份品牌信息——
-   56px 的图形标 + 大字号品牌名，文字大小照旧不缩小，所以给它多一点横向余地。
+/* 软件信息弹窗（owner 2026-09-16 二次改版：popover 换成屏幕居中的 Dialog）：
+   比原来那条 400px 的浮层宽，按 4:3 定形状，不是任由内容把高度撑成随便什么
+   比例。`DialogContent` 自带的 `max-w-panel-md`（512px）比这里想要的窄，
    这条规则不带 `@layer`，在级联上天然压过 DS 工具类的 `@layer utilities`
-   （未分层的规则总是赢分层的，与源码顺序无关），不需要 `!important`。 */
-.app-brand-panel { width: 400px; }
+   （未分层的规则总是赢分层的，与源码顺序无关），不需要 `!important`。
+   内容（`.about-block`）本身比 4:3 的高度矮，用 flex 居中，不贴顶。 */
+.brand-info-dialog {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 672px;
+  max-width: min(672px, 90vw);
+  aspect-ratio: 4 / 3;
+  max-height: 90vh;
+  overflow-y: auto;
+}
 
 /* 当前工作区：常驻，两态都在。原来只有一个光秃秃的名字，「这是什么」写在
    title 里 —— 而 title 要悬停才看得到，等于没说。 */
@@ -1118,6 +1128,55 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* 租户菜单的配额段：三行版式的行本身比 DS 默认的单行 ShellPanelRow 高得多，
+   DS 段内默认的 gap-xs（4px）是给单行邻居留的，两个三行块贴这么近会显得挤
+   （owner 2026-09-16：一贯要求松散布局）。只放开这一段，不动 ShellPanelSection
+   全局默认，其余仍是单行邻居的地方不需要这么松。 */
+.quota-section { gap: var(--spacing-lg); }
+.quota-meter-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--spacing-md);
+  /* DS 的行组件（ShellPanelRow/ShellPanelHeader 等）都带 px-sm 的左右内边距
+     （ROW_INSET）对齐面板边缘；这个手写行漏了这一条，内容比上下相邻的行更
+     宽，明显探出面板左右两边（owner 2026-09-16 现场发现）。 */
+  padding-inline: var(--spacing-sm);
+}
+.quota-meter-row-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.quota-meter-row-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+.quota-meter-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-md);
+}
+.quota-meter-row-label {
+  min-width: 0;
+  flex: 1;
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
+}
+.quota-meter-row-headline {
+  flex-shrink: 0;
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.quota-meter-row-caption {
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+  text-align: right;
 }
 .proj-summary { flex-direction: column; align-items: stretch; gap: var(--spacing-xs); }
 .proj-summary-row {
@@ -1319,11 +1378,30 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-auto, textarea)::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--foreground) 45%, transparent); }
 :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-auto, textarea)::-webkit-scrollbar-corner { background: transparent; }
 
-/* 16. 标题栏：比内容区略深一档 + 一条底线，看得出范围；搜索框压低。 */
+/* 16. 标题栏：必须与壳的原生标题栏叠加层（caption-overlay.ts 的三个窗口按钮，
+   Windows 的 titleBarOverlay）像素级同一个底色，否则两边接缝处颜色对不上。
+   这两边是两套渲染管线，谁都读不到对方——Electron 原生 overlay 只吃字面色，
+   这份 CSS 也没法把值喂给主进程——所以钉的是 caption-overlay.ts 里 DARK.color /
+   LIGHT.color 那两个字面值本身，不经过语义 token 中转。
+
+   owner 2026-09-16 现场纠了两轮：
+   ① 标题栏原来用 --card 调过色，深色下比 overlay（--background 系）亮了小
+      30% 的明度，右上角一块显眼的灰；
+   ② 改成 var(--background) 之后深色对上了，但浅色的 --background 是
+      neutral-100（97% 明度的浅灰），不是 overlay 钉的纯白 #ffffff——token
+      只是在深色那边碰巧接近，靠它兜不住两套管线的一致，所以改回直接抄
+      overlay 的字面值，两个主题各钉一次。
+
+   底线之下用一条同色系细线（不是通用的 --border，那个专为卡片边、分隔线
+   设计，对比度比这里需要的强）分出「标题栏」与「内容区」两块范围——内容区
+   仍然读 --background token，不需要跟着字面值走。 */
 .app-topbar {
-  background: color-mix(in srgb, var(--card) 88%, var(--foreground) 4%);
-  border-bottom: 1px solid var(--border);
+  background: #ffffff;
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
   box-shadow: none;
+}
+.dark .app-topbar {
+  background: #0a0a0a;
 }
 .app-topbar [cmdk-root] > div { height: 28px; min-height: 28px; }
 /* 17. 工作区 + Runtime 紧跟品牌之后，隔一段。 */

@@ -21,9 +21,9 @@ import {
   Icon,
   Popover,
   PopoverTrigger,
+  Progress,
   ShellPanelContent,
   ShellPanelHeader,
-  ShellPanelMeterRow,
   ShellPanelRow,
   ShellPanelSection,
   ShellPanelSectionTitle,
@@ -39,9 +39,14 @@ export interface QuotaLine {
   format: (n: number) => string;
 }
 
-/** 千分位，额度不带小数。 */
+/**
+ * AI 额度专用格式化：千分位、不带小数，带上「点」这个单位（owner
+ * 2026-09-16）——跟 storage 走 fmtBytes 自带单位（GB/MB…）是同一个道理，
+ * 单位跟着各自的格式化函数走，配额行的文案模板（标题行 / 明细行）不用
+ * 关心自己在拼哪一种配额。
+ */
 function fmt(n: number): string {
-  return Math.round(n).toLocaleString("zh-CN");
+  return `${Math.round(n).toLocaleString("zh-CN")} 点`;
 }
 
 /** 字节 → 人读单位。存储是字节口径，直接显示一串数字没人读得懂。 */
@@ -57,15 +62,57 @@ export function fmtBytes(n: number): string {
 }
 
 /**
- * 平台配额用量 → 展示行。两项都是零（没有生效订阅时平台回全零）就是没有配额可看，
- * 回空数组让界面说出来，而不是画两根空进度条。
+ * 平台配额用量 → 展示行。两条都常驻（owner 2026-09-16 改：此前两项都是零就
+ * 整行隐藏，现在哪怕某项当前是 0/0 也照样露出来——「没有配额」本身就是一个
+ * 要让用户看见的事实，不是要藏起来的边界情况；两条名字定死用英文，这两个
+ * 概念本身就是英文术语，硬翻中文反而生造出新词。
  */
 export function quotaLines(usage: QuotaUsage): QuotaLine[] {
-  const lines: QuotaLine[] = [
-    { key: "ai.credit", label: "AI 额度", ...usage.aiCredit, format: fmt },
-    { key: "storage", label: "存储", ...usage.storage, format: fmtBytes },
+  return [
+    { key: "ai.credit", label: "AI Credits", ...usage.aiCredit, format: fmt },
+    { key: "storage", label: "Storage Spaces", ...usage.storage, format: fmtBytes },
   ];
-  return lines.filter((l) => l.limit > 0 || l.used > 0);
+}
+
+/**
+ * 一条配额的三行版式（owner 2026-09-16 改版）：标题行（大字号标签 + 裸的
+ * 用量数字，不带「已用/剩余」这类文字——标题行宽度有限，塞不下）、进度条、
+ * 小字明细（已用 / 总量，文字说明留到这一行）。此前用 DS 的
+ * `ShellPanelMeterRow` 只有两行，「已用 X / Y · 剩余 Z」三个数字全挤在标题行
+ * 右侧一句话里——读起来是一坨，且行距很紧。现在把「概要数字」与「文字明细」
+ * 拆开，图标贯通整行高度，行距也松开一档。
+ */
+function QuotaMeterRow({
+  icon,
+  label,
+  line,
+}: {
+  icon: "database" | "coins";
+  label: string;
+  line: QuotaLine;
+}) {
+  const hasLimit = line.limit > 0;
+  const percent = hasLimit ? Math.max(0, Math.min(100, (line.used / line.limit) * 100)) : 0;
+  const headline = line.format(line.used);
+  // 明细行常驻，哪怕总量是 0（owner 2026-09-16 三次纠正）：行本身已经不再因为
+  // 0/0 就整段藏起来，明细行不该在同一个行里自相矛盾地又藏一次——「总量 0」
+  // 跟「已用 0」一样，都是要让用户看见的事实，不是要吞掉的边界情况。
+  const caption = `已用 ${line.format(line.used)}，总量 ${line.format(line.limit)}`;
+  return (
+    <div className="quota-meter-row">
+      <span className="quota-meter-row-icon" aria-hidden="true">
+        <Icon name={icon} size="sm" />
+      </span>
+      <div className="quota-meter-row-body">
+        <div className="quota-meter-row-head">
+          <span className="quota-meter-row-label">{label}</span>
+          <span className="quota-meter-row-headline">{headline}</span>
+        </div>
+        <Progress value={percent} />
+        <span className="quota-meter-row-caption">{caption}</span>
+      </div>
+    </div>
+  );
 }
 
 export function TenantMenu({ api, session }: { api: Api; session: SessionInfo }) {
@@ -101,6 +148,32 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
     };
   }, [open, api, session.entitlementsConfigured]);
 
+  // 身份卡（ShellPanelHeader）用租户自己的 logo——标题栏那颗触发按钮不用
+  // （owner 2026-09-16：头部保持通用图标，logo 只在弹出面板里）。取不到就是
+  // `null`，落到 avatarFallback（首字）。object URL 只在这一次打开期间存活，
+  // 关闭或换租户就撤，不然是内存泄漏。
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let url: string | null = null;
+    let alive = true;
+    api
+      .orgLogo()
+      .then((blob) => {
+        if (!alive || !blob) return;
+        url = URL.createObjectURL(blob);
+        setLogoUrl(url);
+      })
+      .catch(() => {
+        /* 拿不到就落到首字兜底，不打扰配额那一路的状态机。 */
+      });
+    return () => {
+      alive = false;
+      if (url) URL.revokeObjectURL(url);
+      setLogoUrl(null);
+    };
+  }, [open, api]);
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -111,34 +184,26 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
         </button>
       </PopoverTrigger>
       <ShellPanelContent side="bottom" align="end" sideOffset={8}>
-        {/* 1. 租户 + 工作区 */}
+        {/* 1. 租户 + 工作区。身份卡用租户自己的 logo（owner 2026-09-16）；
+            拿不到就落到首字，不落到通用 icon——那是标题栏那颗触发按钮的事。 */}
         <ShellPanelHeader
-          icon="buildings"
+          {...(logoUrl ? { avatarSrc: logoUrl, avatarAlt: tenantName } : {})}
+          avatarFallback={tenantName.slice(0, 1)}
           title={tenantName}
-          metaRows={[{ key: "ws", icon: "folder-open" as const, content: `工作区：${workspaceName}` }]}
+          metaRows={[{ key: "ws", icon: "folder-open" as const, content: workspaceName }]}
         />
         {/* 2. 配额（只读） */}
-        <ShellPanelSection>
+        <ShellPanelSection className="quota-section">
           <ShellPanelSectionTitle>配额</ShellPanelSectionTitle>
           {quota.status === "loading" && <ShellPanelRow icon="cpu" label="正在读取…" />}
           {quota.status === "unavailable" && <ShellPanelRow icon="cpu" label="配额" value={quota.reason} />}
-          {quota.status === "ok" && quota.lines.length === 0 && (
-            <ShellPanelRow icon="cpu" label="配额" value="当前工作区没有生效的配额" />
-          )}
           {quota.status === "ok" &&
             quota.lines.map((line) => (
-              /* 与平台租户面板同一种读法（进度条是**已用**占配额的比例，文案「已用 / 配额」），
-                 桌面端多写一个「剩余」—— 用户来看的就是还剩多少。 */
-              <ShellPanelMeterRow
+              <QuotaMeterRow
                 key={line.key}
                 icon={line.key === "storage" ? "database" : "coins"}
                 label={line.label}
-                valueLabel={
-                  line.limit > 0
-                    ? `已用 ${line.format(line.used)} / ${line.format(line.limit)} · 剩余 ${line.format(Math.max(0, line.limit - line.used))}`
-                    : `已用 ${line.format(line.used)}`
-                }
-                percent={line.limit > 0 ? Math.max(0, Math.min(100, (line.used / line.limit) * 100)) : 0}
+                line={line}
               />
             ))}
         </ShellPanelSection>

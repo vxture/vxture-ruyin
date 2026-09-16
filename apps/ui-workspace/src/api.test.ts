@@ -794,3 +794,37 @@ void test("fileBytes: 失败时抛 ApiError，带着守护进程的原话 ——
     body: { code: "FILE_NOT_FOUND" },
   });
 });
+
+void test("orgLogo: 带上会话令牌，把响应当字节而不是 JSON", async () => {
+  const blob = new Blob(["fake-png"], { type: "image/png" });
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    blob: () => Promise.resolve(blob),
+  });
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
+  const api = new Api("tok");
+  expect(await api.orgLogo()).toBe(blob);
+  expect(fetchMock).toHaveBeenCalledWith("/platform/org-logo", {
+    headers: { authorization: "Bearer tok" },
+  });
+});
+
+void test("orgLogo: 没传过（204）回 null，不当错误抛", async () => {
+  globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 204 }) as unknown as typeof fetch;
+  const api = new Api("tok");
+  expect(await api.orgLogo()).toBe(null);
+});
+
+void test("orgLogo: 失败时抛 ApiError，带着守护进程的原话", async () => {
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    ok: false,
+    status: 503,
+    json: () => Promise.resolve({ code: "PLATFORM_SESSION_NOT_CONFIGURED", message: "未配置平台会话" }),
+  }) as unknown as typeof fetch;
+  const api = new Api("tok");
+  await expect(api.orgLogo()).rejects.toMatchObject({
+    status: 503,
+    body: { code: "PLATFORM_SESSION_NOT_CONFIGURED" },
+  });
+});

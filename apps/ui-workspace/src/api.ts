@@ -1050,6 +1050,19 @@ export class Api {
     this.call<SubscribedProduct[]>("/platform/subscribed-products");
   /** 本工作区的配额用量，只读展示。 */
   quotaUsage = () => this.call<QuotaUsage>("/platform/quota-usage");
+  /**
+   * 当前租户的自定义 logo；`null` = 没传过（界面自己兜底成首字母/通用图标）。
+   * 不走 `call()`：那条把响应体当 JSON 解析，这里是图片字节。204 是这条路的
+   * 正常状态，不是异常——不当错误抛。
+   */
+  orgLogo = async (): Promise<Blob | null> => {
+    const res = await fetch("/platform/org-logo", {
+      headers: { authorization: `Bearer ${this.token}` },
+    });
+    if (res.status === 204) return null;
+    if (!res.ok) throw new ApiError(res.status, (await res.json()) as ApiError["body"]);
+    return res.blob();
+  };
   /** 能力调用走本机还是云端（ADR-025）：当前档位、档位来源、那句必须带着的说明。 */
   capabilityRouting = () => this.call<CapabilityRouting>("/capabilities/routing");
   /**
