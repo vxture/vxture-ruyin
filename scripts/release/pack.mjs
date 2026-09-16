@@ -110,6 +110,9 @@ if (skillPull) {
   // Python 引导件：uv + CPython + 预取缓存。它自己核 uv 的 sha256，并在最后
   // 用一个空的 UV_TOOL_DIR 断网真起一次 —— 那一跑才是「随包这棵树自己够」的凭据。
   run("node", [join(repoRoot, "scripts", "release", "seed-uv-cache.mjs")], repoRoot);
+  // 随包真 node.exe：node 形态的服务器借它起，避免 ELECTRON_RUN_AS_NODE 重执行
+  // 在 Windows 上弹出空白 cmd 窗口。它自己核 node.exe 的 sha256。
+  run("node", [join(repoRoot, "scripts", "release", "seed-node-runtime.mjs")], repoRoot);
 } else {
   console.log("[pack] skill/tool pull SKIPPED (RUYIN_SKIP_SKILL_PULL=1) - the bundled layers are whatever resources/skills and resources/tools hold");
 }

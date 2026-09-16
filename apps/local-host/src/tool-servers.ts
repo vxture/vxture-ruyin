@@ -257,6 +257,19 @@ export class BundledToolServers {
       if (!existsSync(entry)) return { ok: false, reason: `入口不存在：${entry}` };
       const extra = launch.browserLadder ? this.browserArgs(userEnv) : { ok: true as const, args: [] };
       if (!extra.ok) return extra;
+      // 随包真 node.exe 就用它（owner 2026-09-16）：借 Ruyin.exe 自己 +
+      // ELECTRON_RUN_AS_NODE 跑纯 Node 是能用，但在 Windows 上会弹一个空白
+      // cmd 窗口——Electron 的已知限制，与 spawn 的 windowsHide 无关，`spawn()`
+      // 那边已经开着它了也没用。开发态没有随包这一份（没跑过打包），退回旧路子。
+      const nodeExe = this.nodeExe();
+      if (nodeExe) {
+        return {
+          ok: true,
+          command: nodeExe,
+          args: [entry, ...(launch.args ?? []), ...extra.args],
+          env: { ...userEnv },
+        };
+      }
       return {
         ok: true,
         command: this.options.execPath ?? process.execPath,
@@ -421,6 +434,17 @@ export class BundledToolServers {
     if (!dir) return undefined;
     const home = join(dirname(resolve(dir)), "uv");
     return existsSync(join(home, process.platform === "win32" ? "uv.exe" : "uv")) ? home : undefined;
+  }
+
+  /**
+   * 随包的真 node.exe 在哪（`<resources>/node`，与 `uv` 兄弟）。没有就是这一版
+   * 没装进来（开发态：没跑过 `pack.mjs`）——那时退回借 Ruyin.exe 自己跑的旧路子。
+   */
+  private nodeExe(): string | undefined {
+    const dir = this.options.toolsDir;
+    if (!dir || process.platform !== "win32") return undefined;
+    const exe = join(dirname(resolve(dir)), "node", "node.exe");
+    return existsSync(exe) ? exe : undefined;
   }
 
   /**
