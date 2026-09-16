@@ -259,7 +259,7 @@ export function UserSlot({
             {signedIn && (
               <ShellPanelRow
                 icon="sign-out"
-                label="退出登录"
+                label="退出"
                 danger
                 onClick={() => void doLogout()}
               />

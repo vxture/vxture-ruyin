@@ -20,6 +20,7 @@ function state(over: Partial<UpdateCheckState> = {}): UpdateCheckState {
     busy: false,
     result: null,
     failed: null,
+    manual: false,
     check: vi.fn().mockResolvedValue(undefined),
     dismiss: vi.fn(),
     ...over,

@@ -1151,7 +1151,12 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
 .connector-card { border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-card); overflow: hidden; }
 /* 标题行：图标 + id + 来源标签是「这是什么」，靠左；状态与操作是「现在怎样、
    能做什么」，靠右但留出呼吸空间——不是原来那样贴着彼此、贴着右边缘挤成
-   一串（owner 2026-09-16 第 4 条：「操作和状态信息可以松散一些布局」）。 */
+   一串（owner 2026-09-16 第 4 条：「操作和状态信息可以松散一些布局」）。
+   展开/收起箭头钉死在最右侧（owner 2026-09-16 第二次修正：这是每张卡自己
+   的事，不是整个板块的事）——所以这一行只分两组、不是三组：标题在左，
+   「状态+操作」与「箭头」拼成一组一起靠右，`space-between` 只用在两组
+   之间，箭头才能稳稳落在最右边缘，不会被 `space-between` 拆得离状态徽章
+   忽远忽近。 */
 .connector-card-head {
   display: flex;
   align-items: center;
@@ -1160,6 +1165,23 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
   gap: var(--spacing-md);
   padding: var(--spacing-sm) var(--spacing-md);
 }
+/* 标题行可以点（owner 2026-09-16）：与 `.set-block-head-hit` 同一个手法，
+   `all: unset` 清掉原生 <button> 的默认样式，只在「这张卡有内容可展开」时
+   才会被渲染成 <button>（否则就是一个普通 <span>，点了没反应，因为没有
+   反应可给）。 */
+.connector-card-head-hit {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 0;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+/* 没内容可展开时标题不是按钮，用同样布局的 <span> 占住「左边那一组」——
+   `.connector-card-head` 下必须永远只有两个直接子节点，`space-between`
+   才对得上（否则图标、标题、trailing 三个各自散开，标题会飘到中间）。 */
+.connector-card-head-static { display: flex; align-items: center; gap: var(--spacing-xs); min-width: 0; }
 .connector-card-icon {
   display: inline-flex;
   align-items: center;
@@ -1179,11 +1201,33 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 「状态+操作」与箭头的外层拼盘——箭头永远贴着这一组的最右边，就是这一行
+   的最右边。 */
+.connector-card-trailing { display: inline-flex; align-items: center; gap: var(--spacing-md); flex-shrink: 0; }
 .connector-card-side { display: inline-flex; align-items: center; gap: var(--spacing-md); flex-shrink: 0; }
-/* 展开区：启用（`state === "active"`）就自动展开，停用就跟着收起——不是另一个
-   要手动点开的折叠钮。左右缩进给足（`--space-5xl` = 64px，owner 建议的量），
-   与标题行的图标对不齐也没关系：这一块是「详情」，本来就该退后一步，缩进
-   越大越读得出「这是附属信息」。 */
+/* 箭头按钮：没内容可展开时禁用而不是藏起来（owner 2026-09-16）——藏起来的
+   话每张卡这一列宽度不一致，禁用则始终占位，「这张卡没什么可看」与「这张
+   卡还没读完」一眼能分清。 */
+.connector-card-toggle {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.connector-card-toggle:hover:not(:disabled) { background: var(--surface-3, rgba(127, 127, 127, 0.12)); color: var(--foreground); }
+.connector-card-toggle:disabled { color: var(--content-disabled, var(--muted-foreground)); opacity: 0.4; cursor: default; }
+/* 展开区：默认值跟着「有没有内容可展开」走，之后由用户手动切换（owner
+   2026-09-16 第二次修正：不再是状态锁死的自动展开，箭头说了算）。左右缩进
+   给足（`--space-5xl` = 64px，owner 建议的量），与标题行的图标对不齐也没
+   关系：这一块是「详情」，本来就该退后一步，缩进越大越读得出「这是附属
+   信息」。 */
 .connector-card-tools { padding: var(--space-md) var(--space-5xl); border-top: 1px solid var(--color-border); }
 .connector-card-tools-label { display: block; font-size: var(--body-sm-font-size); font-weight: 600; color: var(--foreground); }
 /* 概要句撑满这一块的宽度（owner 2026-09-16：「必须容器满宽布局」）——`p` 本来
@@ -1554,14 +1598,26 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
 .move-dlg .fact-row:first-child { border-top: none; }
 
 /* ---------- 设置：二级板块（owner 2026-09-04 的统一标题模式）---------- */
-/* 小图标 + 标题 + 说明，内容缩进到标题文字的左缘（图标 24 + gap 8 = 32px）。 */
+/* 小图标 + 标题 + 说明，内容缩进到标题文字的左缘（图标 24 + gap 8 = 32px）。
+   标题行只分两组、不是三个各自散落的 flex item（owner 2026-09-16 第三次
+   修正：与 `.connector-card-head` 同一个手法）——标题在左，「筛选/刷新/
+   折叠箭头」等操作拼成 `.set-block-trailing` 一组一起靠右，`space-between`
+   只用在两组之间。此前标题没有外层包一层，`margin-right: auto` 挂在
+   `.set-block-titles` 上；可折叠板块把标题包进 `.set-block-head-hit`
+   （`all: unset` 的按钮）之后，auto margin 就锁在按钮内部、推不动按钮外面
+   的兄弟节点了——于是操作区看起来「紧跟在标题后面」而不是「贴在最右」。 */
 .set-block { display: flex; flex-direction: column; gap: var(--spacing-sm); }
 .set-block-head {
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--spacing-sm);
   min-width: 0;
 }
+/* 不可折叠板块：标题不是按钮，用一个同样布局的 <span> 占住「左边那一组」，
+   保证 `.set-block-head` 下永远只有两个直接子节点。 */
+.set-block-head-static { display: flex; align-items: flex-start; gap: var(--spacing-sm); min-width: 0; }
 .set-block-icon {
   display: inline-flex;
   align-items: center;
@@ -1573,7 +1629,7 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   color: var(--muted-foreground);
   flex-shrink: 0;
 }
-.set-block-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-right: auto; }
+.set-block-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .set-block-title {
   margin: 0;
   font-size: var(--body-md-font-size);
@@ -1586,6 +1642,8 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   color: var(--muted-foreground);
   max-width: 62em;
 }
+/* 「右边那一组」：筛选/刷新/折叠箭头等操作拼盘，永远贴着标题行最右侧。 */
+.set-block-trailing { display: inline-flex; align-items: center; gap: var(--spacing-md); flex-shrink: 0; }
 /* 标题行右侧可能不止一个东西（筛选 + 刷新按钮；勾选 + 提示 + 检查按钮），
    给它一条 gap，多个控件才不会贴在一起（owner 2026-09-15）。只有一个子项时
    gap 不生效，不影响原来只放一个按钮的那些地方。 */
@@ -1720,12 +1778,13 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   font-weight: 400;
   vertical-align: middle;
 }
-.set-block-toggle { margin-left: var(--spacing-xs); flex: 0 0 auto; }
-/* 箭头版折叠钮（owner 2026-09-16，目前只有连接器管理用）：标题行本身也是
-   一个按钮——点图标、点标题文字都能展开/收起，不必精确点中那个小箭头。
+.set-block-toggle { flex: 0 0 auto; }
+/* 箭头版折叠钮（owner 2026-09-16，全站统一版式）：标题行本身也是一个
+   按钮——点图标、点标题文字都能展开/收起，不必精确点中那个小箭头。
    `all: unset` 清掉原生 <button> 的边框/底色/字体继承问题，再把原来
    `.set-block-head` 直接摆 icon+titles 那两条布局属性搬过来，视觉上跟不可
-   点的版本长得一样。 */
+   点的版本长得一样。间距交给外层 `.set-block-trailing` 的 gap，这里不用再
+   自己加 margin-left。 */
 .set-block-head-hit {
   all: unset;
   display: flex;
