@@ -593,6 +593,10 @@ function openWindow(): void {
     titleBarStyle: "hidden",
     titleBarOverlay: captionOverlay("dark"),
     backgroundColor: "#0a0a0a",
+    // 默认最大化启动（owner 2026-09-16）：先不显示，等首帧就绪再一次性最大化
+    // 并显示——不然会先闪一下 1280x840 那个初始尺寸再跳到最大化，看着像卡了
+    // 一下。1280x840 仍然是最大化之外（比如用户自己取消最大化）的落点尺寸。
+    show: false,
     webPreferences: {
       // The window is a pure web client of the Local API - no Node access,
       // no preload. The contract boundary stays at the HTTP surface.
@@ -600,6 +604,10 @@ function openWindow(): void {
       nodeIntegration: false,
       sandbox: true,
     },
+  });
+  win.once("ready-to-show", () => {
+    win.maximize();
+    win.show();
   });
   // 窗口按钮的颜色跟着页面主题走（owner 2026-09-04）。壳看不见页面，通路是
   // 界面 → 守护进程 → 事件流 → 这里；收到事件后自己去取值（events.ts 的规矩：
