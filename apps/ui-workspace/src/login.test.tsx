@@ -156,7 +156,13 @@ void test("DragStrip: renders in the Electron chrome, not in a plain browser tab
   expect(container.querySelector(".dragstrip.titlebar-electron")).toBeInTheDocument();
 });
 
-void test("LoginScreen: clicking the button calls api.login(), opens the authorize URL, and shows the fallback link", async () => {
+/**
+ * 一个页面，按钮变文案就够（owner 2026-09-16）：此前点了登录之后会另起一段
+ * 「在浏览器中完成登录后自动返回…」提示 + 一条跳转链接，看着像切到了第二套
+ * 内容。改成按钮自己从「登录 Vxture 账号」变成「登录验证中…」，其余（标题、
+ * login-note）原样不动 —— 没有第二块内容冒出来。
+ */
+void test("LoginScreen: clicking the button calls api.login(), opens the authorize URL, and the button itself switches to a verifying label - no second content block appears", async () => {
   const login = vi.fn().mockResolvedValue({ authorizeUrl: "https://accounts.vxture.com/authorize?state=abc" });
   const api = fakeApi({ login });
   render(<SessionGate api={api} />);
@@ -170,8 +176,13 @@ void test("LoginScreen: clicking the button calls api.login(), opens the authori
     "https://accounts.vxture.com/authorize?state=abc",
     "_blank",
   );
-  const fallback = await screen.findByText("未打开？点此继续 ↗");
-  expect(fallback).toHaveAttribute("href", "https://accounts.vxture.com/authorize?state=abc");
+  expect(await screen.findByText("登录验证中…")).toBeInTheDocument();
+  expect(screen.queryByText("登录 Vxture 账号")).not.toBeInTheDocument();
+  // 其余静态文案原样不动。
+  expect(screen.getByText("浏览器中若已登录则会直接登录，安全退出请退出浏览器登录态。")).toBeInTheDocument();
+  // 不再另起一段提示或跳转链接 —— 状态全由按钮自己的文案说完。
+  expect(screen.queryByText(/在浏览器中完成登录后自动返回/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /点此继续/ })).not.toBeInTheDocument();
 });
 
 void test("LoginScreen: polls session() after login and moves to the product once signed in", async () => {
@@ -216,7 +227,7 @@ void test("LoginScreen: clicking 登录 again while a poll is already running re
   vi.useRealTimers();
 });
 
-void test("LoginScreen: gives up polling after 5 minutes rather than polling forever", async () => {
+void test("LoginScreen: gives up polling after 5 minutes rather than polling forever, and the button drops back out of 验证中 so a retry is possible", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const session = vi.fn().mockResolvedValue(signedOut()); // 从不签入
   const api = fakeApi({ session });
@@ -224,6 +235,7 @@ void test("LoginScreen: gives up polling after 5 minutes rather than polling for
   const button = await screen.findByText("登录 Vxture 账号");
   fireEvent.click(button);
   await vi.waitFor(() => expect(api.login).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText("登录验证中…")).toBeInTheDocument();
 
   const callsBeforeCutoff = () => session.mock.calls.length;
   await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 2000);
@@ -232,6 +244,8 @@ void test("LoginScreen: gives up polling after 5 minutes rather than polling for
   // 超时之后不该再新起轮询：再往前推，调用次数不该继续涨。
   await vi.advanceTimersByTimeAsync(10_000);
   expect(callsBeforeCutoff()).toBe(stoppedAt);
+  // 放弃轮询之后按钮得回到能点的状态，不能永远卡在「登录验证中…」。
+  expect(await screen.findByText("登录 Vxture 账号")).toBeInTheDocument();
   vi.useRealTimers();
 });
 
