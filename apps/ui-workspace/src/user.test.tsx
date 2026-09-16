@@ -303,14 +303,20 @@ void test("UserSlot: clicking the settings row calls onOpenSettings", async () =
 });
 
 /**
- * 「用户中心」「配额用量」两行（owner 2026-09-16）：都跟着会话的 consoleBase 走
- * （未登录落到与登录页同一个缺省），不是写死 console.vxture.com——同一套纪律
- * 见 AboutSection 那条「外链基址取自会话的 consoleBase」。
+ * 「用户中心」「配额用量」两行（owner 2026-09-16，同日现场纠错一次）：落在
+ * `consoleAppBase`（console-bff 本体）上，**不是** `consoleBase`（官网深链
+ * 落点，两者是不同的主机）——第一版误用了 consoleBase，两条链接都拼去了
+ * vxture.com。未登录 / daemon 未接通 `PlatformSession` 时没有这个字段，落到
+ * 与 daemon 侧同一个缺省 `https://console.vxture.com`。
  */
-void test("UserSlot: 「用户中心」「配额用量」两行跟着 consoleBase 拼地址", async () => {
+void test("UserSlot: 「用户中心」「配额用量」两行跟着 consoleAppBase 拼地址，不是 consoleBase", async () => {
   const api = fakeApi({
     session: vi.fn().mockResolvedValue(
-      session({ signedIn: true, consoleBase: "https://console.vxture.com" }),
+      session({
+        signedIn: true,
+        consoleBase: "https://vxture.com",
+        consoleAppBase: "https://console.staging.vxture.com",
+      }),
     ),
   });
   render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
@@ -318,11 +324,25 @@ void test("UserSlot: 「用户中心」「配额用量」两行跟着 consoleBas
   expect(await screen.findByText("用户中心")).toBeInTheDocument();
   expect(screen.getByText("用户中心").closest("a")).toHaveAttribute(
     "href",
-    "https://console.vxture.com/profile",
+    "https://console.staging.vxture.com/profile",
   );
   expect(screen.getByText("配额用量").closest("a")).toHaveAttribute(
     "href",
-    "https://console.vxture.com/quotas",
+    "https://console.staging.vxture.com/quotas",
+  );
+});
+
+/** 缺 consoleAppBase 时落到与 daemon 侧一致的缺省，不是空字符串或 consoleBase。 */
+void test("UserSlot: 没有 consoleAppBase 时「用户中心」落到 https://console.vxture.com 缺省", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue(session({ signedIn: true, consoleBase: "https://vxture.com" })),
+  });
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
+  await openPopover();
+  expect(await screen.findByText("用户中心")).toBeInTheDocument();
+  expect(screen.getByText("用户中心").closest("a")).toHaveAttribute(
+    "href",
+    "https://console.vxture.com/profile",
   );
 });
 

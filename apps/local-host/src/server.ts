@@ -1121,6 +1121,12 @@ async function handle(
         ...(status.signedIn ? identity : {}),
         issuer: summary.issuer,
         consoleBase: summary.consoleBase,
+        // console-bff 本体（真正的 console.vxture.com），与上面 consoleBase
+        // 不是同一个主机（owner 2026-09-16 现场纠错）：consoleBase 是「去订阅」
+        // 深链落点，指向官网；这一个才是「用户中心」「配额用量」这类深链
+        // 真正要落的地方。此前界面误拿 consoleBase 拼这两条链接，结果落到了
+        // 官网而不是 console 应用本体。
+        consoleAppBase: deps.platformSession.baseUrl,
         entitlementsConfigured: status.signedIn,
       });
       return;

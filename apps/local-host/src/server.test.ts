@@ -483,6 +483,7 @@ void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 Plat
   let loginCalls = 0;
   let logoutCalls = 0;
   const platformSession = {
+    baseUrl: "https://console.vxture.com",
     status: () => ({ signedIn: true, expiresAt: Date.now() + 3600_000 }),
     signedIn: () => true,
     identity: async () => ({
@@ -528,6 +529,7 @@ void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 Plat
       org?: { name?: string };
       workspace?: { id?: string; name?: string };
       consoleBase: string;
+      consoleAppBase: string;
       entitlementsConfigured: boolean;
     };
     assert.equal(session.signedIn, true);
@@ -542,6 +544,10 @@ void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 Plat
     assert.equal(session.org?.name, "某公司");
     assert.deepEqual(session.workspace, { id: "ws-1", name: "主工作区" });
     assert.equal(session.consoleBase, "https://vxture.com");
+    // consoleBase（官网深链落点）与 consoleAppBase（console-bff 本体）是两个不同
+    // 的主机（owner 2026-09-16 现场纠错）：界面「用户中心」「配额用量」这类深链
+    // 要用后者，此前误用前者，两条链接都拼去了官网。
+    assert.equal(session.consoleAppBase, "https://console.vxture.com");
     assert.equal(session.entitlementsConfigured, true);
 
     // ② /auth/login 回的地址指向 console-bff，且带 surface=native
