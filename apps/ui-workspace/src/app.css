@@ -812,6 +812,12 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
   border: 2px solid var(--background);
 }
 .user-chip-dot.off { background: var(--muted-foreground); }
+/* 面板里的动作行行高调大一档（owner 2026-09-16：加了「配额用量」之后信息
+   拥挤）：`ShellPanelRow` 默认给 `h-control-md`（DS 的 Tailwind 工具类，在
+   `@layer utilities` 里）。这条规则不带 `@layer`，级联上天然压过它（未分层
+   的规则总是赢分层的，与源码先后无关），不用跟 tailwind-merge 打交道、
+   也不需要 `!important`——与 `.app-brand-panel` 那条同一个道理。 */
+.user-panel-row { height: var(--spacing-control-lg); }
 /* Single line, clear hierarchy: name carries weight+color, the status word
    drops a size (body-sm) and a color step (muted). Name truncates first. */
 .user-chip-name {
@@ -1067,6 +1073,25 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
   margin-left: 2px;
   align-self: center;
 }
+/* 字标改成按钮，弹一份软件信息面板（owner 2026-09-16，见 brand-info-trigger.tsx）：
+   视觉上要跟原来那个 `<a>` 一模一样，所以不用 `all: unset`（那样会把 `.vx-brand-lockup`
+   的 `display: inline-flex` 也一并清掉），照 `.app-runtime-trigger` 的手法，只清掉
+   原生 `<button>` 会带出来的边框/底色/字体差异。 */
+.app-brand-trigger {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  border-radius: var(--radius-sm, 6px);
+}
+.app-brand-trigger:hover { background: var(--surface-3, rgba(127, 127, 127, 0.12)); }
+/* 面板宽度自己适配（owner 2026-09-16）：`ShellPanelContent` 默认 320px（`w-80`，
+   给用户面板那种一行一行的列表用），但这里装的是「关于」页那份品牌信息——
+   56px 的图形标 + 大字号品牌名，文字大小照旧不缩小，所以给它多一点横向余地。
+   这条规则不带 `@layer`，在级联上天然压过 DS 工具类的 `@layer utilities`
+   （未分层的规则总是赢分层的，与源码顺序无关），不需要 `!important`。 */
+.app-brand-panel { width: 400px; }
 
 /* 当前工作区：常驻，两态都在。原来只有一个光秃秃的名字，「这是什么」写在
    title 里 —— 而 title 要悬停才看得到，等于没说。 */

@@ -210,18 +210,7 @@ export function UserSlot({
                 {signedIn ? "已登录" : "需重新登录"}
               </StatusBadge>
             }
-            metaRows={[
-              { key: "line", content: subLine },
-              ...(signedIn && session?.workspace?.name
-                ? [
-                    {
-                      key: "ws",
-                      icon: "buildings" as const,
-                      content: session.workspace.name,
-                    },
-                  ]
-                : []),
-            ]}
+            metaRows={[{ key: "line", content: subLine }]}
           />
           {!signedIn && (
             <ShellPanelSection>
@@ -249,15 +238,25 @@ export function UserSlot({
           )}
           <ShellPanelSection>
             <ShellPanelRow
-              icon="cloud"
-              label="账户中心"
-              href={session?.consoleBase ?? "https://vxture.com"}
+              className="user-panel-row"
+              icon="user-circle"
+              label="用户中心"
+              href={`${session?.consoleBase ?? "https://vxture.com"}/profile`}
               newTab
               trailingIcon="external-link"
             />
-            <ShellPanelRow icon="settings" label="设置" onClick={onOpenSettings} />
+            <ShellPanelRow
+              className="user-panel-row"
+              icon="gauge"
+              label="配额用量"
+              href={`${session?.consoleBase ?? "https://vxture.com"}/quotas`}
+              newTab
+              trailingIcon="external-link"
+            />
+            <ShellPanelRow className="user-panel-row" icon="settings" label="设置" onClick={onOpenSettings} />
             {signedIn && (
               <ShellPanelRow
+                className="user-panel-row"
                 icon="sign-out"
                 label="退出"
                 danger

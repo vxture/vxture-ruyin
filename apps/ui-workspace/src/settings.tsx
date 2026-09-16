@@ -74,7 +74,7 @@ import { NoticeBar } from "./notice-bar";
 import { groupCapabilities } from "./capability-groups";
 import { useHostChrome } from "./host-chrome";
 
-import { ThirdPartyNotices } from "./third-party-notices";
+import { BrandInfoBlock } from "./brand-info";
 import { UpdateNotice, type UpdateCheckState } from "./update-check";
 const UI_VERSION = "0.2.0";
 
@@ -1375,24 +1375,6 @@ function UpdatesSection({
 /* ---------------- 关于 ---------------- */
 
 /**
- * 关于页要链哪几页 —— **逐条实测过在不在**（2026-09-10，跟到语言前缀跳转之后）。
- *
- * 在的：`privacy` `terms` `cookies` `refund`（200）。
- * 不在的：`dpa` `security` `subprocessors` `open-source` `acceptable-use` `licenses`
- * 全是 404 —— 所以这里一条都不写。**一个点开是 404 的法律链接，比没有这个链接
- * 糟得多**：用户会以为自己没找到，而不是它不存在。
- *
- * **`cookies` 在，但故意不链。** 那份《Cookie 使用政策》讲的是网站的必要 / 偏好 /
- * 分析 / 第三方 Cookie；桌面应用不设分析 Cookie、也没有第三方 Cookie。链过去等于
- * 替产品宣称了一件不成立的事。
- */
-const LEGAL_LINKS: Array<{ path: string; label: string }> = [
-  { path: "/legal/privacy", label: "隐私政策" },
-  { path: "/legal/terms", label: "服务条款" },
-  { path: "/legal/refund", label: "退款政策" },
-];
-
-/**
  * 关于页：**两块**（owner 2026-09-16 由三块收回两块）。
  *
  * 1. `.about-main` —— 「关于」：品牌 + 条款 + 三方许可，**自动布满**剩下的高度。
@@ -1425,9 +1407,6 @@ function AboutSection({
   session: SessionInfo | null;
   api: Api;
 }) {
-  // 未登录时也要能看条款 —— 落到与登录页同一个缺省，不是空链接。
-  const consoleBase = session?.consoleBase || "https://vxture.com";
-
   // 本机固件信息：懒加载（只在关于页问一次），拿不到就如实说「不可用」而不是
   // 空着——守护进程没接这一路是正常状态（旧版本、或装配没配），不是错误。
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
@@ -1457,48 +1436,7 @@ function AboutSection({
             没有边界，读起来像浮在背景里（owner 2026-09-10 报的）。上一轮重构版式
             时把它弄丢了。 */}
         <div className="card about-card">
-          <div className="about-block">
-            {/* 图形标 + 品牌两行，左对齐、品牌色（owner 2026-09-15）。图形标复用
-                登录页那一份（/logo.svg），不是这一页专门画一份 —— 同一个产品只有
-                一个图形标。 */}
-            <div className="about-brand">
-              <img className="about-mark" src="/logo.svg" alt="" aria-hidden />
-              <div className="about-brand-text">
-                <p className="brand-name">RUYIN</p>
-                <p className="brand-tag">Intelligent Workbench</p>
-              </div>
-            </div>
-            <p className="about-desc text-body-md text-muted-foreground">
-              Vxture AI 原生智能体的本地智能工作环境
-            </p>
-            <div className="about-runtime mono text-muted-foreground">
-              Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
-              {system?.arch ?? ""}
-            </div>
-            <p className="about-copyright text-body-sm text-muted-foreground">
-              © 2026 Vxture · 保留所有权利
-            </p>
-            {/* 三条条款做成按钮式（owner 2026-09-10），但**仍然是 `<a>`**：真链接才能
-                中键新开、右键复制地址；用按钮 + onClick 去 window.open 会把这两样
-                都弄丢，而它看起来一模一样。「三方许可」与它们同一行、同一个版式
-                （owner 2026-09-15）——它底层是个 `<button>`（就地展开一份清单，不是
-                去别处），所以留着 `.about-third-party` 自己的类，只是外观对齐。 */}
-            <div className="about-legal">
-              {LEGAL_LINKS.map((l) => (
-                <a
-                  key={l.path}
-                  className="about-legal-btn"
-                  href={`${consoleBase}${l.path}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {l.label}
-                  <Icon name="external-link" size="xs" />
-                </a>
-              ))}
-              <ThirdPartyNotices />
-            </div>
-          </div>
+          <BrandInfoBlock system={system} session={session} />
         </div>
       </div>
 

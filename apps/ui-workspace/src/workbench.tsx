@@ -30,7 +30,6 @@ import {
 } from "react";
 import {
   Icon,
-  ShellBrand,
   ShellHeader,
   ShellIconButton,
   ShellPageContainer,
@@ -40,6 +39,7 @@ import {
   type ShellSearchGroup,
 } from "@vxture/design-system";
 import { Api, type ProductInfo, type ProjectMeta, type SessionInfo } from "./api";
+import { BrandInfoTrigger } from "./brand-info-trigger";
 import { TenantMenu } from "./tenant-menu";
 import { PROJECT_TABS, type RuntimeTabId, type TabId } from "./workspace-tabs";
 import { declaresUi, useProductSurface } from "./product-surface-info";
@@ -539,15 +539,10 @@ export function Workbench({
           ) : (
             /* 品牌 = 产品 = RUYIN（大写），标语 Intelligent Workbench（owner 2026-09-03 定）。
                字标只写 RUYIN：标记已经在左边了，再写一个中文名是同一个身份说两遍，
-               而标题栏的宽度要留给用户正在做的事。 */
-            <ShellBrand
-              label="RUYIN"
-              tag="Intelligent Workbench"
-              href="#home"
-              logoSrc="/logo.svg"
-              logoAlt="RUYIN"
-              className="app-brand cursor-pointer"
-            />
+               而标题栏的宽度要留给用户正在做的事。
+               点它弹一份软件信息面板（owner 2026-09-16）：这个态本来就在首页，
+               `href="#home"` 那次点击原本是个空转——见 brand-info-trigger.tsx。 */
+            <BrandInfoTrigger api={api} session={session} />
           )}
           {/* Runtime 紧跟在品牌之后（owner 2026-09-04 定），与品牌隔一段；字号与标语一致。
               2026-09-11 起可以点开：运行环境那三行从用户面板挪到这里（runtime-menu.tsx）。 */}
@@ -564,17 +559,24 @@ export function Workbench({
           {/* 当前工作区常驻。**此前它一个字都没有出现在项目面板上**，而项目、
               订阅、权益、数据边界全按工作区划分，跨工作区访问会被服务端拒绝
               —— 用户看着屏幕却不知道自己在哪个工作区，那句拒绝就无从理解。 */}
-          {/* 右侧一簇的顺序（2026-09-04 定）：
-                ① 租户 / 工作区（上下文，下拉看详情）
-                ② 未决确认（可操作、会变红）
-                ③ 设置（全局入口，固定在最右）
+          {/* 右侧一簇的顺序（2026-09-04 定三元，2026-09-16 加官网入口成四元）：
+                ① 官网（ruyin.work，外链，固定最靠前）
+                ② 租户 / 工作区（上下文，下拉看详情）
+                ③ 未决确认（可操作、会变红）
+                ④ 设置（全局入口，固定在最右）
               Runtime 在左侧品牌之后。
               读的东西在左，动的东西在右；越常按的越靠外侧，手停下的位置就是
               最右。通知紧挨设置，是各家桌面应用的惯例（VS Code / GitHub 皆如此）。 */}
           {/* 租户 / 工作区菜单在右侧（owner 2026-09-04 定）：租户 + 工作区、只读 AI 配额、
               租户管理链接（tenant-menu.tsx）。 */}
-          {/* 搜索在右侧一簇的**最左边**：9-04 定的顺序（租户 → 未决 → 设置固定最右）不动。 */}
+          {/* 搜索在右侧一簇的**最左边**：9-04 定的顺序（租户 → 未决 → 设置固定最右）不动，
+              官网入口再往前插一个（owner 2026-09-16），搜索仍是最左。 */}
           <HeaderSearch query={query} onQueryChange={setQuery} groups={searchGroups} />
+          <ShellIconButton
+            icon="home"
+            label="官网 · ruyin.work"
+            onClick={() => window.open("https://ruyin.work", "_blank", "noopener")}
+          />
           {session && workspaceName && (
             <TenantMenu api={api} session={session} />
           )}

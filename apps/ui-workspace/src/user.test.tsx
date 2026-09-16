@@ -134,13 +134,18 @@ void test("UserSlot: a session() rejection leaves the slot signed-out rather tha
 
 // --- subscriptionLine(): every branch --------------------------------------
 
-void test("UserSlot: shows the active workspace name when signed in with one", async () => {
+/**
+ * 工作区名**不在这一格显示**（owner 2026-09-16：移除，标题栏的租户菜单
+ * 已经有这个信息了——两处各显示一遍是同一份事实各自漂的副本）。
+ */
+void test("UserSlot: 不显示工作区名（标题栏租户信息区已经有了）", async () => {
   const api = fakeApi({
     session: vi.fn().mockResolvedValue(session({ signedIn: true, workspace: { name: "某工作区" } })),
   });
   render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
   await openPopover();
-  expect(await screen.findByText("某工作区")).toBeInTheDocument();
+  await screen.findByText("设置");
+  expect(screen.queryByText("某工作区")).not.toBeInTheDocument();
 });
 
 // 「运行环境 · 已就绪」「数据加密 · 开发态」两条原本在这里；那三行环境事实 2026-09-11
@@ -295,6 +300,30 @@ void test("UserSlot: clicking the settings row calls onOpenSettings", async () =
   const user = userEvent.setup();
   await user.click(await screen.findByText("设置"));
   expect(onOpenSettings).toHaveBeenCalledTimes(1);
+});
+
+/**
+ * 「用户中心」「配额用量」两行（owner 2026-09-16）：都跟着会话的 consoleBase 走
+ * （未登录落到与登录页同一个缺省），不是写死 console.vxture.com——同一套纪律
+ * 见 AboutSection 那条「外链基址取自会话的 consoleBase」。
+ */
+void test("UserSlot: 「用户中心」「配额用量」两行跟着 consoleBase 拼地址", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue(
+      session({ signedIn: true, consoleBase: "https://console.vxture.com" }),
+    ),
+  });
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
+  await openPopover();
+  expect(await screen.findByText("用户中心")).toBeInTheDocument();
+  expect(screen.getByText("用户中心").closest("a")).toHaveAttribute(
+    "href",
+    "https://console.vxture.com/profile",
+  );
+  expect(screen.getByText("配额用量").closest("a")).toHaveAttribute(
+    "href",
+    "https://console.vxture.com/quotas",
+  );
 });
 
 void test("UserSlot: collapsed hides the name/sub text but keeps the accessible label", async () => {
