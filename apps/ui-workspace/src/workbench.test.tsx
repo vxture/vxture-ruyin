@@ -191,6 +191,64 @@ void test("Workbench: starts on the home view, showing the brand and the home st
   expect(screen.queryByTestId("settings-stub")).not.toBeInTheDocument();
 });
 
+/**
+ * 字标点了弹一份软件信息面板（owner 2026-09-16）：首页态点它原本是去 `#home`
+ * 的空转——现在换成有用的东西。内容与「关于」页的品牌块一致（品牌/版本/条款/
+ * 三方许可），**不含本机信息**：那是「关于」页自己「本机配置」板块的事。
+ */
+void test("Workbench: 点 RUYIN 字标弹出软件信息面板，只讲本软件的事，不含本机信息", async () => {
+  const { Workbench } = await import("./workbench");
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue({
+      version: "0.2.0",
+      platform: "win32",
+      arch: "x64",
+      dataDir: "(test)",
+      productsDir: "(test)",
+      keyProtection: "dpapi",
+      capabilitySurface: "configured",
+      codeSigning: "unpackaged",
+      startedAt: "2026-09-16T00:00:00Z",
+    }),
+  });
+  render(<Workbench api={api} onSignedOut={() => {}} />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "RUYIN" }));
+
+  expect(await screen.findByText("Vxture AI 原生智能体的本地智能工作环境")).toBeInTheDocument();
+  // 标题栏自己的 Runtime 徽章也写着「Runtime 0.2.0」——scope 到这个面板自己的
+  // `.about-runtime` 上，不跟那一个撞。
+  expect(document.querySelector(".about-runtime")?.textContent).toContain("Runtime 0.2.0 · win32-x64");
+  expect(screen.getByText(/保留所有权利/)).toBeInTheDocument();
+  expect(screen.getByText("隐私政策").closest("a")).toHaveAttribute(
+    "href",
+    "https://vxture.com/legal/privacy",
+  );
+  expect(screen.getByText("三方许可")).toBeInTheDocument();
+  // 本机信息（处理器/内存/机器 ID……）不在这里——那是「关于」页自己的板块。
+  expect(screen.queryByText("本机配置")).not.toBeInTheDocument();
+  expect(screen.queryByText(/处理器/)).not.toBeInTheDocument();
+});
+
+/**
+ * 官网入口（owner 2026-09-16）：右侧操作组原本是三元（租户 / 未决 / 设置），
+ * 加了一个房子按钮变四元，排在最前——搜索仍在这一簇的最左边，不受影响。
+ */
+void test("Workbench: 标题栏右侧四元操作组第一个是官网入口，点开在新窗口打开 ruyin.work", async () => {
+  vi.stubGlobal("open", vi.fn());
+  const { Workbench } = await import("./workbench");
+  render(<Workbench api={fakeApi()} onSignedOut={() => {}} />);
+  const trailing = document.querySelector(".app-header-trailing") as HTMLElement;
+  const home = within(trailing).getByRole("button", { name: "官网 · ruyin.work" });
+  const settings = within(trailing).getByRole("button", { name: "设置" });
+  const after = (a: Element, b: Element) =>
+    (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  expect(after(home, settings)).toBe(true);
+
+  await userEvent.setup().click(home);
+  expect(window.open).toHaveBeenCalledWith("https://ruyin.work", "_blank", "noopener");
+});
+
 void test("Workbench: a refreshSidebar failure surfaces as an error box, not a silent blank sidebar", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi({ products: vi.fn().mockRejectedValue(new Error("守护进程未响应")) });
@@ -664,7 +722,9 @@ void test("Header workspace control: icon + name only (no 工作区 label); open
   const trailing = document.querySelector(".app-header-trailing") as HTMLElement;
   expect(trailing.contains(trigger)).toBe(true);
   const settings = within(trailing).getByRole("button", { name: "设置" });
-  expect(after(screen.getByRole("link", { name: "RUYIN" }), runtime)).toBe(true);
+  // RUYIN 字标底层从 `<a>` 换成了 `<button>`（owner 2026-09-16：点它弹软件
+  // 信息面板，不再是导航链接——见 brand-info-trigger.tsx）。
+  expect(after(screen.getByRole("button", { name: "RUYIN" }), runtime)).toBe(true);
   expect(after(runtime, trigger)).toBe(true);
   expect(after(trigger, settings)).toBe(true);
 });
