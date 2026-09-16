@@ -611,43 +611,52 @@ void test("Settings/连接器: lists installed connectors with live health, and 
 });
 
 /**
- * 展开/收起跟着启用状态走（owner 2026-09-16）：不是另一个要手动点开的折叠钮，
- * 是「启用 = 下面的工具清单自动展开，停用/暂存就收起」。即便暂存的那条已经
- * 带着上一次测通时留下的工具名，只要没启用就不该展开——展开的是「现在能拿到
- * 什么」，不是「历史上问到过什么」。
+ * 展开/收起是每张卡自己的事，不是整个板块的事（owner 2026-09-16 第二次
+ * 修正——上一版把它错放到了「连接器管理」板块本身，收起一整个板块没有
+ * 意义，那不是 owner 说的「板块」）。默认值跟着「有没有工具可展开」走，
+ * 之后用户可以用箭头手动切换；点卡片的标题行（不只是箭头）也能触发。
  */
-void test("Settings/连接器: 展开跟着启用状态走——暂存的即便带着工具名也不展开，启用的才展开", async () => {
+void test("Settings/连接器: 启用且有工具的卡默认展开，点箭头或点卡片标题行都能手动收起再展开", async () => {
+  const api = fakeApi({ connectors: vi.fn().mockResolvedValue({ items: [crmView] }) });
+  renderRouted("connectors", api);
+  await screen.findByText("crm");
+  expect(screen.getByText("工具清单")).toBeInTheDocument();
+  const toggle = screen.getByRole("button", { name: "收起" });
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(toggle).toBeEnabled();
+
+  // 点卡片标题行（连接器 id 所在那一行）也能收起，不必精确点中箭头。
+  await userEvent.click(screen.getByText("crm"));
+  expect(screen.queryByText("工具清单")).not.toBeInTheDocument();
+  const reopened = screen.getByRole("button", { name: "展开" });
+  expect(reopened).toHaveAttribute("aria-expanded", "false");
+
+  await userEvent.click(reopened);
+  expect(await screen.findByText("工具清单")).toBeInTheDocument();
+});
+
+/**
+ * 没有内容可展开的卡（暂存的、或启用了但一个工具都没暴露的），箭头直接
+ * 禁用——给一个点开什么都没有的箭头，比不给箭头更糟（owner 2026-09-16）。
+ * 即便暂存的那条已经带着上一次测通时留下的工具名，只要没启用就不该展开
+ * ——展开的是「现在能拿到什么」，不是「历史上问到过什么」。
+ */
+void test("Settings/连接器: 暂存的卡（即便带着工具名）默认收起、箭头禁用；启用了但没工具的也一样", async () => {
   const api = fakeApi({
     connectors: vi.fn().mockResolvedValue({
-      items: [{ ...crmView, id: "stashed-with-tools", state: "stashed", tools: ["leftover_tool"] }],
+      items: [
+        { ...crmView, id: "stashed-with-tools", state: "stashed", tools: ["leftover_tool"] },
+        { ...crmView, id: "erp", tools: [] },
+      ],
     }),
   });
   renderRouted("connectors", api);
   await screen.findByText("stashed-with-tools");
   expect(screen.queryByText("工具清单")).not.toBeInTheDocument();
   expect(screen.queryByText("leftover_tool")).not.toBeInTheDocument();
-});
-
-/**
- * 「连接器管理」板块本身可以收起（owner 2026-09-16）：箭头按钮在标题行最
- * 右侧，点标题行（不只是那个小箭头）也能触发——不必精确点中箭头。这与
- * 「技能」「工具」两个大类仍然用的文字按钮「收起/展开」是两套版式，互不
- * 影响（那两处的用例照旧钉着文字按钮）。
- */
-void test("Settings/连接器: 「连接器管理」板块可以收起——点标题行或点箭头都行", async () => {
-  const api = fakeApi({ connectors: vi.fn().mockResolvedValue({ items: [crmView] }) });
-  renderRouted("connectors", api);
-  await screen.findByText("crm");
-  const toggle = screen.getByRole("button", { name: "收起" });
-  expect(toggle).toHaveAttribute("aria-expanded", "true");
-
-  await userEvent.click(screen.getByRole("heading", { name: /连接器管理/ }));
-  expect(screen.queryByText("crm")).not.toBeInTheDocument();
-  const reopened = screen.getByRole("button", { name: "展开" });
-  expect(reopened).toHaveAttribute("aria-expanded", "false");
-
-  await userEvent.click(reopened);
-  expect(await screen.findByText("crm")).toBeInTheDocument();
+  for (const toggle of screen.getAllByRole("button", { name: "展开" })) {
+    expect(toggle).toBeDisabled();
+  }
 });
 
 void test("Settings/连接器: 用户自己加的连接器标「自定义」，不直接显示 lan / private 这种内部分类值", async () => {

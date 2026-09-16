@@ -156,7 +156,6 @@ function SettingsBlock({
   collapsible = false,
   defaultOpen = true,
   count,
-  chevronToggle = false,
   children,
 }: {
   icon: React.ComponentProps<typeof Icon>["name"];
@@ -167,18 +166,16 @@ function SettingsBlock({
   /**
    * 可收起（owner 2026-09-07）。**默认关着这个能力**：绝大多数板块只有三五行，
    * 给它们一个折叠钮等于多一个没有意义的状态。只有内容长到会把别的板块顶出
-   * 屏幕的（能力平台的两大类）才打开它。
+   * 屏幕的（能力平台的两大类）才打开它。折叠钮是箭头图标 + 点标题行也能触发
+   * （owner 2026-09-16：全站只留一套折叠版式，不分「文字按钮」「箭头图标」
+   * 两套——之前给连接器管理单独开的 `chevronToggle` 开关已经收掉，这是唯一
+   * 的样子）。可访问名仍是「收起 / 展开」（`aria-label`），只是不再拿这两个
+   * 字当可见文案。
    */
   collapsible?: boolean;
   defaultOpen?: boolean;
   /** 收起时仍然看得见的条数 —— 折叠不该把「这里有多少东西」一起藏掉。 */
   count?: number;
-  /**
-   * 折叠钮换成箭头图标、点标题行也能触发（owner 2026-09-16）：目前只有
-   * 连接器管理要这个版式；技能 / 工具 / Runos 清单继续用文字按钮「收起 /
-   * 展开」，不引入两套视觉又要迁移那三处已有用例。
-   */
-  chevronToggle?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -201,7 +198,7 @@ function SettingsBlock({
   return (
     <section className="card set-block">
       <header className="set-block-head">
-        {collapsible && chevronToggle ? (
+        {collapsible ? (
           <button type="button" className="set-block-head-hit" aria-expanded={open} onClick={toggle}>
             {titleContent}
           </button>
@@ -209,28 +206,17 @@ function SettingsBlock({
           titleContent
         )}
         {aside && <span className="set-block-aside">{aside}</span>}
-        {collapsible &&
-          (chevronToggle ? (
-            <button
-              type="button"
-              className="set-block-toggle set-block-toggle--chevron"
-              aria-expanded={open}
-              aria-label={open ? "收起" : "展开"}
-              onClick={toggle}
-            >
-              <Icon name={open ? "chevron-up" : "chevron-down"} size="sm" />
-            </button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-expanded={open}
-              onClick={toggle}
-              className="set-block-toggle"
-            >
-              {open ? "收起" : "展开"}
-            </Button>
-          ))}
+        {collapsible && (
+          <button
+            type="button"
+            className="set-block-toggle set-block-toggle--chevron"
+            aria-expanded={open}
+            aria-label={open ? "收起" : "展开"}
+            onClick={toggle}
+          >
+            <Icon name={open ? "chevron-up" : "chevron-down"} size="sm" />
+          </button>
+        )}
       </header>
       {(!collapsible || open) && body}
     </section>
@@ -670,8 +656,6 @@ function ConnectorsSection({ api }: { api: Api }) {
       icon="plugs-connected"
       title="连接器管理"
       desc="来源管理：添加、测试、授权本机 MCP 连接器（局域网 / 私有系统）"
-      collapsible
-      chevronToggle
       aside={
         unavailable ? undefined : (
           // 走地址，不是换状态：添加页有自己的地址，返回是真的返回（第 5 条）。
@@ -692,89 +676,142 @@ function ConnectorsSection({ api }: { api: Api }) {
         /* 每个连接器一张卡（owner 2026-09-16，原来共用「一行就是一行」的
            `.row-list`）：启用后要展开一段工具清单，塞进那个给「一条授权 /
            一条绑定」用的窄行里，启用的那一条把其它列全挤没了——这不是同一类
-           内容，改用连接器专属的卡片版式，不动 `.row-list` 影响到别处。 */
+           内容，改用连接器专属的卡片版式，不动 `.row-list` 影响到别处。展开/
+           收起是每张卡自己的事（owner 2026-09-16 纠正：上一版把它错放到了
+           整个板块上——收起一整个板块没有意义，那不是这里说的「板块」）。 */
         <ul className="connector-list" aria-label="已安装的连接器">
-          {items.map((c) => {
-            const running = c.state === "active";
-            return (
-              <li
-                key={c.id}
-                className={`connector-card${running ? " connector-card--running" : ""}`}
-              >
-                <div className="connector-card-head">
-                  <span className="connector-card-icon" aria-hidden>
-                    <Icon name="plugs-connected" size="md" />
-                  </span>
-                  <span className="connector-card-title">
-                    <code
-                      className="connector-card-id"
-                      title={c.transport === "streamable_http" ? c.url : `${c.command} ${c.args.join(" ")}`}
-                    >
-                      {c.id}
-                    </code>
-                    {/* 「系统预置」而不是「预置」（owner 2026-09-16）：这个标签是
-                        用户唯一能看到「为什么这张卡没有删除按钮」的地方——预置的
-                        随安装包来，后端硬性拒绝卸载（ConnectorBundledError），只能
-                        停用。用户自己加的标「自定义」，不直接显示 lan / private
-                        这种内部分类值——那不是给用户读的词。 */}
-                    <span className="row-tag">{c.source === "bundled" ? "系统预置" : "自定义"}</span>
-                  </span>
-                  <span className="connector-card-side">
-                    {/* 三种状态各说各的：暂存 ≠ 装了但没跑起来。前者是用户当时的选择，
-                        后者是这一刻的故障 —— 混成一句话，用户不知道该改配置还是该点启用。 */}
-                    {c.state === "stashed" ? (
-                      <StatusBadge tone="neutral">已暂存</StatusBadge>
-                    ) : (
-                      <StatusBadge tone={c.health.ok ? "success" : "warning"}>
-                        {c.health.ok
-                          ? "运行中"
-                          : `未运行${c.health.detail ? "：" + c.health.detail : ""}`}
-                      </StatusBadge>
-                    )}
-                    {c.state === "stashed" && (
-                      <Button variant="outline" size="sm" onClick={() => void enable(c.id)}>
-                        启用
-                      </Button>
-                    )}
-                    {/* 预置的随安装包来，卸不掉，只能停用；用户装的才有「卸载」。 */}
-                    {c.source === "bundled" ? (
-                      c.state === "active" && (
-                        <Button variant="ghost" size="sm" onClick={() => void stop(c.id)}>
-                          停用
-                        </Button>
-                      )
-                    ) : (
-                      <Button variant="ghost" size="sm" onClick={() => void remove(c.id)}>
-                        卸载
-                      </Button>
-                    )}
-                  </span>
-                </div>
-                {/* 启用 = 下面这块自动展开，停用就收起（owner 2026-09-16）——不是
-                    另一个手动点开的折叠钮，状态自己说了算。工具清单从一段逗号
-                    连着的长文字改成一排排整齐的小方块，空间有限时也不会挤成
-                    一坨看不清哪个是哪个。 */}
-                {running && c.tools.length > 0 && (
-                  <div className="connector-card-tools">
-                    <span className="connector-card-tools-label">工具清单</span>
-                    {/* 概要说清「这份清单是干嘛的」，不是重复标题（owner 2026-09-16：
-                        「暴露的工具」不够人话）。≤30 字，独占一行、撑满容器宽度。 */}
-                    <p className="connector-card-tools-caption">契约里声明了同名工具才能调用</p>
-                    <div className="connector-card-tools-grid">
-                      {c.tools.map((t) => (
-                        <code key={t} className="connector-tool-chip">
-                          {t}
-                        </code>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </li>
-            );
-          })}
+          {items.map((c) => (
+            <ConnectorCard
+              key={c.id}
+              c={c}
+              onEnable={() => void enable(c.id)}
+              onStop={() => void stop(c.id)}
+              onRemove={() => void remove(c.id)}
+            />
+          ))}
         </ul>
       )}
     </SettingsBlock>
+  );
+}
+
+/**
+ * 一张连接器卡，展开/收起是它自己的状态（owner 2026-09-16）。默认值跟着
+ * 「有没有东西可展开」走——启用且暴露了工具，默认展开；否则默认收起——但
+ * 那之后用户可以随时用箭头手动切换，不再是状态锁死的。
+ *
+ * 箭头只在**有内容可展开时**才可点（`expandable`）：暂存的、或启用了但一个
+ * 工具都没暴露的，箭头直接禁用——给一个点开什么都没有的箭头，比不给箭头
+ * 更糟。
+ */
+function ConnectorCard({
+  c,
+  onEnable,
+  onStop,
+  onRemove,
+}: {
+  c: ConnectorView;
+  onEnable: () => void;
+  onStop: () => void;
+  onRemove: () => void;
+}) {
+  const running = c.state === "active";
+  const expandable = running && c.tools.length > 0;
+  const [open, setOpen] = useState(expandable);
+  const toggle = () => setOpen((v) => !v);
+
+  const head = (
+    <>
+      <span className="connector-card-icon" aria-hidden>
+        <Icon name="plugs-connected" size="md" />
+      </span>
+      <span className="connector-card-title">
+        <code
+          className="connector-card-id"
+          title={c.transport === "streamable_http" ? c.url : `${c.command} ${c.args.join(" ")}`}
+        >
+          {c.id}
+        </code>
+        {/* 「系统预置」而不是「预置」（owner 2026-09-16）：这个标签是用户唯一
+            能看到「为什么这张卡没有删除按钮」的地方——预置的随安装包来，
+            后端硬性拒绝卸载（ConnectorBundledError），只能停用。用户自己加的
+            标「自定义」，不直接显示 lan / private 这种内部分类值——那不是
+            给用户读的词。 */}
+        <span className="row-tag">{c.source === "bundled" ? "系统预置" : "自定义"}</span>
+      </span>
+    </>
+  );
+
+  return (
+    <li className={`connector-card${running ? " connector-card--running" : ""}`}>
+      <div className="connector-card-head">
+        {expandable ? (
+          <button type="button" className="connector-card-head-hit" aria-expanded={open} onClick={toggle}>
+            {head}
+          </button>
+        ) : (
+          head
+        )}
+        <span className="connector-card-trailing">
+          <span className="connector-card-side">
+            {/* 三种状态各说各的：暂存 ≠ 装了但没跑起来。前者是用户当时的选择，
+                后者是这一刻的故障 —— 混成一句话，用户不知道该改配置还是该点启用。 */}
+            {c.state === "stashed" ? (
+              <StatusBadge tone="neutral">已暂存</StatusBadge>
+            ) : (
+              <StatusBadge tone={c.health.ok ? "success" : "warning"}>
+                {c.health.ok ? "运行中" : `未运行${c.health.detail ? "：" + c.health.detail : ""}`}
+              </StatusBadge>
+            )}
+            {c.state === "stashed" && (
+              <Button variant="outline" size="sm" onClick={onEnable}>
+                启用
+              </Button>
+            )}
+            {/* 预置的随安装包来，卸不掉，只能停用；用户装的才有「卸载」。 */}
+            {c.source === "bundled" ? (
+              c.state === "active" && (
+                <Button variant="ghost" size="sm" onClick={onStop}>
+                  停用
+                </Button>
+              )
+            ) : (
+              <Button variant="ghost" size="sm" onClick={onRemove}>
+                卸载
+              </Button>
+            )}
+          </span>
+          {/* 箭头永远在最右侧（owner 2026-09-16）：不可展开时禁用，不是藏起来
+              ——藏起来的话这一列的宽度每张卡都不一样，禁用则始终占着位置，
+              一眼就能分清「这张卡没什么可看的」和「这张卡还没加载完」。 */}
+          <button
+            type="button"
+            className="connector-card-toggle"
+            aria-expanded={open}
+            aria-label={open ? "收起" : "展开"}
+            disabled={!expandable}
+            onClick={toggle}
+          >
+            <Icon name={open ? "chevron-up" : "chevron-down"} size="sm" />
+          </button>
+        </span>
+      </div>
+      {expandable && open && (
+        <div className="connector-card-tools">
+          <span className="connector-card-tools-label">工具清单</span>
+          {/* 概要说清「这份清单是干嘛的」，不是重复标题（owner 2026-09-16：
+              「暴露的工具」不够人话）。≤30 字，独占一行、撑满容器宽度。 */}
+          <p className="connector-card-tools-caption">契约里声明了同名工具才能调用</p>
+          <div className="connector-card-tools-grid">
+            {c.tools.map((t) => (
+              <code key={t} className="connector-tool-chip">
+                {t}
+              </code>
+            ))}
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 
