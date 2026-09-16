@@ -680,7 +680,11 @@ function ConnectorsSection({ api }: { api: Api }) {
                     >
                       {c.id}
                     </code>
-                    <span className="row-tag">{c.source === "bundled" ? "预置" : c.source}</span>
+                    {/* 「系统预置」而不是「预置」（owner 2026-09-16）：这个标签是
+                        用户唯一能看到「为什么这张卡没有删除按钮」的地方——预置的
+                        随安装包来，后端硬性拒绝卸载（ConnectorBundledError），只能
+                        停用。标签说清楚就够了，不必再另外弹一句解释。 */}
+                    <span className="row-tag">{c.source === "bundled" ? "系统预置" : c.source}</span>
                   </span>
                   <span className="connector-card-side">
                     {/* 三种状态各说各的：暂存 ≠ 装了但没跑起来。前者是用户当时的选择，

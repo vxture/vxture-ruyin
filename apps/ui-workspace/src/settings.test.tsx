@@ -1709,7 +1709,12 @@ test("能力平台：预置的 MCP 服务器能启动 / 停止（走连接器的
   expect(within(rowWith(rows, "x.registered")).queryByRole("button")).toBeNull();
 });
 
-test("连接器：预置的服务器标「预置」，只能停用不能卸载", async () => {
+/**
+ * 「系统预置」而不是「预置」（owner 2026-09-16）：这个标签是用户唯一能看到
+ * 「为什么这张卡没有删除按钮」的地方——预置的随安装包来，后端硬性拒绝卸载
+ * （ConnectorBundledError），只能停用；用户自己加的才有「卸载」。
+ */
+test("连接器：系统预置的服务器标「系统预置」，只能停用不能卸载", async () => {
   const api = fakeApi({
     connectors: vi.fn().mockResolvedValue({
       items: [
@@ -1723,7 +1728,7 @@ test("连接器：预置的服务器标「预置」，只能停用不能卸载",
   renderSection("connectors", api);
   const list = await screen.findByRole("list", { name: "已安装的连接器" });
   const rows = within(list).getAllByRole("listitem");
-  expect(within(rows[0]!).getByText("预置")).toBeTruthy();
+  expect(within(rows[0]!).getByText("系统预置")).toBeTruthy();
   expect(within(rows[0]!).queryByRole("button", { name: "卸载" })).toBeNull();
   await userEvent.click(within(rows[0]!).getByRole("button", { name: "停用" }));
   expect(api.deactivateConnector).toHaveBeenCalledWith("aas-ee.open-websearch");
