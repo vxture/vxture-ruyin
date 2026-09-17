@@ -56,6 +56,30 @@ body {
   flex-direction: column;
   background: var(--background);
 }
+/* 语言在右上角：登录页只有一个动作（登录），语言是次要的，不该在版面中央
+   与它抢。高度与标题栏那条拖拽带对齐，所以它看起来就在标题栏里。 */
+.login-top {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: var(--spacing-xs) var(--spacing-md);
+  min-height: var(--spacing-control-lg);
+}
+.language-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.language-menu:hover { color: var(--foreground); background: var(--accent); }
+.language-menu-name { white-space: nowrap; }
+
 .login-center {
   flex: 1;
   display: flex;
@@ -670,6 +694,22 @@ select optgroup {
   --set-label-w: 96px;
   --set-control-w: 280px;
 }
+
+/*
+ * 名称列的宽度**按语言走**（owner 2026-09-17 在「关于 › 本机配置」上看到的）。
+ *
+ * 96px 是按中文量的（参考稿第三节）。英文落地之后它不够了 ——「Motherboard /
+ * BIOS」「Operating system」在 96px 里会折成两行，于是那一行比别的高一截，
+ * 全局一个行高当场破掉。
+ *
+ * 不把它统一调大：那会让中文界面凭空多出一截留白，而那个节奏是量过的。
+ * 挂在 `<html lang>` 上 —— 那个属性本来就跟着语言走（locale-provider.tsx），
+ * 不必为它另立一个状态。
+ */
+:root[lang="en"] {
+  --set-label-w: 148px;
+}
+
 
 /* ---------- 密度三档：把「宽松」真正撑开（owner 2026-09-04）----------
    实测 @vxture/design-tokens@3.0.0：`.density-comfortable` 的**内缩尺度与默认
@@ -1821,7 +1861,15 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   border-bottom: 1px dashed var(--border);
   font-size: var(--body-sm-font-size);
 }
-.fact-label { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
+/* 标签不折行：宽度已经按这门语言最长的那条取了，真放不下时省略号，不是换行
+   —— 换行会把这一行顶高，而全局只允许一个行高。 */
+.fact-label {
+  flex: 0 0 var(--set-label-w);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .fact-value {
   min-width: 0;
   /* 单行 + 省略号。路径可以很长（用户自己选的位置），让它换行会把这一行撑成

@@ -1737,6 +1737,42 @@ function bundledSummary(tools: ToolView[], t: TFn): string {
     (needs > 0 ? t("set.cap.bundledNeeds", { n: needs }) : t("set.cap.bundledEnd"))
   );
 }
+/** 三档路由的名字，按语言给（守护进程只给 `mode`）。 */
+const ROUTE_MODE_KEY: Record<CapabilityRouting["current"]["mode"], MessageKey> = {
+  local_only: "set.cap.route.localOnly",
+  prefer_local: "set.cap.route.preferLocal",
+  prefer_cloud: "set.cap.route.preferCloud",
+};
+
+/**
+ * 一行工具旁边那半句话：守护进程给码，界面说话（2026-09-17）。
+ *
+ * 原来那半句是守护进程拼好的中文，而且会漏出预置清单里**我们自己的工程笔记**
+ * （带日期的降档决策、闭包体积、「归属未核实」）。见 `tool-registry.ts` 的
+ * `ToolDetailCode`。
+ */
+const TOOL_DETAIL_KEY: Record<string, MessageKey> = {
+  "no-search-index": "set.tools.detail.noSearchIndex",
+  "not-implemented": "set.tools.detail.notImplemented",
+  "no-skill-registry": "set.tools.detail.noSkillRegistry",
+  "connector-stashed": "set.tools.detail.connectorStashed",
+  "connector-stopped": "set.tools.detail.connectorStopped",
+  "via-runos": "set.tools.detail.viaRunos",
+  "no-launch-spec": "set.tools.detail.noLaunchSpec",
+  running: "set.tools.detail.running",
+  launchable: "set.tools.detail.launchable",
+  "not-enabled": "set.tools.detail.notEnabled",
+  "needs-env": "set.tools.detail.needsEnv",
+  blocked: "set.tools.detail.blocked",
+};
+
+/** 那半句话：认得的码按语言说，没有码就不说 —— **不拿守护进程的原话凑一句**。 */
+function toolDetail(t: TFn, tool: ToolView): string | undefined {
+  if (!tool.detailCode) return undefined;
+  const key = TOOL_DETAIL_KEY[tool.detailCode];
+  return key ? t(key, tool.detailVars ?? {}) : undefined;
+}
+
 const TOOL_KIND_KEY: Record<ToolView["kind"], MessageKey> = {
   builtin: "set.cap.kind.builtin",
   connector: "set.cap.kind.connector",
@@ -2022,7 +2058,9 @@ function SkillsSection({ api }: { api: Api }) {
   };
 
   const skillGroups = groupCapabilities(items, (s) => ({ name: s.name, description: s.description }));
-  const toolGroups = groupCapabilities(toolItems, (t) => ({ id: t.id, name: t.id, description: t.detail }));
+  // 分组看的是关键词，而那半句话现在是按语言给的 —— 用它分组会让**分组随语言
+  // 漂**。只按 id 分（关键词表本来就是按 id 与工具名建的）。
+  const toolGroups = groupCapabilities(toolItems, (tool) => ({ id: tool.id, name: tool.id }));
 
   return (
     <>
@@ -2046,9 +2084,10 @@ function SkillsSection({ api }: { api: Api }) {
         </span>
         {routing && (
           <span className="cap-sync-tags">
-            <StatusBadge tone="neutral">{routing.current.label}</StatusBadge>
+            <StatusBadge tone="neutral">{t(ROUTE_MODE_KEY[routing.current.mode])}</StatusBadge>
+            {/* 名字是专名，说明按语言给 —— 两者必须同时出现（owner 2026-09-15）。 */}
             <StatusBadge tone="neutral">
-              {routing.name}（{routing.note}）
+              {t("set.cap.planeTag", { name: routing.name, note: t("set.cap.planeNote") })}
             </StatusBadge>
             {!routing.cloudOpen && (
               <StatusBadge tone="warning">{t("set.cap.cloudClosed")}</StatusBadge>
@@ -2182,7 +2221,7 @@ function SkillsSection({ api }: { api: Api }) {
                     <ul className="row-list" aria-label={t("set.tools.groupAria", { group: group.label })}>
               {rows.map((tool) => (
                 <li key={`${tool.kind}:${tool.id}`} className="row-item">
-                  <code className="row-main" title={tool.detail ?? ""}>
+                  <code className="row-main" title={toolDetail(t, tool) ?? ""}>
                     {tool.id}
                   </code>
                   <span className="row-tag">{t(TOOL_KIND_KEY[tool.kind])}</span>
@@ -2203,8 +2242,8 @@ function SkillsSection({ api }: { api: Api }) {
                   )}
                   {/* 有载荷那一行时不再重复 detail：守护进程那句话里已经带了同样的
                       体积，两处并排显示同一个数字会让人以为是两笔下载。 */}
-                  {tool.launchable && tool.status !== "available" && tool.detail && !tool.component && (
-                    <span className="text-body-sm text-muted-foreground">{tool.detail}</span>
+                  {tool.launchable && tool.status !== "available" && toolDetail(t, tool) && !tool.component && (
+                    <span className="text-body-sm text-muted-foreground">{toolDetail(t, tool)}</span>
                   )}
                   {/* 体积、许可证、来源主机都在按钮**左边** —— 点之前就看得见要下多少。
                       地址不在这里：它只在守护进程手上，从随包清单读出来。 */}

@@ -10,6 +10,7 @@
  */
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { LocaleProvider } from "./locale-provider";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SessionGate } from "./login";
@@ -308,4 +309,31 @@ void test("LoginScreen: the two legal links point at the website's /legal/ direc
   expect(privacy.href).toBe("https://vxture.com/legal/privacy");
   expect(terms.href).toBe("https://vxture.com/legal/terms");
   expect(privacy.target).toBe("_blank");
+});
+
+/**
+ * 语言的入口必须排在**任何门槛前面**（owner 2026-09-17）。
+ *
+ * 设置页那个开关进不去：要改语言得先登录，而看不懂界面的人正卡在登录页。
+ * 这是本地化里一个经典的顺序问题，也是这条用例钉的那件事。
+ */
+test("登录页有语言入口，且当场生效 —— 改语言不必先登录", async () => {
+  localStorage.clear();
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue({ signedIn: false, issuer: "", consoleBase: "https://vxture.com", entitlementsConfigured: false }),
+  });
+  render(
+    <LocaleProvider>
+      <SessionGate api={api} />
+    </LocaleProvider>,
+  );
+  expect(await screen.findByText("登录 Vxture 账号")).toBeInTheDocument();
+
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "语言" }));
+  await user.click(await screen.findByRole("menuitem", { name: /English/ }));
+
+  expect(await screen.findByText("Sign in with Vxture")).toBeInTheDocument();
+  expect(screen.queryByText("登录 Vxture 账号")).not.toBeInTheDocument();
+  expect(localStorage.getItem("ruyin-language")).toBe("en");
 });

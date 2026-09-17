@@ -1953,11 +1953,14 @@ test("bundled tool servers: /connectors lists them, activate starts, deactivate 
     const list = (await (await fetch(`${rig.base}/connectors`, { headers: rig.headers })).json()) as { items: Array<{ id: string; source: string; state: string }> };
     assert.deepEqual(list.items.map((c) => [c.id, c.source, c.state]), [["fake.server", "bundled", "stashed"]]);
 
-    let tools = (await (await fetch(`${rig.base}/tools`, { headers: rig.headers })).json()) as { items: Array<{ id: string; status: string; launchable?: boolean; detail?: string }> };
+    let tools = (await (await fetch(`${rig.base}/tools`, { headers: rig.headers })).json()) as { items: Array<{ id: string; status: string; launchable?: boolean; detailCode?: string }> };
     assert.equal(tools.items.find((t) => t.id === "fake.server")?.status, "registered");
     assert.equal(tools.items.find((t) => t.id === "fake.server")?.launchable, true);
     assert.equal(tools.items.find((t) => t.id === "registered.only")?.launchable, undefined);
-    assert.equal(tools.items.find((t) => t.id === "registered.only")?.detail, "发行形态未核实");
+    // 清单里那条 `launchNote`（「发行形态未核实」一类）**到守护进程为止**：
+    // 它是我们自己的工程笔记，不是说给用户听的话。界面拿到的只有一个码，
+    // 由它按语言说「这一台上还起不来」（2026-09-17）。
+    assert.equal(tools.items.find((t) => t.id === "registered.only")?.detailCode, "no-launch-spec");
 
     const on = await fetch(`${rig.base}/connectors/fake.server/activate`, { method: "POST", headers: rig.json });
     assert.equal(on.status, 200);
@@ -3107,11 +3110,10 @@ void test("GET /capabilities/routing：没接回 503；接了按会话的租户 
   };
   type Body = {
     name: string;
-    note: string;
     cloudOpen: boolean;
     source: string;
     errors: string[];
-    current: { mode: string; source: string; label: string };
+    current: { mode: string; source: string };
   };
 
   rig = await startServer({
@@ -3124,11 +3126,13 @@ void test("GET /capabilities/routing：没接回 503；接了按会话的租户 
   });
   try {
     const body = (await (await fetch(`${rig.base}/capabilities/routing`, { headers: rig.headers })).json()) as Body;
+    // 名字是专名，原样给。**那句说明与档位的名字不再由这里给** —— 它们原来是
+    // 中文，英文界面下照样是中文；现在界面按 `mode` 自己说（2026-09-17）。
     assert.equal(body.name, "Runos");
-    assert.equal(body.note, "兼容 Runos 协议的本地能力面");
+    assert.equal("note" in body, false, "说明由界面按语言给，不从这里发");
     assert.equal(body.cloudOpen, false, "云端通路开放之前恒为 false");
     assert.equal(body.source, "file");
-    assert.deepEqual(body.current, { mode: "prefer_cloud", source: "workspace", label: "优先云端" });
+    assert.deepEqual(body.current, { mode: "prefer_cloud", source: "workspace" });
   } finally {
     closeRig(rig);
   }
@@ -3150,7 +3154,7 @@ void test("GET /capabilities/routing：没接回 503；接了按会话的租户 
     });
     try {
       const body = (await (await fetch(`${rig.base}/capabilities/routing`, { headers: rig.headers })).json()) as Body;
-      assert.deepEqual(body.current, { mode: "local_only", source: "default", label: "只许本机" });
+      assert.deepEqual(body.current, { mode: "local_only", source: "default" });
       assert.deepEqual(body.errors, ["示例"]);
     } finally {
       closeRig(rig);

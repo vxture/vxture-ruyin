@@ -1166,13 +1166,18 @@ async function handle(
       ...(identity.org?.id ? { tenantId: identity.org.id } : {}),
       ...(identity.workspace?.id ? { workspaceId: identity.workspace.id } : {}),
     });
+    /*
+     * `name` 是专名（Runos），原样给。**`note` 与 `label` 不再由这里给话** ——
+     * 界面按 `mode` 自己说（2026-09-17）：那两句原来是中文，英文界面下照样是
+     * 中文。`ROUTE_MODE_LABEL` / `LOCAL_PLANE_NOTE` 留在 capability-routing.ts
+     * 里给日志与拒绝理由用，那些是给排障的人看的，不进界面。
+     */
     send(res, 200, {
       name: LOCAL_PLANE_NAME,
-      note: LOCAL_PLANE_NOTE,
       cloudOpen: CLOUD_ROUTE_OPEN,
       source,
       errors,
-      current: { ...current, label: ROUTE_MODE_LABEL[current.mode] },
+      current,
     });
     return;
   }

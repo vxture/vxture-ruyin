@@ -66,7 +66,9 @@ test("缺一件可获取的载荷是它自己的状态：needs-acquisition，行
   }).list();
   const row = items.find((t) => t.id === NEEDS_PAYLOAD.id)!;
   assert.equal(row.status, "needs-acquisition");
-  assert.equal(row.detail, "未获取：需下载 23.8 MB");
+  // 体积 / 许可证 / 来源由 `component` 那一行自己说（下面三条断言），这里不再
+  // 叠一句守护进程的原话 —— 那句是给排障的人看的（2026-09-17）。
+  assert.equal(row.detailCode, undefined);
   assert.equal(row.component?.downloadBytes, 24_979_105);
   assert.equal(row.component?.origin, "github.com");
 });

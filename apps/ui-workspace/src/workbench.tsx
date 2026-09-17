@@ -471,7 +471,7 @@ export function Workbench({
       });
     }
     return list;
-  }, [workspaces, products, selectedProductId]);
+  }, [workspaces, products, selectedProductId, t]);
 
   const searchGroups: ShellSearchGroup[] = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -523,7 +523,7 @@ export function Workbench({
       groups.push({ key: "actions", heading: t("search.group.actions"), items: actions });
     }
     return groups;
-  }, [query, workspaces, products, navigate]);
+  }, [query, workspaces, products, navigate, t]);
 
   const header = (
     <ShellHeader
@@ -675,7 +675,7 @@ export function Workbench({
       });
     }
     return list;
-  }, [view, workspaces, openProjectMeta, projectPending, hasProductUi, openProductName]);
+  }, [view, workspaces, openProjectMeta, projectPending, hasProductUi, openProductName, t]);
 
   /** 设置的分区。和产品态同一套道理：它是设置自己的导航，所以它在侧栏 ——
    *  页面里再放一根竖直导航，屏幕上就并排站着两根。 */
@@ -691,7 +691,7 @@ export function Workbench({
         })),
       },
     ],
-    [],
+    [t],
   );
 
   const sidebar = (

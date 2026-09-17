@@ -13,6 +13,7 @@ import { Api, type SessionInfo } from "./api";
 import { syncChromeTheme } from "./chrome-theme";
 import { useHostChrome } from "./host-chrome";
 import { useT, type MessageKey } from "./i18n";
+import { LanguageMenu } from "./language-menu";
 
 // Workbench (~570 lines, plus its own lazy-loaded home/settings/workspace
 // views) only exists once signed in - the login screen has no reason to wait
@@ -174,6 +175,12 @@ function LoginScreen({
   return (
     <div className="login-screen">
       <DragStrip />
+      {/* 语言在**门槛之前**（owner 2026-09-17）：设置页那个开关要先登录才够得着，
+          而看不懂界面的人正卡在这一屏。`no-drag` 是因为它压在标题栏的拖拽
+          带上，不标的话点不动。 */}
+      <div className="login-top no-drag">
+        <LanguageMenu />
+      </div>
       <div className="login-center">
         <img className="login-mark" src="/logo.svg" alt="RUYIN" />
         {/* 品牌 = 产品 = RUYIN，标语 Intelligent Workbench；不再并列一个中文名。 */}
