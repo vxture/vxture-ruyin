@@ -326,6 +326,8 @@ Runtime 拉 index.json → 验平台签名 → 下载 .ruyinpkg → 验双签（
 | product-integration-guide | `docs/40-implementation/10-product-integration-guide.md` | 面向实施 |
 | 本文件 | `docs/30-design/70-repo-organization.md` | |
 
+上表是 2026-07 迁入时的记录。**2026-09-17 起**，产品战略、02、03、06 四份与 `30-design/inputs/` 已退役（内容并入 Claude artifact 上的 RY 文档集，那一套是设计权威，见 `../00-meta/00-index.md`）；仓内只留代码与 CI 直接依赖的工程规范。
+
 另建：`docs/30-design/decisions/`（ADR 寄存器，append-only）、`docs/60-operations/`（TD 登记）、
 `docs/80-liaison/`（§10 的平台来往函）。文件名用英文 slug（编号护栏与跨仓一致性），正文中文不变。
 

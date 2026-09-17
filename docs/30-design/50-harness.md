@@ -7,6 +7,8 @@
 > 文档状态：架构设计基线  
 > 所属平台：Vxture Platform  
 > 关联文档：02（v0.3）、03（v0.3）、03-A（v0.1）、04（v0.1）
+>
+> **2026-09-17 对齐说明。** 02 已退役；Harness 的定位与目标态在 RY-100 §05（一次运行是受监督的持久化进程；`waiting_human` / `waiting_quota` / `paused` 三个 waiting 都是一等状态；journal-first + 检查点）与 RY-101 §05（Tool Gate 硬底线）。本文件 §3 的状态集是**现状**：`waiting_quota` 与配额感知（RY-100 A5）在 RY-103 阶段 4 落地时随代码同轮补进来。§5 / §6 / §8 / §9 的机制被 `runtime-core/harness.ts` 直接引用，仍是工程权威。
 
 ---
 

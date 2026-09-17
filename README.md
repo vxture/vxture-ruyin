@@ -17,20 +17,21 @@ Packages, .ruyinpkg product packages to a static registry directory).
 
 ## Design documentation
 
-The full design baseline lives under `docs/` (org taxonomy). Start at
-`docs/00-meta/00-index.md` for the map and the legacy document-number
-(01..08) cross-reference table. Key documents:
+Product definition, architecture and interface design are authoritative in
+the RY artifact doc set (RY-001, RY-100..103, RY-201..204, RY-301, RY-401,
+RY-501; see CLAUDE.md "Design authority"). `docs/` (org taxonomy) keeps the
+engineering specs that code and CI depend on; start at
+`docs/00-meta/00-index.md` for the map, the RY table and the legacy
+document-number (01..08) cross-reference. Key in-repo documents:
 
 | Doc | Path |
 |-----|------|
-| Product strategy | docs/20-specs/10-product-strategy.md |
-| Workspace runtime architecture | docs/30-design/10-workspace-runtime.md |
-| Runtime contract + schema | docs/30-design/20-runtime-contract.md, 30-contract-schema.md |
-| Context architecture | docs/30-design/40-context-architecture.md |
+| Runtime contract schema (R-series authority) | docs/30-design/30-contract-schema.md |
+| Context mechanisms (sources, connectors, selection, gate) | docs/30-design/40-context-architecture.md |
 | Harness (task execution kernel) | docs/30-design/50-harness.md |
-| Technical architecture | docs/30-design/60-technical-architecture.md |
 | Repo organization and release model | docs/30-design/70-repo-organization.md |
 | Product integration guide | docs/40-implementation/10-product-integration-guide.md |
+| ADR register | docs/30-design/decisions/00-index.md |
 
 ## Layout
 
@@ -125,4 +126,4 @@ Two independent version lines, the industry-standard way:
 See [CLAUDE.md](CLAUDE.md): branch model, tag-to-channel release flow, the five
 required CI checks, secret hygiene, the client-zero-secrets rule, and the
 engineering hard rules from the design baseline. Current work queue:
-`docs/70-workplan/10-workplan.md`. Known debt: `docs/60-operations/10-tech-debt.md`.
+RY-001 s.07 (artifact). Known debt: `docs/60-operations/10-tech-debt.md`.

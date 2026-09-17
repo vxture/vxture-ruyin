@@ -1,7 +1,7 @@
 ﻿/**
  * Host ports - the seam between the isomorphic kernel and its hosts
  * (local Node daemon / cloud runtime). Design authority:
- * docs/30-design/60-technical-architecture.md section 6.2.
+ * RY-101 s.02 (ports the kernel requires from a host); formerly 30-design/60 section 6.2.
  *
  * HARD RULE: nothing in runtime-core may import Node/Electron/browser APIs.
  * Anything host-specific enters through these interfaces.

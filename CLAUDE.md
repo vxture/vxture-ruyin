@@ -33,8 +33,10 @@ paths, the daemon's log prefix).
 
 An Electron shell + an independent Node.js runtime daemon sharing an isomorphic
 TypeScript kernel (runtime-core) with the future Cloud Runtime. Architecture
-docs live in docs/30-design/ (see docs/00-meta/00-index.md for the legacy
-document-number mapping 01..08 used in cross-references).
+design lives in the RY artifact doc set (see "Design authority" below);
+docs/30-design/ keeps only the engineering specs code and CI depend on (see
+docs/00-meta/00-index.md for the legacy document-number mapping 01..08 still
+used in ADR cross-references, and which of those documents were retired).
 
 ## Source layout and the publishing boundary
 
@@ -98,15 +100,32 @@ user tokens live only in the user's OS credential store.
 ## Engineering hard rules (from the design baseline)
 
 - No `execute_script`-class tool may enter the contract schema before an
-  OS-level execution sandbox exists (TD-005; 30-design/60 section 13).
+  OS-level execution sandbox exists (TD-005; RY-101 s.05, RY-100 s.05).
 - AI usage is metered at the Vxture AI Gateway server-side, never self-reported
   by the client (30-design/70 section 2.1).
 - runtime-core stays host-agnostic: no Node/Electron APIs in the kernel, hosts
-  implement the ports (30-design/60 section 6).
+  implement the ports (RY-101 s.02).
 - The contract validation rules (R-series, sparse numbering - the authority
   is the table in 30-design/30-contract-schema.md section 15, never a range
   written here) are the single authority; the `lint:contract` guardrail
   enforces them (TD-004 closed).
+
+## Design authority: the Claude artifact doc set (RY-NNN)
+
+The design documents published as Claude artifacts (RY-001, RY-100..RY-103,
+RY-201..RY-204, RY-301, RY-401, RY-501) are the AUTHORITY for product
+definition, architecture and interface design (owner, 2026-09-17). RY-100
+(top-level architecture) ranks above the direction docs; the direction docs
+rank above anything under docs/ in this repo.
+
+- When a document under docs/ disagrees with an RY doc, fix the repo document
+  to match the RY doc, never the other way round. Say which RY section the
+  change aligns to in the PR ("aligns to RY-103 s.02").
+- ADRs stay append-only: a superseded decision gets a new ADR or a dated
+  "superseded by RY-xxx" note, not an edit of history.
+- Development work is registered in the RY doc set before code is written;
+  any change to a local-host route, request or response shape updates RY-102
+  in the same PR.
 
 ## Docs taxonomy
 
@@ -115,8 +134,8 @@ user tokens live only in the user's OS credential store.
 80-liaison / 90-memory; map in docs/00-meta/00-index.md. Numbered = formal,
 unnumbered = temporary (delete or number it), enforced by
 `pnpm lint:docs-numbering`. ADRs: docs/30-design/decisions/ (append-only).
-Tech debt register: docs/60-operations/10-tech-debt.md (TD-NNN). Workplan:
-docs/70-workplan/10-workplan.md.
+Tech debt register: docs/60-operations/10-tech-debt.md (TD-NNN). Work queue
+and development-task register: RY-001 s.07 (the workplan file was retired).
 
 ## Repository hygiene
 

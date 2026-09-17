@@ -8,6 +8,8 @@
 > 所属平台：Vxture Platform  
 > 关联文档：02（v0.3）、03（v0.3）、03-A（v0.1）、04（v0.1）、05（v0.1）、06（v0.1）  
 > 读者：Vxture 业务产品团队（未来扩展到第三方 publisher）
+>
+> **2026-09-17 对齐说明。** 02 / 03 / 06 已退役；产品在端上是什么、怎么供给、怎么路由能力，权威在 RY-203（产品供给）、RY-201（能力登记册）、RY-100 §06（能力路由）；本地 API 的形状在 RY-102。本文件的 §2–§5.3、§6–§8 是接入者的操作指南，仍在用；**§5.4 已按 ADR-026 与 RY-100 重写**。
 
 ---
 
@@ -139,20 +141,21 @@ objects → states → context.types → capabilities → tools → tasks
 
 ---
 
-## 5.4 云端能力面与 Runos（ADR-009 / ADR-020，2026-09-05）
+## 5.4 产品不自建能力面（ADR-026 / RY-100，2026-09-17 重写）
 
-契约之外，产品还要出**一个云端服务**：能力面。Ruyin 不直连 Atlas、不直连 Runos
-（ADR-001 / ADR-009）—— 桌面客户端是零秘密的 public client，换不到 S2S 令牌；持
-confidential 凭据、替用户换票、调 Atlas 与 Runos 的，是产品自己的云端。
+**产品不需要出一个云端服务。** 2026-09-05 版本的本节要求每个产品自建「能力面」（`POST /capabilities/:id/turn` 回合端点、替用户 OBO 换票调 Atlas 与 Runos、转发技能目录），那条线随 ADR-009 一起作废（ADR-026 §2 第 1 条）；`40-implementation/50-capability-surface-contract.md` 已退役。现在的分工：
 
-| 义务 | 内容 | 出处 |
+| 事 | 谁做 | 出处 |
 |---|---|---|
-| 回合端点 | `POST /capabilities/:id/turn`：收 `{objective, constraints, context[], messages[], tools[], skills[], revision?}`（`skills[]` = 该任务在契约 `tasks[].skills` 里声明、且本机有的那几条 `{name, description}`，2026-09-05 起 Ruyin 真的会送；模型要全文就调 `use_skill`），回 `tool_calls | content | verdict`。运行时只给事实，措辞归产品 | 30-design/20；ADR-011 |
-| 模型 | 用服务端会话里的用户 access token 做 OBO 换票（`act.sub` = 产品码），调 Atlas `POST /v1/chat`，每次必带 `taskId` | ADR-001；《产品接入范本》 |
-| Runos 能力 | 同一张 OBO 票调 Runos `POST /v1/mcp`（`aud=runos`、`scope=tool:runos`），四工具流 discover → resolve → invoke → report_outcome；`_meta.vxture.task_id` 与本地任务的 `taskId` 用**同一个值** —— 两边审计靠它对账 | ADR-020 §2 / §3 |
-| **技能目录转发** | 能力面把 Runos 分发给本产品的 Skill（`runos_invoke` 的 `fetch`，返回 `SKILL.md` 全文 + 资源块 + `content_digest`）**转交给 Ruyin**：暴露 `GET /skills`（目录：`name`、`description`、`capability_id@version`、`content_digest`）与 `GET /skills/:name`（全文与资源）。Ruyin 把它们进本机技能登记册的**产品分发层**，按 digest 缓存、离线可用 | ADR-020 §3 c / §6-1 |
-| 第三方密钥 | **不经过 Ruyin，也不经过能力面的代码**：注册进 Runos 的凭证保险库，由 Runos 在出站调用时注入。产品侧只声明 `credential_requirements` | ADR-020 §6-2 |
-| 脚本 | 带 `scripts/` 的技能：本地不跑（TD-005）；不带业务数据的脚本可声明依赖 Runos Executor 在云端沙箱里跑 —— **登记未启用** | TD-005；ADR-020 §6-3 |
+| 智能体的定义（契约、技能包、界面包） | **产品设计**，针对桌面端打包，登记到平台产品目录；**平台分发，ruyin 同步与本机存储**；契约钉摘要、按摘要校验落盘的规矩不变 | ADR-026 §2 第 4 条、§3；RY-203 |
+| 执行循环 | **运行时（Harness）在本地跑**，云端只出无状态推理；工具在本机过闸执行 | ADR-002；RY-100 §05 |
+| 模型回合 | **运行时经网关发起**。推理上下文是「不出域」的唯一显式例外：唯一、网关不留存、本地推理落地后可收缩。本地推理分「经 Atlas / 绕过 Atlas」两路，计量责任跟着路走，运行时两路都不自报 | RY-100 §06 / §07，A7 / A8 / A15–A17 |
+| 带密钥的外部能力（检索 API、翻译 API 等） | **Runos**：密钥在 Runos 凭证保险库，产品与用户都拿不到；产品只声明 `credential_requirements`。走本机还是云端按三档路由（默认只许本机） | ADR-020 §6-2；ADR-025；RY-100 §06 |
+| 碰用户数据的能力（文件、检索、文档解析、浏览器） | **本机**，进程外 MCP 服务器 | RY-100 §06；RY-201 |
+| 技能 | 云端分发、本机执行；四层来源（随包 / 产品分发 / 用户 / 项目） | ADR-018；RY-201 §02 |
+| 带 `scripts/` 的技能 | 本地不跑（TD-005，等 OS 级沙箱）；不带业务数据的脚本可声明依赖 Runos Executor —— **登记未启用** | TD-005；ADR-020 §4.3 |
+
+**现状与目标的差距**（RY-103）：契约 / 技能 / 界面包今天仍从 `RUYIN_CAPABILITY_BASE` 那个「产品能力面」拉（RY-102 §03 `POST /products/:id/fetch`），改成经平台产品目录下发是 RY-103 阶段 1 / 3d；模型回合今天走 `MockAIGateway`（RY-001 §07 #8），真实网关随 RY-103 阶段 3 / 4 接上。**新接入的产品不要再建回合端点。**
 
 **预置的 MCP 服务器怎么被产品用（2026-09-05，ADR-018 §7.1）**：它们在本机是来源为 `bundled`
 的连接器，用户在「能力平台」启动后，契约里 `provider: connector` 的工具按**同名**接上
