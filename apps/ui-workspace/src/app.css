@@ -85,6 +85,21 @@ body {
   margin-top: var(--spacing-sm);
 }
 .login-hint { margin-top: var(--spacing-2xs); }
+/* 「换个账号登录」：次级动作，不该长得像第二个主按钮 —— 一屏上两个同等分量的
+   按钮，等于没有主动作。做成一条可按的文字，与下面那句说明同宽同色。 */
+.login-alt {
+  margin-top: var(--spacing-sm);
+  background: none;
+  border: 0;
+  padding: var(--spacing-2xs);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font: inherit;
+  color: inherit;
+}
+.login-alt:hover:not(:disabled) { color: var(--foreground); }
+.login-alt:disabled { cursor: default; opacity: 0.6; }
 /* 登录按钮下面那句状态说明（「会直接用浏览器里那个账号」+ 换人的路）。
    宽度跟 .login-sub 一致，免得它比标语还长、把这一屏的重心带偏。 */
 .login-note {

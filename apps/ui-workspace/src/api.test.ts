@@ -425,7 +425,16 @@ const WRAPPER_CASES: WrapperCase[] = [
   { name: "system", call: (api) => api.system(), method: "GET", path: "/system" },
   { name: "hardware", call: (api) => api.hardware(), method: "GET", path: "/system/hardware" },
   { name: "session", call: (api) => api.session(), method: "GET", path: "/auth/session" },
-  { name: "login", call: (api) => api.login(), method: "POST", path: "/auth/login" },
+  /* 登录带请求体，哪怕是空的：`switchAccount` 是「这是不是一次换账号」的唯一
+     载体（0a，TD-069），推断不出来，只能由调用方说。缺省 `{}` = 普通登录。 */
+  { name: "login", call: (api) => api.login(), method: "POST", path: "/auth/login", body: {} },
+  {
+    name: "login(switchAccount)",
+    call: (api) => api.login({ switchAccount: true }),
+    method: "POST",
+    path: "/auth/login",
+    body: { switchAccount: true },
+  },
   { name: "logout", call: (api) => api.logout(), method: "POST", path: "/auth/logout" },
   {
     name: "endSessionUrl",

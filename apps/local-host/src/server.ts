@@ -1136,9 +1136,14 @@ async function handle(
         send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
         return;
       }
+      /* `switchAccount` 只跟着**用户按了「换个账号」**这个动作走（0a / RY-102 §03）。
+         普通登录不带 `prompt`，浏览器里登着就直接沿用；带了的话平台会把现有会话
+         当作不可用，于是每次登录都要重输一遍账号密码——那正是 TD-069。 */
+      const body = await readJson(req);
+      const switchAccount = body["switchAccount"] === true;
       /* 返回地址给 UI 去开系统浏览器；随即在后台轮询领取。
          **不等它**——领取要等用户输密码，最长 5 分钟，HTTP 请求不该挂那么久。 */
-      const authorizeUrl = deps.platformSession.beginLogin();
+      const authorizeUrl = deps.platformSession.beginLogin({ switchAccount });
       void deps.platformSession
         .completeLogin()
         // 登录成功后取一次能力清单（D3）。sync 自己不抛；没有数据源时它什么都不做。

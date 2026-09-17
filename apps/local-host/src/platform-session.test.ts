@@ -113,7 +113,6 @@ describe("platform-session", () => {
     assert.equal(url.origin, CONSOLE);
     assert.equal(url.pathname, "/auth/login");
     assert.equal(url.searchParams.get("surface"), "native");
-    assert.equal(url.searchParams.get("prompt"), "select_account");
 
     const handle = url.searchParams.get("handle")!;
     // sha256 十六进制：64 个 hex 字符
@@ -588,6 +587,39 @@ describe("platform-session", () => {
         { modelCode: "b", modelName: "B", provider: "", capabilities: [], isActive: true },
       ],
     );
+  });
+
+  /**
+   * 0a 的核心断言，钉的是 TD-069 的真因（RY-103 §02）。
+   *
+   * 平台 `authorize()` 里 `forcesInteraction = prompt === "login" || prompt ===
+   * "select_account"`，命中即 `hasUsableSession = false`——**带上它就是要求平台
+   * 忽略浏览器里那份会话**。此前 `beginLogin()` 无条件带着它，于是「浏览器明明
+   * 登着，Ruyin 还要重输账号密码」。
+   *
+   * 两条用例是一对，缺一不可：只测「普通登录不带」，哪天有人为了别的原因把它加
+   * 回去、顺手也给「换个账号」留着，测试全绿；只测「换账号带」，则退回无条件带
+   * 的老样子同样全绿。
+   */
+  it("普通登录不带 prompt——浏览器里登着就直接沿用（TD-069 的真因）", () => {
+    const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+
+    assert.equal(new URL(s.beginLogin()).searchParams.get("prompt"), null);
+    assert.equal(new URL(s.beginLogin({})).searchParams.get("prompt"), null);
+    assert.equal(
+      new URL(s.beginLogin({ switchAccount: false })).searchParams.get("prompt"),
+      null,
+    );
+  });
+
+  it("「换个账号」才带 prompt=select_account——平台据此把现有会话当作不可用", () => {
+    const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    const url = new URL(s.beginLogin({ switchAccount: true }));
+
+    assert.equal(url.searchParams.get("prompt"), "select_account");
+    // 换账号也还是同一条原生握手：秘密不穿过浏览器这一条不受影响。
+    assert.equal(url.searchParams.get("surface"), "native");
+    assert.match(url.searchParams.get("handle")!, /^[0-9a-f]{64}$/);
   });
 
   it("每次 beginLogin 生成新的 secret——重开登录不复用旧的", () => {

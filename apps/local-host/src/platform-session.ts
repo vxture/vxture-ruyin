@@ -43,6 +43,16 @@ import type { KeyManager } from "./keys.js";
 // Types
 // ============================================================================
 
+/** `beginLogin()` 的入参。空对象 = 普通登录。 */
+export interface BeginLoginOptions {
+  /**
+   * 「换个账号」：带 `prompt=select_account`，让平台把现有浏览器会话当作不可用。
+   * 只应由用户的显式动作置真——普通登录带上它，就是每次都逼用户重新登一遍
+   * （TD-069 的真因）。
+   */
+  switchAccount?: boolean;
+}
+
 export interface PlatformSessionConfig {
   /** console-bff 的公网基址，例如 https://console.vxture.com */
   consoleBase: string;
@@ -338,9 +348,7 @@ export class PlatformSession {
   /**
    * 开始登录：返回要在系统浏览器里打开的地址。
    *
-   * `prompt=select_account` 让「退出后再点登录」至少有一屏——桌面应用按工作区/组织
-   * 隔离，**换账号是真实用例**。选它而不是 `prompt=login`：后者每次都逼着重输密码，
-   * 对个人桌面应用是纯摩擦。
+   * **普通登录不带 `prompt`；只有 `switchAccount` 才带 `select_account`。**
    *
    * **2026-09-17 订正（RY-103 §02 / 阶段 0a，TD-057 补记四、TD-069 补记四）：这一行是
    * 「浏览器已登录仍要输账号密码」的真因，要拆。** 此前这里写着「平台只认 `none`、
@@ -350,16 +358,28 @@ export class PlatformSession {
    * 命中即 `hasUsableSession = false`——平台**兑现**了这个参数，兑现方式就是
    * 「有会话也当没有」。于是无条件带它 = 每次登录都要求平台忽略浏览器会话。
    *
-   * 阶段 0a 的改法：正常登录**不带** `prompt`；只有「换账号」这个显式入口才带
-   * `select_account`。`POST /auth/login` 的形状不变。目标态（RY-100 A3）下 RUYIN 是
-   * 自己的 OIDC 客户端，这段握手的对端与身份一起换掉（RY-103 阶段 3）。
+   * 于是分成两个意图，由调用方说清楚是哪一个：
+   *
+   * - **普通登录**（`beginLogin()`）：不带 `prompt`。浏览器里已经登着就直接沿用，
+   *   这正是桌面应用的行业默认，也是用户期望的「点一下就进去」。
+   * - **换个账号**（`beginLogin({ switchAccount: true })`）：带 `select_account`，
+   *   平台据此把现有会话当作不可用，让用户重新选。这是真实用例——项目按工作区 /
+   *   组织隔离，一个人可能同时属于多个租户。
+   *
+   * 这个区别只能由**用户的动作**决定，推断不出来：守护进程看不见浏览器里登的是谁，
+   * 也不知道用户这次想进哪个租户。所以它是 `POST /auth/login` 的一个入参，
+   * 不是本地的一个状态位。
+   *
+   * 共享机上的敞口（别人点一下登录就以你的身份进来）由「换个账号」入口承接；
+   * 根治在目标态：RUYIN 是自己的 OIDC 客户端、实例凭据 DPoP 绑定、并发在线由
+   * Runtime Registry 裁决（RY-100 A3 / A10，RY-103 阶段 3）。
    */
   /** 实际在用的会话/读接口基址。启动播报要按这条说话，不按退役变量说话。 */
   get baseUrl(): string {
     return this.config.consoleBase;
   }
 
-  beginLogin(): string {
+  beginLogin(opts: BeginLoginOptions = {}): string {
     const deviceSecret = randomBytes(32).toString("hex");
     const handle = createHash("sha256").update(deviceSecret).digest("hex");
     this.pending = { deviceSecret, startedAt: Date.now() };
@@ -367,7 +387,8 @@ export class PlatformSession {
     const u = new URL(PLATFORM_PATHS.login, this.config.consoleBase);
     u.searchParams.set("surface", "native");
     u.searchParams.set("handle", handle);
-    u.searchParams.set("prompt", "select_account");
+    /* 只有「换个账号」才带。普通登录不带——带了就是在要求平台忽略浏览器会话。 */
+    if (opts.switchAccount) u.searchParams.set("prompt", "select_account");
     return u.toString();
   }
 
@@ -618,8 +639,9 @@ export class PlatformSession {
    * 公共资产，退出一个桌面应用就把它杀掉，等于顺手登出这台机器上同账号的所有网站，
    * 那是个比「没退干净」更意外的副作用。
    *
-   * 缓解放在**下一次登录**那一端：`beginLogin()` 带 `prompt=select_account`，
-   * 让它至少有一屏、且能换人。
+   * 于是「退出之后再点登录，直接就进来了」是**预期行为**，不是没退干净：本机这份
+   * 清掉了，浏览器那份还在。要换人的走登录页上的「换个账号」
+   * （`beginLogin({ switchAccount: true })`），那一条会带 `prompt=select_account`。
    */
   async logout(): Promise<void> {
     const rpsid = this.rpsid();
