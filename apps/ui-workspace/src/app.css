@@ -99,7 +99,15 @@ body {
   color: inherit;
 }
 .login-alt:hover:not(:disabled) { color: var(--foreground); }
-.login-alt:disabled { cursor: default; opacity: 0.6; }
+/* 停用态（TD-070）：灰掉并去掉下划线 —— 下划线是「这里可以按」的信号，留着
+   它就等于一边说不可用一边继续邀请人按。外层 span 接管指针样式与提示，因为
+   停用的按钮不派发鼠标事件。 */
+.login-alt:disabled {
+  cursor: default;
+  opacity: 0.45;
+  text-decoration: none;
+}
+.login-alt-wrap { display: inline-block; cursor: help; }
 /* 登录按钮下面那句状态说明（「会直接用浏览器里那个账号」+ 换人的路）。
    宽度跟 .login-sub 一致，免得它比标语还长、把这一屏的重心带偏。 */
 .login-note {

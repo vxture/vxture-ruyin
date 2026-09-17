@@ -33,6 +33,14 @@ function DragStrip() {
 const LOGIN_POLL_MS = 2000;
 const LOGIN_POLL_MAX_MS = 5 * 60 * 1000;
 
+/**
+ * 「换个账号登录」停用期间给出的替代做法（TD-070）。
+ *
+ * 说的是**用户自己能做到的那条路**，不是「暂不可用」——后者只告诉人此路不通，
+ * 而他要的是换个账号，那件事今天仍然做得到，只是得先在浏览器里退出。
+ */
+const SWITCH_ACCOUNT_HINT = "先在浏览器里退出登录账号，然后点击登录";
+
 /** Decides the first surface once the daemon is reachable: login vs product. */
 export function SessionGate({ api }: { api: Api }) {
   const [session, setSession] = useState<SessionInfo | "loading">("loading");
@@ -181,26 +189,43 @@ function LoginScreen({
         >
           {busy ? "正在打开浏览器…" : verifying ? "登录验证中…" : "登录 Vxture 账号"}
         </Button>
-        {/* 「换个账号」现在是一条**真的路**，不再只是一句提示（0a，RY-103 §02）。
-            此前这里写的是「平台忽略 prompt，所以那一屏不会出现」，据此只给了一句
-            文案、不给入口。平台后来兑现了 `select_account`（`authorize()` 里
-            `forcesInteraction` 命中即把现有会话当作不可用），于是两件事同时成立：
+        {/* 「换个账号」：**入口留着，但停用**（owner 2026-09-17，TD-070）。
 
-            - 主按钮**不带** `prompt` —— 浏览器里登着就直接进去，这是桌面应用的
-              行业默认，也是用户按下「登录」时期望发生的事。此前无条件带着它，
-              才是「浏览器已登录却仍要输账号密码」的真因（TD-069）。
-            - 这条次级入口**带**它 —— 想换人的人有地方去，而且一按就到账号选择器，
-              不必自己先去浏览器里退出。
+            0a 把主按钮上那个无条件的 `prompt` 拆掉之后（TD-069 的真因），这里加
+            了一条带 `switchAccount` 的次级入口。真机一验，它**到不了**：平台
+            `authorize()` 确实兑现了 `select_account`（拒绝用现有会话、停放一个
+            登录挑战、跳登录页），但停放的挑战里**不带 `prompt`**，而登录页随后
+            调的 `resumeWithExistingSession` 只看浏览器里那份中央会话就把挑战
+            消费掉、按原用户发码 —— 于是输了别人的账号、没输验证码，却以自己的
+            身份登了进去。
 
-            两个意图分开，是因为守护进程推断不出用户这次想进哪个租户。 */}
-        <button
-          type="button"
-          className="login-alt text-body-sm text-muted-foreground"
-          disabled={busy}
-          onClick={() => void startLogin({ switchAccount: true })}
-        >
-          换个账号登录
-        </button>
+            所以停用，不删：**入口不该承诺它兑现不了的东西**（登录页此前两个次级
+            入口都是因这条被移除的）。
+
+            **要留的那条管线全都还在，而且还有用例守着**：`startLogin(opts)` →
+            `api.login(opts)` → `POST /auth/login { switchAccount }` →
+            `beginLogin({ switchAccount })`。平台把 `prompt` 存进挑战、让恢复路径
+            见到 `login` / `select_account` 就拒绝之后，这里只要去掉 `disabled`
+            并接回一行 `onClick={() => void startLogin({ switchAccount: true })}`。
+
+            那一行现在**不挂**：挂在一个永远停用的按钮上，它就是一行看起来活着的
+            死代码 —— 覆盖率到不了，读的人也会以为这条路还通。
+
+            提示挂在外层 span 上而不是按钮上：**停用的按钮不派发鼠标事件**，
+            `title` 写在它自己身上多半不会显示。 */}
+        <span className="login-alt-wrap" title={SWITCH_ACCOUNT_HINT}>
+          <button
+            type="button"
+            className="login-alt text-body-sm text-muted-foreground"
+            disabled
+            aria-describedby="switch-account-hint"
+          >
+            换个账号登录
+          </button>
+        </span>
+        <span id="switch-account-hint" hidden>
+          {SWITCH_ACCOUNT_HINT}
+        </span>
         <p className="login-note text-body-sm text-muted-foreground">
           浏览器中若已登录，会直接用那个账号继续。
         </p>
