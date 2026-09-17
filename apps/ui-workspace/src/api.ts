@@ -1034,7 +1034,13 @@ export class Api {
   setChromeTheme = (theme: "dark" | "light") =>
     this.call<{ theme: string }>("/ui/theme", "POST", { theme });
   session = () => this.call<SessionInfo>("/auth/session");
-  login = () => this.call<{ authorizeUrl: string }>("/auth/login", "POST");
+  /**
+   * 起一次登录。`switchAccount` 只由「换个账号」那个入口传真：它让授权请求带上
+   * `prompt=select_account`，平台据此把浏览器里现有的会话当作不可用。普通登录
+   * 不带——带了就是每次都逼用户重输一遍（TD-069）。
+   */
+  login = (opts: { switchAccount?: boolean } = {}) =>
+    this.call<{ authorizeUrl: string }>("/auth/login", "POST", opts);
   logout = () => this.call<{ ok: boolean }>("/auth/logout", "POST");
   /**
    * 「换个账号」要打开的地址（平台的 RP-initiated logout）。平台没公布这个

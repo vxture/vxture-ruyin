@@ -94,13 +94,53 @@ void test("SessionGate: signed out shows the login screen", async () => {
  * 钉的是那句话真的在屏幕上 —— 一个静默发生、又没人告诉你的登录，比说清楚了
  * 的更糟。
  */
-void test("LoginScreen: 只提示浏览器登录态怎么回事，不给跳转链接", async () => {
+void test("LoginScreen: 说清浏览器登录态怎么回事，并给一条真的换人入口", async () => {
   const api = fakeApi();
   render(<SessionGate api={api} />);
   await screen.findByText("登录 Vxture 账号");
 
-  await screen.findByText("浏览器中若已登录则会直接登录，安全退出请退出浏览器登录态。");
+  await screen.findByText("浏览器中若已登录，会直接用那个账号继续。");
+  // 「换个账号」是一个按钮，不是跳去浏览器退出页的链接 —— 它自己就能到账号选择器。
+  expect(screen.getByRole("button", { name: "换个账号登录" })).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /退出/ })).not.toBeInTheDocument();
+});
+
+/**
+ * 0a 的界面这一端（RY-103 §02）。两个入口，两个意图，一条都不能串：
+ *
+ * - 主按钮**不带** `switchAccount` —— 浏览器里登着就直接进去。此前无条件带着
+ *   `prompt=select_account` 打到平台，才有了「浏览器已登录仍要输账号密码」
+ *   （TD-069）。
+ * - 「换个账号登录」**带** `switchAccount: true`。
+ *
+ * 断言的是传给 api.login 的参数，而不是最终 URL：URL 由守护进程拼，那一端由
+ * platform-session 的用例守着。这里守的是界面有没有把用户的意图说对。
+ */
+void test("LoginScreen: 主按钮不带 switchAccount，「换个账号」才带", async () => {
+  const login = vi.fn().mockResolvedValue({ authorizeUrl: "https://console.vxture.com/auth/login" });
+  const api = fakeApi({ login });
+  render(<SessionGate api={api} />);
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByText("登录 Vxture 账号"));
+  expect(login).toHaveBeenNthCalledWith(1, {});
+});
+
+void test("LoginScreen: 「换个账号登录」带 switchAccount 起同一条握手", async () => {
+  const login = vi.fn().mockResolvedValue({ authorizeUrl: "https://console.vxture.com/auth/login?prompt=select_account" });
+  const api = fakeApi({ login });
+  render(<SessionGate api={api} />);
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByRole("button", { name: "换个账号登录" }));
+
+  expect(login).toHaveBeenCalledWith({ switchAccount: true });
+  // 换人走的是同一条流程：照样开浏览器、照样进入验证态。
+  expect(globalThis.open).toHaveBeenCalledWith(
+    "https://console.vxture.com/auth/login?prompt=select_account",
+    "_blank",
+  );
+  expect(await screen.findByText("登录验证中…")).toBeInTheDocument();
 });
 
 void test("SessionGate: a session() rejection is treated as signed-out, not stuck loading or crashed", async () => {
@@ -179,7 +219,7 @@ void test("LoginScreen: clicking the button calls api.login(), opens the authori
   expect(await screen.findByText("登录验证中…")).toBeInTheDocument();
   expect(screen.queryByText("登录 Vxture 账号")).not.toBeInTheDocument();
   // 其余静态文案原样不动。
-  expect(screen.getByText("浏览器中若已登录则会直接登录，安全退出请退出浏览器登录态。")).toBeInTheDocument();
+  expect(screen.getByText("浏览器中若已登录，会直接用那个账号继续。")).toBeInTheDocument();
   // 不再另起一段提示或跳转链接 —— 状态全由按钮自己的文案说完。
   expect(screen.queryByText(/在浏览器中完成登录后自动返回/)).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /点此继续/ })).not.toBeInTheDocument();

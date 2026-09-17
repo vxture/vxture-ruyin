@@ -3225,6 +3225,53 @@ void test("POST /capabilities/catalog/refresh：reason 不认识 400；没有来
   }
 });
 
+/**
+ * `POST /auth/login` 把「这是不是一次换账号」原样交给会话层（0a，RY-102 §03）。
+ *
+ * 这个意图**推断不出来**：守护进程看不见浏览器里登的是谁。所以它必须是入参，
+ * 而这条用例守的就是「入参真的走到了 beginLogin」——中间少传一次，症状是登录
+ * 页上的「换个账号」点了没反应，而两端的用例各自都还是绿的。
+ */
+void test("POST /auth/login: switchAccount 原样传给 beginLogin（缺省 false）", async () => {
+  const seen: Array<{ switchAccount?: boolean }> = [];
+  const rig = await startServer({
+    platform: signedInTo("wsp_x"),
+    platformSession: {
+      ...signedInSession(false),
+      beginLogin: (opts: { switchAccount?: boolean } = {}) => {
+        seen.push(opts);
+        return "https://console.vxture.com/auth/login?surface=native&handle=abc";
+      },
+      completeLogin: async () => {},
+    } as unknown as PlatformSession,
+  });
+  try {
+    const post = (body?: unknown) =>
+      fetch(`${rig.base}/auth/login`, {
+        method: "POST",
+        headers: { ...rig.headers, "content-type": "application/json" },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+
+    assert.equal((await post()).status, 200, "不带请求体的老调用方不能被打坏");
+    assert.equal((await post({})).status, 200);
+    assert.equal((await post({ switchAccount: true })).status, 200);
+    assert.equal((await post({ switchAccount: false })).status, 200);
+    // 非布尔值不当成真——「换账号」只能由明确的 true 触发。
+    assert.equal((await post({ switchAccount: "yes" })).status, 200);
+
+    assert.deepEqual(seen, [
+      { switchAccount: false },
+      { switchAccount: false },
+      { switchAccount: true },
+      { switchAccount: false },
+      { switchAccount: false },
+    ]);
+  } finally {
+    closeRig(rig);
+  }
+});
+
 void test("登录成功后守护进程自己同步一次清单（D3）", async () => {
   const { catalog, calls } = fakeCatalog({});
   let finish!: () => void;

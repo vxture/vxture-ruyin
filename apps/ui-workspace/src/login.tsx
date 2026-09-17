@@ -124,10 +124,10 @@ function LoginScreen({
     [],
   );
 
-  const startLogin = async () => {
+  const startLogin = async (opts: { switchAccount?: boolean } = {}) => {
     setBusy(true);
     try {
-      const { authorizeUrl } = await api.login();
+      const { authorizeUrl } = await api.login(opts);
       setVerifying(true);
       // Electron routes this to the system browser via the window-open handler;
       // plain browsers may popup-block it - clicking 登录 again (still enabled
@@ -181,22 +181,28 @@ function LoginScreen({
         >
           {busy ? "正在打开浏览器…" : verifying ? "登录验证中…" : "登录 Vxture 账号"}
         </Button>
-        {/* 登录之前先把状态说清楚 —— 这一段是 owner 2026-09-10 实测之后要的。
-            当时的样子：退出登录，再点登录，**一路直接进来，没有任何验证过程**。
-            那不是缺陷，是浏览器里 accounts 的会话还活着；桌面应用不该去杀它
-            （浏览器级、跨应用），行业默认也是不杀。
+        {/* 「换个账号」现在是一条**真的路**，不再只是一句提示（0a，RY-103 §02）。
+            此前这里写的是「平台忽略 prompt，所以那一屏不会出现」，据此只给了一句
+            文案、不给入口。平台后来兑现了 `select_account`（`authorize()` 里
+            `forcesInteraction` 命中即把现有会话当作不可用），于是两件事同时成立：
 
-            行业默认里真正拦一下的是**下一次登录那一屏**（账号选择器），靠
-            authorize 带 `prompt=select_account`。我们带了 —— **平台忽略它**
-            （owner 实测：清空重来一遍，第一次有验证、退出后第二次静默直入）。
-            所以那一屏在平台补上支持之前不会出现。
+            - 主按钮**不带** `prompt` —— 浏览器里登着就直接进去，这是桌面应用的
+              行业默认，也是用户按下「登录」时期望发生的事。此前无条件带着它，
+              才是「浏览器已登录却仍要输账号密码」的真因（TD-069）。
+            - 这条次级入口**带**它 —— 想换人的人有地方去，而且一按就到账号选择器，
+              不必自己先去浏览器里退出。
 
-            界面这一侧只做提示，不给跳转链接（owner 2026-09-15）：把「会直接用
-            浏览器里那个账号」和「怎么才算真退出」说出来就够，不承诺一条按下去
-            会把人带到哪的路——这一步换人操作本就得用户自己在浏览器里做，见
-            TD-057。 */}
+            两个意图分开，是因为守护进程推断不出用户这次想进哪个租户。 */}
+        <button
+          type="button"
+          className="login-alt text-body-sm text-muted-foreground"
+          disabled={busy}
+          onClick={() => void startLogin({ switchAccount: true })}
+        >
+          换个账号登录
+        </button>
         <p className="login-note text-body-sm text-muted-foreground">
-          浏览器中若已登录则会直接登录，安全退出请退出浏览器登录态。
+          浏览器中若已登录，会直接用那个账号继续。
         </p>
         {/* 这里曾有两个次级入口，都已移除，理由是同一条：入口不该承诺它
             兑现不了的东西。
