@@ -2205,6 +2205,16 @@ test("skills: the turn carries the declared catalogue, use_skill returns the SKI
   assert.ok(first.tools.some((t) => t.id === "use_skill"));
   assert.ok(first.tools.some((t) => t.id === "read_skill_resource"));
 
+  /* 参数 schema 逐字带给提供方（RY-001 §07 #43）。不带它，模型只能猜参数名 ——
+     猜错了闸门会挡下，安全是安全，但那一回合白花了，而且模型从一个「参数不对」
+     的拒绝里学不到正确的形状。两个合成的技能工具也各自带着 schema。 */
+  const useSkill = first.tools.find((t) => t.id === "use_skill");
+  assert.deepEqual(useSkill?.parameters, {
+    type: "object",
+    properties: { name: { type: "string" } },
+    required: ["name"],
+  });
+
   // The second turn saw the SKILL.md as a tool result, marked as such.
   const second = seen[1];
   assert.ok(second);

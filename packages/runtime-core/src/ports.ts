@@ -7,7 +7,7 @@
  * Anything host-specific enters through these interfaces.
  */
 
-import type { ContextSource, ToolProvider } from "@vxture/ruyin-contract-schema";
+import type { ContextSource, ToolIoSchema, ToolProvider } from "@vxture/ruyin-contract-schema";
 
 /**
  * 契约允许的来源种类（03-A §9），原样再导出：绑定要说自己是哪一种，而这个
@@ -75,10 +75,29 @@ export type TurnMessage =
       origin?: ContentOrigin;
     };
 
-/** A tool the runtime is willing to actually execute this turn. */
+/**
+ * A tool the runtime is willing to actually execute this turn.
+ *
+ * `parameters` 是契约里那份 `input_schema`，**原样带过来**。
+ *
+ * 不带它的后果不是「少一点信息」，是**模型只能猜参数名**：一个叫 `read_file`
+ * 的工具，要 `path` 还是 `file`、要不要 `encoding`，只有 schema 说得准。猜错了
+ * 由闸门挡下 —— 安全是安全，但那一回合白花了，而且模型从一个「参数不对」的
+ * 拒绝里学不到正确的形状。
+ *
+ * **给了 schema 不等于放松校验。** `validateToolCall()` 照旧按契约判，闸门仍是
+ * 最后一站；这里给的是「让它第一次就拟对」的材料。
+ */
 export interface ToolOffer {
   id: string;
+  /**
+   * 给模型看的一句话。契约的 `Tool` **没有** description 字段，所以这里是
+   * 运行时按 `category` 与 `risk` 合成的 —— 它说的是「这类工具有多危险」，
+   * 不是「这个工具做什么」。真正说清做什么的是 `parameters` 里的属性名。
+   */
   description?: string;
+  /** 契约的 `input_schema`，逐字带过来。 */
+  parameters?: ToolIoSchema;
 }
 
 // ---------------------------------------------------------------------------

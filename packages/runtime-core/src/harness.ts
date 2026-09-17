@@ -1231,7 +1231,13 @@ export class Harness {
     // (ADR-018 §2.4): a task that declares skills can read them, one that
     // does not has nothing to read.
     const withSkills = this.hasSkills(instance) ? [...contractTools, ...SKILL_TOOLS] : contractTools;
-    return withSkills.map((t) => ({ id: t.id, description: `${t.category} (risk: ${t.risk})` }));
+    /* `input_schema` 逐字带过去：不带它，模型只能猜参数名，而一次猜错要白花
+       一个回合。闸门不因此放松 —— validateToolCall() 照旧按契约判。 */
+    return withSkills.map((t) => ({
+      id: t.id,
+      description: `${t.category} (risk: ${t.risk})`,
+      parameters: t.input_schema,
+    }));
   }
 
   private hasSkills(instance: TaskInstanceRecord): boolean {
