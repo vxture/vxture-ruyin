@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { Api } from "./api";
 import { SessionGate } from "./login";
+import { useT } from "./i18n";
 
 export default function App() {
   // token 来源：?token=（Electron 壳 / 启动器注入）> localStorage（PWA 安装后
@@ -41,17 +42,20 @@ export default function App() {
 /** No host-injected token (opened outside the desktop launcher/shell). Guide
  *  back to the proper entry point rather than asking for a token. */
 function ConnectHint() {
+  const t = useT();
   return (
     <div className="splash">
       <img className="splash-mark" src="/logo.svg" alt="" aria-hidden />
-      <div className="text-title-md font-medium">未连接到本地运行时</div>
+      <div className="text-title-md font-medium">{t("app.notConnected.title")}</div>
+      {/* 这两段原先靠 `<strong>` 挑出「本地运行时」「RUYIN 桌面应用」两个词。
+          加粗**没有跟着进目录**：哪几个词该重读是随语言走的，把标记切进句子
+          就等于要求每门语言都在同一个位置断开。整段一句话给出去，重读交给
+          排版（DS 的字号与颜色层级本来就在做这件事）。 */}
       <p
         className="text-body-md text-muted-foreground"
         style={{ maxWidth: 380, textAlign: "center" }}
       >
-        RUYIN 的主体是运行在你自己机器上的<strong>本地运行时</strong>，
-        由<strong>RUYIN 桌面应用</strong>启动。请从开始菜单打开「RUYIN」——
-        运行时会随之启动并自动连接，无需你输入任何东西。
+        {t("app.notConnected.body")}
       </p>
       {/* 说清这个页面是什么：它是访问方式，不是应用本身。少了这句，
           浏览器里的这一屏看起来就像「应用坏了」。 */}
@@ -59,8 +63,7 @@ function ConnectHint() {
         className="text-body-sm text-muted-foreground"
         style={{ maxWidth: 380, textAlign: "center", opacity: 0.75 }}
       >
-        你现在打开的是运行时的网页界面。它需要运行时已在运行——
-        单独打开它不会启动 RUYIN。
+        {t("app.notConnected.note")}
       </p>
     </div>
   );

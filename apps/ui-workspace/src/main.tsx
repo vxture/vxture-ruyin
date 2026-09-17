@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { ThemeProvider } from "@vxture/design-system";
 import App from "./App";
+import { LocaleProvider } from "./locale-provider";
 // DS 地基先行（globals 接好 token 层与 Tailwind 源），然后**恰好一个**品牌入口，
 // 最后是本应用自己的组装 CSS。
 //
@@ -19,7 +20,11 @@ createRoot(document.getElementById("root")!).render(
         superseding #12's light default); the DS .dark class contract drives
         it - never prefers-color-scheme. Users can switch in 设置. */}
     <ThemeProvider defaultMode="dark">
-      <App />
+      {/* 语言包在最外层：连「未连接到运行时」那一屏都要说对语言，而它在
+          `App` 里、在任何会话之前就可能渲染。 */}
+      <LocaleProvider>
+        <App />
+      </LocaleProvider>
     </ThemeProvider>
   </StrictMode>,
 );

@@ -9,6 +9,10 @@ import { afterEach, expect, test, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TenantMenu, fmtBytes, quotaLines } from "./tenant-menu";
+import { translate, type TKey, type Vars } from "./i18n";
+
+/** 简体中文的 t()，给不经组件直接调的那几条用例。 */
+const tzh = (k: TKey, v?: Vars) => translate("zh-CN", k, v);
 import { Api, type QuotaUsage, type SessionInfo } from "./api";
 
 function session(over: Partial<SessionInfo> = {}): SessionInfo {
@@ -42,9 +46,12 @@ function fakeApi(over: Partial<Api> = {}): Api {
 afterEach(() => vi.restoreAllMocks());
 
 test("quotaLines: both lines are always present, even when a metric is 0/0", () => {
-  expect(quotaLines(usage()).map((l) => l.key)).toEqual(["ai.credit", "storage"]);
+  // 配额行现在按语言给单位（「点 / credits」），所以要一个翻译函数与一门语言。
+  expect(quotaLines(usage(), tzh, "zh-CN").map((l) => l.key)).toEqual(["ai.credit", "storage"]);
   expect(
-    quotaLines(usage({ aiCredit: { used: 0, limit: 0 }, storage: { used: 0, limit: 0 } })).map((l) => l.key),
+    quotaLines(usage({ aiCredit: { used: 0, limit: 0 }, storage: { used: 0, limit: 0 } }), tzh, "zh-CN").map(
+      (l) => l.key,
+    ),
   ).toEqual(["ai.credit", "storage"]);
 });
 

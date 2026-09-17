@@ -26,6 +26,7 @@ import {
   StatusBadge,
 } from "@vxture/design-system";
 import type { Api, SessionInfo, SystemInfo } from "./api";
+import { useT } from "./i18n";
 
 export function RuntimeMenu({
   api,
@@ -52,19 +53,26 @@ export function RuntimeMenu({
     };
   }, [api]);
 
+  const t = useT();
   const online = health.ok;
   const signedIn = session?.signedIn === true;
   // 三行的词与原用户面板逐字一致（那一套又与首页第一板块逐字一致）。
-  const runtimeLine = online ? `已就绪${health.version ? ` · ${health.version}` : ""}` : "未连接";
+  const runtimeLine = online
+    ? health.version
+      ? t("runtime.readyWith", { version: health.version })
+      : t("runtime.ready")
+    : t("runtime.offline");
   // DPAPI 是主密钥的保护，不是加密算法（见 home.tsx 同处注释）。
   const encryptionLine = system
     ? system.keyProtection === "dpapi"
-      ? "已加密"
-      : "开发用途 · 密钥未受保护"
+      ? t("runtime.encrypted")
+      : t("runtime.devKey")
     : "…";
   const platformLine = signedIn
-    ? `已连接${session?.workspace?.name ? ` · ${session.workspace.name}` : ""}`
-    : "未登录";
+    ? session?.workspace?.name
+      ? t("runtime.connectedWith", { workspace: session.workspace.name })
+      : t("runtime.platform.connected")
+    : t("runtime.platform.signedOut");
 
   return (
     <Popover>
@@ -72,10 +80,14 @@ export function RuntimeMenu({
         <button
           type="button"
           className="app-runtime-trigger"
-          aria-label={online ? `运行时 · ${health.version ?? ""}` : "运行时 · 未连接"}
+          aria-label={
+            online
+              ? t("runtime.aria.online", { version: health.version ?? "" })
+              : t("runtime.aria.offline")
+          }
         >
           <StatusBadge tone={online ? "success" : "danger"} dot>
-            {online ? `运行环境 ${health.version ?? ""}` : "未连接"}
+            {online ? t("runtime.badge", { version: health.version ?? "" }) : t("runtime.offline")}
           </StatusBadge>
           <Icon name="caret-up-down" size="xs" className="app-workspace-caret" />
         </button>
@@ -88,16 +100,15 @@ export function RuntimeMenu({
            * 版本号一长（beta 版本带日期与序号）挤掉的是左边的名称 —— 观察台里「运行环境」
            * 就被挤成了「运…」。放下面时最坏只是细节省略，名称永远完整。
            */}
-          <ShellPanelRow icon="cpu" label="运行环境" description={runtimeLine} />
-          <ShellPanelRow icon="shield-check" label="数据加密" description={encryptionLine} />
-          <ShellPanelRow icon="buildings" label="平台连接" description={platformLine} />
+          <ShellPanelRow icon="cpu" label={t("runtime.row.env")} description={runtimeLine} />
+          <ShellPanelRow icon="shield-check" label={t("runtime.row.encryption")} description={encryptionLine} />
+          <ShellPanelRow icon="buildings" label={t("runtime.row.platform")} description={platformLine} />
         </ShellPanelSection>
         {!online && (
           <ShellPanelSection>
             {/* 说它是什么、会怎样 —— 一个只会变红的徽标不告诉用户该等还是该动手。 */}
             <p className="text-body-sm text-muted-foreground app-runtime-note">
-              暂时连不上本机的运行环境，所以读不到数据。应用会自动重连；
-              一直连不上的话，关掉 RUYIN 再从开始菜单打开一次。
+              {t("runtime.offlineBody")}
             </p>
           </ShellPanelSection>
         )}

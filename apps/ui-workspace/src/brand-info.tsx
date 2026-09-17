@@ -13,6 +13,7 @@ import { Icon } from "@vxture/design-system";
 import type { SessionInfo, SystemInfo } from "./api";
 import { consoleBaseOf } from "./platform-base";
 import { ThirdPartyNotices } from "./third-party-notices";
+import { useT, type MessageKey } from "./i18n";
 
 /**
  * 关于页要链哪几页 —— **逐条实测过在不在**（2026-09-10，跟到语言前缀跳转之后）。
@@ -26,10 +27,10 @@ import { ThirdPartyNotices } from "./third-party-notices";
  * 分析 / 第三方 Cookie；桌面应用不设分析 Cookie、也没有第三方 Cookie。链过去等于
  * 替产品宣称了一件不成立的事。
  */
-export const LEGAL_LINKS: Array<{ path: string; label: string }> = [
-  { path: "/legal/privacy", label: "隐私政策" },
-  { path: "/legal/terms", label: "服务条款" },
-  { path: "/legal/refund", label: "退款政策" },
+export const LEGAL_LINKS: Array<{ path: string; labelKey: MessageKey }> = [
+  { path: "/legal/privacy", labelKey: "login.legal.privacy" },
+  { path: "/legal/terms", labelKey: "login.legal.terms" },
+  { path: "/legal/refund", labelKey: "login.legal.refund" },
 ];
 
 export function BrandInfoBlock({
@@ -39,6 +40,7 @@ export function BrandInfoBlock({
   system: SystemInfo | null;
   session: SessionInfo | null;
 }) {
+  const t = useT();
   // 未登录时也要能看条款 —— 落到与登录页同一个缺省，不是空链接。
   const consoleBase = consoleBaseOf(session);
   return (
@@ -53,17 +55,13 @@ export function BrandInfoBlock({
           <p className="brand-tag">Intelligent Workbench</p>
         </div>
       </div>
-      <p className="about-desc text-body-md text-muted-foreground">
-        Vxture AI 原生智能体的本地智能工作环境
-      </p>
+      <p className="about-desc text-body-md text-muted-foreground">{t("about.desc")}</p>
       {/* 「Runtime 0.2.0 · win32-x64」是给程序看的写法。这里只留版本号，
           系统与位数在「设置 › 当前版本」里用用户认得的词写（owner 2026-09-17）。 */}
       <div className="about-runtime mono text-muted-foreground">
-        版本 {system?.version ?? "…"}
+        {t("about.version", { version: system?.version ?? "…" })}
       </div>
-      <p className="about-copyright text-body-sm text-muted-foreground">
-        © 2026 Vxture · 保留所有权利
-      </p>
+      <p className="about-copyright text-body-sm text-muted-foreground">{t("about.copyright")}</p>
       {/* 三条条款做成按钮式（owner 2026-09-10），但**仍然是 `<a>`**：真链接才能
           中键新开、右键复制地址；用按钮 + onClick 去 window.open 会把这两样
           都弄丢，而它看起来一模一样。「三方许可」与它们同一行、同一个版式
@@ -78,7 +76,7 @@ export function BrandInfoBlock({
             target="_blank"
             rel="noopener noreferrer"
           >
-            {l.label}
+            {t(l.labelKey)}
             <Icon name="external-link" size="xs" />
           </a>
         ))}

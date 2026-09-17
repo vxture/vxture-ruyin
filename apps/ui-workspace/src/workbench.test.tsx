@@ -41,12 +41,13 @@ vi.mock("./home", () => ({
 // read the section/tab list - see workspace-tabs.ts's header comment) -
 // mocked separately from the components themselves, with the same real data.
 vi.mock("./settings-sections", () => ({
+  // 桩里放的也是目录键（与真表同形，i18n 之后）—— 桩若停在旧形状，侧栏会渲染
+  // 出一排空标签，而那正是真代码里最容易漏掉的一处。
   SETTINGS_SECTIONS: [
-    { id: "account", label: "账户", icon: "role" },
-    { id: "general", label: "通用", icon: "settings" },
-    { id: "privacy", label: "数据与隐私", icon: "lock" },
-    { id: "updates", label: "软件更新", icon: "arrow-down" },
-    { id: "about", label: "关于", icon: "info" },
+    { id: "account", labelKey: "sections.account", icon: "role" },
+    { id: "general", labelKey: "sections.general", icon: "settings" },
+    { id: "updates", labelKey: "sections.updates", icon: "arrow-down" },
+    { id: "about", labelKey: "sections.about", icon: "info" },
   ],
   // 路由要靠它认地址（含侧栏里没有的「添加连接器」），所以桩里必须有它 ——
   // 少了它这条 mock 会在点击时才炸，而不是在加载时。
@@ -60,10 +61,10 @@ vi.mock("./settings", () => ({
 }));
 vi.mock("./workspace-tabs", () => ({
   PROJECT_TABS: [
-    { id: "overview", label: "概览" },
-    { id: "context", label: "上下文" },
-    { id: "tasks", label: "任务" },
-    { id: "audit", label: "审计" },
+    { id: "overview", labelKey: "tabs.overview" },
+    { id: "context", labelKey: "tabs.context" },
+    { id: "tasks", labelKey: "tabs.tasks" },
+    { id: "audit", labelKey: "tabs.audit" },
   ],
 }));
 vi.mock("./workspace", () => ({

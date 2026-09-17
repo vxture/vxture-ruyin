@@ -118,6 +118,9 @@ jobs:
       - name: Shared type shape guardrail (server <-> UI)
         run: node scripts/guardrails/check-shared-shapes.mjs
 
+      - name: i18n guardrail (catalog parity, no bare Chinese in converted files)
+        run: node scripts/guardrails/check-i18n.mjs
+
       - name: Update policy guardrail (TD-021, owner decisions)
         run: node scripts/guardrails/check-update-policy.mjs
 

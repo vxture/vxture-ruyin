@@ -43,6 +43,7 @@ import { Api, type ProductInfo, type ProjectMeta, type SessionInfo } from "./api
 import { BrandInfoTrigger } from "./brand-info-trigger";
 import { TenantMenu } from "./tenant-menu";
 import { PROJECT_TABS, type RuntimeTabId, type TabId } from "./workspace-tabs";
+import { useT } from "./i18n";
 import { declaresUi, useProductSurface } from "./product-surface-info";
 import { SETTINGS_SECTIONS, resolveSection, type SectionId } from "./settings-sections";
 import { NoticeBar } from "./notice-bar";
@@ -190,6 +191,7 @@ export function Workbench({
   /** 用户在侧栏底部退出登录后调用；工作台自己不决定去留，交给会话闸门重读。 */
   onSignedOut: () => void;
 }) {
+  const t = useT();
   const [products, setProducts] = useState<ProductInfo[]>([]);
   const [workspaces, setWorkspaces] = useState<ProjectMeta[]>([]);
   /** 其他工作区里还有几个项目。只报数量——让人知道数据还在，不泄露名字。 */
@@ -395,8 +397,8 @@ export function Workbench({
     // 「首页」一项，是给一件东西起了两个名字。
     const list: ShellNavSection[] = [
       {
-        title: "首页",
-        items: [{ href: "#home", label: "首页", icon: "home" }],
+        title: t("nav.home"),
+        items: [{ href: "#home", label: t("nav.home"), icon: "home" }],
       },
     ];
     // 归档的项目不进「最近工作」—— 那一栏回答的是「我刚才在做什么」；它们另起一组。
@@ -416,7 +418,7 @@ export function Workbench({
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, RECENT_LIMIT);
       list.push({
-        title: "最近工作",
+        title: t("nav.recent"),
         dividerBefore: true,
         items: recent.map((w) => ({
           href: `#ws/${w.id}`,
@@ -430,7 +432,7 @@ export function Workbench({
       // 一个真项目都没有时才放样例，好让这一栏的样子看得见。真数据一到就整组
       // 消失 —— 真假混排用户没法分辨（catalog.ts 的 DEMO_RECENT 有完整约束）。
       list.push({
-        title: "最近工作",
+        title: t("nav.recent"),
         dividerBefore: true,
         // href 必须**逐条唯一**：侧栏拿 href 当 key，三条都写 `#home` 会撞成
         // 重复 key，React 就不保证增删的对应关系了 —— 真项目到位、这一组本该
@@ -439,7 +441,7 @@ export function Workbench({
         items: DEMO_RECENT.map((d, i) => ({
           href: `#sample/${i}`,
           label: d.project,
-          subLabel: `示例 · ${d.product}`,
+          subLabel: t("nav.sample", { product: d.product }),
           icon: "cube" as const,
         })),
       });
@@ -447,7 +449,7 @@ export function Workbench({
     // 归档的项目：只读，但要找得回来（恢复入口在项目页里）。放在最后，不与在用的混排。
     if (archived.length > 0) {
       list.push({
-        title: "已归档",
+        title: t("nav.archived"),
         dividerBefore: true,
         items: archived.map((w) => ({
           href: `#ws/${w.id}`,
@@ -459,7 +461,7 @@ export function Workbench({
     }
     if (pendingImport.length > 0) {
       list.push({
-        title: "待导入工作区",
+        title: t("nav.pendingImport"),
         dividerBefore: true,
         items: pendingImport.map((w) => ({
           href: `#ws/${w.id}/overview`,
@@ -481,12 +483,14 @@ export function Workbench({
       .map((w) => ({
         key: w.id,
         label: w.name,
-        description: `${w.productId} · ${w.projectType}${w.archivedAt ? " · 已归档" : ""}`,
+        description: w.archivedAt
+          ? t("nav.projectMetaArchived", { product: w.productId, type: w.projectType })
+          : t("nav.projectMeta", { product: w.productId, type: w.projectType }),
         icon: (w.archivedAt ? "archive" : "cube") as "cube",
         onSelect: () => navigate(`#ws/${w.id}`),
       }));
     if (wsItems.length > 0) {
-      groups.push({ key: "ws", heading: "项目", items: wsItems });
+      groups.push({ key: "ws", heading: t("search.group.projects"), items: wsItems });
     }
     const productItems = products
       .filter((p) => match(p.name) || match(p.id))
@@ -495,28 +499,28 @@ export function Workbench({
         label: p.name,
         description: p.id,
         icon: "package" as const,
-        meta: "已安装",
+        meta: t("search.meta.installed"),
         onSelect: () => navigate("#home"),
       }));
     if (productItems.length > 0) {
-      groups.push({ key: "products", heading: "产品", items: productItems });
+      groups.push({ key: "products", heading: t("search.group.products"), items: productItems });
     }
     const actions = [
       {
         key: "home",
-        label: "回到首页",
+        label: t("search.action.home"),
         icon: "home" as const,
         onSelect: () => navigate("#home"),
       },
       {
         key: "settings",
-        label: "打开设置",
+        label: t("search.action.settings"),
         icon: "settings" as const,
         onSelect: () => navigate("#settings/account"),
       },
     ].filter((a) => match(a.label));
     if (actions.length > 0) {
-      groups.push({ key: "actions", heading: "动作", items: actions });
+      groups.push({ key: "actions", heading: t("search.group.actions"), items: actions });
     }
     return groups;
   }, [query, workspaces, products, navigate]);
@@ -540,12 +544,12 @@ export function Workbench({
             <>
               <ShellIconButton
                 icon="arrow-left"
-                label="回到工作台"
+                label={t("chrome.back")}
                 onClick={() => navigate("#home")}
               />
               <span className="app-ident min-w-0">
                 {view.kind === "settings" ? (
-                  <span className="app-ident-product">设置</span>
+                  <span className="app-ident-product">{t("chrome.settings")}</span>
                 ) : (
                   <>
                     <span className="app-ident-product">{openProductName}</span>
@@ -556,7 +560,7 @@ export function Workbench({
                       <>
                         <span className="app-ident-sep">·</span>
                         <span className="app-ident-doc">
-                          {openProjectMeta?.name ?? "项目"}
+                          {openProjectMeta?.name ?? t("chrome.project")}
                         </span>
                       </>
                     )}
@@ -602,7 +606,7 @@ export function Workbench({
           <HeaderSearch query={query} onQueryChange={setQuery} groups={searchGroups} />
           <ShellIconButton
             icon="home"
-            label="官网 · ruyin.work"
+            label={t("chrome.website")}
             onClick={() => window.open("https://ruyin.work", "_blank", "noopener")}
           />
           {session && workspaceName && (
@@ -617,7 +621,7 @@ export function Workbench({
           {/* 「安装桌面应用」（PWA）已移除，理由见 login.tsx 同处注释。 */}
           <ShellIconButton
             icon="settings"
-            label="设置"
+            label={t("chrome.settings")}
             active={view.kind === "settings"}
             onClick={() => navigate("#settings/account")}
           />
@@ -644,24 +648,24 @@ export function Workbench({
           // 产品自己的界面：契约声明了才有这一格，有就排第一（owner 2026-09-11）。
           // 名字用产品自己的名字 —— 这一格就是这个产品，不是 Runtime 的又一个控制面。
           ...(hasProductUi
-            ? [{ href: `#ws/${view.id}/product`, label: openProductName ?? "产品界面", icon: PRODUCT_TAB_ICON }]
+            ? [{ href: `#ws/${view.id}/product`, label: openProductName ?? t("tabs.product"), icon: PRODUCT_TAB_ICON }]
             : []),
-          ...PROJECT_TABS.map((t) => ({
-            href: `#ws/${view.id}/${t.id}`,
+          ...PROJECT_TABS.map((tab) => ({
+            href: `#ws/${view.id}/${tab.id}`,
             // 未决数挂在「任务」上：徽章跟着它要指向的东西走，才省得下那条
             // 32px 的横条。
             label:
-              t.id === "tasks" && projectPending > 0
-                ? `${t.label}（${projectPending}）`
-                : t.label,
-            icon: TAB_ICON[t.id],
+              tab.id === "tasks" && projectPending > 0
+                ? t("nav.tabWithCount", { label: t(tab.labelKey), count: projectPending })
+                : t(tab.labelKey),
+            icon: TAB_ICON[tab.id],
           })),
         ],
       },
     ];
     if (siblings.length > 0) {
       list.push({
-        title: "同产品的其他项目",
+        title: t("nav.siblings"),
         dividerBefore: true,
         items: siblings.map((w) => ({
           href: `#ws/${w.id}`,
@@ -682,7 +686,7 @@ export function Workbench({
         title: "",
         items: SETTINGS_SECTIONS.map((x) => ({
           href: `#settings/${x.id}`,
-          label: x.label,
+          label: t(x.labelKey),
           icon: x.icon as "settings",
         })),
       },
@@ -720,10 +724,10 @@ export function Workbench({
       storageKeyPrefix="ruyin-workbench"
       linkComponent={NavLink}
       labels={{
-        expandNav: "展开导航",
-        collapseNav: "收起导航",
-        expandAllGroups: "展开全部分组",
-        collapseAllGroups: "收起全部分组",
+        expandNav: t("nav.expand"),
+        collapseNav: t("nav.collapse"),
+        expandAllGroups: t("nav.expandGroups"),
+        collapseAllGroups: t("nav.collapseGroups"),
       }}
       footer={
         <>
@@ -731,7 +735,7 @@ export function Workbench({
               在用户那里和「数据丢了」分不开。 */}
           {elsewhere > 0 && !collapsed && (
             <p className="sidebar-elsewhere">
-              另有 {elsewhere} 个项目在其他工作区
+              {t("nav.elsewhere", { count: elsewhere })}
             </p>
           )}
           <UserSlot
@@ -760,7 +764,7 @@ export function Workbench({
           {error && <NoticeBar message={error} onClose={() => setError(null)} />}
           <Suspense
             fallback={
-              <p className="text-body-md text-muted-foreground">加载中……</p>
+              <p className="text-body-md text-muted-foreground">{t("chrome.loading")}</p>
             }
           >
             {view.kind === "settings" ? (
@@ -768,7 +772,7 @@ export function Workbench({
             ) : view.kind === "workspace" ? (
               view.tab === undefined ? (
                 // 还在等「有没有产品界面」的回答，决定进哪一格（见上面的解析）。
-                <p className="text-body-md text-muted-foreground">加载中……</p>
+                <p className="text-body-md text-muted-foreground">{t("chrome.loading")}</p>
               ) : (
                 <ProjectPanel
                   key={view.id}

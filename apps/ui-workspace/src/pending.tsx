@@ -23,15 +23,17 @@ import {
   ShellPanelSection,
 } from "@vxture/design-system";
 import { Api, type PendingConfirmation } from "./api";
+import { useT, type MessageKey, type TFn } from "./i18n";
 
 /** 轮询间隔。检查点由后台任务推进，界面这边没有推送通道。 */
 const POLL_MS = 30_000;
 
-const KIND_LABEL: Record<PendingConfirmation["kind"], string> = {
-  context_confirm: "确认要送出的资料",
-  tool_ask: "批准一次工具使用",
-  verification_review: "人工复核",
-  state_transition: "确认智能体提出的阶段推进",
+/** 种类 → 目录键。**词表本身不进目录** —— 键是代码里的常量，句子才是文案。 */
+const KIND_KEY: Record<PendingConfirmation["kind"], MessageKey> = {
+  context_confirm: "pending.kind.context_confirm",
+  tool_ask: "pending.kind.tool_ask",
+  verification_review: "pending.kind.verification_review",
+  state_transition: "pending.kind.state_transition",
 };
 
 export function usePending(api: Api): PendingConfirmation[] {
@@ -61,16 +63,21 @@ export function usePending(api: Api): PendingConfirmation[] {
   return rows;
 }
 
-/** 相对时间。等得越久越该被看见，绝对时间戳传达不了这件事。 */
-function waitedFor(raisedAt: string): string {
-  const ms = Date.now() - new Date(raisedAt).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return "刚刚";
+/**
+ * 相对时间。等得越久越该被看见，绝对时间戳传达不了这件事。
+ *
+ * 挑哪一档（刚刚 / 分 / 时 / 天）是**逻辑**，与语言无关，所以留在这里；
+ * 那一档说成什么话是**文案**，交给目录。英文的单复数由 `count` 自动分支。
+ */
+export function waitedFor(raisedAt: string, t: TFn, now = Date.now()): string {
+  const ms = now - new Date(raisedAt).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return t("pending.waited.justNow");
   const min = Math.floor(ms / 60_000);
-  if (min < 1) return "刚刚";
-  if (min < 60) return `已等 ${min} 分钟`;
+  if (min < 1) return t("pending.waited.justNow");
+  if (min < 60) return t("pending.waited.minutes", { count: min });
   const hours = Math.floor(min / 60);
-  if (hours < 24) return `已等 ${hours} 小时`;
-  return `已等 ${Math.floor(hours / 24)} 天`;
+  if (hours < 24) return t("pending.waited.hours", { count: hours });
+  return t("pending.waited.days", { count: Math.floor(hours / 24) });
 }
 
 export function PendingInbox({
@@ -81,6 +88,7 @@ export function PendingInbox({
   onOpen: (projectId: string) => void;
 }) {
   const count = rows.length;
+  const t = useT();
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -88,7 +96,9 @@ export function PendingInbox({
           variant="ghost"
           size="sm"
           className="pending-trigger"
-          aria-label={count > 0 ? `${count} 项等待你确认` : "没有待确认的事项"}
+          aria-label={
+            count > 0 ? t("pending.aria.count", { count }) : t("pending.aria.none")
+          }
         >
           <Icon name="bell" size="sm" />
           {count > 0 && <span className="pending-count">{count}</span>}
@@ -99,8 +109,8 @@ export function PendingInbox({
           {count === 0 ? (
             <EmptyState
               icon="check"
-              title="没有在等你的事"
-              description="任务停下来需要你确认时，会出现在这里，并同时发出系统通知。"
+              title={t("pending.empty.title")}
+              description={t("pending.empty.desc")}
             />
           ) : (
             <ul className="pending-list">
@@ -114,11 +124,11 @@ export function PendingInbox({
                     <span className="pending-item-main">
                       <span className="pending-item-title">{r.projectName}</span>
                       <span className="pending-item-kind">
-                        {KIND_LABEL[r.kind]}
+                        {t(KIND_KEY[r.kind])}
                       </span>
                     </span>
                     <span className="pending-item-age">
-                      {waitedFor(r.raisedAt)}
+                      {waitedFor(r.raisedAt, t)}
                     </span>
                   </button>
                 </li>

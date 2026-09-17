@@ -4,6 +4,8 @@
  *  就把整个项目面板（含它拉的全部 DS 表格/表单组件）拖进同一个同步包里，
  *  这条数据本该带来的「按需加载」也就名存实亡。 */
 
+import type { MessageKey } from "./i18n";
+
 /** Runtime 自持的四个控制面（接入指南 §6.3）。每个项目都有。 */
 export type RuntimeTabId = "overview" | "context" | "tasks" | "audit";
 
@@ -16,9 +18,9 @@ export type TabId = RuntimeTabId | "product";
 /** 项目内的分区。**这是产品自己的导航，所以它属于侧栏** —— 进了产品就是进了
  *  另一套框架（macOS 的应用源列表就是这么回事）。产品界面那一格不在这里：它有没有
  *  取决于契约，由侧栏按守护进程的回答另行加在最前面。 */
-export const PROJECT_TABS: Array<{ id: RuntimeTabId; label: string }> = [
-  { id: "overview", label: "概览" },
-  { id: "context", label: "上下文" },
-  { id: "tasks", label: "任务" },
-  { id: "audit", label: "审计" },
+export const PROJECT_TABS: Array<{ id: RuntimeTabId; labelKey: MessageKey }> = [
+  { id: "overview", labelKey: "tabs.overview" },
+  { id: "context", labelKey: "tabs.context" },
+  { id: "tasks", labelKey: "tabs.tasks" },
+  { id: "audit", labelKey: "tabs.audit" },
 ];

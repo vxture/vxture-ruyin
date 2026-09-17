@@ -24,6 +24,7 @@ import {
 } from "@vxture/design-system";
 import { Api, type SessionInfo } from "./api";
 import { consoleAppBaseOf } from "./platform-base";
+import { useT } from "./i18n";
 
 /** Poll /auth/session until signedIn flips (login completes in the browser). */
 const LOGIN_POLL_MS = 2000;
@@ -52,6 +53,7 @@ export function UserSlot({
    */
   onSignedOut: () => void;
 }) {
+  const t = useT();
   const [online, setOnline] = useState(false);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [busy, setBusy] = useState(false);
@@ -153,8 +155,8 @@ export function UserSlot({
    * 得到），配置 › 账号里也有。没有显示名时落到用户名，仍然不落到邮箱。
    */
   const displayName = signedIn
-    ? session?.profile?.name ?? session?.profile?.username ?? "Vxture 用户"
-    : "会话已失效";
+    ? session?.profile?.name ?? session?.profile?.username ?? t("user.defaultName")
+    : t("user.sessionExpired");
   /**
    * 菜单里那一行（**不是**侧栏那一格）。这里放邮箱是对的：菜单要回答「我登的
    * 是哪个账号」，而它只在点开时出现，不是一直摊在屏幕上。
@@ -166,8 +168,8 @@ export function UserSlot({
   const subLine = signedIn
     ? session?.profile?.email ?? session?.org?.name
     : online
-      ? "请重新登录以继续"
-      : "未连接";
+      ? t("user.relogin")
+      : t("user.offline");
 
   // 运行环境 / 数据加密 / 平台连接三行**挪到标题栏的 Runtime 下拉里了**（runtime-menu.tsx，
   // owner 2026-09-11）。它们是运行时的事实，不是账户的事实；留在这里就是第三份
@@ -180,7 +182,7 @@ export function UserSlot({
         <PopoverTrigger asChild>
           <Button
             variant="ghost"
-            aria-label={`账户 · ${displayName}`}
+            aria-label={t("user.aria.chip", { name: displayName })}
             className={`user-chip h-auto w-full px-xs py-2xs ${
               collapsed ? "justify-center" : "justify-start"
             }`}
@@ -220,7 +222,7 @@ export function UserSlot({
               : {
                   titleAside: (
                     <StatusBadge tone="warning" dot>
-                      登录异常
+                      {t("user.badge.loginError")}
                     </StatusBadge>
                   ),
                 })}
@@ -233,18 +235,18 @@ export function UserSlot({
                 disabled={busy || !online}
                 onClick={() => void startLogin()}
               >
-                {busy ? "正在打开浏览器…" : "登录 Vxture 账号"}
+                {busy ? t("login.button.opening") : t("login.button.idle")}
               </Button>
               {pendingUrl && (
                 <div className="text-body-sm text-muted-foreground text-center pt-2xs">
-                  在浏览器中完成登录后自动返回…{" "}
+                  {t("user.login.return")}{" "}
                   <a
                     className="text-primary-text underline"
                     href={pendingUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    未打开？点此继续 ↗
+                    {t("user.login.fallback")}
                   </a>
                 </div>
               )}
@@ -257,7 +259,7 @@ export function UserSlot({
             <ShellPanelRow
               className="user-panel-row"
               icon="user-circle"
-              label="用户中心"
+              label={t("user.row.profile")}
               href={`${consoleAppBaseOf(session)}/profile`}
               newTab
               trailingIcon="external-link"
@@ -265,17 +267,22 @@ export function UserSlot({
             <ShellPanelRow
               className="user-panel-row"
               icon="gauge"
-              label="配额用量"
+              label={t("user.row.quota")}
               href={`${consoleAppBaseOf(session)}/quotas`}
               newTab
               trailingIcon="external-link"
             />
-            <ShellPanelRow className="user-panel-row" icon="settings" label="设置" onClick={onOpenSettings} />
+            <ShellPanelRow
+              className="user-panel-row"
+              icon="settings"
+              label={t("user.row.settings")}
+              onClick={onOpenSettings}
+            />
             {signedIn && (
               <ShellPanelRow
                 className="user-panel-row"
                 icon="sign-out"
-                label="退出"
+                label={t("user.row.logout")}
                 danger
                 onClick={() => void doLogout()}
               />

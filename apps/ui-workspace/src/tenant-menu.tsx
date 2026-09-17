@@ -30,6 +30,7 @@ import {
 } from "@vxture/design-system";
 import { Api, type QuotaUsage, type SessionInfo } from "./api";
 import { consoleAppBaseOf } from "./platform-base";
+import { useLocale, useT, type Locale, type TFn } from "./i18n";
 
 export interface QuotaLine {
   key: string;
@@ -46,8 +47,9 @@ export interface QuotaLine {
  * 单位跟着各自的格式化函数走，配额行的文案模板（标题行 / 明细行）不用
  * 关心自己在拼哪一种配额。
  */
-function fmt(n: number): string {
-  return `${Math.round(n).toLocaleString("zh-CN")} 点`;
+function fmt(n: number, t: TFn, locale: Locale): string {
+  // 数字的千分位由 `Intl` 按语言排；「点 / credits」这个单位由目录给。
+  return t("tenant.quota.points", { n: Math.round(n).toLocaleString(locale) });
 }
 
 /** 字节 → 人读单位。存储是字节口径，直接显示一串数字没人读得懂。 */
@@ -68,9 +70,14 @@ export function fmtBytes(n: number): string {
  * 要让用户看见的事实，不是要藏起来的边界情况；两条名字定死用英文，这两个
  * 概念本身就是英文术语，硬翻中文反而生造出新词。
  */
-export function quotaLines(usage: QuotaUsage): QuotaLine[] {
+export function quotaLines(usage: QuotaUsage, t: TFn, locale: Locale): QuotaLine[] {
   return [
-    { key: "ai.credit", label: "AI Credits", ...usage.aiCredit, format: fmt },
+    {
+      key: "ai.credit",
+      label: "AI Credits",
+      ...usage.aiCredit,
+      format: (n: number) => fmt(n, t, locale),
+    },
     { key: "storage", label: "Storage Spaces", ...usage.storage, format: fmtBytes },
   ];
 }
@@ -92,13 +99,17 @@ function QuotaMeterRow({
   label: string;
   line: QuotaLine;
 }) {
+  const t = useT();
   const hasLimit = line.limit > 0;
   const percent = hasLimit ? Math.max(0, Math.min(100, (line.used / line.limit) * 100)) : 0;
   const headline = line.format(line.used);
   // 明细行常驻，哪怕总量是 0（owner 2026-09-16 三次纠正）：行本身已经不再因为
   // 0/0 就整段藏起来，明细行不该在同一个行里自相矛盾地又藏一次——「总量 0」
   // 跟「已用 0」一样，都是要让用户看见的事实，不是要吞掉的边界情况。
-  const caption = `已用 ${line.format(line.used)}，总量 ${line.format(line.limit)}`;
+  const caption = t("tenant.quota.caption", {
+    used: line.format(line.used),
+    limit: line.format(line.limit),
+  });
   return (
     <div className="quota-meter-row">
       <span className="quota-meter-row-icon" aria-hidden="true">
@@ -117,6 +128,8 @@ function QuotaMeterRow({
 }
 
 export function TenantMenu({ api, session }: { api: Api; session: SessionInfo }) {
+  const t = useT();
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [quota, setQuota] = useState<
     | { status: "idle" }
@@ -128,21 +141,21 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
   // 「租户管理」落在 console-bff 本体上，不是官网 consoleBase（owner 2026-09-16
   // audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明）。
   const consoleAppBase = consoleAppBaseOf(session);
-  const tenantName = session.org?.name ?? "未命名租户";
-  const workspaceName = session.workspace?.name ?? "未选定工作区";
+  const tenantName = session.org?.name ?? t("tenant.unnamed");
+  const workspaceName = session.workspace?.name ?? t("tenant.noWorkspace");
 
   // 打开时才去问，关上不刷新：菜单不是常驻面板，没必要每 45s 拉一次。
   useEffect(() => {
     if (!open) return;
     if (!session.entitlementsConfigured) {
-      setQuota({ status: "unavailable", reason: "暂时读不到" });
+      setQuota({ status: "unavailable", reason: t("tenant.quota.unavailable") });
       return;
     }
     let alive = true;
     setQuota({ status: "loading" });
     api
       .quotaUsage()
-      .then((usage) => alive && setQuota({ status: "ok", lines: quotaLines(usage) }))
+      .then((usage) => alive && setQuota({ status: "ok", lines: quotaLines(usage, t, locale) }))
       .catch((e: Error) => alive && setQuota({ status: "unavailable", reason: e.message }));
     return () => {
       alive = false;
@@ -178,7 +191,11 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" className="app-workspace" title={`租户 ${tenantName} · 工作区 ${workspaceName}`}>
+        <button
+          type="button"
+          className="app-workspace"
+          title={t("tenant.aria", { tenant: tenantName, workspace: workspaceName })}
+        >
           <Icon name="buildings" size="xs" />
           <span className="app-workspace-name">{workspaceName}</span>
           <Icon name="caret-up-down" size="xs" className="app-workspace-caret" />
@@ -195,9 +212,11 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
         />
         {/* 2. 配额（只读） */}
         <ShellPanelSection className="quota-section">
-          <ShellPanelSectionTitle>配额</ShellPanelSectionTitle>
-          {quota.status === "loading" && <ShellPanelRow icon="cpu" label="正在读取…" />}
-          {quota.status === "unavailable" && <ShellPanelRow icon="cpu" label="配额" value={quota.reason} />}
+          <ShellPanelSectionTitle>{t("tenant.quota.section")}</ShellPanelSectionTitle>
+          {quota.status === "loading" && <ShellPanelRow icon="cpu" label={t("tenant.quota.loading")} />}
+          {quota.status === "unavailable" && (
+            <ShellPanelRow icon="cpu" label={t("tenant.quota.label")} value={quota.reason} />
+          )}
           {quota.status === "ok" &&
             quota.lines.map((line) => (
               <QuotaMeterRow
@@ -212,7 +231,7 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
         <ShellPanelSection>
           <ShellPanelRow
             icon="settings"
-            label="租户管理"
+            label={t("tenant.admin")}
             href={`${consoleAppBase}/tenant-settings`}
             newTab
             trailingIcon="external-link"

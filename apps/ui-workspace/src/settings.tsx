@@ -78,6 +78,8 @@ import { useHostChrome } from "./host-chrome";
 
 import { BrandInfoBlock } from "./brand-info";
 import { UpdateNotice, channelLabel, type UpdateCheckState } from "./update-check";
+import { LOCALE_NAMES, LOCALES, useLocale, useT, type Locale } from "./i18n";
+import { useSetLocale } from "./locale-provider";
 const UI_VERSION = "0.2.0";
 
 /**
@@ -449,13 +451,11 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
  */
 function PreferencesBlock() {
   const { mode, setMode, density, setDensity, fontSize, setFontSize } = useTheme();
-  const [lang, setLang] = useState(
-    () => localStorage.getItem(LANG_KEY) ?? "zh-CN",
-  );
-  const pickLang = (next: string) => {
-    localStorage.setItem(LANG_KEY, next);
-    setLang(next);
-  };
+  const t = useT();
+  // 语言不再由这一格自己存：它是**整棵树**的状态（换一门语言，屏幕上每一句话
+  // 都要跟着变），所以持有者是 `LocaleProvider`，这里只读当前值、只发出切换。
+  const locale = useLocale();
+  const setLocale = useSetLocale();
   return (
     <SettingsBlock
       icon="settings"
@@ -464,9 +464,18 @@ function PreferencesBlock() {
     >
       {/* 四项各一行、不带说明（owner 第 5 条）：这四个词自己说得清，一行小字
           只是把行距撑开。控件列定宽，所以四行左右对齐、滑块等长（第 6 条）。 */}
-      <Row label="语言">
-        <NativeSelect value={lang} onChange={(e) => pickLang(e.target.value)}>
-          <option value="zh-CN">简体中文</option>
+      <Row label={t("prefs.language")}>
+        {/* 每门语言用**它自己**写名字（简体中文 / English）—— 要换语言的人，
+            多半正读不懂当前这一门。 */}
+        <NativeSelect
+          value={locale}
+          onChange={(e) => setLocale(e.target.value as Locale)}
+        >
+          {LOCALES.map((l) => (
+            <option key={l} value={l}>
+              {LOCALE_NAMES[l]}
+            </option>
+          ))}
         </NativeSelect>
       </Row>
       <Row label="主题">
@@ -1383,6 +1392,7 @@ function UpdatesSection({
   system: SystemInfo | null;
   updateCheck: UpdateCheckState;
 }) {
+  const t = useT();
   const { autoCheck, setAutoCheck, busy, check } = updateCheck;
 
   return (
@@ -1429,7 +1439,7 @@ function UpdatesSection({
       >
         {/* 渠道来自**刚查过的那份结果**，不是写死的字面量：写死的话，将来出了
             测试版渠道，界面会一口咬定「正式版」而用户正装着测试包（TD-021）。 */}
-        <FactRow label="更新渠道" value={channelLabel(updateCheck.result?.channel)} />
+        <FactRow label="更新渠道" value={channelLabel(t, updateCheck.result?.channel)} />
         <FactRow label="检查" value="手动点「检查更新」，或开着「自动检查」时每次启动查一次" />
         <FactRow label="下载" value="在浏览器里下载，安装包保存到你的下载文件夹" />
         <FactRow label="安装" value="双击安装包覆盖安装，你的数据不受影响" />

@@ -33,6 +33,7 @@ import { Button } from "@vxture/design-system";
 import type { Api } from "./api";
 import { ProductBridge } from "./product-bridge";
 import { declaresUi, type SurfaceInfo } from "./product-surface-info";
+import { useT } from "./i18n";
 
 /**
  * 沙箱允许的能力，**逐项写死**。多给一项就多一条出路：
@@ -80,6 +81,7 @@ function frameOf(s: SurfaceInfo): Frame {
  * —— 那份回答侧栏也要用（列不列这一格、默认进哪），由上层问一次传下来。
  */
 export function ProductSurface({ api, projectId, surface }: { api: Api; projectId: string; surface: SurfaceInfo }) {
+  const t = useT();
   const frameState = useMemo(() => frameOf(surface), [surface]);
   const frame = useRef<HTMLIFrameElement>(null);
 
@@ -107,7 +109,7 @@ export function ProductSurface({ api, projectId, surface }: { api: Api; projectI
   if (frameState.state === "refused") {
     return (
       <p className="error-box" role="alert">
-        出于安全考虑，这个产品界面没有被载入。
+        {t("productSurface.refused")}
       </p>
     );
   }
@@ -115,7 +117,7 @@ export function ProductSurface({ api, projectId, surface }: { api: Api; projectI
     <iframe
       ref={frame}
       className="product-surface"
-      title="产品界面"
+      title={t("productSurface.title")}
       src={frameState.entry}
       sandbox={PRODUCT_SANDBOX}
       referrerPolicy="no-referrer"
@@ -146,11 +148,12 @@ export function ProductTab({
   surface: SurfaceInfo | null | undefined;
   onReload: () => void;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
   if (surface === undefined) {
-    return <p className="text-body-md text-muted-foreground">加载中……</p>;
+    return <p className="text-body-md text-muted-foreground">{t("productSurface.loading")}</p>;
   }
   if (surface?.available) {
     return <ProductSurface api={api} projectId={projectId} surface={surface} />;
@@ -158,14 +161,14 @@ export function ProductTab({
   if (surface?.reason === "archived") {
     return (
       <p className="text-body-md text-muted-foreground">
-        项目已归档，产品界面不再载入。记录照常可看、可导出；恢复项目后界面就回来。
+        {t("productSurface.archived")}
       </p>
     );
   }
   if (!declaresUi(surface)) {
     return (
       <p className="text-body-md text-muted-foreground">
-        这个产品没有自己的界面。任务、资料与成果都在左侧。
+        {t("productSurface.none")}
       </p>
     );
   }
@@ -187,15 +190,14 @@ export function ProductTab({
   return (
     <div className="notice-box" role="status">
       <div className="flex flex-col gap-2xs">
-        <strong>产品界面暂时不可用</strong>
+        <strong>{t("productSurface.unavailable.title")}</strong>
         <span className="text-body-sm text-muted-foreground">
-          它的界面还没取到本机，可能是之前离线。产品其余部分照常可用 ——
-          任务、资料与成果都在左侧。
+          {t("productSurface.unavailable.body")}
         </span>
         {failure && <span className="text-body-sm text-destructive-text">{failure}</span>}
       </div>
       <Button onClick={() => void retry()} disabled={busy}>
-        {busy ? "获取中…" : "重新获取"}
+        {busy ? t("productSurface.retrying") : t("productSurface.retry")}
       </Button>
     </div>
   );

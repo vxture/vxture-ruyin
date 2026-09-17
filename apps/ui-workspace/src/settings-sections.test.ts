@@ -18,7 +18,8 @@ void test("resolveSection: 添加连接器不在侧栏里，但它是一个能�
 void test("模型平台紧挨在能力平台前面（owner 2026-09-15）", () => {
   const ids = SETTINGS_SECTIONS.map((s) => s.id);
   expect(ids.indexOf("models")).toBe(ids.indexOf("skills") - 1);
-  expect(SETTINGS_SECTIONS.find((s) => s.id === "models")?.label).toBe("模型平台");
+  // 表里放的是目录键，不是那句中文（i18n 之后）—— 断言键，不是断言文案。
+  expect(SETTINGS_SECTIONS.find((s) => s.id === "models")?.labelKey).toBe("sections.models");
 });
 
 void test("resolveSection: 侧栏里的分区照原样通过；不认识的地址回账户，不是空白", () => {
