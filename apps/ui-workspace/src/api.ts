@@ -191,6 +191,7 @@ export type RuntimeEvent =
   | { kind: "ui-theme" }
   | { kind: "app-restart" }
   | { kind: "app-open-data-dir" }
+  | { kind: "app-open-log-dir" }
   | { kind: "app-pick-folder" };
 
 export interface StateItem {
@@ -1026,6 +1027,12 @@ export class Api {
    * （它才是知道 dataDir 的那个），界面只是提出这个请求。
    */
   openDataDir = () => this.call<{ ok: boolean }>("/ui/open-data-dir", "POST");
+  /**
+   * 请壳打开日志目录（TD-066）。**路径不由界面给** —— 与数据目录同一条边界：
+   * 同一个页面在浏览器里也开着，路径要是跟着请求走，就等于给了它「让壳打开
+   * 任意目录」的能力。
+   */
+  openLogDir = () => this.call<{ ok: boolean }>("/ui/open-log-dir", "POST");
   /**
    * 弹系统目录选择框，等用户选完。
    *

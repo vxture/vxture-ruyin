@@ -491,6 +491,9 @@ function CryptoTag({ children }: { children: React.ReactNode }) {
  * 原先它们挤在两张卡里，而「目录」和「加密」不是同一个问题。
  */
 function SystemSection({ system, api }: { system: SystemInfo | null; api: Api }) {
+  /* 「打开目录」只有 Electron 壳做得到 —— 浏览器里同一个页面也开着，那里不给
+     这个入口，而不是给一个点了没反应的按钮。 */
+  const inShell = useHostChrome() === "electron";
   const [policy, setPolicy] = useState(
     localStorage.getItem("ruyin-transmission-policy") ?? "sensitivity",
   );
@@ -511,6 +514,23 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
             一个换位置。 */}
         <DataDirRow system={system} api={api} />
         <FactRow label="产品目录" value={system?.productsDir} mono />
+        {/* 运行日志（TD-066）。**只给入口，不显示路径** —— 路径是壳自己算的
+            （Electron 的标准日志位置），守护进程不知道它，界面更不该编一个出来。
+            用户报障时要的就是这一下：打开、把文件拖过来。 */}
+        <FactRow
+          label="运行日志"
+          value="记录守护进程与壳的输出，按天滚动，保留 7 天"
+          {...(inShell
+            ? {
+                action: (
+                  <Button variant="ghost" size="sm" aria-label="打开日志目录" onClick={() => void api.openLogDir()}>
+                    <Icon name="folder-open" size="xs" />
+                    打开目录
+                  </Button>
+                ),
+              }
+            : {})}
+        />
       </SettingsBlock>
 
       <SettingsBlock
@@ -1024,7 +1044,10 @@ function DataDirRow({ system, api }: { system: SystemInfo | null; api: Api }) {
                 <>
                   {/* 「打开目录」在前：**大多数人想要的是看一眼**，而不是搬家。
                       默认目录要让人不想改，那就先让人找得到它。 */}
-                  <Button variant="ghost" size="sm" onClick={() => void api.openDataDir()}>
+                  {/* 可见文字是「打开目录」（行标签已经说了是哪个目录），但
+                      **无障碍名要自带宾语** —— 这一屏上现在有两个「打开目录」
+                      （数据、日志），读屏用户听到的是两次一模一样的话。 */}
+                  <Button variant="ghost" size="sm" aria-label="打开数据目录" onClick={() => void api.openDataDir()}>
                     <Icon name="folder-open" size="xs" />
                     打开目录
                   </Button>

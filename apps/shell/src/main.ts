@@ -21,7 +21,7 @@ import {
 } from "electron";
 
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +36,7 @@ import { captionOverlay, themeFromReply } from "./caption-overlay.js";
 import { extractDaemonEvents, type DaemonEventKind } from "./daemon-events.js";
 import { humanBytes, moveWaitMs, progressLine, progressPercent } from "./migration-wait.js";
 import { diffPending } from "./pending-notify.js";
+import { filesToPrune, formatChunk, logFileName } from "./log-file.js";
 
 // userData 路径由它决定，而不是 productName。**这里的 "Ruyin" 是路径键，不是
 // 展示名**：展示名是 RUYIN（productName / 窗口标题 / 界面字标）。改了这一行，
@@ -132,6 +133,56 @@ const legacyDataDir = app.isPackaged ? join(app.getPath("userData"), "data") : u
  */
 const dataDir = process.env["RUYIN_DATA_DIR"] ?? defaultDataDir;
 
+/**
+ * 日志目录（TD-066）。用 Electron 的标准位置，**不用数据目录** —— 数据目录可以
+ * 被搬走（TD-039），而搬家失败恰好是最需要日志的时候；它还可能落在移动盘上。
+ * 日志是应用的事，不是数据的事。理由写全在 `log-file.ts` 的头注释里。
+ */
+const logDir = join(app.getPath("logs"));
+
+/** 保留天数与总量。两条一起用，各管一种失控（见 `filesToPrune`）。 */
+const LOG_KEEP_DAYS = 7;
+const LOG_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+
+/** 管道给的是字节块不是行，半行攒在这里 —— 在半行上脱敏会漏（见用例）。 */
+const logTails: Record<"daemon" | "shell", string> = { daemon: "", shell: "" };
+
+/**
+ * 写一段输出。
+ *
+ * **写日志永不打断应用**：磁盘满、目录只读、杀毒软件锁文件，都不该让壳崩掉或
+ * 让守护进程的输出卡住。所以整段吞掉异常 —— 这是少数几个「失败就算了」是对的
+ * 地方，因为这条路本身就是为了别的失败服务的。
+ */
+function writeLog(chunk: string, source: "daemon" | "shell"): void {
+  try {
+    const { text, rest } = formatChunk(logTails[source] + chunk, source, new Date());
+    logTails[source] = rest;
+    if (text === "") return;
+    mkdirSync(logDir, { recursive: true });
+    appendFileSync(join(logDir, logFileName(new Date())), text, "utf8");
+  } catch {
+    /* 见上：日志写不进去不是一件要让用户知道的事，更不是要让应用停下的事。 */
+  }
+}
+
+/** 启动时清一次旧日志。只在启动做：日志写入路径上不该有目录扫描。 */
+function pruneLogs(): void {
+  try {
+    const files = readdirSync(logDir)
+      .filter((n) => /^ruyin-\d{4}-\d{2}-\d{2}\.log$/.test(n))
+      .map((name) => ({ name, bytes: statSync(join(logDir, name)).size }));
+    for (const name of filesToPrune(files, {
+      keepDays: LOG_KEEP_DAYS,
+      maxTotalBytes: LOG_MAX_TOTAL_BYTES,
+    })) {
+      rmSync(join(logDir, name), { force: true });
+    }
+  } catch {
+    /* 目录还不存在（头一次跑）或读不了 —— 都不值得打扰任何人。 */
+  }
+}
+
 let daemon: Electron.UtilityProcess | undefined;
 let stopping = false;
 /** 守护进程说过的话。冒烟要等它的自检标记（ADR-017）。 */
@@ -203,6 +254,22 @@ async function openDataDir(): Promise<void> {
   }
 }
 
+/**
+ * 在资源管理器里打开日志目录（TD-066）。
+ *
+ * 与 `openDataDir` 不同：那个要问守护进程（目录由它解析），这个**不问** ——
+ * 日志落点是壳自己定的，问谁都不会更准。
+ */
+async function openLogDir(): Promise<void> {
+  try {
+    mkdirSync(logDir, { recursive: true });
+    const failed = await shell.openPath(logDir);
+    if (failed) console.error(`[shell] could not open ${logDir}: ${failed}`);
+  } catch (cause) {
+    console.error("[shell] could not open the log dir:", cause);
+  }
+}
+
 function stopDaemon(): void {
   stopping = true;
   daemon?.kill();
@@ -238,8 +305,13 @@ function startDaemon(): Electron.UtilityProcess {
   child.stdout?.on("data", (d: Buffer) => {
     daemonOutput += d.toString();
     process.stdout.write(d);
+    /* 落文件（TD-066）。开发态从终端也看得见，安装版这是**唯一**的落点。 */
+    writeLog(d.toString(), "daemon");
   });
-  child.stderr?.on("data", (d: Buffer) => process.stderr.write(d));
+  child.stderr?.on("data", (d: Buffer) => {
+    process.stderr.write(d);
+    writeLog(d.toString(), "daemon");
+  });
   // 守护进程 -> 壳的请求/应答（ADR-017）。此前只有壳轮询守护进程的 HTTP，
   // 而 PDF 是反方向的：Chromium 在这一侧，落盘的护栏在那一侧。
   child.on("message", (message: unknown) => {
@@ -635,6 +707,7 @@ function openWindow(): void {
     // 数据）。这条边界是有意的 —— 界面同一个页面在浏览器里也开着，路径要是
     // 跟着请求走，就等于给了它「让壳打开任意目录」的能力。
     if (kind === "app-open-data-dir") void openDataDir();
+    if (kind === "app-open-log-dir") void openLogDir();
     // 系统目录选择框：界面弹不出来（纯 Web 客户端，file input 只给文件名），
     // 只有壳能弹。选完把路径送回守护进程，那边正挂着界面那次请求。
     if (kind === "app-pick-folder") void pickFolder(win);

@@ -1116,7 +1116,7 @@ void test("Settings/存储位置: 壳里给「打开目录」，浏览器里不�
       <Shell api={api} section="general" updateCheck={stubUpdateCheck()} />
     </ThemeProvider>,
   );
-  const btn = await screen.findByRole("button", { name: /打开目录/ });
+  const btn = await screen.findByRole("button", { name: "打开数据目录" });
   await userEvent.setup().click(btn);
   // 请求里**不带路径**：打开哪个目录由守护进程说（server.test.ts 那条钉的是
   // 另一半 —— 事件里也没有路径）。
@@ -1172,7 +1172,7 @@ void test("Settings/存储位置: 两个动作都在数据目录那一行上，�
   // 2026-09-05 指出：一个在行上、一个在下面另一块，那是两处）。
   expect(row.textContent).toContain("数据目录");
   expect(row.textContent).toContain("C:/data");
-  expect(within(row).getByRole("button", { name: /打开目录/ })).toBeInTheDocument();
+  expect(within(row).getByRole("button", { name: "打开数据目录" })).toBeInTheDocument();
 
   // 常驻页面上不该有这些：它们是一次性操作的零件。
   expect(screen.queryByRole("button", { name: "检查目标" })).not.toBeInTheDocument();
@@ -2459,4 +2459,59 @@ test("本地推理：已开通但没有模型名时不编一个", async () => {
 
   expect(await screen.findByText("已接入本地模型")).toBeInTheDocument();
   expect(await screen.findByText("已开通")).toBeInTheDocument();
+});
+
+/* ---------------- 运行日志（TD-066） ---------------- */
+
+/**
+ * 日志入口只在壳里给。
+ *
+ * 两条断言各守一半：**壳里按下去真的发出请求**（否则用户报障时拿不到文件），
+ * **浏览器里根本不出现这个按钮**（那一下没有人会接，给了就是一个点了没反应的
+ * 入口 —— 登录页那两个次级入口就是因为这条被移除的）。
+ */
+void test("Settings/运行日志: 壳里给「打开目录」并发请求，浏览器里不给", async () => {
+  const openLogDir = vi.fn().mockResolvedValue({ ok: true });
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data" })),
+    openLogDir,
+  } as Partial<Api>);
+
+  const ua = navigator.userAgent;
+  Object.defineProperty(navigator, "userAgent", {
+    value: `${ua} Electron/40.0.0`,
+    configurable: true,
+  });
+  vi.resetModules();
+  const { SettingsView: Shell } = await import("./settings");
+  const { unmount } = render(
+    <ThemeProvider defaultMode="dark" defaultDensity="default">
+      <Shell api={api} section="general" updateCheck={stubUpdateCheck()} />
+    </ThemeProvider>,
+  );
+
+  const btn = await screen.findByRole("button", { name: "打开日志目录" });
+  await userEvent.setup().click(btn);
+  // 请求里不带路径：日志落点是壳自己算的，界面无权指定（server.test.ts 钉另一半）。
+  expect(openLogDir).toHaveBeenCalledWith();
+  unmount();
+
+  /* 浏览器那一半**显式设一个不含 Electron 的 UA**，不靠「恢复原值」——
+     host-chrome 的 IS_ELECTRON 是模块加载时算的常量，而 UA 是全局可变的：
+     只要前面任何一条用例污染过它，"恢复" 恢复的就是被污染的值，这条断言
+     会以一种看起来像产品缺陷的方式失败。 */
+  Object.defineProperty(navigator, "userAgent", {
+    value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+    configurable: true,
+  });
+  vi.resetModules();
+  const { SettingsView: Web } = await import("./settings");
+  render(
+    <ThemeProvider defaultMode="dark" defaultDensity="default">
+      <Web api={api} section="general" updateCheck={stubUpdateCheck()} />
+    </ThemeProvider>,
+  );
+  expect(await screen.findByText(/按天滚动，保留 7 天/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "打开日志目录" })).not.toBeInTheDocument();
+  Object.defineProperty(navigator, "userAgent", { value: ua, configurable: true });
 });

@@ -14,6 +14,7 @@ export type DaemonEventKind =
   | "ui-theme"
   | "app-restart"
   | "app-open-data-dir"
+  | "app-open-log-dir"
   | "app-pick-folder";
 
 export interface DaemonEventFrame {
