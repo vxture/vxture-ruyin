@@ -112,7 +112,7 @@ user tokens live only in the user's OS credential store.
 
 ## Design authority: the Claude artifact doc set (RY-NNN)
 
-The design documents published as Claude artifacts (RY-001, RY-100..RY-103,
+The design documents published as Claude artifacts (RY-001, RY-100..RY-104,
 RY-201..RY-204, RY-301, RY-401, RY-501) are the AUTHORITY for product
 definition, architecture and interface design (owner, 2026-09-17). RY-100
 (top-level architecture) ranks above the direction docs; the direction docs
