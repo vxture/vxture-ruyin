@@ -454,6 +454,41 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 }
 
 /**
+ * 平台读的统一收尾：**把「平台不让这个角色看」与「这一次没取到」分开**。
+ *
+ * 两者差在一个字段上，而那个字段决定调用方做什么：`retryable`。403 是角色事实——
+ * 换个租户成员来点一百次还是 403，说它可重试就是让界面空转；其余非 2xx（网络、
+ * 网关、平台 5xx）是这一次的事，重试有意义。
+ *
+ * 不分开的后果是安静的：异常落到兜底分支变成 `500 INTERNAL`，而兜底给的正是
+ * `retryable: true`——**一个永远不会成功的重试建议**。RY-102 §02 点名的就是这条
+ * （「说可以重试而其实不能，只会让调用方空转」）。
+ *
+ * 这条路上最容易撞见 403 的是订阅清单：平台把 `tenant.billing.read` 授给
+ * owner / manager / readonly，**`member` 没有**（核对 vxture-platform `5d38b97c`
+ * 的 `2026-09-10-access-console-permission-catalog.sql` 与 `seed-catalog.mjs`）。
+ * 权益与配额走 `tenant.quota.read`，`member` 有——所以普通成员产品能用、门控正常，
+ * 只是看不到「还订了什么」。这是平台侧的角色矩阵事实，不是本仓能改的；本仓能做的
+ * 是**如实说**，而不是报一个假的 500。
+ */
+async function sendPlatformRead(
+  res: ServerResponse,
+  read: () => Promise<unknown>,
+  deniedMessage: string,
+): Promise<void> {
+  try {
+    send(res, 200, await read());
+  } catch (cause) {
+    if (!(cause instanceof PlatformReadError)) throw cause;
+    if (cause.status === 403) {
+      send(res, 403, apiError(REJECTION.POLICY_DENIED, deniedMessage));
+    } else {
+      send(res, 502, apiError("PLATFORM_READ_FAILED", cause.message, { retryable: true }));
+    }
+  }
+}
+
+/**
  * `/connectors` 与 `/connectors/test` 共用的连接细节解析（不含 `source` / `state`，
  * 那两个字段只有 install 要，probe 不要）。`transport: "streamable_http"` 走地址，
  * 否则按 stdio 的老样子走命令行 —— 两者都不传时缺省 stdio，旧请求体不必改。
@@ -1171,7 +1206,11 @@ async function handle(
         send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
         return;
       }
-      send(res, 200, await deps.platformSession.subscribedProducts());
+      await sendPlatformRead(
+        res,
+        () => deps.platformSession!.subscribedProducts(),
+        "当前角色看不到本租户的订阅清单（平台权限 tenant.billing.read）",
+      );
       return;
     }
     if (method === "GET" && path === "/platform/entitlements") {
@@ -1179,7 +1218,11 @@ async function handle(
         send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
         return;
       }
-      send(res, 200, await deps.platformSession.entitlements());
+      await sendPlatformRead(
+        res,
+        () => deps.platformSession!.entitlements(),
+        "当前角色看不到本工作区的权益（平台权限 tenant.quota.read）",
+      );
       return;
     }
     // 配额用量（只读展示，ADR-006）。标题栏租户菜单读它；配额属于工作区，
@@ -1189,7 +1232,11 @@ async function handle(
         send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
         return;
       }
-      send(res, 200, await deps.platformSession.quotaUsage());
+      await sendPlatformRead(
+        res,
+        () => deps.platformSession!.quotaUsage(),
+        "当前角色看不到本工作区的配额用量（平台权限 tenant.quota.read）",
+      );
       return;
     }
     // 租户 logo（标题栏租户菜单的身份卡）。图片字节，不走 send()——那条是 JSON 专用。
@@ -1220,16 +1267,11 @@ async function handle(
         send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
         return;
       }
-      try {
-        send(res, 200, { items: projectAtlasModels(await deps.platformSession.atlasModels()) });
-      } catch (cause) {
-        if (!(cause instanceof PlatformReadError)) throw cause;
-        if (cause.status === 403) {
-          send(res, 403, apiError(REJECTION.POLICY_DENIED, "只有租户所有者能查看本工作区的模型（平台权限 tenant.model.read）"));
-        } else {
-          send(res, 502, apiError("PLATFORM_READ_FAILED", cause.message, { retryable: true }));
-        }
-      }
+      await sendPlatformRead(
+        res,
+        async () => ({ items: projectAtlasModels(await deps.platformSession!.atlasModels()) }),
+        "只有租户所有者能查看本工作区的模型（平台权限 tenant.model.read）",
+      );
       return;
     }
     if (method === "POST" && path === "/auth/logout") {

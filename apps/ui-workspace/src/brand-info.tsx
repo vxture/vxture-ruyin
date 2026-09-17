@@ -11,6 +11,7 @@
 
 import { Icon } from "@vxture/design-system";
 import type { SessionInfo, SystemInfo } from "./api";
+import { consoleBaseOf } from "./platform-base";
 import { ThirdPartyNotices } from "./third-party-notices";
 
 /**
@@ -39,7 +40,7 @@ export function BrandInfoBlock({
   session: SessionInfo | null;
 }) {
   // 未登录时也要能看条款 —— 落到与登录页同一个缺省，不是空链接。
-  const consoleBase = session?.consoleBase || "https://vxture.com";
+  const consoleBase = consoleBaseOf(session);
   return (
     <div className="about-block">
       {/* 图形标 + 品牌两行，左对齐、品牌色（owner 2026-09-15）。图形标复用
