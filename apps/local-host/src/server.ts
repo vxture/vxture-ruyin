@@ -1461,6 +1461,15 @@ async function handle(
     return;
   }
 
+  /* POST /ui/open-log-dir —— 请壳打开日志目录（TD-066）。同上：只发事件、不收
+     路径。**守护进程自己也不知道那个目录在哪** —— 日志落点是壳的事
+     （`app.getPath("logs")`），因为要接住的正是守护进程自己的 stdout。 */
+  if (method === "POST" && path === "/ui/open-log-dir") {
+    deps.events?.publish({ kind: "app-open-log-dir" });
+    send(res, 202, { ok: true });
+    return;
+  }
+
   /**
    * POST /ui/pick-folder - 弹系统目录选择框，**把这条请求挂着**，直到壳把结果
    * 送回来（下面那条 result）。界面因此可以直接 await：「选个目录」在用户眼里是

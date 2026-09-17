@@ -1711,6 +1711,31 @@ test("ui open-data-dir: 只发一条不带路径的事件 —— 打开哪个目
   }
 });
 
+/**
+ * 日志目录（TD-066）。与 open-data-dir 同一条边界，理由也同一条。
+ *
+ * 多一层：**守护进程自己也不知道日志在哪** —— 落点是壳定的（Electron 的标准
+ * 日志位置），因为要接住的正是守护进程自己的 stdout。所以这条事件比数据目录
+ * 那条更不可能带路径。
+ */
+test("ui open-log-dir: 只发一条不带路径的事件", async () => {
+  const events = new EventBus();
+  const seen: unknown[] = [];
+  events.subscribe((e) => seen.push(e));
+  const rig = await startServer({ events });
+  try {
+    const res = await fetch(`${rig.base}/ui/open-log-dir`, {
+      method: "POST",
+      headers: rig.json,
+      body: JSON.stringify({ path: "C:/Windows/System32" }),
+    });
+    assert.equal(res.status, 202);
+    assert.deepEqual(seen, [{ kind: "app-open-log-dir" }]);
+  } finally {
+    closeRig(rig);
+  }
+});
+
 test("pick-folder: 请求挂着等壳送结果；壳先问起始目录；没接这个能力时端点不存在", async () => {
   const events = new EventBus();
   const seen: string[] = [];
