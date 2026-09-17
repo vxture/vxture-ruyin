@@ -811,11 +811,16 @@ export const en: Catalog = {
   "set.models.listAria": "Platform models",
   "set.models.on": "Enabled",
   "set.models.off": "Disabled",
-  "set.private.title": "Your own models",
+  /*
+   * 「Private models」与隔壁的「Platform models」成对 —— 两块本来就是同一屏上
+   * 的两半，标题一长一短会让人以为它们不是一类东西（owner 2026-09-17 指出
+   * 「Your own models」太长）。「private」也正是这门技术自己的说法。
+   */
+  "set.private.title": "Private models",
   "set.private.desc":
     "Connect a model you host yourself, bypassing the platform. Available with the enterprise and self-hosted editions",
   "set.private.loading": "Reading the runtime state…",
-  "set.private.notProvisioned": "Your own models are not enabled for this workspace",
+  "set.private.notProvisioned": "Private models are not enabled for this workspace",
   "set.private.notProvisionedBadge": "Not enabled",
   "set.private.notProvisionedNote":
     "Once enabled, you can connect a model you host yourself (Ollama, LM Studio, vLLM…). Material sent for inference does not pass through the platform and never leaves your own network; you host and maintain the model. Enabling it comes with the enterprise and self-hosted editions.",

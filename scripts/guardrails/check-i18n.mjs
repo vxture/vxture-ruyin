@@ -69,10 +69,19 @@ for (const k of zhKeys) {
 
 /* ---- 二、英文目录里不许有中文 -------------------------------------------- */
 
-for (const [i, line] of enSrc.split("\n").entries()) {
-  // 注释里可以写中文（写给我们自己看的）；句子里不行。
-  const text = line.replace(/\/\/.*$/, "").replace(/\/\*.*$/, "");
-  if (HAN.test(text)) {
+/**
+ * 先把注释整段抹掉，**保留换行**（报错要能指到原来那一行）：注释里可以写中文，
+ * 那是写给我们自己看的；句子里不行。
+ *
+ * 上一版只剥了单行 `//` 与 `/*` 起头的那一行 —— 跨行块注释的后续行以 ` * `
+ * 开头，逃不掉，于是一段正当的中文说明会被当成漏翻报上来。
+ */
+const enBody = enSrc
+  .replace(/\/\*[\s\S]*?\*\//g, (m) => "\n".repeat((m.match(/\n/g) || []).length))
+  .replace(/\/\/.*$/gm, "");
+
+for (const [i, line] of enBody.split("\n").entries()) {
+  if (HAN.test(line)) {
     problems.push(
       `en.ts:${i + 1} 英文目录里出现了中文 —— 漏翻时 t() 会自己回退到中文，` +
         `抄一份进来反而把漏翻藏起来了：${line.trim().slice(0, 60)}`,
