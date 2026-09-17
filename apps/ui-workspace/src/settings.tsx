@@ -78,7 +78,15 @@ import { useHostChrome } from "./host-chrome";
 
 import { BrandInfoBlock } from "./brand-info";
 import { UpdateNotice, channelLabel, type UpdateCheckState } from "./update-check";
-import { LOCALE_NAMES, LOCALES, useLocale, useT, type Locale } from "./i18n";
+import {
+  LOCALE_NAMES,
+  LOCALES,
+  useLocale,
+  useT,
+  type Locale,
+  type MessageKey,
+  type TFn,
+} from "./i18n";
 import { useSetLocale } from "./locale-provider";
 const UI_VERSION = "0.2.0";
 
@@ -182,6 +190,7 @@ function SettingsBlock({
   count?: number;
   children: React.ReactNode;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(defaultOpen);
   const body = <div className="set-block-body">{children}</div>;
   const toggle = () => setOpen((v) => !v);
@@ -212,7 +221,7 @@ function SettingsBlock({
           type="button"
           className="set-block-toggle set-block-toggle--chevron"
           aria-expanded={open}
-          aria-label={open ? "收起" : "展开"}
+          aria-label={t(open ? "set.collapse" : "set.expand")}
           onClick={toggle}
         >
           <Icon name={open ? "chevron-up" : "chevron-down"} size="sm" />
@@ -252,6 +261,7 @@ function Row({
   children: React.ReactNode;
   note?: string;
 }) {
+  const t = useT();
   return (
     <>
       <div className="set-row">
@@ -278,6 +288,7 @@ function FactRow({
   /** 行尾的一个动作（如「打开目录」）。顶到右端，不挤值那一列。 */
   action?: React.ReactNode;
 }) {
+  const t = useT();
   return (
     <div className="fact-row">
       <span className="fact-label">{label}</span>
@@ -316,6 +327,7 @@ function shortId(id?: string): string | undefined {
  * 谎报「已复制」比不报更糟。
  */
 function CopyButton({ value, label }: { value: string; label: string }) {
+  const t = useT();
   const [done, setDone] = useState(false);
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -332,7 +344,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
   return (
     <Button variant="ghost" size="sm" aria-label={label} onClick={() => void copy()}>
       <Icon name={done ? "check" : "copy"} size="xs" />
-      {done ? "已复制" : "复制"}
+      {t(done ? "common.copied" : "common.copy")}
     </Button>
   );
 }
@@ -345,14 +357,15 @@ function CopyButton({ value, label }: { value: string; label: string }) {
  * 会话，不改身份 —— 改在平台改，这里如实写「在线修改」。
  */
 function AccountSection({ session }: { session: SessionInfo | null }) {
+  const t = useT();
   if (!session?.signedIn) {
     return (
       <>
         <div className="card">
           <EmptyState
             icon="user-circle"
-            title="请先登录"
-            description="登录 Vxture 账号后，你订阅的智能体和云端 AI 能力才会同步到这台电脑。登录入口在左下角的账户菜单。"
+            title={t("set.account.signInTitle")}
+            description={t("set.account.signInDesc")}
           />
         </div>
         <PreferencesBlock />
@@ -363,22 +376,22 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
   // 「个人信息」页落在 console-bff 本体上，不是官网 consoleBase（owner 2026-09-16
   // audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明）。
   const profileUrl = `${consoleAppBaseOf(session)}/profile`;
-  const name = p?.name ?? p?.email ?? "Vxture 用户";
+  const name = p?.name ?? p?.email ?? t("user.defaultName");
   const verified = (ok?: boolean) =>
     ok === undefined ? undefined : ok ? (
-      <StatusBadge tone="success">已验证</StatusBadge>
+      <StatusBadge tone="success">{t("set.account.verified")}</StatusBadge>
     ) : (
-      <StatusBadge tone="warning">未验证</StatusBadge>
+      <StatusBadge tone="warning">{t("set.account.unverified")}</StatusBadge>
     );
   return (
     <>
       <SettingsBlock
         icon="role"
-        title="账号信息"
-        desc="这里只作展示，要修改请到平台的「个人信息」页"
+        title={t("set.account.title")}
+        desc={t("set.account.desc")}
         aside={
           <Button variant="outline" size="sm" onClick={() => window.open(profileUrl, "_blank", "noopener")}>
-            在线修改
+            {t("set.account.editOnline")}
             <Icon name="external-link" size="xs" />
           </Button>
         }
@@ -396,12 +409,12 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
         {/* 逐项摆出来。**不显示 sub（uuid）** —— 那是给机器对账的，不是给人看的
             （owner 2026-09-04 定）。缺的字段写「—」而不是藏起来：那一横说明的是
             「平台没在 token 里给」，本身就是信息。 */}
-        <FactRow label="显示名" value={p?.name} />
-        <FactRow label="用户名" value={p?.username} mono />
-        <FactRow label="邮箱" value={p?.email} badge={verified(p?.emailVerified)} />
-        <FactRow label="电话" value={p?.phone} badge={verified(p?.phoneVerified)} />
+        <FactRow label={t("set.account.displayName")} value={p?.name} />
+        <FactRow label={t("set.account.username")} value={p?.username} mono />
+        <FactRow label={t("set.account.email")} value={p?.email} badge={verified(p?.emailVerified)} />
+        <FactRow label={t("set.account.phone")} value={p?.phone} badge={verified(p?.phoneVerified)} />
         <FactRow
-          label="角色"
+          label={t("set.account.roles")}
           value={
             p?.roles && p.roles.length > 0 ? (
               <span className="fact-chips">
@@ -414,7 +427,7 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
             ) : undefined
           }
         />
-        <FactRow label="语言地区" value={p?.locale} mono />
+        <FactRow label={t("set.account.locale")} value={p?.locale} mono />
         {/* 租户与工作区同一行（owner 第 4 条）：它们回答的是同一个问题 ——
             「我现在在哪儿干活」。中间一个淡分隔点，不是两行各说一半。
             **这里不再放切换入口**（owner 2026-09-15）：标题栏的租户菜单里已经有
@@ -422,13 +435,13 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
             切不了（token 里只有 `active_org` 一个组织，平台 v2 已弃用 `tenants`
             声明），要切只能去标题栏那一处。 */}
         <div className="fact-row">
-          <span className="fact-label">当前租户</span>
+          <span className="fact-label">{t("set.account.tenant")}</span>
           <span className="fact-value">
             {session.org?.name ?? <span className="fact-empty">—</span>}
             {session.org?.type && (
               <span className="fact-tag">
                 <StatusBadge tone="neutral">
-                  {session.org.type === "personal" ? "个人租户" : "组织租户"}
+                  {t(session.org.type === "personal" ? "set.account.tenantPersonal" : "set.account.tenantOrg")}
                 </StatusBadge>
               </span>
             )}
@@ -459,8 +472,8 @@ function PreferencesBlock() {
   return (
     <SettingsBlock
       icon="settings"
-      title="偏好设置"
-      desc="只影响这台电脑，不随账号同步"
+      title={t("set.prefs.title")}
+      desc={t("set.prefs.desc")}
     >
       {/* 四项各一行、不带说明（owner 第 5 条）：这四个词自己说得清，一行小字
           只是把行距撑开。控件列定宽，所以四行左右对齐、滑块等长（第 6 条）。 */}
@@ -478,40 +491,40 @@ function PreferencesBlock() {
           ))}
         </NativeSelect>
       </Row>
-      <Row label="主题">
+      <Row label={t("set.prefs.theme")}>
         <SegmentedControl
-          ariaLabel="主题"
+          ariaLabel={t("set.prefs.theme")}
           items={[
-            { value: "dark", label: "深色" },
-            { value: "light", label: "浅色" },
-            { value: "system", label: "系统" },
+            { value: "dark", label: t("set.prefs.theme.dark") },
+            { value: "light", label: t("set.prefs.theme.light") },
+            { value: "system", label: t("set.prefs.theme.system") },
           ]}
           value={mode}
           onChange={setMode}
         />
       </Row>
-      <Row label="密度">
+      <Row label={t("set.prefs.density")}>
         <SegmentedControl
-          ariaLabel="密度"
+          ariaLabel={t("set.prefs.density")}
           items={[
-            { value: "compact", label: "紧凑" },
-            { value: "default", label: "默认" },
-            { value: "comfortable", label: "宽松" },
+            { value: "compact", label: t("set.prefs.density.compact") },
+            { value: "default", label: t("set.prefs.density.default") },
+            { value: "comfortable", label: t("set.prefs.density.comfortable") },
           ]}
           value={density}
           onChange={setDensity}
         />
       </Row>
-      <Row label="字号">
+      <Row label={t("set.prefs.fontSize")}>
         <SegmentedControl
-          ariaLabel="字号"
+          ariaLabel={t("set.prefs.fontSize")}
           items={[
             // 「减小 / 默认 / 加大」而不是「小 / 标准 / 大」（owner 2026-09-04
             // 第 3 条）：这三个是**动作**，是把当前字号往哪边调，不是在描述
             // 一个尺码。
-            { value: "small", label: "减小" },
-            { value: "default", label: "默认" },
-            { value: "large", label: "加大" },
+            { value: "small", label: t("set.prefs.fontSize.small") },
+            { value: "default", label: t("set.prefs.fontSize.default") },
+            { value: "large", label: t("set.prefs.fontSize.large") },
           ]}
           value={fontSize}
           onChange={setFontSize}
@@ -540,6 +553,7 @@ function CryptoTag({ children }: { children: React.ReactNode }) {
  * 原先它们挤在两张卡里，而「目录」和「加密」不是同一个问题。
  */
 function SystemSection({ system, api }: { system: SystemInfo | null; api: Api }) {
+  const t = useT();
   /* 「打开目录」只有 Electron 壳做得到 —— 浏览器里同一个页面也开着，那里不给
      这个入口，而不是给一个点了没反应的按钮。 */
   const inShell = useHostChrome() === "electron";
@@ -554,15 +568,15 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
     <>
       <SettingsBlock
         icon="folder-open"
-        title="存储位置"
-        desc="你的数据都保存在这台电脑上，只用下面这两个文件夹"
+        title={t("set.storage.title")}
+        desc={t("set.storage.desc")}
       >
         {/* 数据目录**连它的两个动作一起**由一个组件出（owner 2026-09-05 指出：
             「打开目录」在行上、「更改目录」在下面另一块，同一个对象的两个动作分
             在两处）。行是「数据在哪」，两个按钮是能对它做的两件事 —— 一个看一眼、
             一个换位置。 */}
         <DataDirRow system={system} api={api} />
-        <FactRow label="产品目录" value={system?.productsDir} mono />
+        <FactRow label={t("set.storage.productsDir")} value={system?.productsDir} mono />
         {/* 安装标识（阶段 3a）。和运行日志放在一起，因为它们服务的是同一件事：
             用户报障时**对得上是哪一台**。刻意不叫「设备 ID」—— 它跟着安装走，
             重装即换，而且将来限制的是同时在线数不是安装数（RY-100 A10）。
@@ -572,25 +586,30 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
             没有意义，那只是一条谁也不会去读的乱码。留前 8 位让人认出「是这一台」，
             整串交给「复制」。它是公钥指纹，不是秘密，复制出去是安全的。 */}
         <FactRow
-          label="安装标识"
+          label={t("set.storage.instanceId")}
           value={shortId(system?.instanceId)}
           mono
           {...(system?.instanceId
-            ? { action: <CopyButton value={system.instanceId} label="复制安装标识" /> }
+            ? { action: <CopyButton value={system.instanceId} label={t("set.storage.copyInstanceId")} /> }
             : {})}
         />
         {/* 运行日志（TD-066）。**只给入口，不显示路径** —— 路径是壳自己算的
             （Electron 的标准日志位置），守护进程不知道它，界面更不该编一个出来。
             用户报障时要的就是这一下：打开、把文件拖过来。 */}
         <FactRow
-          label="运行日志"
-          value="出问题时用来排查，按天保存，只留最近 7 天"
+          label={t("set.storage.logs")}
+          value={t("set.storage.logsValue")}
           {...(inShell
             ? {
                 action: (
-                  <Button variant="ghost" size="sm" aria-label="打开日志目录" onClick={() => void api.openLogDir()}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={t("set.storage.openLogDir")}
+                    onClick={() => void api.openLogDir()}
+                  >
                     <Icon name="folder-open" size="xs" />
-                    打开目录
+                    {t("set.storage.openDir")}
                   </Button>
                 ),
               }
@@ -600,33 +619,38 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
 
       <SettingsBlock
         icon="lock"
-        title="数据加密"
-        desc="数据一保存就是加密的，密钥本身还有两层保护"
+        title={t("set.crypto.title")}
+        desc={t("set.crypto.desc")}
       >
         {system ? (
           <>
             <ul className="crypto-chain">
               <li>
-                <span className="crypto-what">业务数据</span>
+                <span className="crypto-what">{t("set.crypto.data")}</span>
                 <span className="crypto-how">
-                  每个项目库整库加密 · <CryptoTag>SQLCipher（AES-256）</CryptoTag>
+                  {t("set.crypto.dataHow")}
+                  <CryptoTag>SQLCipher（AES-256）</CryptoTag>
                 </span>
               </li>
               <li>
-                <span className="crypto-what">库密钥</span>
+                <span className="crypto-what">{t("set.crypto.dbKey")}</span>
                 <span className="crypto-how">
-                  一库一把随机密钥 · <CryptoTag>AES-256-GCM</CryptoTag> 封装在主密钥下
+                  {t("set.crypto.dbKeyHow")}
+                  <CryptoTag>AES-256-GCM</CryptoTag>
+                  {t("set.crypto.dbKeyWrapped")}
                 </span>
               </li>
               <li>
-                <span className="crypto-what">主密钥</span>
+                <span className="crypto-what">{t("set.crypto.masterKey")}</span>
                 <span className="crypto-how">
                   {system.keyProtection === "dpapi" ? (
                     <>
-                      受 <CryptoTag>Windows DPAPI</CryptoTag> 保护，只有你这个 Windows 账户能解开
+                      {t("set.crypto.masterKeyProtectedPrefix")}
+                      <CryptoTag>Windows DPAPI</CryptoTag>
+                      {t("set.crypto.masterKeyProtectedSuffix")}
                     </>
                   ) : (
-                    "当前系统没有可用的密钥保护，主密钥未加密存放"
+                    t("set.crypto.masterKeyPlain")
                   )}
                 </span>
               </li>
@@ -636,7 +660,7 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
                 明文这一侧留着：它多说了一句「不可用于真实数据」，那是行里没有的
                 结论，而且这一条必须显眼 —— 它是「别把真数据放进来」。 */}
             {system.keyProtection === "plaintext" && (
-              <StatusBadge tone="warning">开发用途：请勿放入真实数据</StatusBadge>
+              <StatusBadge tone="warning">{t("set.crypto.devBadge")}</StatusBadge>
             )}
           </>
         ) : (
@@ -649,18 +673,18 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
           可选与不可选不该同一块。 */}
       <SettingsBlock
         icon="cloud"
-        title="推理策略"
-        desc="资料送去云端 AI 之前，什么情况下先问你一句"
+        title={t("set.inference.title")}
+        desc={t("set.inference.desc")}
       >
         <Row
-          label="确认粒度"
-          note="无论选哪一档，高敏感内容都会先问过你。送去推理的资料用完即弃，不会被保存。"
+          label={t("set.inference.grain")}
+          note={t("set.inference.note")}
         >
           <SegmentedControl
-            ariaLabel="推理传输策略"
+            ariaLabel={t("set.inference.aria")}
             items={[
-              { value: "sensitivity", label: "按敏感度（推荐）" },
-              { value: "always", label: "全部需确认" },
+              { value: "sensitivity", label: t("set.inference.bySensitivity") },
+              { value: "always", label: t("set.inference.always") },
             ]}
             value={policy}
             onChange={pickPolicy}
@@ -670,13 +694,13 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
 
       <SettingsBlock
         icon="list"
-        title="安全审计"
-        desc="每一次传输与执行都留下记录，记录本身也能验真。这一块没有开关"
+        title={t("set.audit.title")}
+        desc={t("set.audit.desc")}
       >
-        <FactRow label="记录范围" value="每次上下文传输、每次工具执行、每次人工决定" />
-        <FactRow label="防篡改" value="每条记录都接在上一条后面，改动任何一条都会被发现" />
-        <FactRow label="查看" value="在项目的「审计」板块查看，可随时验真" />
-        <p className="set-note">记录里只有内容的指纹，不含内容本身。</p>
+        <FactRow label={t("set.audit.scope")} value={t("set.audit.scopeValue")} />
+        <FactRow label={t("set.audit.tamper")} value={t("set.audit.tamperValue")} />
+        <FactRow label={t("set.audit.view")} value={t("set.audit.viewValue")} />
+        <p className="set-note">{t("set.audit.note")}</p>
       </SettingsBlock>
     </>
   );
@@ -692,6 +716,7 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
  * 界面照实转达，不把「拒绝」包装成「暂不可用」。
  */
 function ConnectorsSection({ api }: { api: Api }) {
+  const t = useT();
   const [items, setItems] = useState<ConnectorView[] | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -750,13 +775,13 @@ function ConnectorsSection({ api }: { api: Api }) {
   return (
     <SettingsBlock
       icon="plugs-connected"
-      title="连接器管理"
-      desc="把局域网或自有系统接进来，供智能体取用"
+      title={t("set.conn.title")}
+      desc={t("set.conn.desc")}
       aside={
         unavailable ? undefined : (
           // 走地址，不是换状态：添加页有自己的地址，返回是真的返回（第 5 条）。
           <Button variant="outline" size="sm" onClick={() => go("#settings/connectors-add")}>
-            添加连接器
+            {t("set.conn.add")}
           </Button>
         )
       }
@@ -767,7 +792,7 @@ function ConnectorsSection({ api }: { api: Api }) {
       ) : items === null ? (
         <p className="set-note">…</p>
       ) : items.length === 0 ? (
-        <p className="set-note">尚未安装任何连接器。</p>
+        <p className="set-note">{t("set.conn.none")}</p>
       ) : (
         /* 每个连接器一张卡（owner 2026-09-16，原来共用「一行就是一行」的
            `.row-list`）：启用后要展开一段工具清单，塞进那个给「一条授权 /
@@ -775,7 +800,7 @@ function ConnectorsSection({ api }: { api: Api }) {
            内容，改用连接器专属的卡片版式，不动 `.row-list` 影响到别处。展开/
            收起是每张卡自己的事（owner 2026-09-16 纠正：上一版把它错放到了
            整个板块上——收起一整个板块没有意义，那不是这里说的「板块」）。 */
-        <ul className="connector-list" aria-label="已安装的连接器">
+        <ul className="connector-list" aria-label={t("set.conn.listAria")}>
           {items.map((c) => (
             <ConnectorCard
               key={c.id}
@@ -811,6 +836,7 @@ function ConnectorCard({
   onStop: () => void;
   onRemove: () => void;
 }) {
+  const t = useT();
   const running = c.state === "active";
   const expandable = running && c.tools.length > 0;
   const [open, setOpen] = useState(expandable);
@@ -833,7 +859,7 @@ function ConnectorCard({
             后端硬性拒绝卸载（ConnectorBundledError），只能停用。用户自己加的
             标「自定义」，不直接显示 lan / private 这种内部分类值——那不是
             给用户读的词。 */}
-        <span className="row-tag">{c.source === "bundled" ? "系统预置" : "自定义"}</span>
+        <span className="row-tag">{t(c.source === "bundled" ? "set.conn.bundled" : "set.conn.custom")}</span>
       </span>
     </>
   );
@@ -853,28 +879,32 @@ function ConnectorCard({
             {/* 三种状态各说各的：暂存 ≠ 装了但没跑起来。前者是用户当时的选择，
                 后者是这一刻的故障 —— 混成一句话，用户不知道该改配置还是该点启用。 */}
             {c.state === "stashed" ? (
-              <StatusBadge tone="neutral">已暂存</StatusBadge>
+              <StatusBadge tone="neutral">{t("set.conn.staged")}</StatusBadge>
             ) : (
               <StatusBadge tone={c.health.ok ? "success" : "warning"}>
-                {c.health.ok ? "运行中" : `未运行${c.health.detail ? "：" + c.health.detail : ""}`}
+                {c.health.ok
+              ? t("set.conn.running")
+              : c.health.detail
+                ? t("set.conn.stoppedWhy", { detail: c.health.detail })
+                : t("set.conn.stopped")}
               </StatusBadge>
             )}
             {c.state === "stashed" && (
               <Button variant="outline" size="sm" onClick={onEnable}>
-                启用
-              </Button>
+                {t("set.conn.enable")}
+                </Button>
             )}
             {/* 预置的随安装包来，卸不掉，只能停用；用户装的才有「卸载」。 */}
             {c.source === "bundled" ? (
               c.state === "active" && (
                 <Button variant="ghost" size="sm" onClick={onStop}>
-                  停用
-                </Button>
+                  {t("set.conn.disable")}
+                  </Button>
               )
             ) : (
               <Button variant="ghost" size="sm" onClick={onRemove}>
-                卸载
-              </Button>
+                {t("set.conn.uninstall")}
+                </Button>
             )}
           </span>
           {/* 箭头永远在最右侧（owner 2026-09-16）：不可展开时禁用，不是藏起来
@@ -884,7 +914,7 @@ function ConnectorCard({
             type="button"
             className="connector-card-toggle"
             aria-expanded={open}
-            aria-label={open ? "收起" : "展开"}
+            aria-label={t(open ? "set.collapse" : "set.expand")}
             disabled={!expandable}
             onClick={toggle}
           >
@@ -894,10 +924,10 @@ function ConnectorCard({
       </div>
       {expandable && open && (
         <div className="connector-card-tools">
-          <span className="connector-card-tools-label">工具清单</span>
+          <span className="connector-card-tools-label">{t("set.conn.toolsLabel")}</span>
           {/* 概要说清「这份清单是干嘛的」，不是重复标题（owner 2026-09-16：
               「暴露的工具」不够人话）。≤30 字，独占一行、撑满容器宽度。 */}
-          <p className="connector-card-tools-caption">智能体声明过同名工具才能调用</p>
+          <p className="connector-card-tools-caption">{t("set.conn.toolsCaption")}</p>
           <div className="connector-card-tools-grid">
             {c.tools.map((t) => (
               <code key={t} className="connector-tool-chip">
@@ -922,6 +952,7 @@ function ConnectorCard({
  * 比让用户重新敲一遍强；但暂存的不启动、不进任务能拿到的清单，它是待办不是能力。
  */
 function AddConnectorPage({ api }: { api: Api }) {
+  const t = useT();
   const [id, setId] = useState("");
   const [transport, setTransport] = useState<"stdio" | "streamable_http">("stdio");
   const [command, setCommand] = useState("");
@@ -980,29 +1011,29 @@ function AddConnectorPage({ api }: { api: Api }) {
   return (
     <SettingsBlock
       icon="plugs-connected"
-      title="添加连接器"
-      desc="填本机的启动命令，或已经在运行的服务地址。先测一次，通过了再启用"
+      title={t("set.conn.addTitle")}
+      desc={t("set.conn.addDesc")}
       aside={
         <Button variant="ghost" size="sm" onClick={() => go("#settings/connectors")}>
-          返回列表
+          {t("set.conn.back")}
         </Button>
       }
     >
-      <Row label="连接器 id">
-        <Input value={id} onChange={(e) => setId(e.target.value)} placeholder="如 crm" />
+      <Row label={t("set.conn.id")}>
+        <Input value={id} onChange={(e) => setId(e.target.value)} placeholder={t("set.conn.idPlaceholder")} />
       </Row>
-      <Row label="传输方式">
+      <Row label={t("set.conn.transport")}>
         <NativeSelect
-          aria-label="传输方式"
+          aria-label={t("set.conn.transport")}
           value={transport}
           onChange={(e) => switchTransport(e.target.value === "streamable_http" ? "streamable_http" : "stdio")}
         >
-          <option value="stdio">本机启动命令</option>
-          <option value="streamable_http">streamable_http · 已在跑的地址</option>
+          <option value="stdio">{t("set.conn.transportStdio")}</option>
+                      <option value="streamable_http">{t("set.conn.transportHttp")}</option>
         </NativeSelect>
       </Row>
       {transport === "streamable_http" ? (
-        <Row label="地址" note="以 http 或 https 开头；这条服务需支持 Streamable HTTP。">
+        <Row label={t("set.conn.url")} note={t("set.conn.urlNote")}>
           <Input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -1011,67 +1042,72 @@ function AddConnectorPage({ api }: { api: Api }) {
         </Row>
       ) : (
         <>
-          <Row label="命令">
+          <Row label={t("set.conn.command")}>
             <Input
               value={command}
               onChange={(e) => setCommand(e.target.value)}
-              placeholder="如 node，或可执行文件的完整路径"
+              placeholder={t("set.conn.commandPlaceholder")}
             />
           </Row>
-          <Row label="参数" note="空格分隔，可以留空。">
+          <Row label={t("set.conn.args")} note={t("set.conn.argsNote")}>
             <Input value={args} onChange={(e) => setArgs(e.target.value)} placeholder="--port 8931" />
           </Row>
         </>
       )}
-      <Row label="来源种类" note="只有声明过局域网 / 私有来源的资料类型才能绑到它。">
+      <Row label={t("set.conn.kind")} note={t("set.conn.kindNote")}>
         <NativeSelect
-          aria-label="来源种类"
+          aria-label={t("set.conn.kind")}
           value={source}
           onChange={(e) => setSource(e.target.value === "private" ? "private" : "lan")}
         >
-          <option value="lan">lan · 局域网系统</option>
-          <option value="private">private · 私有服务</option>
+          <option value="lan">{t("set.conn.kindLan")}</option>
+                      <option value="private">{t("set.conn.kindPrivate")}</option>
         </NativeSelect>
       </Row>
 
       <div className="add-actions">
         <Button variant="outline" disabled={!ready || busy !== null} onClick={() => void test()}>
-          {busy === "test" ? "正在测试…" : "测试连接"}
+          {t(busy === "test" ? "set.conn.testing" : "set.conn.test")}
         </Button>
         {/* 主按钮只在测通之后亮：没测过就写进去，等于把「能用」这件事留给
             下一个打开它的人去发现。 */}
         <Button disabled={!ready || busy !== null || probe?.ok !== true} onClick={() => void save(false)}>
-          {busy === "save" ? "正在添加…" : "添加并启用"}
+          {t(busy === "save" ? "set.conn.saving" : "set.conn.saveEnable")}
         </Button>
         {probe && !probe.ok && (
           <Button variant="ghost" disabled={busy !== null} onClick={() => void save(true)}>
-            暂存（不启用）
+            {t("set.conn.stage")}
           </Button>
         )}
       </div>
 
       {probe?.ok && (
         <p className="update-line">
-          连接成功
+          {t("set.conn.probeOk")}
           {probe.tools.length > 0 ? (
             <>
-              ，对方报了 {probe.tools.length} 个工具：
+              {t("set.conn.probeTools", { n: probe.tools.length })}
               <span className="mono"> {probe.tools.join("、")}</span>
             </>
           ) : (
-            "，但对方没有报出任何工具 —— 要用它提供工具的功能会接不上"
+            t("set.conn.probeNoTools")
           )}
         </p>
       )}
       {probe && !probe.ok && (
         <p className="update-line update-line--warn">
-          连不上{probe.detail ? "：" + probe.detail : ""}。可以改配置再测，或先暂存 —— 暂存的不会启动，也不会被任务用到。
+          {probe.detail
+            ? t("set.conn.probeFailWhy", { detail: probe.detail })
+            : t("set.conn.probeFail")}
         </p>
       )}
       {failed && <div className="update-line update-line--warn">{failed}</div>}
       <p className="set-note">
-        正式版只安装经过签名的连接器，装不了时会说明原因；测试本身不保存任何东西，
-        {transport === "streamable_http" ? "只是发一次握手请求。" : "起一下就结束。"}
+        {t(
+          transport === "streamable_http"
+            ? "set.conn.signNoteHttp"
+            : "set.conn.signNoteStdio",
+        )}
       </p>
     </SettingsBlock>
   );
@@ -1087,6 +1123,7 @@ function AddConnectorPage({ api }: { api: Api }) {
  * 它现在发生在用户选完目录之后，结果直接写在确认那一屏里。
  */
 function DataDirRow({ system, api }: { system: SystemInfo | null; api: Api }) {
+  const t = useT();
   // 壳在不在，决定给不给这两个按钮：系统目录框与资源管理器都只有壳弹得出来，
   // 浏览器里给了就是给两条走不通的路。
   const hostChrome = useHostChrome();
@@ -1098,7 +1135,7 @@ function DataDirRow({ system, api }: { system: SystemInfo | null; api: Api }) {
   return (
     <>
       <FactRow
-        label="数据目录"
+        label={t("set.storage.dataDir")}
         value={system?.dataDir}
         mono
         {...(shell
@@ -1110,15 +1147,20 @@ function DataDirRow({ system, api }: { system: SystemInfo | null; api: Api }) {
                   {/* 可见文字是「打开目录」（行标签已经说了是哪个目录），但
                       **无障碍名要自带宾语** —— 这一屏上现在有两个「打开目录」
                       （数据、日志），读屏用户听到的是两次一模一样的话。 */}
-                  <Button variant="ghost" size="sm" aria-label="打开数据目录" onClick={() => void api.openDataDir()}>
+                  <Button
+                variant="ghost"
+                size="sm"
+                aria-label={t("set.storage.openDataDir")}
+                onClick={() => void api.openDataDir()}
+              >
                     <Icon name="folder-open" size="xs" />
-                    打开目录
+                    {t("set.storage.openDir")}
                   </Button>
                   {/* 排着一次搬移时不给「更改」：那时该做的是重启或取消，
                       而不是再选一个新目标。 */}
                   {!pending && (
                     <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-                      更改…
+                      {t("set.storage.change")}
                     </Button>
                   )}
                 </>
@@ -1132,9 +1174,8 @@ function DataDirRow({ system, api }: { system: SystemInfo | null; api: Api }) {
         <p className="set-callout set-callout--warning">
           <Icon name="warning" size="sm" />
           <span>
-            <strong>已排好一次搬移，重启后生效。</strong>
-            目标：<span className="mono">{pending}</span>。搬移在下次启动、打开任何数据库之前
-            进行；万一没搬成，应用会照旧从原目录启动并告诉你原因。
+            <strong>{t("set.storage.movePlanned")}</strong>{" "}
+            {t("set.storage.movePlannedBody", { path: pending })}
           </span>
         </p>
       )}
@@ -1142,7 +1183,7 @@ function DataDirRow({ system, api }: { system: SystemInfo | null; api: Api }) {
         <p className="set-callout set-callout--warning">
           <Icon name="warning" size="sm" />
           <span>
-            <strong>上次搬移没成功，数据仍在原处。</strong>
+            <strong>{t("set.storage.moveFailed")}</strong>
             {last.reason}
           </span>
         </p>
@@ -1152,7 +1193,7 @@ function DataDirRow({ system, api }: { system: SystemInfo | null; api: Api }) {
           （owner 2026-09-05）。失败不同：数据还在原处，那是要人处理的状态，
           所以它一直显示到下一次动作为止。 */}
       {!pending && last?.status === "moved" && last.justNow && (
-        <p className="set-note">数据已搬到上面这个新位置，旧目录里只剩缓存。</p>
+        <p className="set-note">{t("set.storage.moveDone")}</p>
       )}
 
       {/* 待搬状态下的两个动作跟着那条提醒走：它们说的是「这次搬移」，不是
@@ -1160,14 +1201,14 @@ function DataDirRow({ system, api }: { system: SystemInfo | null; api: Api }) {
       {pending && (
         <div className="add-actions">
           <Button size="sm" onClick={() => void api.restartApp()}>
-            立即重启并搬移
+            {t("set.storage.restartAndMove")}
           </Button>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => void api.cancelDataDir().then(() => window.location.reload())}
           >
-            取消这次搬移
+            {t("set.storage.cancelMove")}
           </Button>
         </div>
       )}
@@ -1197,6 +1238,7 @@ function DataDirMoveDialog({
   current: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const [target, setTarget] = useState<string | null>(null);
   const [check, setCheck] = useState<DataDirCheck | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1207,7 +1249,7 @@ function DataDirMoveDialog({
     setFailed(null);
     try {
       const picked = await api.pickFolder(current || undefined);
-      if (!picked.path) return; // 取消：什么都不变，也不报错
+      if (!picked.path) return; // cancelled: nothing changes and nothing is reported
       setTarget(picked.path);
       // 选完立刻校验 —— 用户不该记得「还要按一下检查」。
       setCheck(await api.checkDataDir(picked.path));
@@ -1237,9 +1279,9 @@ function DataDirMoveDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>更改数据目录</DialogTitle>
+          <DialogTitle>{t("set.storage.dialogTitle")}</DialogTitle>
           <DialogDescription>
-            业务数据与密钥会搬到新位置。搬移在下次启动、打开任何数据库之前进行。
+            {t("set.storage.dialogDesc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -1253,22 +1295,18 @@ function DataDirMoveDialog({
           <p className="set-callout set-callout--warning">
             <Icon name="warning" size="sm" />
             <span>
-              <strong>不要选云同步盘目录</strong>（OneDrive、坚果云、Dropbox、百度网盘、
-              iCloud、Google 云端硬盘…）。同步客户端会在数据库正被使用时改动它的文件，
-              那会让整个加密库读不出来；而且它会把你的数据整份上传到云端。
-              常见的几家会被自动拒绝，<strong>但挂成盘符的那些认不出来</strong> ——
-              请你自己确认这个位置不在任何同步盘里。
+              {t("set.storage.cloudWarning")}
             </span>
           </p>
 
-          <FactRow label="当前" value={current} mono />
+          <FactRow label={t("set.storage.current")} value={current} mono />
           <FactRow
-            label="搬到"
+            label={t("set.storage.moveTo")}
             value={target ?? undefined}
             mono
             action={
               <Button variant="outline" size="sm" disabled={busy} onClick={() => void pick()}>
-                {target ? "重新选择…" : "选择目录…"}
+                {t(target ? "set.storage.pickAgain" : "set.storage.pick")}
               </Button>
             }
           />
@@ -1280,29 +1318,27 @@ function DataDirMoveDialog({
           )}
           {check?.ok && (
             <p className="set-note">
-              要搬 约 {mb} MB
+              {t("set.storage.sizeToMove", { mb })}
               {check.sameVolume
-                ? " · 同一个盘，改名即可，几乎瞬间完成。"
-                : " · 跨盘，要逐文件复制并核对，可能要等几分钟。"}
-              {" 缓存不搬（它会自己重建）。"}
+                ? t("set.storage.sameDrive")
+                : t("set.storage.crossDrive")}
+                {t("set.storage.cacheNotMoved")}
             </p>
           )}
           <p className="set-note">
             {/* 这是渲染出去的正文，不是注释 —— JSX 不解析 Markdown 的星号，
                 写 ** 用户就会看见两个星号。要加重用 <strong>。 */}
-            按下之后应用会<strong>关闭并重新打开</strong>，期间会显示搬移进度。源目录在
-            核对通过之前一直是权威 —— 中途失败就照旧从原处启动，数据不会丢。数据按当前
-            Windows 用户加密，所以不要选别的用户的目录或移动磁盘。
+            {t("set.storage.restartNote")}
           </p>
           {failed && <p className="set-note">{failed}</p>}
         </div>
 
         <DialogFooter>
           <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
-            取消
+            {t("set.cancel")}
           </Button>
           <Button size="sm" disabled={busy || !check?.ok} onClick={() => void go()}>
-            重启并搬移
+            {t("set.storage.restartConfirm")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1321,12 +1357,13 @@ function DataDirMoveDialog({
  * 连接器那条路（ADR-005 通路二）。
  */
 function DatabaseSection() {
+  const t = useT();
   return (
     <div className="card">
       <EmptyState
         icon="table"
-        title="暂未开放"
-        description="外接数据库还在开发中。眼下要把局域网或自有系统的数据带进来，请用「连接器」。"
+        title={t("set.db.title")}
+        description={t("set.db.desc")}
       />
     </div>
   );
@@ -1376,13 +1413,21 @@ function DatabaseSection() {
  * `win32-x64` 是给程序看的写法。用户要认出的是「我这台是 Windows、64 位」。
  * 认不出来的组合就原样显示——**编一个好听的名字比显示原值更糟**。
  */
-function describePlatform(system: SystemInfo | null): string | undefined {
+function describePlatform(system: SystemInfo | null, t: TFn): string | undefined {
   if (!system) return undefined;
-  const os =
-    { win32: "Windows", darwin: "macOS", linux: "Linux" }[system.platform] ??
-    system.platform;
-  const arch = { x64: "64 位", arm64: "ARM 64 位" }[system.arch] ?? system.arch;
-  return `${os} · ${arch}`;
+  const osKey = {
+    win32: "set.update.os.win32",
+    darwin: "set.update.os.darwin",
+    linux: "set.update.os.linux",
+  }[system.platform] as MessageKey | undefined;
+  const archKey = {
+    x64: "set.update.arch.x64",
+    arm64: "set.update.arch.arm64",
+  }[system.arch] as MessageKey | undefined;
+  return t("set.update.platformValue", {
+    os: osKey ? t(osKey) : system.platform,
+    arch: archKey ? t(archKey) : system.arch,
+  });
 }
 
 function UpdatesSection({
@@ -1399,7 +1444,7 @@ function UpdatesSection({
     <>
       <SettingsBlock
         icon="info"
-        title="当前版本"
+        title={t("set.update.currentTitle")}
         aside={
           <TooltipProvider>
             <Tooltip>
@@ -1409,23 +1454,23 @@ function UpdatesSection({
                   <Checkbox
                     checked={autoCheck}
                     onCheckedChange={(v) => setAutoCheck(v === true)}
-                    aria-label="自动检查"
+                    aria-label={t("set.update.autoCheck")}
                   />
-                  自动检查
+                  {t("set.update.autoCheck")}
                 </label>
               </TooltipTrigger>
-              <TooltipContent>每次启动软件自动检查最新版本</TooltipContent>
+              <TooltipContent>{t("set.update.autoCheckTip")}</TooltipContent>
             </Tooltip>
             <Button variant="outline" size="sm" disabled={busy} onClick={() => void check(true)}>
-              {busy ? "正在检查…" : "检查更新"}
+              {t(busy ? "set.update.checking" : "set.update.check")}
             </Button>
           </TooltipProvider>
         }
       >
-        <FactRow label="运行环境" value={system?.version} mono />
-        <FactRow label="界面" value={UI_VERSION} mono />
-        <FactRow label="系统" value={describePlatform(system)} />
-        <FactRow label="本次启动" value={system?.startedAt} mono />
+        <FactRow label={t("set.update.runtime")} value={system?.version} mono />
+        <FactRow label={t("set.update.ui")} value={UI_VERSION} mono />
+        <FactRow label={t("set.update.system")} value={describePlatform(system, t)} />
+        <FactRow label={t("set.update.startedAt")} value={system?.startedAt} mono />
       </SettingsBlock>
 
       {/* 「更新渠道」原先是独立一块，里面只有一个**停用的下拉框、一个选项**，
@@ -1434,23 +1479,21 @@ function UpdatesSection({
           让它长回一个能选的控件（owner 2026-09-17：没有价值的可以删）。 */}
       <SettingsBlock
         icon="package"
-        title="安装方式"
-        desc="不会自动下载或安装，什么时候更新由你决定"
+        title={t("set.update.installTitle")}
+        desc={t("set.update.installDesc")}
       >
         {/* 渠道来自**刚查过的那份结果**，不是写死的字面量：写死的话，将来出了
             测试版渠道，界面会一口咬定「正式版」而用户正装着测试包（TD-021）。 */}
-        <FactRow label="更新渠道" value={channelLabel(t, updateCheck.result?.channel)} />
-        <FactRow label="检查" value="手动点「检查更新」，或开着「自动检查」时每次启动查一次" />
-        <FactRow label="下载" value="在浏览器里下载，安装包保存到你的下载文件夹" />
-        <FactRow label="安装" value="双击安装包覆盖安装，你的数据不受影响" />
+        <FactRow label={t("set.update.channelRow")} value={channelLabel(t, updateCheck.result?.channel)} />
+        <FactRow label={t("set.update.howCheck")} value={t("set.update.howCheckValue")} />
+        <FactRow label={t("set.update.howDownload")} value={t("set.update.howDownloadValue")} />
+        <FactRow label={t("set.update.howInstall")} value={t("set.update.howInstallValue")} />
         {system?.codeSigning === "unsigned" && (
           <p className="set-callout set-callout--warning">
             <Icon name="warning" size="sm" />
             <span>
-              <strong>这个版本还没有数字签名。</strong>
-              安装时 Windows 可能会先弹一个提示框，点「更多信息」→「仍要运行」可以继续。
-              少数开启了「智能应用控制」的电脑会直接拦下它，双击没有反应 —— 这种情况请等
-              已签名的版本。请只从 Vxture 官方下载页获取安装包。
+              <strong>{t("set.update.unsignedTitle")}</strong>{" "}
+              {t("set.update.unsignedBody")}
             </span>
           </p>
         )}
@@ -1494,6 +1537,7 @@ function AboutSection({
   session: SessionInfo | null;
   api: Api;
 }) {
+  const t = useT();
   // 本机固件信息：懒加载（只在关于页问一次），拿不到就如实说「不可用」而不是
   // 空着——守护进程没接这一路是正常状态（旧版本、或装配没配），不是错误。
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
@@ -1534,22 +1578,22 @@ function AboutSection({
           单独一张卡看不出是同一套设置页。 */}
       <SettingsBlock
         icon="cpu"
-        title="本机配置"
-        desc="只在这台电脑上显示，不会上传"
+        title={t("set.hw.title")}
+        desc={t("set.hw.desc")}
       >
         {hardwareUnavailable ? (
           <p className="text-body-sm text-muted-foreground">
-            暂时读不到本机配置，不影响其它功能。
+            {t("set.hw.unavailable")}
           </p>
         ) : (
           <>
             <FactRow
-              label="处理器"
+              label={t("set.hw.cpu")}
               value={
                 hardware?.cpu
                   ? [
                       hardware.cpu.brand,
-                      hardware.cpu.cores ? `${hardware.cpu.cores} 核` : undefined,
+                      hardware.cpu.cores ? t("set.hw.cores", { n: hardware.cpu.cores }) : undefined,
                     ]
                       .filter(Boolean)
                       .join(" · ")
@@ -1558,10 +1602,10 @@ function AboutSection({
                     : "…"
               }
             />
-            <FactRow label="内存" value={hardware ? gb(hardware.memoryTotalBytes) : "…"} />
-            <FactRow label="主板 / BIOS" value={board} />
+            <FactRow label={t("set.hw.memory")} value={hardware ? gb(hardware.memoryTotalBytes) : "…"} />
+            <FactRow label={t("set.hw.board")} value={board} />
             <FactRow
-              label="操作系统"
+              label={t("set.hw.os")}
               value={
                 hardware?.os
                   ? [
@@ -1576,7 +1620,7 @@ function AboutSection({
               }
             />
             <FactRow
-              label="磁盘"
+              label={t("set.hw.disk")}
               value={
                 hardware?.disks && hardware.disks.length > 0
                   ? hardware.disks
@@ -1590,12 +1634,12 @@ function AboutSection({
               }
             />
             <FactRow
-              label="网卡 MAC 地址"
+              label={t("set.hw.mac")}
               value={hardware?.macAddresses?.join("、") ?? (hardware ? undefined : "…")}
               mono
             />
             <FactRow
-              label="机器 ID"
+              label={t("set.hw.machineId")}
               value={hardware?.machineId ?? (hardware ? undefined : "…")}
               mono
             />
@@ -1613,46 +1657,55 @@ function AboutSection({
  * 契约里声明（§2.5）。所以这一页没有「运行」按钮，只有启用 / 停用与刷新。
  * 四层来源同名时近者优先，被盖住的那条如实标「被覆盖」，而不是从清单里消失。
  */
-const LAYER_LABEL: Record<SkillLayer, string> = {
-  bundled: "预置",
-  distributed: "产品分发",
-  user: "用户",
-  project: "项目",
+const LAYER_KEY: Record<SkillLayer, MessageKey> = {
+  bundled: "set.cap.layer.bundled",
+  distributed: "set.cap.layer.distributed",
+  user: "set.cap.layer.user",
+  project: "set.cap.layer.project",
 };
-const TIER_LABEL: Record<string, string> = {
-  default: "默认启用",
-  "installed-disabled": "装而不启用",
-  "runos-registered": "经 Runos",
+/** 供给档位：认得的给它那句话，认不得的原样显示。 */
+function tierLabel(t: TFn, tier: string): string {
+  const key = TIER_KEY[tier];
+  return key ? t(key) : tier;
+}
+
+const TIER_KEY: Record<string, MessageKey> = {
+  default: "set.cap.supply.default",
+  "installed-disabled": "set.cap.supply.installedDisabled",
+  "runos-registered": "set.cap.supply.runos",
 };
-const TOOL_STATUS: Record<ToolView["status"], { label: string; tone: "success" | "warning" | "neutral" }> = {
-  available: { label: "可用", tone: "success" },
-  unavailable: { label: "不可用", tone: "warning" },
+const TOOL_STATUS: Record<
+  ToolView["status"],
+  { key: MessageKey; tone: "success" | "warning" | "neutral" }
+> = {
+  available: { key: "set.cap.state.available", tone: "success" },
+  unavailable: { key: "set.cap.state.unavailable", tone: "warning" },
   /** 用户点一下就能改变的事实 —— 所以它有自己的徽标和自己的按钮，不是「不可用」。 */
-  "needs-acquisition": { label: "未获取", tone: "warning" },
-  acquiring: { label: "获取中", tone: "neutral" },
-  registered: { label: "已登记", tone: "neutral" },
-  runos: { label: "经 Runos", tone: "neutral" },
+  "needs-acquisition": { key: "set.cap.state.needsAcquisition", tone: "warning" },
+  acquiring: { key: "set.cap.state.acquiring", tone: "neutral" },
+  registered: { key: "set.cap.state.registered", tone: "neutral" },
+  runos: { key: "set.cap.supply.runos", tone: "neutral" },
 };
 /**
  * 获取失败**各说各的**（ADR-018 §7.2）。折叠成一句「获取失败」，用户就分不清
  * 「网络到不了」（等会儿再试）与「字节和清单对不上」（这一种是要说响的）。
  */
-const COMPONENT_STATE: Record<ComponentState, string> = {
-  acquired: "已获取",
-  "not-acquired": "未获取",
-  acquiring: "获取中",
-  unreachable: "网络到不了 —— 也可以从本地文件导入",
+const COMPONENT_STATE_KEY: Record<ComponentState, MessageKey> = {
+  acquired: "set.cap.component.acquired",
+  "not-acquired": "set.cap.component.notAcquired",
+  acquiring: "set.cap.component.acquiring",
+  unreachable: "set.cap.component.unreachable",
   // 「上游已经删了这个构建」不是「等会儿再试」：再点一次还是 404，要动的是清单。
-  gone: "上游已经没有这一版了 —— 重试没有用，要等一版更新过清单的 Ruyin",
-  "payload-missing": "装过，但文件不在了（杀毒隔离 / 清盘）—— 移除后重新获取",
-  mismatch: "取到的字节与清单里那条摘要不符，已丢弃",
-  "no-space": "磁盘不够",
-  "too-large": "比清单说的大",
-  "license-missing": "解压后缺许可证文件，已回滚",
-  "refused-origin": "来源不在允许的名单里，请求没有发出",
-  "path-too-long": "保存路径太长",
-  cancelled: "已取消",
-  failed: "获取失败",
+  gone: "set.cap.component.gone",
+  "payload-missing": "set.cap.component.payloadMissing",
+  mismatch: "set.cap.component.mismatch",
+  "no-space": "set.cap.component.noSpace",
+  "too-large": "set.cap.component.tooLarge",
+  "license-missing": "set.cap.component.licenseMissing",
+  "refused-origin": "set.cap.component.refusedOrigin",
+  "path-too-long": "set.cap.component.pathTooLong",
+  cancelled: "set.cap.component.cancelled",
+  failed: "set.cap.component.failed",
 };
 
 function mb(n: number): string {
@@ -1663,7 +1716,7 @@ function mb(n: number): string {
  * 「工具」块顶上那句常驻事实。数的是**能不能起**，不是清单上有多少条 ——
  * 「预置 10 个」而其中 7 个在干净机器上起不来，是上一版清单犯过的错。
  */
-function bundledSummary(tools: ToolView[]): string {
+function bundledSummary(tools: ToolView[], t: TFn): string {
   const servers = tools.filter((t) => t.kind === "mcp-server");
   const bundled = servers.filter((t) => t.launchable && !t.component);
   // `launchable` 只说「有启动规格」，不说「此刻起得来」——差一个环境变量、差一个
@@ -1672,15 +1725,15 @@ function bundledSummary(tools: ToolView[]): string {
   const blocked = bundled.filter((t) => t.status !== "available" && t.status !== "registered").length;
   const needs = servers.filter((t) => t.component && t.component.state !== "acquired").length;
   return (
-    `预置 ${bundled.length} 个，随安装包而来、不下载任何字节` +
-    (blocked > 0 ? `（其中 ${blocked} 个还要先配置才能起）` : "") +
-    (needs > 0 ? `；另有 ${needs} 个需要获取（可联网，也可从本地文件导入）。` : "。")
+    t("set.cap.bundledSummary", { n: bundled.length }) +
+    (blocked > 0 ? t("set.cap.bundledBlocked", { n: blocked }) : "") +
+    (needs > 0 ? t("set.cap.bundledNeeds", { n: needs }) : t("set.cap.bundledEnd"))
   );
 }
-const TOOL_KIND: Record<ToolView["kind"], string> = {
-  builtin: "内建",
-  connector: "连接器",
-  "mcp-server": "MCP 服务器",
+const TOOL_KIND_KEY: Record<ToolView["kind"], MessageKey> = {
+  builtin: "set.cap.kind.builtin",
+  connector: "set.cap.kind.connector",
+  "mcp-server": "set.cap.kind.mcpServer",
 };
 
 /**
@@ -1723,20 +1776,21 @@ function FilterMenu<T extends string>({
   );
 }
 
-const LAYER_FILTER_OPTIONS: Array<{ value: "all" | SkillLayer; label: string }> = [
-  { value: "all", label: "全部来源" },
-  { value: "bundled", label: LAYER_LABEL.bundled },
-  { value: "distributed", label: LAYER_LABEL.distributed },
-  { value: "user", label: LAYER_LABEL.user },
-  { value: "project", label: LAYER_LABEL.project },
+/** 筛选项带的是**目录键**，词在渲染时按语言取（下面三组同理）。 */
+const LAYER_FILTER_OPTIONS: Array<{ value: "all" | SkillLayer; labelKey: MessageKey }> = [
+  { value: "all", labelKey: "set.cap.filter.allSources" },
+  { value: "bundled", labelKey: LAYER_KEY.bundled },
+  { value: "distributed", labelKey: LAYER_KEY.distributed },
+  { value: "user", labelKey: LAYER_KEY.user },
+  { value: "project", labelKey: LAYER_KEY.project },
 ];
 
 type ToolKindFilter = "all" | ToolView["kind"];
-const TOOL_KIND_FILTER_OPTIONS: Array<{ value: ToolKindFilter; label: string }> = [
-  { value: "all", label: "全部类别" },
-  { value: "builtin", label: TOOL_KIND.builtin },
-  { value: "connector", label: TOOL_KIND.connector },
-  { value: "mcp-server", label: TOOL_KIND["mcp-server"] },
+const TOOL_KIND_FILTER_OPTIONS: Array<{ value: ToolKindFilter; labelKey: MessageKey }> = [
+  { value: "all", labelKey: "set.cap.filter.allKinds" },
+  { value: "builtin", labelKey: TOOL_KIND_KEY.builtin },
+  { value: "connector", labelKey: TOOL_KIND_KEY.connector },
+  { value: "mcp-server", labelKey: TOOL_KIND_KEY["mcp-server"] },
 ];
 
 /**
@@ -1744,46 +1798,58 @@ const TOOL_KIND_FILTER_OPTIONS: Array<{ value: ToolKindFilter; label: string }> 
  * 一个永远是空的按钮。
  */
 type CatalogFilter = "all" | "skill" | "connector" | "executor";
-const CATALOG_FILTERS: { value: CatalogFilter; label: string }[] = [
-  { value: "all", label: "全部" },
-  { value: "skill", label: "技能" },
-  { value: "connector", label: "连接器" },
-  { value: "executor", label: "执行器" },
+const CATALOG_FILTERS: { value: CatalogFilter; labelKey: MessageKey }[] = [
+  { value: "all", labelKey: "set.cap.filter.all" },
+  { value: "skill", labelKey: "set.cap.filter.skill" },
+  { value: "connector", labelKey: "set.cap.filter.connector" },
+  { value: "executor", labelKey: "set.cap.filter.executor" },
 ];
 
-function catalogTime(iso: string | undefined): string {
-  return iso ? new Date(iso).toLocaleString("zh-CN", { hour12: false }) : "—";
+function catalogTime(iso: string | undefined, locale: Locale): string {
+  // 时间的写法**跟着语言走**：中文是 2026/9/17 19:40:00，英文是 9/17/2026, 19:40:00。
+  return iso ? new Date(iso).toLocaleString(locale, { hour12: false }) : "—";
 }
 
 /** 四种状态各说各的（RY-204 §状态）：拿不到就说拿不到，旧的就说是旧的。 */
-function catalogStateLine(source: CatalogSourceStatus): string {
+function catalogStateLine(source: CatalogSourceStatus, t: TFn, locale: Locale): string {
   switch (source.state) {
     case "unavailable":
       // 守护进程的原因本来就是这半句（带着 issue 号）：拼成一句说，不再在下面重复一遍
       // （owner 2026-09-15 真机看到两遍，RY-001 #23）。
-      return `${source.reason ?? "平台尚未提供能力目录"}，暂时没有清单。`;
+      return t("set.cap.catalog.noEndpoint", {
+        reason: source.reason ?? t("set.cap.catalog.noEndpointDefault"),
+      });
     case "never":
-      return "还没有取到 Runos 清单。";
+      return t("set.cap.catalog.neverFetched");
     case "synced":
-      return `共 ${source.total ?? 0} 项 · 更新于 ${catalogTime(source.fetchedAt)}`;
+      return t("set.cap.catalog.fresh", {
+        total: source.total ?? 0,
+        at: catalogTime(source.fetchedAt, locale),
+      });
     case "stale":
-      return `显示的是 ${catalogTime(source.fetchedAt)} 时的清单，之后没能更新。`;
+      return t("set.cap.catalog.stale", { at: catalogTime(source.fetchedAt, locale) });
   }
 }
 
-function catalogDiffLine(source: CatalogSourceStatus): string | null {
+function catalogDiffLine(source: CatalogSourceStatus, t: TFn): string | null {
   const d = source.diff;
   if (source.state !== "synced" || !d || d.added + d.removed + d.changed === 0) return null;
-  return `本次新增 ${d.added} · 下线 ${d.removed} · 变更 ${d.changed}`;
+  return t("set.cap.catalog.diff", {
+    added: d.added,
+    removed: d.removed,
+    changed: d.changed,
+  });
 }
 
 /** D4：只按守护进程核对出来的事实标；技能没有就是「本机无」，其余在 Runos 远端跑。 */
-function catalogLocalLabel(item: CatalogItem): string {
-  if (item.local.runnable) return "本机可运行";
-  return item.primitiveType === "skill" ? "本机无" : "仅云端";
+function catalogLocalLabel(item: CatalogItem, t: TFn): string {
+  if (item.local.runnable) return t("set.cap.local.runnable");
+  return t(item.primitiveType === "skill" ? "set.cap.local.none" : "set.cap.local.cloudOnly");
 }
 
 function SkillsSection({ api }: { api: Api }) {
+  const t = useT();
+  const locale = useLocale();
   const [listing, setListing] = useState<SkillListing | null>(null);
   const [tools, setTools] = useState<ToolView[] | null>(null);
   /** 能力调用路径（ADR-025）。null = 没问到 —— 那时不显示那一行，不猜一个档位。 */
@@ -1888,7 +1954,9 @@ function SkillsSection({ api }: { api: Api }) {
   };
 
   const items = (listing?.items ?? []).filter((s) => layer === "all" || s.layer === layer);
-  const layerSummary = (listing?.layers ?? []).map((l) => `${LAYER_LABEL[l.layer]} ${l.count}`).join(" · ");
+  const layerSummary = (listing?.layers ?? [])
+    .map((l) => `${t(LAYER_KEY[l.layer])} ${l.count}`)
+    .join(" · ");
   const toolItems = (tools ?? []).filter((t) => toolKind === "all" || t.kind === toolKind);
   // 预置的 MCP 服务器：启动 = 真起进程、握手、列工具；起不了的原因照原样转达。
   const [starting, setStarting] = useState<string | null>(null);
@@ -1967,7 +2035,7 @@ function SkillsSection({ api }: { api: Api }) {
       <p className="cap-sync">
         <Icon name="shield-check" size="sm" aria-hidden />
         <span>
-          能力供给与 <strong>Vxture</strong> 云端 <strong>Runos</strong> 同步，本机提供运行环境。
+          {t("set.cap.syncLine")}
         </span>
         {routing && (
           <span className="cap-sync-tags">
@@ -1975,7 +2043,9 @@ function SkillsSection({ api }: { api: Api }) {
             <StatusBadge tone="neutral">
               {routing.name}（{routing.note}）
             </StatusBadge>
-            {!routing.cloudOpen && <StatusBadge tone="warning">云端未开放</StatusBadge>}
+            {!routing.cloudOpen && (
+              <StatusBadge tone="warning">{t("set.cap.cloudClosed")}</StatusBadge>
+            )}
           </span>
         )}
       </p>
@@ -1983,21 +2053,21 @@ function SkillsSection({ api }: { api: Api }) {
         icon="sparkles"
         collapsible
         count={items.length}
-        title="本机技能"
-        desc="这台电脑上装好的技能包。智能体只能用到它自己声明过的那些"
+        title={t("set.skills.title")}
+        desc={t("set.skills.desc")}
         aside={
           unavailable ? undefined : (
             // 筛选紧挨着刷新按钮、一起右对齐（owner 2026-09-15）：原来这个筛选是
             // 内容区里一个全宽的 <select>，挪到标题行、压缩到按钮宽度。
             <>
               <FilterMenu
-                ariaLabel="按来源层筛选"
-                options={LAYER_FILTER_OPTIONS}
+                ariaLabel={t("set.skills.filterAria")}
+                options={LAYER_FILTER_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
                 value={layer}
                 onChange={setLayer}
               />
               <Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}>
-                {busy ? "刷新中…" : "刷新"}
+                {t(busy ? "set.refreshing" : "set.refresh")}
               </Button>
             </>
           )
@@ -2010,12 +2080,12 @@ function SkillsSection({ api }: { api: Api }) {
           <p className="set-note">…</p>
         ) : (
           <>
-            <p className="set-note">{layerSummary || "尚无技能"}</p>
+            <p className="set-note">{layerSummary || t("set.skills.none")}</p>
             {items.length === 0 ? (
               <p className="set-note">
                 {listing.items.length === 0
-                  ? "本机还没有任何技能。预置层随安装包来；开发态要先 pnpm skills:pull。"
-                  : "这一层没有技能。"}
+                  ? t("set.skills.emptyAll")
+                  : t("set.skills.emptyLayer")}
               </p>
             ) : (
               <Accordion type="multiple" className="cap-groups">
@@ -2027,28 +2097,32 @@ function SkillsSection({ api }: { api: Api }) {
                       <span className="cap-group-desc">{group.desc}</span>
                     </AccordionTrigger>
                     <AccordionContent>
-                      <ul className="row-list" aria-label={`技能 · ${group.label}`}>
+                      <ul className="row-list" aria-label={t("set.skills.groupAria", { group: group.label })}>
                 {rows.map((s) => (
                   <li key={`${s.layer}:${s.source}:${s.name}`} className="row-item">
                     <code className="row-main" title={`${s.dir}\n${s.description}`}>
                       {s.name}
                     </code>
-                    <span className="row-tag">{LAYER_LABEL[s.layer]}</span>
+                    <span className="row-tag">{t(LAYER_KEY[s.layer])}</span>
                     <span className="text-body-sm text-muted-foreground">
                       {s.source}
                       {s.version ? ` · v${s.version}` : ""}
                       {s.license ? ` · ${s.license}` : ""}
-                      {s.tier ? ` · ${TIER_LABEL[s.tier] ?? s.tier}` : ""}
+                      {s.tier ? ` · ${tierLabel(t, s.tier)}` : ""}
                     </span>
                     {/* 脚本本地不跑（TD-005）：标出来，而不是悄悄跳过。 */}
-                    {s.hasScripts && <StatusBadge tone="neutral">含脚本（本地不跑）</StatusBadge>}
+                    {s.hasScripts && <StatusBadge tone="neutral">{t("set.skills.hasScripts")}</StatusBadge>}
                     {s.shadowedBy ? (
-                      <StatusBadge tone="neutral">{`被${LAYER_LABEL[s.shadowedBy]}层覆盖`}</StatusBadge>
+                      <StatusBadge tone="neutral">
+                        {t("set.skills.shadowed", { layer: t(LAYER_KEY[s.shadowedBy]) })}
+                      </StatusBadge>
                     ) : (
-                      <StatusBadge tone={s.enabled ? "success" : "neutral"}>{s.enabled ? "启用" : "停用"}</StatusBadge>
+                      <StatusBadge tone={s.enabled ? "success" : "neutral"}>
+                        {t(s.enabled ? "set.skills.enabled" : "set.skills.disabled")}
+                      </StatusBadge>
                     )}
                     <Button variant="ghost" size="sm" onClick={() => void toggle(s)}>
-                      {s.enabled ? "停用" : "启用"}
+                      {t(s.enabled ? "set.skills.disabled" : "set.skills.enabled")}
                     </Button>
                   </li>
                 ))}
@@ -2065,13 +2139,13 @@ function SkillsSection({ api }: { api: Api }) {
         icon="plugs-connected"
         collapsible
         count={tools?.length ?? 0}
-        title="本机工具"
-        desc="智能体在这台电脑上能做的事。每一次调用都要过你设的权限"
+        title={t("set.tools.title")}
+        desc={t("set.tools.desc")}
         aside={
           tools && tools.length > 0 ? (
             <FilterMenu
-              ariaLabel="按类别筛选"
-              options={TOOL_KIND_FILTER_OPTIONS}
+              ariaLabel={t("set.tools.filterAria")}
+              options={TOOL_KIND_FILTER_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
               value={toolKind}
               onChange={setToolKind}
             />
@@ -2081,14 +2155,14 @@ function SkillsSection({ api }: { api: Api }) {
         {tools === null ? (
           <p className="set-note">…</p>
         ) : tools.length === 0 ? (
-          <p className="set-note">这台电脑上还没有可用的工具。</p>
+          <p className="set-note">{t("set.tools.none")}</p>
         ) : (
           <>
             {/* 常驻的一句事实：随包的与要获取的各多少（按登记册全量算，不随筛选变——
                 这是「这台机器总共有多少」，不是「筛出来看见几个」）。用户不必点开
                 每一行去数。 */}
-            <p className="set-note">{bundledSummary(tools)}</p>
-            {toolItems.length === 0 && <p className="set-note">这一类没有工具。</p>}
+            <p className="set-note">{bundledSummary(tools, t)}</p>
+            {toolItems.length === 0 && <p className="set-note">{t("set.tools.emptyKind")}</p>}
             <Accordion type="multiple" className="cap-groups">
               {toolGroups.map(({ group, items: rows }) => (
                 <AccordionItem key={group.id} value={group.id} className="cap-group">
@@ -2098,77 +2172,87 @@ function SkillsSection({ api }: { api: Api }) {
                     <span className="cap-group-desc">{group.desc}</span>
                   </AccordionTrigger>
                   <AccordionContent>
-                    <ul className="row-list" aria-label={`工具 · ${group.label}`}>
-              {rows.map((t) => (
-                <li key={`${t.kind}:${t.id}`} className="row-item">
-                  <code className="row-main" title={t.detail ?? ""}>
-                    {t.id}
+                    <ul className="row-list" aria-label={t("set.tools.groupAria", { group: group.label })}>
+              {rows.map((tool) => (
+                <li key={`${tool.kind}:${tool.id}`} className="row-item">
+                  <code className="row-main" title={tool.detail ?? ""}>
+                    {tool.id}
                   </code>
-                  <span className="row-tag">{TOOL_KIND[t.kind]}</span>
-                  {(t.license || t.tier) && (
+                  <span className="row-tag">{t(TOOL_KIND_KEY[tool.kind])}</span>
+                  {(tool.license || tool.tier) && (
                     <span className="text-body-sm text-muted-foreground">
-                      {[t.license, t.tier ? (TIER_LABEL[t.tier] ?? t.tier) : undefined].filter(Boolean).join(" · ")}
+                      {[tool.license, tool.tier ? tierLabel(t, tool.tier) : undefined]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </span>
                   )}
                   {/* 工具名来自构建时探过的那一次：**停着的、还没获取的行也显示** ——
                       用户在下载之前就看得见这台机器将要多出哪些工具（TD-034）。 */}
-                  {t.tools && t.tools.length > 0 && (
-                    <span className="text-body-sm text-muted-foreground mono">{`工具：${t.tools.join("、")}`}</span>
+                  {tool.tools && tool.tools.length > 0 && (
+                    <span className="text-body-sm text-muted-foreground mono">{t("set.tools.toolList", { list: tool.tools.join(t("common.listSep")) })}</span>
                   )}
-                  {!t.tools && t.toolsUnprobed && (
-                    <span className="text-body-sm text-muted-foreground">{`工具名未探到：${t.toolsUnprobed}`}</span>
+                  {!tool.tools && tool.toolsUnprobed && (
+                    <span className="text-body-sm text-muted-foreground">{t("set.tools.unprobed", { reason: tool.toolsUnprobed })}</span>
                   )}
                   {/* 有载荷那一行时不再重复 detail：守护进程那句话里已经带了同样的
                       体积，两处并排显示同一个数字会让人以为是两笔下载。 */}
-                  {t.launchable && t.status !== "available" && t.detail && !t.component && (
-                    <span className="text-body-sm text-muted-foreground">{t.detail}</span>
+                  {tool.launchable && tool.status !== "available" && tool.detail && !tool.component && (
+                    <span className="text-body-sm text-muted-foreground">{tool.detail}</span>
                   )}
                   {/* 体积、许可证、来源主机都在按钮**左边** —— 点之前就看得见要下多少。
                       地址不在这里：它只在守护进程手上，从随包清单读出来。 */}
-                  {t.component && (
+                  {tool.component && (
                     <span className="text-body-sm text-muted-foreground">
-                      {t.component.state === "acquiring"
-                        ? `${mb(t.component.receivedBytes ?? 0)} / ${mb(t.component.totalBytes ?? t.component.downloadBytes)}`
-                        : `${COMPONENT_STATE[t.component.state]} · 需下载 ${mb(t.component.downloadBytes)}（占盘 ${mb(
-                            t.component.diskBytes,
-                          )}）· ${t.component.license} · 来自 ${t.component.origin}`}
-                      {t.component.reason ? ` —— ${t.component.reason}` : ""}
+                      {tool.component.state === "acquiring"
+                        ? `${mb(tool.component.receivedBytes ?? 0)} / ${mb(tool.component.totalBytes ?? tool.component.downloadBytes)}`
+                        : t("set.tools.componentLine", {
+                            state: t(COMPONENT_STATE_KEY[tool.component.state]),
+                            download: mb(tool.component.downloadBytes),
+                            disk: mb(tool.component.diskBytes),
+                            license: tool.component.license,
+                            origin: tool.component.origin,
+                          })}
+                      {tool.component.reason ? ` —— ${tool.component.reason}` : ""}
                     </span>
                   )}
-                  <StatusBadge tone={TOOL_STATUS[t.status].tone}>{TOOL_STATUS[t.status].label}</StatusBadge>
-                  {t.component && t.component.state === "acquiring" ? (
-                    <Button variant="ghost" size="sm" onClick={() => void cancelAcquire(t.component!.id)}>
-                      取消
+                  <StatusBadge tone={TOOL_STATUS[tool.status].tone}>
+                    {t(TOOL_STATUS[tool.status].key)}
+                  </StatusBadge>
+                  {tool.component && tool.component.state === "acquiring" ? (
+                    <Button variant="ghost" size="sm" onClick={() => void cancelAcquire(tool.component!.id)}>
+                      {t("set.cancel")}
                     </Button>
-                  ) : t.component ? (
+                  ) : tool.component ? (
                     <>
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={acquiring === t.component.id}
-                        onClick={() => void acquire(t.component!.id)}
+                        disabled={acquiring === tool.component.id}
+                        onClick={() => void acquire(tool.component!.id)}
                       >
-                        {acquiring === t.component.id ? "获取中…" : "获取"}
+                        {t(acquiring === tool.component.id ? "set.tools.acquiring" : "set.tools.acquire")}
                       </Button>
                       {/* 气隙机器点不动上面那个按钮，但管理员可以把离线包指给它。 */}
                       <Button
                         variant="ghost"
                         size="sm"
-                        disabled={acquiring === t.component.id}
-                        onClick={() => void importFromDisk(t.component!.id)}
+                        disabled={acquiring === tool.component.id}
+                        onClick={() => void importFromDisk(tool.component!.id)}
                       >
-                        从本地文件导入
+                        {t("set.tools.importLocal")}
                       </Button>
                     </>
                   ) : null}
-                  {t.launchable && !t.component && (
+                  {tool.launchable && !tool.component && (
                     <Button
-                      variant={t.status === "available" ? "ghost" : "outline"}
+                      variant={tool.status === "available" ? "ghost" : "outline"}
                       size="sm"
-                      disabled={starting === t.id}
-                      onClick={() => void launch(t, t.status !== "available")}
+                      disabled={starting === tool.id}
+                      onClick={() => void launch(tool, tool.status !== "available")}
                     >
-                      {starting === t.id ? "…" : t.status === "available" ? "停止" : "启动"}
+                      {starting === tool.id
+                        ? t("set.tools.starting")
+                        : t(tool.status === "available" ? "set.tools.stop" : "set.tools.start")}
                     </Button>
                   )}
                 </li>
@@ -2188,16 +2272,16 @@ function SkillsSection({ api }: { api: Api }) {
           icon="cloud"
           collapsible
           {...(catalog.source.total === undefined ? {} : { count: catalog.source.total })}
-          title="云端能力清单"
-          desc="平台上有哪些能力，只作了解。这里的条目不会装到本机 —— 本机能用什么，看上面的技能与工具"
+          title={t("set.catalog.title")}
+          desc={t("set.catalog.desc")}
           aside={
             <>
               {/* 筛选与工具板块同一个组件（owner 2026-09-15：「多维度筛选下拉」）。
                   一条都没有时不给一个永远筛不出东西的按钮。 */}
               {(catalog.source.total ?? 0) > 0 && (
                 <FilterMenu
-                  ariaLabel="按类型筛选"
-                  options={CATALOG_FILTERS}
+                  ariaLabel={t("set.catalog.filterAria")}
+                  options={CATALOG_FILTERS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
                   value={catalogType}
                   onChange={setCatalogType}
                 />
@@ -2208,32 +2292,34 @@ function SkillsSection({ api }: { api: Api }) {
                 disabled={catalogBusy || catalog.source.state === "unavailable"}
                 onClick={() => void refreshCatalog()}
               >
-                {catalogBusy ? "刷新中…" : "刷新"}
+                {t(catalogBusy ? "set.refreshing" : "set.refresh")}
               </Button>
             </>
           }
         >
           {catalogFailed && <div className="update-line update-line--warn">{catalogFailed}</div>}
-          <p className="set-note">{catalogStateLine(catalog.source)}</p>
+          <p className="set-note">{catalogStateLine(catalog.source, t, locale)}</p>
           {(catalog.source.state === "never" || catalog.source.state === "stale") && catalog.source.reason && (
             <p className="set-note text-muted-foreground">{catalog.source.reason}</p>
           )}
-          {catalogDiffLine(catalog.source) && <p className="set-note">{catalogDiffLine(catalog.source)}</p>}
+          {catalogDiffLine(catalog.source, t) && (
+            <p className="set-note">{catalogDiffLine(catalog.source, t)}</p>
+          )}
           {(catalog.source.total ?? 0) > 0 && (
             <>
               <div className="row-item">
                 <Input
                   id="catalog-search"
-                  aria-label="搜索 Runos 清单"
+                  aria-label={t("set.catalog.searchAria")}
                   value={catalogQ}
                   onChange={(e) => setCatalogQ(e.target.value)}
-                  placeholder="按名称、id、标签搜索"
+                  placeholder={t("set.catalog.searchPlaceholder")}
                 />
               </div>
               {catalog.items.length === 0 ? (
-                <p className="set-note">没有符合条件的条目。</p>
+                <p className="set-note">{t("set.catalog.noMatch")}</p>
               ) : (
-                <ul className="row-list" aria-label="Runos 清单条目">
+                <ul className="row-list" aria-label={t("set.catalog.listAria")}>
                   {catalog.items.map((c) => (
                     <li key={c.capabilityId} className="row-item">
                       <span className="row-main" title={c.summary}>
@@ -2241,14 +2327,14 @@ function SkillsSection({ api }: { api: Api }) {
                       </span>
                       <code className="text-body-sm text-muted-foreground">{c.capabilityId}</code>
                       {c.category && <span className="row-tag">{c.category}</span>}
-                      <StatusBadge tone={c.local.runnable ? "success" : "neutral"}>{catalogLocalLabel(c)}</StatusBadge>
+                      <StatusBadge tone={c.local.runnable ? "success" : "neutral"}>{catalogLocalLabel(c, t)}</StatusBadge>
                     </li>
                   ))}
                 </ul>
               )}
               {catalog.nextCursor && (
                 <Button variant="ghost" size="sm" onClick={() => void loadCatalog(true)}>
-                  再显示更多
+                  {t("set.catalog.more")}
                 </Button>
               )}
             </>
@@ -2266,23 +2352,30 @@ function SkillsSection({ api }: { api: Api }) {
  * 看（owner：不用复杂化）。每种处境只说一句 —— 平台拒绝时守护进程给的那句已经说清谁能看，
  * 就用它，不在下面再重复一遍（#23 的教训）。
  */
+/**
+ * 说不了话的那几档带的是**目录键**，不是句子 —— 句子在渲染时按语言取。
+ * 只有 403 例外：那一句是守护进程点名了哪个权限码，原话比我们能写的任何一句
+ * 都具体（它告诉用户去平台要哪个权限）。
+ */
 type ModelsState =
   | { kind: "loading" }
   | { kind: "ready"; models: AtlasModel[] }
   | { kind: "message"; text: string }
-  | { kind: "failed"; text: string };
+  | { kind: "message"; key: MessageKey }
+  | { kind: "failed"; key: MessageKey; reason: string };
 
 function modelsStateOf(e: unknown): ModelsState {
   if (e instanceof ApiError) {
     if (e.status === 403) return { kind: "message", text: e.message };
-    if (e.status === 401) return { kind: "message", text: "登录平台后才能查看本工作区的模型。" };
+    if (e.status === 401) return { kind: "message", key: "set.models.needSignIn" };
     // 没接平台的装配：会话没配（503），或整组路由都不在（404）—— 对用户是同一件事。
-    if (e.status === 404 || e.status === 503) return { kind: "message", text: "尚未连接平台，暂时没有可展示的模型。" };
+    if (e.status === 404 || e.status === 503) return { kind: "message", key: "set.models.noPlatform" };
   }
-  return { kind: "failed", text: `这次没从平台取到模型：${(e as Error).message}` };
+  return { kind: "failed", key: "set.models.failed", reason: (e as Error).message };
 }
 
 function ModelsSection({ api, system }: { api: Api; system: SystemInfo | null }) {
+  const t = useT();
   const [state, setState] = useState<ModelsState>({ kind: "loading" });
   const load = async () => {
     setState({ kind: "loading" });
@@ -2301,28 +2394,30 @@ function ModelsSection({ api, system }: { api: Api; system: SystemInfo | null })
     <>
     <SettingsBlock
       icon="cpu"
-      title="平台模型服务"
+      title={t("set.models.title")}
       // 一句话说完（owner 2026-09-15：原句太长，标题行放不下会回行）。「本机不配置、
       // 不调用模型」这句边界不丢——挪到下面正文里单独一行，不挤在标题行的说明里。
-      desc="本工作区可用的模型，由平台授权，这里只作展示"
+      desc={t("set.models.desc")}
       {...(state.kind === "ready" ? { count: state.models.length } : {})}
     >
-      <p className="set-note text-muted-foreground">用量与配额请在平台查看。</p>
-      {state.kind === "loading" && <p className="set-note">正在从平台读取模型…</p>}
-      {state.kind === "message" && <p className="set-note">{state.text}</p>}
+      <p className="set-note text-muted-foreground">{t("set.models.quotaNote")}</p>
+      {state.kind === "loading" && <p className="set-note">{t("set.models.loading")}</p>}
+      {state.kind === "message" && (
+        <p className="set-note">{"key" in state ? t(state.key) : state.text}</p>
+      )}
       {state.kind === "failed" && (
         <div className="update-line update-line--warn">
-          <span>{state.text}</span>
+          <span>{t(state.key, { reason: state.reason })}</span>
           <Button variant="outline" size="sm" onClick={() => void load()}>
-            重试
+            {t("set.retry")}
           </Button>
         </div>
       )}
       {state.kind === "ready" &&
         (state.models.length === 0 ? (
-          <p className="set-note">本工作区还没有可用的模型。</p>
+          <p className="set-note">{t("set.models.empty")}</p>
         ) : (
-          <ul className="row-list" aria-label="平台模型服务">
+          <ul className="row-list" aria-label={t("set.models.listAria")}>
             {state.models.map((m) => (
               <li key={m.modelCode} className="row-item">
                 <span className="row-main">{m.modelName}</span>
@@ -2333,7 +2428,9 @@ function ModelsSection({ api, system }: { api: Api; system: SystemInfo | null })
                     {c}
                   </Badge>
                 ))}
-                <StatusBadge tone={m.isActive ? "success" : "neutral"}>{m.isActive ? "已启用" : "已停用"}</StatusBadge>
+                <StatusBadge tone={m.isActive ? "success" : "neutral"}>
+                  {t(m.isActive ? "set.models.on" : "set.models.off")}
+                </StatusBadge>
               </li>
             ))}
           </ul>
@@ -2367,6 +2464,7 @@ function ModelsSection({ api, system }: { api: Api; system: SystemInfo | null })
  * 一个他没做过的承诺。
  */
 function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | null }) {
+  const t = useT();
   const li = system?.localInference;
   const [view, setView] = useState<PrivateModelView | null>(null);
   const [editing, setEditing] = useState(false);
@@ -2423,21 +2521,20 @@ function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | nul
   return (
     <SettingsBlock
       icon="cpu"
-      title="私有模型服务"
-      desc="接入你自己部署的模型，不经过平台。企业版 / 私有化部署可用"
+      title={t("set.private.title")}
+      desc={t("set.private.desc")}
     >
       {li === undefined ? (
         /* 还没读到 /system。不说「未开通」—— 那是此刻并不知道的事实。 */
-        <p className="set-note text-muted-foreground">正在读取运行时状态…</p>
+        <p className="set-note text-muted-foreground">{t("set.private.loading")}</p>
       ) : !li.direct && !provisioned ? (
         <>
           <div className="update-line">
-            <span>本工作区未开通私有模型服务</span>
-            <StatusBadge tone="neutral">未开通</StatusBadge>
+            <span>{t("set.private.notProvisioned")}</span>
+            <StatusBadge tone="neutral">{t("set.private.notProvisionedBadge")}</StatusBadge>
           </div>
           <p className="set-note text-muted-foreground">
-            开通后可接入你自己部署的模型（Ollama、LM Studio、vLLM 等）。送去推理的资料
-            不经过平台、不出你自己的网络；模型由你自己部署与维护。开通由企业版 / 私有化部署提供。
+            {t("set.private.notProvisionedNote")}
           </p>
         </>
       ) : (
@@ -2446,16 +2543,17 @@ function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | nul
             <span>
               {view?.endpoint ? (
                 <>
-                  已接入 <code className="text-body-sm">{view.endpoint.model}</code>
+                  {t("set.private.connectedPrefix")}
+                  <code className="text-body-sm">{view.endpoint.model}</code>
                   {" @ "}
                   <code className="text-body-sm">{view.endpoint.baseUrl}</code>
                 </>
               ) : (
-                "已开通，尚未填写服务地址"
+                t("set.private.noEndpointYet")
               )}
             </span>
             <StatusBadge tone={view?.endpoint ? "success" : "neutral"}>
-              {view?.endpoint ? "已接入" : "待接入"}
+              {t(view?.endpoint ? "set.private.connected" : "set.private.pending")}
             </StatusBadge>
           </div>
 
@@ -2463,25 +2561,25 @@ function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | nul
           {view?.endpoint && (
             <p className="set-note text-muted-foreground">
               {view.endpoint.loopback
-                ? "服务就在本机，送去推理的资料不出这台电脑，也不计入平台用量。"
-                : "服务不在本机：送去推理的资料会离开这台电脑，到你指定的那台服务上；不经过平台，也不出你自己的网络。"}
+                ? t("set.private.loopbackNote")
+                : t("set.private.remoteNote")}
             </p>
           )}
 
           {view && !view.editable && (
             /* 运维选了哪台推理服务，用户不该绕过去 —— 与「预置连接器卸不掉、
                只能停用」同一条模式。 */
-            <p className="set-note text-muted-foreground">由部署配置，本机不可更改。</p>
+            <p className="set-note text-muted-foreground">{t("set.private.fromDeployment")}</p>
           )}
 
           {view?.editable && !editing && (
             <div className="update-line">
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                {view.endpoint ? "更改…" : "接入…"}
+                {t(view.endpoint ? "set.private.change" : "set.private.connect")}
               </Button>
               {view.endpoint && (
                 <Button variant="ghost" size="sm" disabled={busy} onClick={() => void disconnect()}>
-                  断开
+                  {t("set.private.disconnect")}
                 </Button>
               )}
             </div>
@@ -2490,7 +2588,7 @@ function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | nul
           {editing && (
             <div className="set-form">
               <label className="set-field" htmlFor="private-model-base">
-                <span>服务地址</span>
+                <span>{t("set.private.baseUrl")}</span>
                 <input
                   id="private-model-base"
                   value={form.baseUrl}
@@ -2499,7 +2597,7 @@ function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | nul
                 />
               </label>
               <label className="set-field" htmlFor="private-model-name">
-                <span>模型名</span>
+                <span>{t("set.private.model")}</span>
                 <input
                   id="private-model-name"
                   value={form.model}
@@ -2510,22 +2608,22 @@ function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | nul
               <label className="set-field" htmlFor="private-model-key">
                 {/* 这是**用户自己那台服务的口令**，不是 Vxture 的机密 —— 与填给连接器
                     的数据库口令同类。「客户端零秘密」管的是后者。落盘随主密钥封存。 */}
-                <span>口令（可选）</span>
+                <span>{t("set.private.apiKey")}</span>
                 <input
                   id="private-model-key"
                   type="password"
                   value={form.apiKey}
-                  placeholder="自建服务挂在代理后面时才需要"
+                  placeholder={t("set.private.apiKeyPlaceholder")}
                   onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
                 />
               </label>
               <div className="update-line">
                 <Button size="sm" disabled={busy} onClick={() => void submit()}>
-                  保存
+                  {t("set.save")}
                 </Button>
                 <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(false)}>
-                  取消
-                </Button>
+                  {t("set.cancel")}
+                  </Button>
               </div>
             </div>
           )}

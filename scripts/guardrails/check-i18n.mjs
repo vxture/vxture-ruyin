@@ -9,11 +9,12 @@
  *    那是类型表达不了的。
  * 2. **英文目录里不许出现中文。** 漏翻一句时 `t()` 会回退到中文原句，界面上
  *    看得见，但如果有人把中文原句抄进英文目录，回退就再也发现不了了。
- * 3. **已经转换过的界面文件里不许再出现裸中文。** 这是防退化的那一条：
- *    下一个人加一句话时，很自然地就写成字面量了。
+ * 3. **界面文件里不许出现裸中文。** 这是防退化的那一条：下一个人加一句话时，
+ *    很自然地就写成字面量了。
  *
- * 第 3 条带一份 `PENDING` 名单 —— 还没轮到的文件列在那里。**名单只许变短。**
- * 它不是豁免，是进度条：清空那天把这段和名单一起删掉。
+ * 改造期间第 3 条带过一份 `PENDING` 名单（settings / workspace / home）。
+ * 名单已经清空并删除 —— 全部界面文件都过这一条，没有例外，只有下面那份
+ * 「本来就不是文案」的清单。
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -24,15 +25,12 @@ const uiSrc = join(repoRoot, "apps", "ui-workspace", "src");
 const HAN = /[一-鿿]/;
 
 /**
- * 还没转换的界面文件。**只许变短。**
+ * 本来就不是文案的文件。
  *
- * `capability-groups.ts` 不在这里，它永远不进名单：那份关键词表是**匹配用的
- * 输入**，不是文案。翻译掉它，能力分组就会漂。`catalog.ts` 同理 —— 那是平台
- * 产品目录的快照，产品名与简介是产品方写的，我们不改也不猜。
+ * `capability-groups.ts`：那份关键词表是**匹配用的输入**，不是文案 —— 翻译掉
+ * 它，能力分组就会漂。`catalog.ts`：平台产品目录的快照，产品名与简介是产品方
+ * 写的，我们不改也不猜。
  */
-const PENDING = new Set(["settings.tsx"]);
-
-/** 本来就不是文案的文件。 */
 const NOT_COPY = new Set([
   "capability-groups.ts",
   "catalog.ts",
@@ -95,7 +93,7 @@ function strip(src) {
 for (const file of readdirSync(uiSrc)) {
   if (!/\.tsx?$/.test(file)) continue;
   if (file.includes(".test.")) continue;
-  if (PENDING.has(file) || NOT_COPY.has(file)) continue;
+  if (NOT_COPY.has(file)) continue;
   const body = strip(readFileSync(join(uiSrc, file), "utf8"));
   const lines = body.split("\n");
   for (const [i, line] of lines.entries()) {
@@ -112,7 +110,4 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  ${p}`);
   process.exit(1);
 }
-console.log(
-  `[i18n] OK - ${zhKeys.size} 个键，两门语言齐平；` +
-    `${PENDING.size} 个文件待转换（名单只许变短）。`,
-);
+console.log(`[i18n] OK - ${zhKeys.size} 个键，两门语言齐平；界面无裸中文。`);
