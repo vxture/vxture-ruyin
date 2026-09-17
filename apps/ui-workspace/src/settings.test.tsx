@@ -2385,3 +2385,78 @@ test("模型平台：守护进程没响应（不是 ApiError）也照样说没�
   renderSection("models", fakeApi({ atlasModels: vi.fn().mockRejectedValue(new Error("fetch failed")) } as Partial<Api>));
   expect(await screen.findByText("这次没从平台取到模型：fetch failed")).toBeInTheDocument();
 });
+
+/* ---------------- 本地推理（直连）：企业版特性的三态 ---------------- */
+
+/**
+ * 三态里最要紧的是第一态。
+ *
+ * `/system` 还没回来时**不能显示「未开通」**：那是把「不知道」说成一个确定的
+ * 商业状态。用户据此以为自己没买、或者去找销售，而事实可能是他买了、只是这一
+ * 刻还没读到。与产品卡标「未接通」同一条纪律（TD-033）。
+ */
+test("本地推理：/system 还没回来时不说「未开通」，只说在读", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockReturnValue(new Promise(() => {})),
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  expect(await screen.findByText("正在读取运行时状态…")).toBeInTheDocument();
+  expect(screen.queryByText("未开通")).not.toBeInTheDocument();
+  expect(screen.queryByText("已开通")).not.toBeInTheDocument();
+});
+
+/**
+ * 字段缺席同样是「不知道」—— 老守护进程不带 `localInference`，界面不许替它
+ * 断言成没开通。
+ */
+test("本地推理：守护进程没给这个字段时也算不知道，不断言成未开通", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo()),
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  expect(await screen.findByText("正在读取运行时状态…")).toBeInTheDocument();
+  expect(screen.queryByText("未开通")).not.toBeInTheDocument();
+});
+
+test("本地推理：未开通时说清它是什么、怎么拿到，而不是假装没有这件事", async () => {
+  const api = fakeApi({
+    system: vi
+      .fn()
+      .mockResolvedValue(systemInfo({ localInference: { direct: false } })),
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  expect(await screen.findByText("未开通")).toBeInTheDocument();
+  expect(screen.getByText(/本工作区未开通本地推理/)).toBeInTheDocument();
+  expect(screen.getByText(/企业版 \/ 私有化部署提供/)).toBeInTheDocument();
+  // 这一屏只展示不配置：开通与否的权威在控制面，本机不自行开启。
+  expect(screen.queryByRole("button", { name: /开通|启用|配置/ })).not.toBeInTheDocument();
+});
+
+test("本地推理：已开通时显示模型名，并说明推理上下文不出本机", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(
+      systemInfo({ localInference: { direct: true, model: "qwen2.5:14b" } }),
+    ),
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  expect(await screen.findByText("已开通")).toBeInTheDocument();
+  expect(screen.getByText("qwen2.5:14b")).toBeInTheDocument();
+  expect(screen.getByText(/推理上下文不出本机/)).toBeInTheDocument();
+});
+
+/** 开通了但守护进程没报模型名：仍说已开通，不编一个名字出来。 */
+test("本地推理：已开通但没有模型名时不编一个", async () => {
+  const api = fakeApi({
+    system: vi
+      .fn()
+      .mockResolvedValue(systemInfo({ localInference: { direct: true } })),
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  expect(await screen.findByText("已接入本地模型")).toBeInTheDocument();
+  expect(await screen.findByText("已开通")).toBeInTheDocument();
+});
