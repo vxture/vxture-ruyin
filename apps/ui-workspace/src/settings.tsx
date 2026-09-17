@@ -9,7 +9,7 @@
  * （模式 / 密度 / 字号）与推理传输策略。StatusBadge 表示保护状态。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Accordion,
   AccordionContent,
@@ -296,6 +296,45 @@ function FactRow({
   );
 }
 
+/**
+ * 长标识的短形：前 8 位 + 省略号。**不是为了好看，是为了可读** —— 一串 43 个
+ * 字符的指纹摊在行里，谁也不会去读它，只会把旁边的事实一起淹掉。前 8 位足够
+ * 认出「是不是这一台」，整串由「复制」给出。
+ */
+function shortId(id?: string): string | undefined {
+  if (!id) return undefined;
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
+}
+
+/**
+ * 复制一个值，并当场说一声复制成功了。
+ *
+ * **「已复制」必须出现**：点了按钮什么都不变，用户会再点一次，然后怀疑它坏了。
+ * 剪贴板在没有安全上下文（http、沙盒 iframe）里会抛，那时按钮就什么也不说 ——
+ * 谎报「已复制」比不报更糟。
+ */
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [done, setDone] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setDone(true);
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => setDone(false), 2000);
+    } catch {
+      /* 复制不了就不吭声，绝不假装成功。 */
+    }
+  };
+  return (
+    <Button variant="ghost" size="sm" aria-label={label} onClick={() => void copy()}>
+      <Icon name={done ? "check" : "copy"} size="xs" />
+      {done ? "已复制" : "复制"}
+    </Button>
+  );
+}
+
 /* ---------------- 账户 ---------------- */
 
 /**
@@ -517,8 +556,20 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
         <FactRow label="产品目录" value={system?.productsDir} mono />
         {/* 安装标识（阶段 3a）。和运行日志放在一起，因为它们服务的是同一件事：
             用户报障时**对得上是哪一台**。刻意不叫「设备 ID」—— 它跟着安装走，
-            重装即换，而且将来限制的是同时在线数不是安装数（RY-100 A10）。 */}
-        <FactRow label="安装标识" value={system?.instanceId} mono />
+            重装即换，而且将来限制的是同时在线数不是安装数（RY-100 A10）。
+
+            **它有一个用途，只有一个**（owner 2026-09-17 问的就是这个）：报障时
+            把它给我们。用户不需要读懂它，更不需要记住它 —— 所以摊开 43 个字符
+            没有意义，那只是一条谁也不会去读的乱码。留前 8 位让人认出「是这一台」，
+            整串交给「复制」。它是公钥指纹，不是秘密，复制出去是安全的。 */}
+        <FactRow
+          label="安装标识"
+          value={shortId(system?.instanceId)}
+          mono
+          {...(system?.instanceId
+            ? { action: <CopyButton value={system.instanceId} label="复制安装标识" /> }
+            : {})}
+        />
         {/* 运行日志（TD-066）。**只给入口，不显示路径** —— 路径是壳自己算的
             （Electron 的标准日志位置），守护进程不知道它，界面更不该编一个出来。
             用户报障时要的就是这一下：打开、把文件拖过来。 */}

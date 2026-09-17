@@ -841,6 +841,14 @@ html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
    的规则总是赢分层的，与源码先后无关），不用跟 tailwind-merge 打交道、
    也不需要 `!important`——与 `.brand-info-dialog` 那条同一个道理。 */
 .user-panel-row { height: var(--spacing-control-lg); }
+/* 面板抬头：去掉头像之后左对齐，并把标题与下面那一行的间距放开一档
+   （owner 2026-09-17：「让信息别那么拥挤」）。DS 的抬头本来按「左边一个
+   头像、右边两行字」排版，头像一去，那份为圆形留的缩进就成了悬空的留白。 */
+.user-panel-head {
+  text-align: left;
+  padding-block: var(--spacing-xs);
+  row-gap: var(--spacing-2xs);
+}
 /* Single line, clear hierarchy: name carries weight+color, the status word
    drops a size (body-sm) and a color step (muted). Name truncates first. */
 .user-chip-name {

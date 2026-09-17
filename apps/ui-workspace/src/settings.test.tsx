@@ -1072,6 +1072,64 @@ void test("Settings/通用设置: 没有 OS 级密钥保护时，行里与警告
   ).toBeInTheDocument();
 });
 
+/**
+ * 安装标识（owner 2026-09-17 问：这串明码需要用户知道吗？）。
+ *
+ * 结论：**需要，但只为一件事** —— 报障时对得上是哪一台。用户不必读懂它，更不
+ * 必记住它，所以行里只留前 8 位让人认出「是这一台」，整串交给「复制」。它是
+ * 公钥指纹，不是秘密，复制出去是安全的。
+ *
+ * 「已复制」必须出现：点了按钮什么都不变，用户会再点一次，然后怀疑它坏了。
+ */
+void test("Settings/存储位置: 安装标识只摊前 8 位，整串由「复制」给出，并当场说一声", async () => {
+  const full = "IiP5QvdYiSXxusmaQ91NXGydDTGY2ovHtV1xXTiLG8I";
+  const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ instanceId: full })) });
+  renderSection("general", api);
+
+  expect(await screen.findByText("IiP5QvdY…")).toBeInTheDocument();
+  // 43 个字符的乱码不摊在行里。
+  expect(document.body.textContent).not.toContain(full);
+
+  // `userEvent.setup()` 自己会替换 `navigator.clipboard`，所以要在它之后再
+  // 接管 —— 反过来装的那一份会被它盖掉，于是断言看到的是零次调用。
+  const user = userEvent.setup();
+  const writeText = vi
+    .spyOn(navigator.clipboard, "writeText")
+    .mockResolvedValue(undefined);
+  await user.click(screen.getByRole("button", { name: "复制安装标识" }));
+  expect(writeText).toHaveBeenCalledWith(full);
+  expect(await screen.findByText("已复制")).toBeInTheDocument();
+  writeText.mockRestore();
+});
+
+/** 剪贴板不可用（http、沙盒 iframe）时**不谎报成功** —— 那比不报更糟。 */
+void test("Settings/存储位置: 复制失败时什么都不说，绝不假装「已复制」", async () => {
+  const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ instanceId: "abcdefghijklmn" })) });
+  renderSection("general", api);
+
+  const user = userEvent.setup();
+  const writeText = vi
+    .spyOn(navigator.clipboard, "writeText")
+    .mockRejectedValue(new Error("not allowed"));
+  await user.click(await screen.findByRole("button", { name: "复制安装标识" }));
+  await vi.waitFor(() => expect(writeText).toHaveBeenCalled());
+  expect(screen.queryByText("已复制")).not.toBeInTheDocument();
+  writeText.mockRestore();
+});
+
+/** 短到不用截的就不截；守护进程还没报上来时整行连按钮一起不出现。 */
+void test("Settings/存储位置: 标识短就原样显示；没有标识时不给复制按钮", async () => {
+  const shortApi = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ instanceId: "abc123" })) });
+  const { unmount } = renderSection("general", shortApi);
+  expect(await screen.findByText("abc123")).toBeInTheDocument();
+  unmount();
+
+  const noneApi = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ instanceId: undefined })) });
+  renderSection("general", noneApi);
+  await screen.findByText("安装标识");
+  expect(screen.queryByRole("button", { name: "复制安装标识" })).not.toBeInTheDocument();
+});
+
 void test("Settings/账户: every claim the platform gave is shown - username, phone, roles, locale - and the uuid never is", async () => {
   const api = fakeApi({
     session: vi.fn().mockResolvedValue({
