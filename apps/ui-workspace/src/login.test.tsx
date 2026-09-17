@@ -100,23 +100,20 @@ void test("LoginScreen: 说清浏览器登录态怎么回事，并给一条真�
   await screen.findByText("登录 Vxture 账号");
 
   await screen.findByText("浏览器中若已登录，会直接用那个账号继续。");
-  // 「换个账号」是一个按钮，不是跳去浏览器退出页的链接 —— 它自己就能到账号选择器。
-  expect(screen.getByRole("button", { name: "换个账号登录" })).toBeInTheDocument();
+  // 「换个账号」入口留着但停用（TD-070），提示给的是用户自己做得到的那条路。
+  expect(screen.getByRole("button", { name: "换个账号登录" })).toBeDisabled();
   expect(screen.queryByRole("link", { name: /退出/ })).not.toBeInTheDocument();
 });
 
 /**
- * 0a 的界面这一端（RY-103 §02）。两个入口，两个意图，一条都不能串：
+ * 0a 的界面这一端（RY-103 §02）：主按钮**不带** `switchAccount`。
  *
- * - 主按钮**不带** `switchAccount` —— 浏览器里登着就直接进去。此前无条件带着
- *   `prompt=select_account` 打到平台，才有了「浏览器已登录仍要输账号密码」
- *   （TD-069）。
- * - 「换个账号登录」**带** `switchAccount: true`。
- *
- * 断言的是传给 api.login 的参数，而不是最终 URL：URL 由守护进程拼，那一端由
- * platform-session 的用例守着。这里守的是界面有没有把用户的意图说对。
+ * 此前无条件带着 `prompt=select_account` 打到平台，才有了「浏览器已登录仍要输
+ * 账号密码」（TD-069）。断言的是传给 `api.login` 的参数而不是最终 URL —— URL 由
+ * 守护进程拼，那一端由 platform-session 的用例守着；这里守的是界面有没有把用户
+ * 的意图说对。
  */
-void test("LoginScreen: 主按钮不带 switchAccount，「换个账号」才带", async () => {
+void test("LoginScreen: 主按钮不带 switchAccount", async () => {
   const login = vi.fn().mockResolvedValue({ authorizeUrl: "https://console.vxture.com/auth/login" });
   const api = fakeApi({ login });
   render(<SessionGate api={api} />);
@@ -126,21 +123,35 @@ void test("LoginScreen: 主按钮不带 switchAccount，「换个账号」才带
   expect(login).toHaveBeenNthCalledWith(1, {});
 });
 
-void test("LoginScreen: 「换个账号登录」带 switchAccount 起同一条握手", async () => {
-  const login = vi.fn().mockResolvedValue({ authorizeUrl: "https://console.vxture.com/auth/login?prompt=select_account" });
+/**
+ * 「换个账号登录」停用（owner 2026-09-17，TD-070）。
+ *
+ * 平台 `authorize()` 确实兑现了 `select_account`，但它停放的登录挑战里不带
+ * `prompt`，登录页随后调的 `resumeWithExistingSession` 只看浏览器里那份中央
+ * 会话就把挑战消费掉、按原用户发码 —— 输了别人的账号、没输验证码，却以自己的
+ * 身份登了进去。入口不该承诺它兑现不了的东西，所以停用。
+ *
+ * 两条断言缺一不可：**按不动**（否则用户仍会撞上那个假登录），以及**提示说的是
+ * 用户自己做得到的那条路**（不是一句「暂不可用」——他要的是换账号，那件事今天
+ * 仍然做得到，只是得先去浏览器里退出）。
+ */
+void test("LoginScreen: 「换个账号登录」停用，且提示给出可行的替代做法", async () => {
+  const login = vi.fn();
   const api = fakeApi({ login });
   render(<SessionGate api={api} />);
   const user = userEvent.setup();
 
-  await user.click(await screen.findByRole("button", { name: "换个账号登录" }));
+  const btn = await screen.findByRole("button", { name: "换个账号登录" });
+  expect(btn).toBeDisabled();
 
-  expect(login).toHaveBeenCalledWith({ switchAccount: true });
-  // 换人走的是同一条流程：照样开浏览器、照样进入验证态。
-  expect(globalThis.open).toHaveBeenCalledWith(
-    "https://console.vxture.com/auth/login?prompt=select_account",
-    "_blank",
-  );
-  expect(await screen.findByText("登录验证中…")).toBeInTheDocument();
+  await user.click(btn);
+  expect(login).not.toHaveBeenCalled();
+  expect(globalThis.open).not.toHaveBeenCalled();
+
+  /* 提示挂在外层 span 上 —— 停用的按钮不派发鼠标事件，title 写在它自己身上
+     多半不会显示。这条断言就是守那个位置的。 */
+  const hint = "先在浏览器里退出登录账号，然后点击登录";
+  expect(btn.closest("[title]")).toHaveAttribute("title", hint);
 });
 
 void test("SessionGate: a session() rejection is treated as signed-out, not stuck loading or crashed", async () => {
