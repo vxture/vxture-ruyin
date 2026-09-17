@@ -1139,6 +1139,29 @@ export class Harness {
       messages.push({ role: "assistant", content: "", toolCalls: turn.calls });
       const gated = await this.gateCalls(instance, turn.calls);
 
+      /*
+       * 放行的那些**先跑**，不管同一批里有没有要等人的（2026-09-17 修）。
+       *
+       * 原来这一段在 `needsApproval` 非空时直接 `return suspended`，于是下面
+       * 那句 `runTools(gated.allowed)` 到不了：同一批里已经放行的调用**一次都
+       * 没执行过，也没有任何回答**。两个后果，都在主路径上：
+       *
+       * ① 模型要求做的事**悄悄没做** —— 它说「读这个文件」，闸门也说了可以，
+       *    然后什么都没发生，而它下一轮还以为读过了；
+       * ② 发给提供方的对话是**残缺**的 —— 一条带 `tool_calls` 的 assistant
+       *    消息，必须每一个 `tool_call_id` 都有对应的 tool 消息。少一个，
+       *    OpenAI 形状的服务端直接 400。
+       *
+       * 第二条是靠真网关进闭环才看见的（`local-model-e2e.test.ts`）：在此之前
+       * 所有网关用例都把 `fetch` 换掉了，没有谁校验过对话的形状。
+       *
+       * 放行的先跑是对的，不是将就：闸门已经对它们说了「可以」，它们不该被
+       * 另一个调用的审批拖住；而用户拒绝了待批的那些时，先跑的这些也不该被
+       * 当成「被拒绝」。
+       */
+      const ran = await this.runTools(instance, gated.allowed);
+      messages.push(...gated.refusalMessages, ...ran);
+
       if (gated.needsApproval.length > 0) {
         // Park the whole batch: the conversation holds an unanswered turn, so
         // it has to persist. Refused calls in the same batch are carried along
@@ -1163,9 +1186,6 @@ export class Harness {
         });
         return { kind: "suspended" };
       }
-
-      const results = await this.runTools(instance, gated.allowed);
-      messages.push(...gated.refusalMessages, ...results);
     }
     return {
       kind: "failed",

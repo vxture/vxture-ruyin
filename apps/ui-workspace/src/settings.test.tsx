@@ -1901,10 +1901,12 @@ test("能力平台：预置的 MCP 服务器能启动 / 停止（走连接器的
   const api = skillsApi({
     tools: vi.fn().mockResolvedValue({
       items: [
-        { id: "microsoft.playwright-mcp", kind: "mcp-server", source: "microsoft.playwright-mcp", status: "registered", launchable: true, detail: "可启动（node）；需要 Chromium", license: "Apache-2.0", tier: "default" },
-        { id: "aas-ee.open-websearch", kind: "mcp-server", source: "aas-ee.open-websearch", status: "available", launchable: true, detail: "运行中（node）", tools: ["search"] },
-        { id: "microsoft.markitdown", kind: "mcp-server", source: "microsoft.markitdown", status: "unavailable", launchable: true, detail: "需要本机有 uv（https://docs.astral.sh/uv/），uvx 不在 PATH 里" },
-        { id: "x.registered", kind: "mcp-server", source: "x.registered", status: "registered", detail: "发行形态未核实" },
+        { id: "microsoft.playwright-mcp", kind: "mcp-server", source: "microsoft.playwright-mcp", status: "registered", launchable: true, detailCode: "launchable", detailVars: { runtime: "node" }, license: "Apache-2.0", tier: "default" },
+        { id: "aas-ee.open-websearch", kind: "mcp-server", source: "aas-ee.open-websearch", status: "available", launchable: true, detailCode: "running", detailVars: { runtime: "node" }, tools: ["search"] },
+        { id: "microsoft.markitdown", kind: "mcp-server", source: "microsoft.markitdown", status: "unavailable", launchable: true, detailCode: "needs-env", detailVars: { names: "UV_PATH" } },
+        // 只登记的那条：清单里那句 launchNote 是我们自己的工程笔记，到守护进程
+        // 为止；界面拿到的只有一个码（2026-09-17）。
+        { id: "x.registered", kind: "mcp-server", source: "x.registered", status: "registered", detailCode: "no-launch-spec" },
       ],
     }),
     activateConnector: vi.fn().mockResolvedValue({}),
@@ -1917,7 +1919,9 @@ test("能力平台：预置的 MCP 服务器能启动 / 停止（走连接器的
   await userEvent.click(within(rowWith(rows, "aas-ee.open-websearch")).getByRole("button", { name: "停止" }));
   expect(api.deactivateConnector).toHaveBeenCalledWith("aas-ee.open-websearch");
   const noUv = rowWith(rows, "microsoft.markitdown");
-  expect(within(noUv).getByText(/需要本机有 uv/)).toBeTruthy();
+  // 起不来的原因里**只有「差配置」是用户能动手的**，所以它带着变量名过去；
+  // 其余（差外部程序、平台不支持…）一律说「起不来」，不把诊断摆给用户。
+  expect(within(noUv).getByText("需要先配置：UV_PATH")).toBeTruthy();
   expect(within(noUv).getByRole("button", { name: "启动" })).toBeTruthy();
   // 只登记的没有按钮。
   expect(within(rowWith(rows, "x.registered")).queryByRole("button")).toBeNull();

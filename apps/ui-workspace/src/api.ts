@@ -416,7 +416,13 @@ export interface ToolView {
    * （ADR-018 §7.2）；acquiring = 正在取。
    */
   status: "available" | "unavailable" | "needs-acquisition" | "acquiring" | "registered" | "runos";
-  detail?: string;
+  /**
+   * 那半句话由**界面**说（`TOOL_DETAIL_KEY`）。守护进程只给码 —— 原来它给的是
+   * 拼好的中文，而且会漏出预置清单里我们自己的工程笔记（2026-09-17）。
+   */
+  detailCode?: string;
+  /** 码要带的值（运行时名、环境变量名）。**不含散文。** */
+  detailVars?: Record<string, string>;
   license?: string;
   tier?: string;
   /** 它暴露（或构建时探到、清单说它有）的工具名 —— 停着的行也显示。 */
@@ -1181,18 +1187,20 @@ export interface AtlasModel {
 
 /** 能力路由（ADR-025）。三档：只许本机 / 优先本机 / 优先云端；默认只许本机。 */
 export interface CapabilityRouting {
-  /** 面向用户的名字（Runos），**出现时必须带着 `note`**。 */
+  /**
+   * 面向用户的名字（Runos）——**专名，不翻译**，但出现的地方必须带着那句说明
+   * （owner 2026-09-15：叫 Runos 好理解，可本机跑的不是云端 Runos 服务）。
+   * 说明本身由界面按语言给，键是 `set.cap.planeNote`。
+   */
   name: string;
-  /** 「兼容 Runos 协议的本地能力面」。 */
-  note: string;
   /** 云端 Runos 通路开没开放。开放之前任何配置都按本机执行。 */
   cloudOpen: boolean;
   source: "default" | "file";
   errors: string[];
   current: {
+    /** 界面按它说话。**档位的名字不再由守护进程给** —— 那句原来是中文。 */
     mode: "local_only" | "prefer_local" | "prefer_cloud";
     source: "capability" | "workspace" | "tenant" | "default";
-    label: string;
   };
 }
 

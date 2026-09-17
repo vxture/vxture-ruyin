@@ -1042,3 +1042,55 @@ void test("搜索：归档的项目照样找得到，描述里标「已归档」
   expect(await results.findByText(/· 已归档/)).toBeInTheDocument();
   expect(results.getAllByText(/bidproposal · project/)).toHaveLength(2);
 });
+
+/**
+ * 换语言之后**侧栏导航要当场跟着变**（owner 2026-09-17 在真机上看到的：别处都
+ * 变了，只有导航不变，直到重新登录）。
+ *
+ * 根因不在文案，在 `useMemo`：那几张导航表是 memo 出来的，而依赖数组里没有
+ * 翻译函数 —— 于是它们一直拿着切换前的那一份。`useT()` 现在同一门语言下返回
+ * 同一个函数，所以把 `t` 写进依赖既正确又便宜（语言不变时不触发重算）。
+ *
+ * **这条用例必须在原地切换**，不能重新挂载：重新挂载本来就会好，那正是
+ * 「重新登录才变」的样子，测不出这个缺陷。
+ */
+void test("换语言：侧栏导航当场跟着变，不必重新挂载", async () => {
+  // 起点写死成中文，不靠「按系统猜」—— 这个文件里有别的用例把整个 `navigator`
+  // 换掉过（只留 userAgent），猜出来的结果会随用例顺序变。
+  localStorage.setItem("ruyin-language", "zh-CN");
+  /*
+   * **Provider 与 Workbench 必须来自同一份模块图。** 这个文件里有一条用例调过
+   * `vi.resetModules()`，此后动态 import 拿到的是新的一份 —— 静态导入的
+   * `LocaleProvider` 与它各有一个 `LocaleContext` 对象，context 根本接不上，
+   * 于是消费方一直读缺省值。这一条踩过，留个记号。
+   */
+  const [{ Workbench }, { LocaleProvider, useSetLocale }] = await Promise.all([
+    import("./workbench"),
+    import("./locale-provider"),
+  ]);
+  const LocaleSwitch = () => {
+    const setLocale = useSetLocale();
+    return (
+      <button type="button" onClick={() => setLocale("en")}>
+        switch-locale
+      </button>
+    );
+  };
+
+  render(
+    <LocaleProvider>
+      <LocaleSwitch />
+      <Workbench api={fakeApi()} onSignedOut={() => {}} />
+    </LocaleProvider>,
+  );
+  expect((await screen.findAllByText("首页")).length).toBeGreaterThan(0);
+
+  // 一次真实的 click 就够；不用 userEvent —— 它要摸 `navigator`，而这个文件里的
+  // navigator 是被换过的桩。
+  act(() => {
+    screen.getByText("switch-locale").click();
+  });
+
+  expect((await screen.findAllByText("Home")).length).toBeGreaterThan(0);
+  expect(screen.queryByText("首页")).not.toBeInTheDocument();
+});

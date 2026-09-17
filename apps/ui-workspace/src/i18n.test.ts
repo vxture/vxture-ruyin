@@ -50,6 +50,10 @@ test("preferredLocale: zh 开头算中文，en 开头算英文，都不认就中
   expect(preferredLocale(["fr-FR", "en-US"])).toBe("en");
   expect(preferredLocale(["fr-FR"])).toBe("zh-CN");
   expect(preferredLocale([])).toBe("zh-CN");
+  // 外面给的东西可能是残的：`navigator.languages` 不存在、`language` 是空的、
+  // 或者被用例整个换掉。跳过，不摔。
+  expect(preferredLocale([undefined, "", "en-US"])).toBe("en");
+  expect(preferredLocale([undefined])).toBe("zh-CN");
 });
 
 test("readLocale: 存过就用存的；存了个不认识的值当作没存过", () => {

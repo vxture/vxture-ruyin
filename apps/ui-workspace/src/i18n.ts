@@ -28,7 +28,7 @@
  * - **守护进程的日志与启动横幅**：那是给排障的人看的，不是给用户看的。
  */
 
-import { createContext, useContext } from "react";
+import { createContext, useContext, useMemo } from "react";
 import { zhCN } from "./locales/zh-CN";
 import { en } from "./locales/en";
 
@@ -105,8 +105,12 @@ export function translate(locale: Locale, key: TKey, vars?: Vars): string {
  * 自己选的为准。`zh` 开头的都算简体中文（`zh-TW` 也落这里——繁体还没有目录，
  * 给一门中文比给英文近）。
  */
-export function preferredLocale(tags: readonly string[]): Locale {
+export function preferredLocale(tags: readonly (string | undefined)[]): Locale {
   for (const tag of tags) {
+    // 这里收的是**外面给的东西**：`navigator.languages` 可能不存在，
+    // `navigator.language` 可能是空的，用例里还可能被整个换掉。不是字符串就
+    // 跳过 —— 为一句「用哪门语言」把应用摔了，不成比例。
+    if (typeof tag !== "string" || tag === "") continue;
     const low = tag.toLowerCase();
     if (low.startsWith("zh")) return "zh-CN";
     if (low.startsWith("en")) return "en";
@@ -119,9 +123,20 @@ export const LocaleContext = createContext<Locale>("zh-CN");
 /** 组件里取翻译函数。语言变了，用到它的组件跟着重渲染。 */
 export type TFn = (key: TKey, vars?: Vars) => string;
 
+/**
+ * **同一门语言下返回同一个函数**（2026-09-17）。
+ *
+ * 不这样的话，`useT()` 每次渲染都给一个新闭包，于是它进不了 `useMemo` 的依赖
+ * 数组 —— 进了就等于没有 memo。而不进去的代价是：**语言换了，memo 里的东西
+ * 不换**。owner 在真机上看到的正是这个：切到英文，别处都变了，侧栏导航不变，
+ * 直到重新登录（那时整棵树重建）。
+ *
+ * 身份稳定之后，依赖数组里写上 `t` 既正确又便宜：语言不变时它不触发重算，
+ * 语言一变全部重算。
+ */
 export function useT(): TFn {
   const locale = useContext(LocaleContext);
-  return (key, vars) => translate(locale, key, vars);
+  return useMemo<TFn>(() => (key, vars) => translate(locale, key, vars), [locale]);
 }
 
 export function useLocale(): Locale {

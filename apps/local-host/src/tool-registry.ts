@@ -26,13 +26,46 @@ export type ToolKind = "builtin" | "connector" | "mcp-server";
  */
 export type ToolStatus = "available" | "unavailable" | "needs-acquisition" | "acquiring" | "registered" | "runos";
 
+/**
+ * 一行工具旁边那半句话，**用码不用话**（2026-09-17）。
+ *
+ * 两个理由，各自都足够：
+ *
+ * ① **翻译。** 这半句原来是守护进程拼好的中文，界面照着渲染 —— 英文界面下
+ *    它仍然是中文。界面按码说话，两门语言各说各的。
+ * ② **措辞。** 更要紧的一条：原来这里会漏出预置清单的 `launchNote`，而那个
+ *    字段装的是**我们自己的工程笔记** —— 带日期的降档决策、闭包体积、
+ *    「死重」「归属未核实」，连 Markdown 星号都在里面。那是写给我们看的，
+ *    任何语言下都不该摆到用户面前（owner 2026-09-17 的口径）。
+ *
+ * 真正对用户有用的那半句被混在同一个字段里（「需要本机有 pandoc」「需要先配
+ * 环境变量 SEARXNG_URL」）—— 后者本来就是结构化的（`launch.requiresEnv`），
+ * 所以它单独成一个码，带着变量名过去。
+ */
+export type ToolDetailCode =
+  | "no-search-index"
+  | "not-implemented"
+  | "no-skill-registry"
+  | "connector-stashed"
+  | "connector-stopped"
+  | "via-runos"
+  | "no-launch-spec"
+  | "running"
+  | "launchable"
+  | "not-enabled"
+  | "needs-env"
+  | "blocked";
+
 export interface ToolView {
   id: string;
   kind: ToolKind;
   /** builtin: "runtime" / "skills"；connector: 连接器 id；mcp-server: 清单来源 id。 */
   source: string;
   status: ToolStatus;
-  detail?: string;
+  /** 界面据此说话。诊断细节不走这里 —— 见 `ToolDetailCode` 的说明。 */
+  detailCode?: ToolDetailCode;
+  /** 码要带的值（`running` 的运行时名、`needs-env` 的变量名）。**不含散文。** */
+  detailVars?: Record<string, string>;
   license?: string;
   tier?: string;
   /**
@@ -95,7 +128,13 @@ export class ToolRegistryView {
         kind: "builtin",
         source: "runtime",
         status: ok ? "available" : "unavailable",
-        ...(ok ? {} : { detail: id === "search_knowledge" ? "这套装配没有检索索引" : "运行时未实现" }),
+        ...(ok
+          ? {}
+          : {
+              detailCode: (id === "search_knowledge"
+                ? "no-search-index"
+                : "not-implemented") as ToolDetailCode,
+            }),
       });
     }
     const skills = this.sources.hasSkills();
@@ -105,7 +144,7 @@ export class ToolRegistryView {
         kind: "builtin",
         source: "skills",
         status: skills ? "available" : "unavailable",
-        ...(skills ? {} : { detail: "没有技能登记册" }),
+        ...(skills ? {} : { detailCode: "no-skill-registry" as ToolDetailCode }),
       });
     }
     const connectors = (await this.sources.connectors?.()) ?? [];
@@ -117,7 +156,15 @@ export class ToolRegistryView {
         kind: "connector",
         source: c.id,
         status: running ? "available" : "unavailable",
-        ...(running ? {} : { detail: c.state === "stashed" ? "已暂存，未启用" : (c.health.detail ?? "未运行") }),
+        // 连接器没起来时，**健康检查那句原话不再往外递** —— 它是给排障的人看的
+        // （见 api-message.ts 同一条分寸）。用户要知道的只有「没在跑」。
+        ...(running
+          ? {}
+          : {
+              detailCode: (c.state === "stashed"
+                ? "connector-stashed"
+                : "connector-stopped") as ToolDetailCode,
+            }),
         tools: c.tools,
       });
     }
@@ -135,22 +182,40 @@ export class ToolRegistryView {
       const live = byId.get(s.id);
       if (viaRunos) {
         view.status = "runos";
-        view.detail = "经 Runos 注册，密钥在 Runos 保险库，本机不装（ADR-020 §6-2）";
+        view.detailCode = "via-runos";
       } else if (!s.launch) {
-        view.detail = s.launchNote ?? "已登记；本机启动规格未定（TD-042）";
+        // **`launchNote` 到此为止。** 它是清单里我们自己的工程笔记（降档理由、
+        // 闭包体积、归属存疑），不是说给用户听的话。用户在这一行要知道的只有
+        // 一件事：这一台上它还起不来。
+        view.detailCode = "no-launch-spec";
       } else if (live) {
         // 有启动规格：状态是它此刻真实的样子。
         view.launchable = true;
         const running = live.state === "active" && live.health.ok;
         view.status = running ? "available" : live.bundled?.blocked ? "unavailable" : "registered";
-        view.detail = running
-          ? `运行中（${s.launch.runtime}）${s.launch.note ? "；" + s.launch.note : ""}`
-          : (live.bundled?.blocked ?? live.health.detail ?? "未启用");
+        if (running) {
+          view.detailCode = "running";
+          view.detailVars = { runtime: s.launch.runtime };
+        } else if (live.bundled?.blocked) {
+          // 起不来的具体原因里，**只有「差环境变量」是用户能动手的**，而它本来
+          // 就是结构化的。其余（差外部程序、平台不支持…）一律说「没启用」——
+          // 把守护进程的原话摆出去，用户读到的是一段他无从下手的诊断。
+          const env = s.launch.requiresEnv ?? [];
+          if (env.length > 0) {
+            view.detailCode = "needs-env";
+            view.detailVars = { names: env.join(", ") };
+          } else {
+            view.detailCode = "blocked";
+          }
+        } else {
+          view.detailCode = "not-enabled";
+        }
         // 运行中的以它自己报的为准：目录是构建时的一张快照，运行时的 tools/list 才是权威。
         if (live.tools.length > 0) view.tools = live.tools;
       } else {
         view.launchable = true;
-        view.detail = `可启动（${s.launch.runtime}）${s.launch.note ? "；" + s.launch.note : ""}`;
+        view.detailCode = "launchable";
+        view.detailVars = { runtime: s.launch.runtime };
       }
       // 起不来是因为差一件可获取的载荷：这不是「不可用」，是「还没获取」——
       // 一个用户点一下就能改变的事实，所以给它自己的状态和自己的按钮。
@@ -160,7 +225,11 @@ export class ToolRegistryView {
         if (component) {
           view.component = component;
           view.status = component.state === "acquiring" ? "acquiring" : "needs-acquisition";
-          view.detail = plan.reason ?? view.detail;
+          // 载荷那一行自己会说清要下多少、许可证与来源（界面渲染 `component`），
+          // 这里把上一支留下的码清掉：一个「还没获取」的行不是「可启动」的，
+          // 两句并排会自相矛盾。
+          delete view.detailCode;
+          delete view.detailVars;
         }
       }
       out.push(view);

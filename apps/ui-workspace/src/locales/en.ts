@@ -861,6 +861,25 @@ export const en: Catalog = {
   "quota.aiCredit": "AI Credits",
   "quota.storage": "Storage Spaces",
 
+  /* ── Capabilities: routing tier and the half-sentence beside a tool ──── */
+  "set.cap.route.localOnly": "This computer only",
+  "set.cap.route.preferLocal": "Prefer this computer",
+  "set.cap.route.preferCloud": "Prefer the cloud",
+  "set.cap.planeTag": "{name} ({note})",
+  "set.cap.planeNote": "a local capability surface speaking the Runos protocol",
+  "set.tools.detail.noSearchIndex": "This build has no search index",
+  "set.tools.detail.notImplemented": "Not implemented in this build",
+  "set.tools.detail.noSkillRegistry": "This build does not offer skill management",
+  "set.tools.detail.connectorStashed": "Staged, not enabled",
+  "set.tools.detail.connectorStopped": "Not running",
+  "set.tools.detail.viaRunos": "Provided through Runos; not installed here",
+  "set.tools.detail.noLaunchSpec": "Cannot start on this computer yet",
+  "set.tools.detail.running": "Running ({runtime})",
+  "set.tools.detail.launchable": "Can be started ({runtime})",
+  "set.tools.detail.notEnabled": "Not enabled",
+  "set.tools.detail.needsEnv": "Needs configuring first: {names}",
+  "set.tools.detail.blocked": "Cannot start on this computer yet",
+
   /* ── Language ─────────────────────────────────────────────────────── */
   "prefs.language": "Language",
 };

@@ -805,6 +805,30 @@ export const zhCN = {
   "quota.aiCredit": "AI Credits",
   "quota.storage": "Storage Spaces",
 
+  /* ── 能力面：路由档位与那半句话（守护进程给码，界面说话） ────────────── */
+  "set.cap.route.localOnly": "只许本机",
+  "set.cap.route.preferLocal": "优先本机",
+  "set.cap.route.preferCloud": "优先云端",
+  /*
+   * 「Runos」是专名，不翻译；但 owner 2026-09-15 定过：名字出现的地方，说明
+   * 必须一起出现 —— 本机跑的不是云端 Runos 服务。所以这里是「名字（说明）」
+   * 一个整体，不拆成两处拼。
+   */
+  "set.cap.planeTag": "{name}（{note}）",
+  "set.cap.planeNote": "兼容 Runos 协议的本地能力面",
+  "set.tools.detail.noSearchIndex": "当前版本没有检索索引",
+  "set.tools.detail.notImplemented": "当前版本还没有实现",
+  "set.tools.detail.noSkillRegistry": "当前版本不提供技能管理",
+  "set.tools.detail.connectorStashed": "已暂存，未启用",
+  "set.tools.detail.connectorStopped": "没有在运行",
+  "set.tools.detail.viaRunos": "经 Runos 提供，本机不安装",
+  "set.tools.detail.noLaunchSpec": "这台电脑上还起不来",
+  "set.tools.detail.running": "运行中（{runtime}）",
+  "set.tools.detail.launchable": "可启动（{runtime}）",
+  "set.tools.detail.notEnabled": "未启用",
+  "set.tools.detail.needsEnv": "需要先配置：{names}",
+  "set.tools.detail.blocked": "这台电脑上还起不来",
+
   /* ── 语言（设置 › 通用设置 › 偏好设置） ──────────────────────────── */
   "prefs.language": "语言",
 } as const;
