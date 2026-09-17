@@ -64,7 +64,8 @@ Thumbs.db
 # Bundled skill layer, pulled at build time from resources/skill-manifest.json (ADR-018)
 resources/skills/
 resources/tools/
-# 随包的 Python 引导件（uv + CPython + 预取缓存），构建时由 seed-uv-cache.mjs 生成
+# 旧的随包 Python 引导件。2026-09-18 起没有任何东西生成它（TD-042 ②：uv 不随安装包，
+# 用户点一次由守护进程装到数据目录）。这一行留着，是为了老克隆里那 219 MB 不冒出来。
 resources/uv/
 # 随包的真 node.exe，构建时由 seed-node-runtime.mjs 生成（owner 2026-09-16）
 resources/node/

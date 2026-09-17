@@ -109,10 +109,12 @@ for (const s of m.servers ?? []) {
       if (l.runtime === "node" && !s.vendored?.bundled) {
         errors.push(`${where}: node 形态的 default 档必须有 vendored.bundled（随安装包走），否则干净机器上没有它`);
       }
+      // uvx 形态**永远不可能是 default**（2026-09-18，TD-042 ②）：uv 不随安装包了，
+      // 所以干净机器上一个字节都没有它 —— 要先点一次获取。这一条从「要满足三个
+      // 条件」变成「不成立」，而不是被删掉：删掉的话，下一个人把某条 uvx 挂回默认
+      // 档时不会有任何东西反对他。
       if (l.runtime === "uvx") {
-        if (l.offline?.cacheSeeded !== true) errors.push(`${where}: uvx 形态的 default 档必须 launch.offline.cacheSeeded = true（wheel 已预取进随包的 uv cache）`);
-        if (!seedIds.has(s.id)) errors.push(`${where}: uvx 形态的 default 档必须列进 pythonRuntime.seed，否则构建时不会有人去预取它的 wheel`);
-        if (!m.pythonRuntime?.uv?.version) errors.push(`${where}: uvx 形态的 default 档要求 pythonRuntime.uv 存在 —— 机器上没有 uv，侧载来的 wheel 也跑不了`);
+        errors.push(`${where}: uvx 形态不能是 default 档 —— uv 不随安装包（owner 2026-09-17 定性），要先获取 ${m.pythonRuntime?.component ?? "python.uv"}`);
       }
       if (l.requiresComponent) errors.push(`${where}: default 档不许有 requiresComponent —— 要先下载才能起的，不是「不下载任何字节就能起」`);
     }
@@ -165,8 +167,25 @@ for (const c of components) {
   if (!c.licenseSource) errors.push(`${where}: 缺 licenseSource`);
   // 许可证正文必须随树同行。这条顺手把完整 chrome-win64 挡在门外 ——
   // 195.6 MB、压缩包里 308 个条目、零个许可证文件。
-  if (!(Array.isArray(c.licenseFile) && c.licenseFile.length > 0 && c.licenseFile.every((f) => typeof f === "string" && f.length > 0))) {
-    errors.push(`${where}: licenseFile 要是非空数组 —— 一个许可证文件都没有的载荷不许存在`);
+  //
+  // **唯一的例外要人看过、写下日期**（2026-09-18，python.uv）：上游的包里真的一个
+  // 许可证文件都没有时，写 `licenseAbsent: { verifiedAt, why }` —— 这不是把门放宽，
+  // 是把「查过了、确实没有」与「没人看过」在字节上分开，和 `refused` 段同一个路子。
+  // 一个空的 licenseFile 自己说不出这两者的区别，而下一个人只会看见它是空的。
+  if (!(Array.isArray(c.licenseFile) && c.licenseFile.every((f) => typeof f === "string" && f.length > 0))) {
+    errors.push(`${where}: licenseFile 要是字符串数组`);
+  } else if (c.licenseFile.length === 0) {
+    const a = c.licenseAbsent;
+    if (!a) errors.push(`${where}: licenseFile 是空的却没有 licenseAbsent —— 一个许可证文件都没有的载荷要有人查过并写下理由`);
+    else {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(a.verifiedAt ?? "")) errors.push(`${where}: licenseAbsent.verifiedAt 要是 YYYY-MM-DD（哪天解包看过）`);
+      if (!a.why || a.why.length < 30) errors.push(`${where}: licenseAbsent.why 要说清包里为什么没有、许可证正文在哪`);
+      // 例外只对「我们不分发它」的载荷成立。随包再分发的东西没有许可证正文，
+      // 缺的是分发权本身，不是一行说明能补的。
+      if (c.redistribution !== "download-only") errors.push(`${where}: licenseAbsent 只对 download-only 的载荷成立`);
+    }
+  } else if (c.licenseAbsent) {
+    errors.push(`${where}: 既列了 licenseFile 又写 licenseAbsent —— 两句话只有一句是真的`);
   }
   // 5. copyleft 要 source offer。
   if (COPYLEFT.test(c.license ?? "") && !c.sourceOffer) {
@@ -224,20 +243,28 @@ const offlineDefault = servers.filter((e) => e.tier === "default").length;
 // pythonRuntime 也走「钉死 + 校验」那条规则：随包的 uv 是可执行文件，
 // 一个没钉哈希的可执行文件进安装包，比一个没钉哈希的按需组件更糟 —— 它不用
 // 用户点一下就已经在每台机器上了。
-if (m.pythonRuntime?.uv) {
-  const uv = m.pythonRuntime.uv;
-  const where = "pythonRuntime.uv";
-  if (!/^https:\/\//.test(uv.upstream ?? "")) errors.push(`${where}: upstream 必须是 https`);
-  if (!/^[0-9a-f]{64}$/.test(uv.sha256 ?? "")) errors.push(`${where}: sha256 不是 40+ 位十六进制的钉死值`);
-  if (!Number.isInteger(uv.size) || uv.size <= 0) errors.push(`${where}: size 缺失`);
-  if (!uv.license || !uv.licenseSource) errors.push(`${where}: 许可证与出处都要写`);
-  if (!Array.isArray(uv.licenseFiles) || uv.licenseFiles.length === 0) {
-    errors.push(`${where}: licenseFiles 要列出随件落盘的许可证正文`);
-  }
-  for (const id of m.pythonRuntime.seed ?? []) {
+if (m.pythonRuntime) {
+  const py = m.pythonRuntime;
+  const where = "pythonRuntime";
+  // uv 现在是一条**获取通道的组件**，钉死与校验那一套照走上面 components 那一段；
+  // 这里只钉住「pythonRuntime 说的那条 uv 真的存在」，以及它没有偷偷长回随包的样子。
+  if (!py.component) errors.push(`${where}: 缺 component —— uv 从哪来要写明（2026-09-18 起它是一条按需获取的组件，不随包）`);
+  else if (!componentIds.has(py.component)) errors.push(`${where}: component ${py.component} 不在 components[] 里`);
+  if (py.uv) errors.push(`${where}: 不许再有 uv 段 —— 那是「随包引导件」的形状，owner 2026-09-17 定性之后它不该回来`);
+  if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(py.cpython?.version ?? "")) errors.push(`${where}: cpython.version 要钉死到补丁号`);
+  for (const id of py.seed ?? []) {
     const s = (m.servers ?? []).find((x) => x.id === id);
-    if (!s) errors.push(`pythonRuntime.seed: 清单里没有 ${id}`);
-    else if (s.launch?.runtime !== "uvx") errors.push(`pythonRuntime.seed: ${id} 不是 uvx 形态`);
+    if (!s) errors.push(`${where}.seed: 清单里没有 ${id}`);
+    else if (s.launch?.runtime !== "uvx") errors.push(`${where}.seed: ${id} 不是 uvx 形态`);
+  }
+  // uvx 形态都要 uv：少写一条 requiresComponent，起不来时用户看见的是一句
+  // 「起不来」，而不是那个能点的「获取」按钮（tool-servers.ts 的 plan() 按它给按钮）。
+  for (const s of m.servers ?? []) {
+    if (s.launch?.runtime !== "uvx") continue;
+    if (!(s.launch.requiresComponent ?? []).includes(py.component)) {
+      errors.push(`${s.kind}:${s.id}: uvx 形态要在 launch.requiresComponent 里写上 ${py.component}`);
+    }
+    if (s.launch.offline) errors.push(`${s.kind}:${s.id}: launch.offline 是「构建时预取进随包缓存」的形状 —— 预热改在获取那一次做，由 pythonRuntime.seed 说了算`);
   }
 }
 

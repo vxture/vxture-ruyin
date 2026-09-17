@@ -46,7 +46,12 @@ if (existsSync(nodeExe)) {
   process.exit(0);
 }
 
-/** 取字节，网络抖动要重试（与 seed-uv-cache.mjs 同一套规则，见那边的注释）。 */
+/**
+ * 取字节，网络抖动要重试：一次 ECONNRESET 让整条发布链失败，换来的不是安全，是重跑
+ * 一遍 CI —— 而钉死的哈希在下面把关，重试多少次都改变不了「取到的必须是那一份」。
+ * 退到 curl 也不是因为 curl 更可信，是 Node 的 fetch 在某些网络上到 GitHub 的 release
+ * 主机直接超时，而同一地址 curl 通（2026-09-06 本机实测）。
+ */
 async function getBytes(url, what) {
   let last;
   for (const wait of [0, 1000, 3000, 8000]) {

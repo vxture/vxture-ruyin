@@ -129,9 +129,17 @@ void test("**三条路径都不许 acquire** —— 一次悄悄发生的下载�
     assert.equal(r.code, 1, `${file} 里的 acquire 应该被拦`);
     assert.match(r.out, expect);
   }
-  // 声明依赖不算，调用才算 —— 否则装配线上那一行 `components: componentStore` 会被误伤。
+  // 装 Python 半边同样是一次下载（TD-042 ②：uv 的字节 + uv 自己去取 CPython 与
+  // wheel），所以同一条纪律管它。
+  for (const file of ["apps/local-host/src/main.ts", "packages/runtime-core/src/harness.ts"]) {
+    const r = check(baseline({ [file]: `await python.provision();` }));
+    assert.equal(r.code, 1, `${file} 里的 provision 应该被拦`);
+    assert.match(r.out, /provision/);
+  }
+  // 声明依赖不算，调用才算 —— 否则装配线上那两行 `components: componentStore` /
+  // `python: pythonRuntime` 会被误伤。
   const declared = check(
-    baseline({ "apps/local-host/src/main.ts": `const deps = { components: componentStore };` }),
+    baseline({ "apps/local-host/src/main.ts": `const deps = { components: componentStore, python: pythonRuntime };` }),
   );
   assert.equal(declared.code, 0, declared.out);
 });
