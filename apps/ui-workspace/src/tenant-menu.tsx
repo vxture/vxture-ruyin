@@ -67,18 +67,22 @@ export function fmtBytes(n: number): string {
 /**
  * 平台配额用量 → 展示行。两条都常驻（owner 2026-09-16 改：此前两项都是零就
  * 整行隐藏，现在哪怕某项当前是 0/0 也照样露出来——「没有配额」本身就是一个
- * 要让用户看见的事实，不是要藏起来的边界情况；两条名字定死用英文，这两个
- * 概念本身就是英文术语，硬翻中文反而生造出新词。
+ * 要让用户看见的事实，不是要藏起来的边界情况。
+ *
+ * 两条名字**走目录**，尽管两门语言眼下写的是同一串英文：这两个是平台那边的
+ * 配额名，本身就是英文术语，硬翻中文会生造出新词 —— 但「这句话现在是什么」
+ * 与「这句话该不该可翻译」是两件事（owner 2026-09-17）。写死在代码里，将来
+ * 平台改名或者真要出中文名时，改的就是二十个文件而不是一行。
  */
 export function quotaLines(usage: QuotaUsage, t: TFn, locale: Locale): QuotaLine[] {
   return [
     {
       key: "ai.credit",
-      label: "AI Credits",
+      label: t("quota.aiCredit"),
       ...usage.aiCredit,
       format: (n: number) => fmt(n, t, locale),
     },
-    { key: "storage", label: "Storage Spaces", ...usage.storage, format: fmtBytes },
+    { key: "storage", label: t("quota.storage"), ...usage.storage, format: fmtBytes },
   ];
 }
 

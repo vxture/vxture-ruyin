@@ -13,6 +13,7 @@ import { translate, type TKey, type Vars } from "./i18n";
 
 /** 简体中文的 t()，给不经组件直接调的那几条用例。 */
 const tzh = (k: TKey, v?: Vars) => translate("zh-CN", k, v);
+const ten = (k: TKey, v?: Vars) => translate("en", k, v);
 import { Api, type QuotaUsage, type SessionInfo } from "./api";
 
 function session(over: Partial<SessionInfo> = {}): SessionInfo {
@@ -44,6 +45,22 @@ function fakeApi(over: Partial<Api> = {}): Api {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+/**
+ * 两条名字**走目录**，尽管两门语言眼下写的是同一串英文（owner 2026-09-17：
+ * 「也是 i18n，只是中英都是英文，不能写死」）。钉住的是**这条通路活着** ——
+ * 平台哪天改了名字、或者真要出中文名时，改的是一行而不是二十个文件。
+ */
+test("quotaLines：两条名字取自目录，不是写死在代码里", () => {
+  const zh = quotaLines(usage(), tzh, "zh-CN");
+  const en = quotaLines(usage(), ten, "en");
+  expect(zh.map((l) => l.label)).toEqual(["AI Credits", "Storage Spaces"]);
+  // 眼下两门一样 —— 断言的是「两边都从目录取」，不是「两边必须不同」。
+  expect(en.map((l) => l.label)).toEqual(zh.map((l) => l.label));
+  // 单位那一侧是真的分语言的，顺带证明这条通路确实按语言走。
+  expect(zh[0]!.format(1234)).toBe("1,234 点");
+  expect(en[0]!.format(1234)).toBe("1,234 credits");
+});
 
 test("quotaLines: both lines are always present, even when a metric is 0/0", () => {
   // 配额行现在按语言给单位（「点 / credits」），所以要一个翻译函数与一门语言。

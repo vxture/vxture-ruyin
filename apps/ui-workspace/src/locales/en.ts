@@ -852,6 +852,10 @@ export const en: Catalog = {
   "err.notConfigured.platform": "This build does not offer platform sign-in",
   "err.notConfigured.language": "This build does not offer a language setting",
 
+  /* ── The two quota names ──────────────────────────────────────────── */
+  "quota.aiCredit": "AI Credits",
+  "quota.storage": "Storage Spaces",
+
   /* ── Language ─────────────────────────────────────────────────────── */
   "prefs.language": "Language",
 };
