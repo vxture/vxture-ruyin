@@ -200,6 +200,102 @@ export const en: Catalog = {
   "search.action.home": "Go to Home",
   "search.action.settings": "Open Settings",
 
+  /* ── Home: the three status cards ─────────────────────────────────── */
+  "home.cards.aria": "Runtime status",
+  "home.card.runtime": "Runtime",
+  "home.card.runtime.ok": "Ready",
+  "home.card.runtime.off": "Not connected",
+  "home.card.runtime.hintOk": "The runtime on this computer is healthy",
+  "home.card.runtime.hintOff":
+    "The runtime on this computer is not responding; reconnecting",
+  "home.card.encryption": "Encryption",
+  "home.card.encryption.on": "Encrypted",
+  "home.card.encryption.dev": "Development use",
+  "home.card.encryption.hintOn":
+    "All your data is stored encrypted, and only you on this computer can unlock it",
+  "home.card.encryption.hintDev":
+    "Data is still encrypted, but the key has no system-level protection — do not put real data here",
+  "home.card.platform": "Platform",
+  "home.card.platform.on": "Connected",
+  "home.card.platform.off": "Signed out",
+  "home.card.platform.hintOn":
+    "Workspace “{workspace}” — the agents and data available here belong to it",
+  "home.card.platform.hintOff":
+    "Sign in with Vxture and the agents you subscribe to appear on this computer",
+  "home.workspace.unset": "none selected",
+
+  /* ── Home: my agents ──────────────────────────────────────────────── */
+  "home.mine.title": "My agents",
+  "home.mine.subscriptionUnknown":
+    "Subscription information is unavailable right now; below is what is installed on this computer.",
+  "home.mine.updateBlocked": "AI is not enabled yet, so updates cannot be checked",
+  "home.mine.checking": "Checking…",
+  "home.mine.update": "Check for updates",
+  "home.empty.signedIn": "No agents available for this account",
+  "home.empty.signedOut": "Sign in to sync your agents",
+  "home.empty.descSignedIn":
+    "The runtime is ready. Subscribe on the Vxture platform and your agents appear here.",
+  "home.empty.descSignedOut":
+    "The runtime is ready. Sign in with Vxture and the agents you subscribe to appear here.",
+  "home.empty.subscribe": "Subscribe on Vxture",
+
+  /* ── Home: popular agents ─────────────────────────────────────────── */
+  "home.catalog.title": "Popular agents",
+  "home.catalog.desc": "The three most popular on the platform; subscribe there",
+  "home.catalog.browseAll": "Browse all",
+  "home.catalog.released": "Released",
+  "home.catalog.preview": "In development",
+  "home.catalog.learnMore": "Learn more",
+  "home.catalog.source": "From the Vxture platform, updated {date}",
+
+  /* ── Home: product cards ──────────────────────────────────────────── */
+  "home.card.blurbFallback": "Vxture agent",
+  "home.blurb.bidproposal":
+    "Tender analysis · requirement matrix · proposal drafting · coverage checks",
+  "home.card.identTitle": "Product code {id}",
+  "home.card.platformVersion": "Version on the platform: {version}",
+  "home.card.activeVersion": "Version in use: {version}",
+  "home.badge.expired": "Expired",
+  "home.badge.subscribed": "Subscribed",
+  "home.badge.notInstalled": "Not installed",
+  "home.badge.notEntitled": "Not subscribed",
+  "home.badge.disabled": "Disabled",
+  "home.badge.builtinSample": "Built-in example",
+  "home.badge.localOnly": "Installed locally",
+  "home.badge.notWired": "Not enabled",
+  "home.alert.notWired":
+    "AI is not enabled yet: starting a task now returns example content, not real results",
+  "home.card.renew": "Renew",
+  "home.card.useOnline": "Use online",
+  "home.card.about": "About this agent",
+  "home.card.upgradeTo": "Update to v{version}",
+  "home.card.open": "Open",
+  "home.card.opening": "Opening…",
+  "home.card.goRenew": "Renew on the platform",
+  "home.card.goSubscribe": "Subscribe on the platform",
+  "home.card.enable": "Enable",
+  "home.card.projects": "projects",
+  "home.card.projectsTitleBoth": "{local} here of {total} in total",
+  "home.card.projectsTitleLocal": "Projects for this product on this computer: {local}",
+
+  /* ── Home: installing and the package registry ────────────────────── */
+  "home.install.reading": "Loading…",
+  "home.install.catalogUnreachable": "Could not read the registry this time — try again later",
+  "home.install.catalogEmpty": "No agents available to install right now",
+  "home.install.catalogAria": "Package registry",
+  "home.install.signed": "Signed",
+  "home.install.unsigned": "Unsigned",
+  "home.install.installed": "Installed",
+  "home.install.installing": "Installing…",
+  "home.install.install": "Install",
+  "home.install.unsignedBlockedTitle": "For safety, release builds only install signed agents",
+  "home.install.unsignedBlocked": "Unsigned — cannot install",
+  "home.install.fromFile": "Install from a local package",
+  "home.install.hideRegistry": "Hide the registry",
+  "home.install.showRegistry": "Browse the registry",
+  "home.install.doneSigned": "Installed {id}@{version} (signed)",
+  "home.install.doneUnsigned": "Installed {id}@{version} (unsigned)",
+
   /* ── Language ─────────────────────────────────────────────────────── */
   "prefs.language": "Language",
 };

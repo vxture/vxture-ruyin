@@ -44,6 +44,7 @@ import {
 } from "./api";
 import { consoleAppBaseOf, consoleBaseOf } from "./platform-base";
 import { CATALOG_SOURCE, RECOMMENDED } from "./catalog";
+import { useT, type MessageKey, type TFn } from "./i18n";
 
 /** 库里比生效版本更新的那一版（没有就是 undefined）。卡片与标题行读同一份判断。 */
 export function newerVersionOf(product: {
@@ -92,6 +93,7 @@ function RegistryList({
   onDone: () => void | Promise<void>;
   onError: (msg: string) => void;
 }) {
+  const t = useT();
   const [catalog, setCatalog] = useState<RegistryCatalog | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const load = async () => {
@@ -124,20 +126,20 @@ function RegistryList({
   return (
     <div className="install-row" style={{ flexDirection: "column", alignItems: "flex-start" }}>
       {busy === "__catalog" && catalog === null && (
-        <span className="text-body-sm text-muted-foreground">正在读取…</span>
+        <span className="text-body-sm text-muted-foreground">{t("home.install.reading")}</span>
       )}
       {/* **不端出 `catalog.reason`**（owner 2026-09-17）：那是取数失败的原话。
           用户要知道的只有两件——这次没读到，以及这不等于库是空的。 */}
       {open && catalog?.status === "unreachable" && (
         <span className="text-body-sm text-muted-foreground">
-          这次没读到产品库，请稍后再试
+          {t("home.install.catalogUnreachable")}
         </span>
       )}
       {open && catalog?.status === "ok" && catalog.items.length === 0 && (
-        <span className="text-body-sm text-muted-foreground">产品库里暂时没有可安装的智能体</span>
+        <span className="text-body-sm text-muted-foreground">{t("home.install.catalogEmpty")}</span>
       )}
       {open && catalog?.status === "ok" && catalog.items.length > 0 && (
-        <ul className="row-list" aria-label="产品库">
+        <ul className="row-list" aria-label={t("home.install.catalogAria")}>
           {catalog.items.map((item) => (
             <li key={`${item.id}@${item.version}`} className="row-item">
               <span className="row-main">
@@ -147,25 +149,29 @@ function RegistryList({
                 </span>
               </span>
               {/* 签没签名照实说：今天静态库里的包都未签名，生产拒装。 */}
-              <span className="row-tag">{item.signed ? "已签名" : "未签名"}</span>
+              <span className="row-tag">{t(item.signed ? "home.install.signed" : "home.install.unsigned")}</span>
               {item.installed ? (
-                <span className="text-body-sm text-muted-foreground">已安装</span>
+                <span className="text-body-sm text-muted-foreground">{t("home.install.installed")}</span>
               ) : catalog.installable ? (
                 <Button
                   size="sm"
                   disabled={busy !== null}
                   onClick={() => void install(item.id, item.version)}
                 >
-                  {busy === `${item.id}@${item.version}` ? "正在安装……" : "安装"}
+                  {t(
+                    busy === `${item.id}@${item.version}`
+                      ? "home.install.installing"
+                      : "home.install.install",
+                  )}
                 </Button>
               ) : (
                 // 悬停提示原先写着「未经 Vxture Registry 副署（TD-012 / TD-037）」——
                 // **把内部债务编号挂到了用户的鼠标下**。要说的只有一句：为什么装不了。
                 <span
                   className="text-body-sm text-muted-foreground"
-                  title="出于安全考虑，正式版只安装经过签名的智能体"
+                  title={t("home.install.unsignedBlockedTitle")}
                 >
-                  未签名，不能安装
+                  {t("home.install.unsignedBlocked")}
                 </span>
               )}
             </li>
@@ -194,6 +200,7 @@ function InstallMenu({
   registryOpen: boolean;
   onToggleRegistry: () => void;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<InstalledPackage | null>(null);
   const pick = useRef<HTMLInputElement>(null);
@@ -202,7 +209,7 @@ function InstallMenu({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm" disabled={busy}>
-            {busy ? "正在安装……" : "安装"}
+            {t(busy ? "home.install.installing" : "home.install.install")}
             <Icon name="caret-up-down" size="xs" />
           </Button>
         </DropdownMenuTrigger>
@@ -211,9 +218,11 @@ function InstallMenu({
               浏览器渲染，按**浏览器的语言**显示「Choose File / No file chosen」——
               一句改不掉的英文夹在中文界面里。功能照旧走这个 input（同一个页面在
               浏览器和壳里都要能用，不走只有壳能走的原生对话框）。 */}
-          <DropdownMenuItem onSelect={() => pick.current?.click()}>从本地包安装</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => pick.current?.click()}>
+            {t("home.install.fromFile")}
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={onToggleRegistry}>
-            {registryOpen ? "收起产品库" : "从产品库拉取"}
+            {t(registryOpen ? "home.install.hideRegistry" : "home.install.showRegistry")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -242,17 +251,30 @@ function InstallMenu({
       {/* 签没签名要照实说：未签名的包是另一回事，不该和签过的长一个样。 */}
       {done && (
         <span className="text-body-sm text-muted-foreground">
-          已安装 {done.productId}@{done.version}
-          {done.signed ? "（已签名）" : "（未签名）"}
+          {t(done.signed ? "home.install.doneSigned" : "home.install.doneUnsigned", {
+            id: done.productId,
+            version: done.version,
+          })}
         </span>
       )}
     </span>
   );
 }
 
-const BLURBS: Record<string, string> = {
-  "bidproposal": "招标解析 · 需求矩阵 · 方案生成 · 覆盖校验",
+/**
+ * 随包那个示例产品的一句简介。**产品自己的文案原则上不翻译**（它是产品方写的），
+ * 但这一条是我们替一个内置示例写的，所以它进目录 —— 真产品的简介仍然由产品给，
+ * 是什么语言就显示什么语言。
+ */
+const BLURB_KEYS: Record<string, MessageKey> = {
+  bidproposal: "home.blurb.bidproposal",
 };
+
+/** 认得的产品给它那句简介；不认得的给一句通用的，绝不留空。 */
+function blurbOf(t: TFn, productCode: string): string {
+  const key = BLURB_KEYS[productCode];
+  return key ? t(key) : t("home.card.blurbFallback");
+}
 
 /**
  * Console 的应用中心 —— 本地已装的产品「智能体介绍」/ 顶部「在线使用」的落点。
@@ -311,8 +333,9 @@ function StatusCards({
     tone: StripTone;
   }>;
 }) {
+  const t = useT();
   return (
-    <ul className="status-cards" aria-label="运行时概况">
+    <ul className="status-cards" aria-label={t("home.cards.aria")}>
       {items.map((it) => (
         /* 图标占两行、左边一列；右边名称一行、结论一行，左对齐（owner 2026-09-03 定）。 */
         <li key={it.id} className={`status-card status-card--${it.tone}`} title={it.hint}>
@@ -358,6 +381,7 @@ export function HomePage({
   selectedProductId?: string | null;
   onSelectProduct?: (id: string | null) => void;
 }) {
+  const t = useT();
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [registryOpen, setRegistryOpen] = useState(false);
@@ -491,26 +515,26 @@ export function HomePage({
           {
             id: "runtime",
             icon: "cpu",
-            label: "运行环境",
-            value: health.ok ? "已就绪" : "未连接",
+            label: t("home.card.runtime"),
+            value: t(health.ok ? "home.card.runtime.ok" : "home.card.runtime.off"),
             detail: health.ok ? (health.version ?? "") : "",
             hint: health.ok
-              ? "本机运行环境正常"
-              : "本机运行环境暂时没有响应，正在重新连接",
+              ? t("home.card.runtime.hintOk")
+              : t("home.card.runtime.hintOff"),
             tone: health.ok ? "ok" : "danger",
           },
           {
             id: "protection",
             icon: "shield-check",
-            label: "数据加密",
-            value: encrypted ? "已加密" : "开发用途",
+            label: t("home.card.encryption"),
+            value: t(encrypted ? "home.card.encryption.on" : "home.card.encryption.dev"),
             // 首页这张卡是**一眼扫过去的状态**，不是加密说明书。完整的三层
             // 逐条写在「设置 › 数据加密」，那里才是要看细节的人去的地方 ——
             // 同一套事实抄两份，迟早两份各自漂（owner 2026-09-17）。
             detail: "",
             hint: encrypted
-              ? "你的数据全部加密保存，密钥只有这台电脑上的你能解开"
-              : "数据仍然加密，但密钥没有系统级保护 —— 请勿放入真实数据",
+              ? t("home.card.encryption.hintOn")
+              : t("home.card.encryption.hintDev"),
             tone: encrypted ? "ok" : "warn",
           },
           {
@@ -519,25 +543,27 @@ export function HomePage({
             // 理解「为什么这里是空的」和「跨工作区为什么被拒」。
             id: "platform",
             icon: "buildings",
-            label: "平台连接",
-            value: signedIn ? "已连接" : "未登录",
+            label: t("home.card.platform"),
+            value: t(signedIn ? "home.card.platform.on" : "home.card.platform.off"),
             detail: signedIn ? (session?.workspace?.name ?? "") : "",
             hint: signedIn
-              ? `当前工作区「${session?.workspace?.name ?? "未选定"}」，这里能用的智能体与数据都属于它`
-              : "登录 Vxture 账号后，你订阅的智能体才会同步到这台电脑",
+              ? t("home.card.platform.hintOn", {
+                  workspace: session?.workspace?.name ?? t("home.workspace.unset"),
+                })
+              : t("home.card.platform.hintOff"),
             tone: signedIn ? "ok" : "muted",
           },
         ]}
       />
 
       <Section
-        title="我的智能体"
+        title={t("home.mine.title")}
         icon="package"
         level={2}
         description={
           subscriptionKnown
             ? undefined
-            : "暂时读不到订阅信息，以下是这台电脑上已安装的智能体。"
+            : t("home.mine.subscriptionUnknown")
         }
         action={
           /* 三个动作排在标题行右侧，主按钮在最右（owner 2026-09-04 定）：
@@ -554,11 +580,11 @@ export function HomePage({
                    入口不该承诺它兑现不了的事（与「连接器」那边同一条道理）。 */
                 disabled={syncing || capabilityMock}
                 {...(capabilityMock
-                  ? { title: "AI 能力尚未开通，暂时查不了新版本" }
+                  ? { title: t("home.mine.updateBlocked") }
                   : {})}
                 onClick={() => void checkUpdates(products.map((p) => p.id))}
               >
-                {syncing ? "正在检查……" : "更新"}
+                {t(syncing ? "home.mine.checking" : "home.mine.update")}
                 {/* 有可切的新版本才挂 new：一个常年亮着的标记等于没有标记。
                     这一条与能力面无关 —— 它看的是本机已装的版本，本地装了新版
                     照样该亮。 */}
@@ -579,7 +605,7 @@ export function HomePage({
                   window.open(APPCENTER_URL(consoleBase), "_blank", "noopener")
                 }
               >
-                在线使用
+                {t("home.card.useOnline")}
                 <Icon name="external-link" size="xs" />
               </Button>
             )}
@@ -592,19 +618,19 @@ export function HomePage({
             icon="package"
             title={
               signedIn
-                ? "当前账号没有可用的智能体"
-                : "登录后同步你的智能体"
+                ? t("home.empty.signedIn")
+                : t("home.empty.signedOut")
             }
             description={
               signedIn
-                ? "运行环境已就绪。到 Vxture 平台订阅后，智能体就会出现在这里。"
-                : "运行环境已就绪。登录 Vxture 账号后，你订阅的智能体会出现在这里。"
+                ? t("home.empty.descSignedIn")
+                : t("home.empty.descSignedOut")
             }
             action={
               <Button
                 onClick={() => window.open(subscribeUrl(), "_blank", "noopener")}
               >
-                到 Vxture 平台订阅
+                {t("home.empty.subscribe")}
                 <Icon name="external-link" size="xs" />
               </Button>
             }
@@ -645,10 +671,10 @@ export function HomePage({
           视口、这一段 margin-top:auto）。 */}
       <div className="home-catalog">
       <Section
-        title="热门智能体"
+        title={t("home.catalog.title")}
         icon="sparkles"
         level={2}
-        description="平台上最受欢迎的三个，订阅在平台完成"
+        description={t("home.catalog.desc")}
         action={
           <Button
             variant="outline"
@@ -657,7 +683,7 @@ export function HomePage({
               window.open(CATALOG_SOURCE.url, "_blank", "noopener")
             }
           >
-            浏览全部
+            {t("home.catalog.browseAll")}
             <Icon name="external-link" size="xs" />
           </Button>
         }
@@ -677,7 +703,7 @@ export function HomePage({
                 </span>
                 <span className="pcard-badges">
                   <StatusBadge tone={c.status === "released" ? "success" : "neutral"}>
-                    {c.status === "released" ? "正式版" : "开发中"}
+                    {t(c.status === "released" ? "home.catalog.released" : "home.catalog.preview")}
                   </StatusBadge>
                 </span>
               </header>
@@ -706,7 +732,7 @@ export function HomePage({
                       window.open(CATALOG_SOURCE.url, "_blank", "noopener")
                     }
                   >
-                    了解详情
+                    {t("home.catalog.learnMore")}
                   </Button>
                 </span>
               </footer>
@@ -715,7 +741,7 @@ export function HomePage({
         </ListCardGrid>
         {/* 出处要写明：这份清单不是实时的，用户有权知道自己看到的是什么时候的。 */}
         <p className="text-body-sm text-muted-foreground">
-          来自 Vxture 平台，更新于 {CATALOG_SOURCE.capturedAt}
+          {t("home.catalog.source", { date: CATALOG_SOURCE.capturedAt })}
         </p>
       </Section>
       </div>
@@ -745,6 +771,7 @@ function SubscribedElsewhereCard({
   consoleBase: string;
   subscribeUrl: (id?: string, intent?: "subscribe" | "renew") => string;
 }) {
+  const t = useT();
   const expired = row.status === "expired";
   const title = row.productName ?? row.productNick ?? row.productCode;
   return (
@@ -755,25 +782,27 @@ function SubscribedElsewhereCard({
         </span>
         <span className="pcard-titles">
           <h3 className="pcard-title">{title}</h3>
-          <p className="pcard-ident" title={`产品标识 ${row.productCode}`}>{row.productCode}</p>
+          <p className="pcard-ident" title={t("home.card.identTitle", { id: row.productCode })}>
+          {row.productCode}
+        </p>
         </span>
         <span className="pcard-badges">
           {row.tier && <StatusBadge tone="neutral">{row.tier}</StatusBadge>}
           {expired ? (
-            <StatusBadge tone="warning">已过期</StatusBadge>
+            <StatusBadge tone="warning">{t("home.badge.expired")}</StatusBadge>
           ) : (
-            <StatusBadge tone="success">已订阅</StatusBadge>
+            <StatusBadge tone="success">{t("home.badge.subscribed")}</StatusBadge>
           )}
-          <StatusBadge tone="neutral">本机未安装</StatusBadge>
+          <StatusBadge tone="neutral">{t("home.badge.notInstalled")}</StatusBadge>
         </span>
       </header>
       <div className="pcard-body">
-        <p className="pcard-desc">{BLURBS[row.productCode] ?? "Vxture 智能体"}</p>
+        <p className="pcard-desc">{blurbOf(t, row.productCode)}</p>
       </div>
       <footer className="pcard-foot">
         <span className="pcard-meta">
           {row.releaseVersion && (
-            <span className="pcard-version" title={`平台上的版本 ${row.releaseVersion}`}>
+            <span className="pcard-version" title={t("home.card.platformVersion", { version: row.releaseVersion })}>
               v{row.releaseVersion}
             </span>
           )}
@@ -785,7 +814,7 @@ function SubscribedElsewhereCard({
               size="sm"
               onClick={() => window.open(subscribeUrl(row.productCode, "renew"), "_blank", "noopener")}
             >
-              续订
+              {t("home.card.renew")}
             </Button>
           ) : (
             <Button
@@ -793,7 +822,7 @@ function SubscribedElsewhereCard({
               size="sm"
               onClick={() => window.open(productEdgeUrl(consoleBase, row.productCode), "_blank", "noopener")}
             >
-              在线使用
+              {t("home.card.useOnline")}
               <Icon name="external-link" size="xs" />
             </Button>
           )}
@@ -846,6 +875,7 @@ function ProductCard({
   selected: boolean;
   onToggleSelect: () => void;
 }) {
+  const t = useT();
   const [opening, setOpening] = useState(false);
   const usable = product.availability === "available";
 
@@ -903,19 +933,19 @@ function ProductCard({
    */
   const badge =
     product.availability === "not_entitled" ? (
-      <StatusBadge tone="warning">未订阅</StatusBadge>
+      <StatusBadge tone="warning">{t("home.badge.notEntitled")}</StatusBadge>
     ) : product.availability === "disabled" ? (
-      <StatusBadge tone="neutral">已停用</StatusBadge>
+      <StatusBadge tone="neutral">{t("home.badge.disabled")}</StatusBadge>
     ) : product.entitled === true ? (
-      <StatusBadge tone="success">已订阅</StatusBadge>
+      <StatusBadge tone="success">{t("home.badge.subscribed")}</StatusBadge>
     ) : product.supply === "builtin" ? (
       /* 随包的是示例（TD-006 / TD-033），得看起来就是示例：标「本地已装」会让人
          以为那是一个自己拥有的产品。平台说订了（上一支）时以平台为准。
          用户看到的词是「内置示例」——「测试夹具」是我们的行话，不是他们的
          （owner 2026-09-17）。 */
-      <StatusBadge tone="neutral">内置示例</StatusBadge>
+      <StatusBadge tone="neutral">{t("home.badge.builtinSample")}</StatusBadge>
     ) : (
-      <StatusBadge tone="neutral">本地已装</StatusBadge>
+      <StatusBadge tone="neutral">{t("home.badge.localOnly")}</StatusBadge>
     );
 
   return (
@@ -938,19 +968,23 @@ function ProductCard({
         </span>
         <span className="pcard-titles">
           <h3 className="pcard-title">{product.name}</h3>
-          <p className="pcard-ident" title={`产品标识 ${product.id}`}>{product.id}</p>
+          <p className="pcard-ident" title={t("home.card.identTitle", { id: product.id })}>
+          {product.id}
+        </p>
         </span>
         <span className="pcard-badges">
           {badge}
           {/* 「未接通」与订阅徽章并列而不是替换：「已订阅」和「能力面没接」是两件
               都成立的事。只标在能打开的卡上 —— 打不开的卡不会跑任务，也就没有
               「拿到占位输出当成果」这回事。 */}
-          {usable && capabilityMock && <StatusBadge tone="warning">未接通</StatusBadge>}
+          {usable && capabilityMock && (
+            <StatusBadge tone="warning">{t("home.badge.notWired")}</StatusBadge>
+          )}
         </span>
       </header>
 
       <div className="pcard-body">
-        <p className="pcard-desc">{BLURBS[product.id] ?? "Vxture 智能体"}</p>
+        <p className="pcard-desc">{blurbOf(t, product.id)}</p>
         {/* 警示与说明要分得开：说明是灰字，警示走 DS 的 warning 语气（色 + 图标 +
             浅底），扫一眼就知道这是「要留意」而不是「介绍」。 */}
         {!usable && product.reason && (
@@ -962,7 +996,7 @@ function ProductCard({
         {usable && capabilityMock && (
           <p className="pcard-alert pcard-alert--warning" role="note">
             <Icon name="info" size="xs" />
-            <span>AI 能力尚未开通：现在发起任务只会得到示例内容，不是真实成果</span>
+            <span>{t("home.alert.notWired")}</span>
           </p>
         )}
       </div>
@@ -975,16 +1009,18 @@ function ProductCard({
             口径进 tooltip：要用一句话说清的东西，不该常年占着版面。 */}
         {/* 左下角顶头对齐图标：版本（淡，hover 亮）→ 关键数字 → 单位（小、淡）。 */}
         <span className="pcard-meta">
-          <span className="pcard-version" title={`当前生效版本 ${product.version}`}>v{product.version}</span>
+          <span className="pcard-version" title={t("home.card.activeVersion", { version: product.version })}>
+            v{product.version}
+          </span>
           <span
             className="pcard-count"
             title={
               total > local
-                ? `本地项目 ${local} / 总计 ${total}`
-                : `本机上属于该产品的项目：${local}`
+                ? t("home.card.projectsTitleBoth", { local, total })
+                : t("home.card.projectsTitleLocal", { local })
             }
           >
-            <b>{total > local ? `${local}/${total}` : local}</b> <span className="pcard-unit">项目</span>
+            <b>{total > local ? `${local}/${total}` : local}</b> <span className="pcard-unit">{t("home.card.projects")}</span>
           </span>
         </span>
         <span className="pcard-actions">
@@ -999,7 +1035,7 @@ function ProductCard({
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                智能体介绍
+                {t("home.card.about")}
               </a>
               {newer && (
                 <Button
@@ -1008,11 +1044,11 @@ function ProductCard({
                   disabled={opening}
                   onClick={() => void updateTo(newer)}
                 >
-                  更新版本 v{newer}
+                  {t("home.card.upgradeTo", { version: newer })}
                 </Button>
               )}
               <Button className="pcard-open" size="sm" disabled={opening} onClick={() => void open()}>
-                {opening ? "打开中……" : "打开"}
+                {t(opening ? "home.card.opening" : "home.card.open")}
               </Button>
             </>
           ) : (
@@ -1032,7 +1068,7 @@ function ProductCard({
                     )
                   }
                 >
-                  {product.commercialIntent === "renew" ? "去平台续费" : "去平台订阅"}
+                  {t(product.commercialIntent === "renew" ? "home.card.goRenew" : "home.card.goSubscribe")}
                   <Icon name="external-link" size="xs" />
                 </Button>
               )}
@@ -1046,7 +1082,7 @@ function ProductCard({
                       .catch((e: Error) => onError(e.message))
                   }
                 >
-                  启用
+                  {t("home.card.enable")}
                 </Button>
               )}
             </>
