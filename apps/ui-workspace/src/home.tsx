@@ -124,15 +124,17 @@ function RegistryList({
   return (
     <div className="install-row" style={{ flexDirection: "column", alignItems: "flex-start" }}>
       {busy === "__catalog" && catalog === null && (
-        <span className="text-body-sm text-muted-foreground">正在读取产品库…</span>
+        <span className="text-body-sm text-muted-foreground">正在读取…</span>
       )}
+      {/* **不端出 `catalog.reason`**（owner 2026-09-17）：那是取数失败的原话。
+          用户要知道的只有两件——这次没读到，以及这不等于库是空的。 */}
       {open && catalog?.status === "unreachable" && (
         <span className="text-body-sm text-muted-foreground">
-          产品库没查到 —— {catalog.reason}。这不代表产品库是空的，只代表这次没问到。
+          这次没读到产品库，请稍后再试
         </span>
       )}
       {open && catalog?.status === "ok" && catalog.items.length === 0 && (
-        <span className="text-body-sm text-muted-foreground">产品库里目前没有产品包</span>
+        <span className="text-body-sm text-muted-foreground">产品库里暂时没有可安装的智能体</span>
       )}
       {open && catalog?.status === "ok" && catalog.items.length > 0 && (
         <ul className="row-list" aria-label="产品库">
@@ -145,7 +147,7 @@ function RegistryList({
                 </span>
               </span>
               {/* 签没签名照实说：今天静态库里的包都未签名，生产拒装。 */}
-              <span className="row-tag">{item.signed ? "已副署" : "未签名"}</span>
+              <span className="row-tag">{item.signed ? "已签名" : "未签名"}</span>
               {item.installed ? (
                 <span className="text-body-sm text-muted-foreground">已安装</span>
               ) : catalog.installable ? (
@@ -157,8 +159,13 @@ function RegistryList({
                   {busy === `${item.id}@${item.version}` ? "正在安装……" : "安装"}
                 </Button>
               ) : (
-                <span className="text-body-sm text-muted-foreground" title="正式版拒绝安装未经 Vxture Registry 副署的包（TD-012 / TD-037）">
-                  本机不装未签名包
+                // 悬停提示原先写着「未经 Vxture Registry 副署（TD-012 / TD-037）」——
+                // **把内部债务编号挂到了用户的鼠标下**。要说的只有一句：为什么装不了。
+                <span
+                  className="text-body-sm text-muted-foreground"
+                  title="出于安全考虑，正式版只安装经过签名的智能体"
+                >
+                  未签名，不能安装
                 </span>
               )}
             </li>
@@ -236,7 +243,7 @@ function InstallMenu({
       {done && (
         <span className="text-body-sm text-muted-foreground">
           已安装 {done.productId}@{done.version}
-          {done.signed ? "（已副署）" : "（未签名）"}
+          {done.signed ? "（已签名）" : "（未签名）"}
         </span>
       )}
     </span>
@@ -486,24 +493,24 @@ export function HomePage({
             icon: "cpu",
             label: "运行环境",
             value: health.ok ? "已就绪" : "未连接",
-            detail: health.ok ? `Runtime ${health.version ?? ""}`.trim() : "",
+            detail: health.ok ? (health.version ?? "") : "",
             hint: health.ok
-              ? `本地守护进程 ${health.version ?? ""} 正在运行`
-              : "守护进程未响应，正在等待它起来",
+              ? "本机运行环境正常"
+              : "本机运行环境暂时没有响应，正在重新连接",
             tone: health.ok ? "ok" : "danger",
           },
           {
             id: "protection",
             icon: "shield-check",
             label: "数据加密",
-            value: encrypted ? "已加密" : "开发态",
-            // 说加密就说加密算法。DPAPI 是最外层保护主密钥的，不是加密本身 ——
-            // 写在这里读起来像「用 DPAPI 加密的」，而实际是 SQLCipher（owner
-            // 2026-09-04 问及）。完整三层放 tooltip。
-            detail: encrypted ? "SQLCipher" : "主密钥明文",
+            value: encrypted ? "已加密" : "开发用途",
+            // 首页这张卡是**一眼扫过去的状态**，不是加密说明书。完整的三层
+            // 逐条写在「设置 › 数据加密」，那里才是要看细节的人去的地方 ——
+            // 同一套事实抄两份，迟早两份各自漂（owner 2026-09-17）。
+            detail: "",
             hint: encrypted
-              ? "业务库整库 SQLCipher 加密，一库一钥；库钥以 AES-256-GCM 封装在主密钥下；主密钥由 Windows DPAPI 保护"
-              : "业务库仍整库加密，但主密钥以明文存放（本平台无 OS 级密钥保护）——仅供开发，不可用于真实数据",
+              ? "你的数据全部加密保存，密钥只有这台电脑上的你能解开"
+              : "数据仍然加密，但密钥没有系统级保护 —— 请勿放入真实数据",
             tone: encrypted ? "ok" : "warn",
           },
           {
@@ -516,8 +523,8 @@ export function HomePage({
             value: signedIn ? "已连接" : "未登录",
             detail: signedIn ? (session?.workspace?.name ?? "") : "",
             hint: signedIn
-              ? `已登录；当前工作区「${session?.workspace?.name ?? "未选定"}」决定了本地可用的产品与数据归属`
-              : "登录 Vxture 账号后，你订阅的产品和工作区才会同步到本地",
+              ? `当前工作区「${session?.workspace?.name ?? "未选定"}」，这里能用的智能体与数据都属于它`
+              : "登录 Vxture 账号后，你订阅的智能体才会同步到这台电脑",
             tone: signedIn ? "ok" : "muted",
           },
         ]}
@@ -530,7 +537,7 @@ export function HomePage({
         description={
           subscriptionKnown
             ? undefined
-            : "订阅状态尚未接通，以下为本地运行时已安装的产品。"
+            : "暂时读不到订阅信息，以下是这台电脑上已安装的智能体。"
         }
         action={
           /* 三个动作排在标题行右侧，主按钮在最右（owner 2026-09-04 定）：
@@ -547,7 +554,7 @@ export function HomePage({
                    入口不该承诺它兑现不了的事（与「连接器」那边同一条道理）。 */
                 disabled={syncing || capabilityMock}
                 {...(capabilityMock
-                  ? { title: "还没接产品能力面，暂时问不到新版本" }
+                  ? { title: "AI 能力尚未开通，暂时查不了新版本" }
                   : {})}
                 onClick={() => void checkUpdates(products.map((p) => p.id))}
               >
@@ -590,7 +597,7 @@ export function HomePage({
             }
             description={
               signedIn
-                ? "运行环境已就绪。智能体由 Vxture 平台订阅提供——在平台订阅后即可在这里使用。"
+                ? "运行环境已就绪。到 Vxture 平台订阅后，智能体就会出现在这里。"
                 : "运行环境已就绪。登录 Vxture 账号后，你订阅的智能体会出现在这里。"
             }
             action={
@@ -641,7 +648,7 @@ export function HomePage({
         title="热门智能体"
         icon="sparkles"
         level={2}
-        description="平台上排在前面的三个智能体。这里只作了解，订阅在平台完成。"
+        description="平台上最受欢迎的三个，订阅在平台完成"
         action={
           <Button
             variant="outline"
@@ -706,9 +713,9 @@ export function HomePage({
             </article>
           ))}
         </ListCardGrid>
-        {/* 出处要写明：这份清单不是实时的，用户有权知道自己在看一份快照。 */}
+        {/* 出处要写明：这份清单不是实时的，用户有权知道自己看到的是什么时候的。 */}
         <p className="text-body-sm text-muted-foreground">
-          取自 Vxture 平台目录（{CATALOG_SOURCE.capturedAt} 快照）。
+          来自 Vxture 平台，更新于 {CATALOG_SOURCE.capturedAt}
         </p>
       </Section>
       </div>
@@ -902,9 +909,11 @@ function ProductCard({
     ) : product.entitled === true ? (
       <StatusBadge tone="success">已订阅</StatusBadge>
     ) : product.supply === "builtin" ? (
-      /* 随包的是测试夹具（TD-006 / TD-033），得看起来就是夹具：标「本地已装」会让人
-         以为那是一个自己拥有的产品。平台说订了（上一支）时以平台为准。 */
-      <StatusBadge tone="neutral">测试夹具</StatusBadge>
+      /* 随包的是示例（TD-006 / TD-033），得看起来就是示例：标「本地已装」会让人
+         以为那是一个自己拥有的产品。平台说订了（上一支）时以平台为准。
+         用户看到的词是「内置示例」——「测试夹具」是我们的行话，不是他们的
+         （owner 2026-09-17）。 */
+      <StatusBadge tone="neutral">内置示例</StatusBadge>
     ) : (
       <StatusBadge tone="neutral">本地已装</StatusBadge>
     );
@@ -953,7 +962,7 @@ function ProductCard({
         {usable && capabilityMock && (
           <p className="pcard-alert pcard-alert--warning" role="note">
             <Icon name="info" size="xs" />
-            <span>能力面未接通：现在发起任务只会得到占位输出，不是真实成果</span>
+            <span>AI 能力尚未开通：现在发起任务只会得到示例内容，不是真实成果</span>
           </p>
         )}
       </div>

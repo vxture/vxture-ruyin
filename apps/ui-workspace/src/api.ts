@@ -118,6 +118,13 @@ export type UpdateCheck =
   | {
       status: "unreachable";
       current: string;
+      /**
+       * 界面据此选措辞，**`reason` 一个字都不显示**（那是给日志看的）：
+       * `no-release` = 这个渠道没发布过任何版本，对用户就是「已是最新版本」；
+       * `unavailable` = 这一次没问到，说「暂时无法检查更新」。
+       */
+      reasonCode: "no-release" | "unavailable";
+      /** 诊断用。**不要渲染它** —— 「feed returned 404」不是给用户看的话。 */
       reason: string;
       channel: string;
       checkedAt: string;

@@ -42,7 +42,7 @@ export function startMigrationServer(
       const auth = req.headers["authorization"];
       if (auth !== `Bearer ${token}`) {
         res.writeHead(401, { "content-type": "application/json" });
-        res.end(JSON.stringify(apiError("UNAUTHORIZED", "missing or bad token")));
+        res.end(JSON.stringify(apiError("UNAUTHORIZED", "登录状态已失效，请重新打开应用")));
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
@@ -52,7 +52,7 @@ export function startMigrationServer(
     // 别的什么都没有：这一刻运行时只搬了一半，任何别的回答都会是假的。
     res.writeHead(503, { "content-type": "application/json" });
     // 可重试：搬完就好，等一会儿再问答案就变了（X-1 的 retryable 恰恰是为这种情况）。
-    res.end(JSON.stringify(apiError("MIGRATING", "runtime is moving its data directory", { retryable: true })));
+    res.end(JSON.stringify(apiError("MIGRATING", "正在搬移数据，请稍候", { retryable: true })));
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);

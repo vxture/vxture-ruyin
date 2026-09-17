@@ -180,7 +180,7 @@ function LoginScreen({
           <span className="brand-tag">Intelligent Workbench</span>
         </h1>
         <p className="login-sub">
-          Ruyin Studio 原生智能体本地运行环境 · 本地数据不出域
+          智能工作台 · 你的数据留在这台电脑上
         </p>
         <Button
           className="login-btn"

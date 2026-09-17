@@ -379,6 +379,50 @@ void test("UserSlot panel: 环境三行已挪去 Runtime 下拉，这一格只�
   }
 });
 
+/**
+ * 面板抬头（owner 2026-09-17）：**按钮条上已经有一个头像，面板里不再放第二个**；
+ * 「已登录」是废话（用户看得见自己的名字，当然是登着的），删；「登录异常」留着
+ * —— 那一种才是用户需要看见的。
+ */
+void test("UserSlot panel: 登录正常时没有头像、没有「已登录」徽标；异常时挂「登录异常」", async () => {
+  const ok = fakeApi({
+    session: vi.fn().mockResolvedValue(
+      session({ signedIn: true, profile: { sub: "u1", name: "郭", email: "yh@example.com" } }),
+    ),
+  });
+  const { unmount } = render(
+    <UserSlot api={ok} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />,
+  );
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /账户/ }));
+  const panel = await screen.findByText("退出");
+  expect(panel).toBeInTheDocument();
+  expect(screen.queryByText("已登录")).not.toBeInTheDocument();
+  expect(screen.queryByText("登录异常")).not.toBeInTheDocument();
+  // 邮箱那一行还在 —— 它回答的是「我登的是哪个账号」，不是废话。
+  expect(screen.getByText("yh@example.com")).toBeInTheDocument();
+  unmount();
+
+  const broken = fakeApi({ session: vi.fn().mockResolvedValue(session({ signedIn: false })) });
+  render(<UserSlot api={broken} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
+  await user.click(await screen.findByRole("button", { name: /账户/ }));
+  expect(await screen.findByText("登录异常")).toBeInTheDocument();
+});
+
+/** 邮箱与租户名都没有时，那一行整个不出现 —— 不拿「已登录」凑一行。 */
+void test("UserSlot panel: 没有邮箱也没有租户名时，副行整个不出现", async () => {
+  const api = fakeApi({
+    session: vi.fn().mockResolvedValue(
+      session({ signedIn: true, profile: { sub: "u1", name: "郭" }, org: undefined }),
+    ),
+  });
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={() => {}} onSignedOut={() => {}} />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /账户/ }));
+  await screen.findByText("退出");
+  expect(screen.queryByText("已登录")).not.toBeInTheDocument();
+});
+
 void test("UserSlot: the platform's avatar picture is used when the session carries one", async () => {
   const api = fakeApi({
     session: vi.fn().mockResolvedValue(

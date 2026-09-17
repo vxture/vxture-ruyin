@@ -107,7 +107,7 @@ export function ProductSurface({ api, projectId, surface }: { api: Api; projectI
   if (frameState.state === "refused") {
     return (
       <p className="error-box" role="alert">
-        产品界面的来源与工作台同源，出于安全原因没有加载（{frameState.origin}）。
+        出于安全考虑，这个产品界面没有被载入。
       </p>
     );
   }
@@ -158,14 +158,14 @@ export function ProductTab({
   if (surface?.reason === "archived") {
     return (
       <p className="text-body-md text-muted-foreground">
-        项目已归档：产品界面不再装入。记录照常可看、可导出，恢复之后产品界面回来。
+        项目已归档，产品界面不再载入。记录照常可看、可导出；恢复项目后界面就回来。
       </p>
     );
   }
   if (!declaresUi(surface)) {
     return (
       <p className="text-body-md text-muted-foreground">
-        这个产品没有自己的界面。任务、上下文与成果在左侧各分区里。
+        这个产品没有自己的界面。任务、资料与成果都在左侧。
       </p>
     );
   }
@@ -189,8 +189,8 @@ export function ProductTab({
       <div className="flex flex-col gap-2xs">
         <strong>产品界面暂时不可用</strong>
         <span className="text-body-sm text-muted-foreground">
-          这个产品的界面包不在本机：可能还没取回（离线时取不到），也可能取回的与契约
-          钉的不符。产品的其余功能照常可用 —— 任务、上下文与成果在左侧各分区里。
+          它的界面还没取到本机，可能是之前离线。产品其余部分照常可用 ——
+          任务、资料与成果都在左侧。
         </span>
         {failure && <span className="text-body-sm text-destructive-text">{failure}</span>}
       </div>

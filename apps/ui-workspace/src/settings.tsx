@@ -9,7 +9,7 @@
  * （模式 / 密度 / 字号）与推理传输策略。StatusBadge 表示保护状态。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Accordion,
   AccordionContent,
@@ -77,7 +77,7 @@ import { groupCapabilities } from "./capability-groups";
 import { useHostChrome } from "./host-chrome";
 
 import { BrandInfoBlock } from "./brand-info";
-import { UpdateNotice, type UpdateCheckState } from "./update-check";
+import { UpdateNotice, channelLabel, type UpdateCheckState } from "./update-check";
 const UI_VERSION = "0.2.0";
 
 /**
@@ -296,6 +296,45 @@ function FactRow({
   );
 }
 
+/**
+ * 长标识的短形：前 8 位 + 省略号。**不是为了好看，是为了可读** —— 一串 43 个
+ * 字符的指纹摊在行里，谁也不会去读它，只会把旁边的事实一起淹掉。前 8 位足够
+ * 认出「是不是这一台」，整串由「复制」给出。
+ */
+function shortId(id?: string): string | undefined {
+  if (!id) return undefined;
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
+}
+
+/**
+ * 复制一个值，并当场说一声复制成功了。
+ *
+ * **「已复制」必须出现**：点了按钮什么都不变，用户会再点一次，然后怀疑它坏了。
+ * 剪贴板在没有安全上下文（http、沙盒 iframe）里会抛，那时按钮就什么也不说 ——
+ * 谎报「已复制」比不报更糟。
+ */
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [done, setDone] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setDone(true);
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => setDone(false), 2000);
+    } catch {
+      /* 复制不了就不吭声，绝不假装成功。 */
+    }
+  };
+  return (
+    <Button variant="ghost" size="sm" aria-label={label} onClick={() => void copy()}>
+      <Icon name={done ? "check" : "copy"} size="xs" />
+      {done ? "已复制" : "复制"}
+    </Button>
+  );
+}
+
 /* ---------------- 账户 ---------------- */
 
 /**
@@ -310,8 +349,8 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
         <div className="card">
           <EmptyState
             icon="user-circle"
-            title="账户由左下角的账户菜单管理"
-            description="在侧栏底部登录 Vxture 账号：同步订阅权益、调用云端 AI 能力、管理设备。登录走系统浏览器（PKCE），凭证只存于本机凭据库。"
+            title="请先登录"
+            description="登录 Vxture 账号后，你订阅的智能体和云端 AI 能力才会同步到这台电脑。登录入口在左下角的账户菜单。"
           />
         </div>
         <PreferencesBlock />
@@ -334,7 +373,7 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
       <SettingsBlock
         icon="role"
         title="账号信息"
-        desc="全部取自登录后的会话，本机只读；修改在平台的「个人信息」页完成"
+        desc="这里只作展示，要修改请到平台的「个人信息」页"
         aside={
           <Button variant="outline" size="sm" onClick={() => window.open(profileUrl, "_blank", "noopener")}>
             在线修改
@@ -421,7 +460,7 @@ function PreferencesBlock() {
     <SettingsBlock
       icon="settings"
       title="偏好设置"
-      desc="只作用于这台机器上的这个应用，记录在本机，不随账号同步"
+      desc="只影响这台电脑，不随账号同步"
     >
       {/* 四项各一行、不带说明（owner 第 5 条）：这四个词自己说得清，一行小字
           只是把行距撑开。控件列定宽，所以四行左右对齐、滑块等长（第 6 条）。 */}
@@ -507,7 +546,7 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
       <SettingsBlock
         icon="folder-open"
         title="存储位置"
-        desc="全部业务数据在本机，这两个目录之外不落任何内容"
+        desc="你的数据都保存在这台电脑上，只用下面这两个文件夹"
       >
         {/* 数据目录**连它的两个动作一起**由一个组件出（owner 2026-09-05 指出：
             「打开目录」在行上、「更改目录」在下面另一块，同一个对象的两个动作分
@@ -517,14 +556,26 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
         <FactRow label="产品目录" value={system?.productsDir} mono />
         {/* 安装标识（阶段 3a）。和运行日志放在一起，因为它们服务的是同一件事：
             用户报障时**对得上是哪一台**。刻意不叫「设备 ID」—— 它跟着安装走，
-            重装即换，而且将来限制的是同时在线数不是安装数（RY-100 A10）。 */}
-        <FactRow label="安装标识" value={system?.instanceId} mono />
+            重装即换，而且将来限制的是同时在线数不是安装数（RY-100 A10）。
+
+            **它有一个用途，只有一个**（owner 2026-09-17 问的就是这个）：报障时
+            把它给我们。用户不需要读懂它，更不需要记住它 —— 所以摊开 43 个字符
+            没有意义，那只是一条谁也不会去读的乱码。留前 8 位让人认出「是这一台」，
+            整串交给「复制」。它是公钥指纹，不是秘密，复制出去是安全的。 */}
+        <FactRow
+          label="安装标识"
+          value={shortId(system?.instanceId)}
+          mono
+          {...(system?.instanceId
+            ? { action: <CopyButton value={system.instanceId} label="复制安装标识" /> }
+            : {})}
+        />
         {/* 运行日志（TD-066）。**只给入口，不显示路径** —— 路径是壳自己算的
             （Electron 的标准日志位置），守护进程不知道它，界面更不该编一个出来。
             用户报障时要的就是这一下：打开、把文件拖过来。 */}
         <FactRow
           label="运行日志"
-          value="记录守护进程与壳的输出，按天滚动，保留 7 天"
+          value="出问题时用来排查，按天保存，只留最近 7 天"
           {...(inShell
             ? {
                 action: (
@@ -541,7 +592,7 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
       <SettingsBlock
         icon="lock"
         title="数据加密"
-        desc="业务数据落盘即加密。一次加密，密钥再套两层保护 —— 每层各自保护什么，逐条写在下面"
+        desc="数据一保存就是加密的，密钥本身还有两层保护"
       >
         {system ? (
           <>
@@ -563,10 +614,10 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
                 <span className="crypto-how">
                   {system.keyProtection === "dpapi" ? (
                     <>
-                      <CryptoTag>Windows DPAPI</CryptoTag> 保护（当前用户作用域），不落明文
+                      受 <CryptoTag>Windows DPAPI</CryptoTag> 保护，只有你这个 Windows 账户能解开
                     </>
                   ) : (
-                    "明文存放 —— 本平台没有 OS 级密钥保护"
+                    "当前系统没有可用的密钥保护，主密钥未加密存放"
                   )}
                 </span>
               </li>
@@ -576,7 +627,7 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
                 明文这一侧留着：它多说了一句「不可用于真实数据」，那是行里没有的
                 结论，而且这一条必须显眼 —— 它是「别把真数据放进来」。 */}
             {system.keyProtection === "plaintext" && (
-              <StatusBadge tone="warning">开发态：主密钥明文存储，不可用于真实数据</StatusBadge>
+              <StatusBadge tone="warning">开发用途：请勿放入真实数据</StatusBadge>
             )}
           </>
         ) : (
@@ -590,11 +641,11 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
       <SettingsBlock
         icon="cloud"
         title="推理策略"
-        desc="上下文送云端推理之前，什么情况下要先问我一句"
+        desc="资料送去云端 AI 之前，什么情况下先问你一句"
       >
         <Row
           label="确认粒度"
-          note="策略引擎接入后生效；当前无论选哪一档，高敏感内容都始终需要确认。推理传输 ≠ 数据存储：传输临时、不持久化。"
+          note="无论选哪一档，高敏感内容都会先问过你。送去推理的资料用完即弃，不会被保存。"
         >
           <SegmentedControl
             ariaLabel="推理传输策略"
@@ -611,14 +662,12 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
       <SettingsBlock
         icon="list"
         title="安全审计"
-        desc="每一次传输与执行都留痕，且留痕本身可以被校验 —— 这一块没有开关"
+        desc="每一次传输与执行都留下记录，记录本身也能验真。这一块没有开关"
       >
         <FactRow label="记录范围" value="每次上下文传输、每次工具执行、每次人工决定" />
-        <FactRow label="完整性" value="哈希链：每条记录接在上一条的哈希之后，改一条后面全对不上" />
-        <FactRow label="查看" value="在项目的「审计」板块查看，并可在本机重算校验" />
-        <p className="set-note">
-          审计不落原文：记录里是内容的哈希与字节数，不是内容本身。
-        </p>
+        <FactRow label="防篡改" value="每条记录都接在上一条后面，改动任何一条都会被发现" />
+        <FactRow label="查看" value="在项目的「审计」板块查看，可随时验真" />
+        <p className="set-note">记录里只有内容的指纹，不含内容本身。</p>
       </SettingsBlock>
     </>
   );
@@ -693,7 +742,7 @@ function ConnectorsSection({ api }: { api: Api }) {
     <SettingsBlock
       icon="plugs-connected"
       title="连接器管理"
-      desc="来源管理：添加、测试、授权本机 MCP 连接器（局域网 / 私有系统）"
+      desc="把局域网或自有系统接进来，供智能体取用"
       aside={
         unavailable ? undefined : (
           // 走地址，不是换状态：添加页有自己的地址，返回是真的返回（第 5 条）。
@@ -839,7 +888,7 @@ function ConnectorCard({
           <span className="connector-card-tools-label">工具清单</span>
           {/* 概要说清「这份清单是干嘛的」，不是重复标题（owner 2026-09-16：
               「暴露的工具」不够人话）。≤30 字，独占一行、撑满容器宽度。 */}
-          <p className="connector-card-tools-caption">契约里声明了同名工具才能调用</p>
+          <p className="connector-card-tools-caption">智能体声明过同名工具才能调用</p>
           <div className="connector-card-tools-grid">
             {c.tools.map((t) => (
               <code key={t} className="connector-tool-chip">
@@ -923,7 +972,7 @@ function AddConnectorPage({ api }: { api: Api }) {
     <SettingsBlock
       icon="plugs-connected"
       title="添加连接器"
-      desc="一个 MCP 服务器：本机启动命令（stdio），或已经在跑的地址（Streamable HTTP）。先测一次，再决定启用还是暂存"
+      desc="填本机的启动命令，或已经在运行的服务地址。先测一次，通过了再启用"
       aside={
         <Button variant="ghost" size="sm" onClick={() => go("#settings/connectors")}>
           返回列表
@@ -939,12 +988,12 @@ function AddConnectorPage({ api }: { api: Api }) {
           value={transport}
           onChange={(e) => switchTransport(e.target.value === "streamable_http" ? "streamable_http" : "stdio")}
         >
-          <option value="stdio">stdio · 本机启动命令</option>
+          <option value="stdio">本机启动命令</option>
           <option value="streamable_http">streamable_http · 已在跑的地址</option>
         </NativeSelect>
       </Row>
       {transport === "streamable_http" ? (
-        <Row label="地址" note="http 或 https；这条服务要实现 MCP 的 Streamable HTTP 传输。">
+        <Row label="地址" note="以 http 或 https 开头；这条服务需支持 Streamable HTTP。">
           <Input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -957,7 +1006,7 @@ function AddConnectorPage({ api }: { api: Api }) {
             <Input
               value={command}
               onChange={(e) => setCommand(e.target.value)}
-              placeholder="如 node，或 MCP 服务器可执行文件的完整路径"
+              placeholder="如 node，或可执行文件的完整路径"
             />
           </Row>
           <Row label="参数" note="空格分隔，可以留空。">
@@ -965,7 +1014,7 @@ function AddConnectorPage({ api }: { api: Api }) {
           </Row>
         </>
       )}
-      <Row label="来源种类" note="契约里声明 lan / private 的上下文类型才能绑到它。">
+      <Row label="来源种类" note="只有声明过局域网 / 私有来源的资料类型才能绑到它。">
         <NativeSelect
           aria-label="来源种类"
           value={source}
@@ -1001,7 +1050,7 @@ function AddConnectorPage({ api }: { api: Api }) {
               <span className="mono"> {probe.tools.join("、")}</span>
             </>
           ) : (
-            "，但对方没有报出任何工具 —— 契约里 provider: connector 的工具会接不上"
+            "，但对方没有报出任何工具 —— 要用它提供工具的功能会接不上"
           )}
         </p>
       )}
@@ -1012,7 +1061,7 @@ function AddConnectorPage({ api }: { api: Api }) {
       )}
       {failed && <div className="update-line update-line--warn">{failed}</div>}
       <p className="set-note">
-        签名信任锚就位前，正式版会拒绝安装并说明原因（TD-036）；测试本身不落盘，
+        正式版只安装经过签名的连接器，装不了时会说明原因；测试本身不保存任何东西，
         {transport === "streamable_http" ? "只是发一次握手请求。" : "起一下就结束。"}
       </p>
     </SettingsBlock>
@@ -1267,8 +1316,8 @@ function DatabaseSection() {
     <div className="card">
       <EmptyState
         icon="table"
-        title="功能暂未开通"
-        description="外部数据库接入还没有开放。业务数据当前全部在本机的加密库里（通用设置 › 存储位置）；要把局域网或私有服务的数据带进上下文，先用「连接器」那条路。"
+        title="暂未开放"
+        description="外接数据库还在开发中。眼下要把局域网或自有系统的数据带进来，请用「连接器」。"
       />
     </div>
   );
@@ -1314,6 +1363,19 @@ function DatabaseSection() {
  * 否定，同 `capabilitySurface` 的纪律。要在开发态看这一支，设
  * `RUYIN_CODE_SIGNING=unsigned`。
  */
+/**
+ * `win32-x64` 是给程序看的写法。用户要认出的是「我这台是 Windows、64 位」。
+ * 认不出来的组合就原样显示——**编一个好听的名字比显示原值更糟**。
+ */
+function describePlatform(system: SystemInfo | null): string | undefined {
+  if (!system) return undefined;
+  const os =
+    { win32: "Windows", darwin: "macOS", linux: "Linux" }[system.platform] ??
+    system.platform;
+  const arch = { x64: "64 位", arm64: "ARM 64 位" }[system.arch] ?? system.arch;
+  return `${os} · ${arch}`;
+}
+
 function UpdatesSection({
   system,
   updateCheck,
@@ -1328,7 +1390,6 @@ function UpdatesSection({
       <SettingsBlock
         icon="info"
         title="当前版本"
-        desc="这台机器上正在跑的是哪一版"
         aside={
           <TooltipProvider>
             <Tooltip>
@@ -1351,50 +1412,35 @@ function UpdatesSection({
           </TooltipProvider>
         }
       >
-        <FactRow label="运行时" value={system ? `Runtime ${system.version}` : undefined} mono />
-        <FactRow label="界面" value={`UI ${UI_VERSION}`} mono />
-        <FactRow label="平台" value={system ? `${system.platform}-${system.arch}` : undefined} mono />
-        <FactRow label="启动时间" value={system?.startedAt} mono />
+        <FactRow label="运行环境" value={system?.version} mono />
+        <FactRow label="界面" value={UI_VERSION} mono />
+        <FactRow label="系统" value={describePlatform(system)} />
+        <FactRow label="本次启动" value={system?.startedAt} mono />
       </SettingsBlock>
 
-      {/* 这一句的理由**换到第三个版本了**，前两个都随实现变化而过期：
-          ① 「随下载与安装一并开放」—— 那两样开放之后它没跟着改；
-          ② 「切换渠道会连带允许降级」—— 那是 electron-updater 的 `channel`
-             setter 副作用，而 electron-updater 已随自动更新一并拆掉；
-          ③ 现在：本机只发 stable，切到 beta 那边**没有包**，检查会 unreachable。
-          之所以把这段历史留着：一处解释性文案连着两次比它解释的东西活得更久，
-          说明它值得被当成会过期的东西看待，而不是写完就忘。 */}
-      <SettingsBlock
-        icon="list"
-        title="更新渠道"
-        desc="从哪个渠道问新版本。当前只发布 stable —— 别的渠道那边还没有包，切过去检查会查不到"
-      >
-        {/* 名称与控件同一行、列宽与别处同一套（owner 2026-09-04 追加）：
-            这里原先用的是纵向那套旧行，于是整个设置页只有这一处是两行。 */}
-        <Row label="渠道">
-          <NativeSelect value="stable" disabled>
-            <option value="stable">stable（正式）</option>
-          </NativeSelect>
-        </Row>
-      </SettingsBlock>
-
+      {/* 「更新渠道」原先是独立一块，里面只有一个**停用的下拉框、一个选项**，
+          外加一句解释为什么别的渠道选不了（那句话把发布现状端给了用户）。一个
+          选不了的选择不是选择 —— 收成下面这一行事实。将来真有第二个渠道，再
+          让它长回一个能选的控件（owner 2026-09-17：没有价值的可以删）。 */}
       <SettingsBlock
         icon="package"
         title="安装方式"
-        desc="本应用不会自动下载或自动安装 —— 更新由你自己决定什么时候装"
+        desc="不会自动下载或安装，什么时候更新由你决定"
       >
-        <FactRow label="检查" value="手动点一下，或开着「自动检查」时每次启动软件问一次" />
-        <FactRow label="下载" value="浏览器下载，安装包落在你的下载目录" />
-        <FactRow label="安装" value="双击安装包，覆盖安装，业务数据不动" />
+        {/* 渠道来自**刚查过的那份结果**，不是写死的字面量：写死的话，将来出了
+            测试版渠道，界面会一口咬定「正式版」而用户正装着测试包（TD-021）。 */}
+        <FactRow label="更新渠道" value={channelLabel(updateCheck.result?.channel)} />
+        <FactRow label="检查" value="手动点「检查更新」，或开着「自动检查」时每次启动查一次" />
+        <FactRow label="下载" value="在浏览器里下载，安装包保存到你的下载文件夹" />
+        <FactRow label="安装" value="双击安装包覆盖安装，你的数据不受影响" />
         {system?.codeSigning === "unsigned" && (
           <p className="set-callout set-callout--warning">
             <Icon name="warning" size="sm" />
             <span>
-              <strong>这个安装包没有做代码签名。</strong>
-              首次安装时 Windows 的 SmartScreen 通常会弹一个蓝色提示框：点「更多信息」，再点
-              「仍要运行」即可继续。但开着「智能应用控制」的电脑会直接拦下下载来的安装包，
-              双击没有任何反应 —— 先右键安装包 →「属性」→ 勾选「解除锁定」，再运行。
-              请从 Vxture 官方下载页取安装包，并核对 SHA256。
+              <strong>这个版本还没有数字签名。</strong>
+              安装时 Windows 可能会先弹一个提示框，点「更多信息」→「仍要运行」可以继续。
+              少数开启了「智能应用控制」的电脑会直接拦下它，双击没有反应 —— 这种情况请等
+              已签名的版本。请只从 Vxture 官方下载页获取安装包。
             </span>
           </p>
         )}
@@ -1479,11 +1525,11 @@ function AboutSection({
       <SettingsBlock
         icon="cpu"
         title="本机配置"
-        desc="仅用于确定本机运行环境，只在本机展示，不上传、不计费、不进遥测"
+        desc="只在这台电脑上显示，不会上传"
       >
         {hardwareUnavailable ? (
           <p className="text-body-sm text-muted-foreground">
-            本机固件信息暂不可用（守护进程未提供这一项，不影响其它功能）。
+            暂时读不到本机配置，不影响其它功能。
           </p>
         ) : (
           <>
@@ -1594,7 +1640,7 @@ const COMPONENT_STATE: Record<ComponentState, string> = {
   "too-large": "比清单说的大",
   "license-missing": "解压后缺许可证文件，已回滚",
   "refused-origin": "来源不在允许的名单里，请求没有发出",
-  "path-too-long": "落盘路径太长（Windows MAX_PATH）",
+  "path-too-long": "保存路径太长",
   cancelled: "已取消",
   failed: "获取失败",
 };
@@ -1911,8 +1957,7 @@ function SkillsSection({ api }: { api: Api }) {
       <p className="cap-sync">
         <Icon name="shield-check" size="sm" aria-hidden />
         <span>
-          能力供给与 <strong>Vxture</strong> 云端 <strong>Runos</strong> 同步，本机提供
-          <strong>Runtime</strong> 执行环境。
+          能力供给与 <strong>Vxture</strong> 云端 <strong>Runos</strong> 同步，本机提供运行环境。
         </span>
         {routing && (
           <span className="cap-sync-tags">
@@ -1929,7 +1974,7 @@ function SkillsSection({ api }: { api: Api }) {
         collapsible
         count={items.length}
         title="本机技能"
-        desc="本机装着的指令包（Agent Skills）：预置 → 产品分发 → 用户 → 项目，同名近者优先。只有产品在契约里声明了的任务能读到它们"
+        desc="这台电脑上装好的技能包。智能体只能用到它自己声明过的那些"
         aside={
           unavailable ? undefined : (
             // 筛选紧挨着刷新按钮、一起右对齐（owner 2026-09-15）：原来这个筛选是
@@ -2011,7 +2056,7 @@ function SkillsSection({ api }: { api: Api }) {
         collapsible
         count={tools?.length ?? 0}
         title="本机工具"
-        desc="可执行的能力：运行时内建的、已装连接器暴露的、预置清单登记的 MCP 服务器。每一次调用都过 Tool Gate"
+        desc="智能体在这台电脑上能做的事。每一次调用都要过你设的权限"
         aside={
           tools && tools.length > 0 ? (
             <FilterMenu
@@ -2026,7 +2071,7 @@ function SkillsSection({ api }: { api: Api }) {
         {tools === null ? (
           <p className="set-note">…</p>
         ) : tools.length === 0 ? (
-          <p className="set-note">没有工具登记册。</p>
+          <p className="set-note">这台电脑上还没有可用的工具。</p>
         ) : (
           <>
             {/* 常驻的一句事实：随包的与要获取的各多少（按登记册全量算，不随筛选变——
@@ -2133,8 +2178,8 @@ function SkillsSection({ api }: { api: Api }) {
           icon="cloud"
           collapsible
           {...(catalog.source.total === undefined ? {} : { count: catalog.source.total })}
-          title="云端能力清单 RUNOS"
-          desc="这是平台 Runos 能力目录的清单，不是安装：条目不会下载到本机，本机能用什么以上面的技能与工具为准。"
+          title="云端能力清单"
+          desc="平台上有哪些能力，只作了解。这里的条目不会装到本机 —— 本机能用什么，看上面的技能与工具"
           aside={
             <>
               {/* 筛选与工具板块同一个组件（owner 2026-09-15：「多维度筛选下拉」）。
@@ -2222,7 +2267,7 @@ function modelsStateOf(e: unknown): ModelsState {
     if (e.status === 403) return { kind: "message", text: e.message };
     if (e.status === 401) return { kind: "message", text: "登录平台后才能查看本工作区的模型。" };
     // 没接平台的装配：会话没配（503），或整组路由都不在（404）—— 对用户是同一件事。
-    if (e.status === 404 || e.status === 503) return { kind: "message", text: "这套装配没有接平台，没有模型可展示。" };
+    if (e.status === 404 || e.status === 503) return { kind: "message", text: "尚未连接平台，暂时没有可展示的模型。" };
   }
   return { kind: "failed", text: `这次没从平台取到模型：${(e as Error).message}` };
 }
@@ -2249,10 +2294,10 @@ function ModelsSection({ api, system }: { api: Api; system: SystemInfo | null })
       title="平台模型服务"
       // 一句话说完（owner 2026-09-15：原句太长，标题行放不下会回行）。「本机不配置、
       // 不调用模型」这句边界不丢——挪到下面正文里单独一行，不挤在标题行的说明里。
-      desc="本工作区在 Atlas 上被授权的模型。权威在平台，本机只展示。"
+      desc="本工作区可用的模型，由平台授权，这里只作展示"
       {...(state.kind === "ready" ? { count: state.models.length } : {})}
     >
-      <p className="set-note text-muted-foreground">本机不配置、不调用模型；用量与配额在平台查看。</p>
+      <p className="set-note text-muted-foreground">用量与配额请在平台查看。</p>
       {state.kind === "loading" && <p className="set-note">正在从平台读取模型…</p>}
       {state.kind === "message" && <p className="set-note">{state.text}</p>}
       {state.kind === "failed" && (
@@ -2265,7 +2310,7 @@ function ModelsSection({ api, system }: { api: Api; system: SystemInfo | null })
       )}
       {state.kind === "ready" &&
         (state.models.length === 0 ? (
-          <p className="set-note">本工作区还没有被授权使用的模型。</p>
+          <p className="set-note">本工作区还没有可用的模型。</p>
         ) : (
           <ul className="row-list" aria-label="平台模型服务">
             {state.models.map((m) => (
@@ -2369,7 +2414,7 @@ function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | nul
     <SettingsBlock
       icon="cpu"
       title="私有模型服务"
-      desc="接入你自己部署的模型，不经 Atlas。企业版 / 私有化部署特性。"
+      desc="接入你自己部署的模型，不经过平台。企业版 / 私有化部署可用"
     >
       {li === undefined ? (
         /* 还没读到 /system。不说「未开通」—— 那是此刻并不知道的事实。 */
@@ -2381,8 +2426,8 @@ function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | nul
             <StatusBadge tone="neutral">未开通</StatusBadge>
           </div>
           <p className="set-note text-muted-foreground">
-            开通后可接入自部署的模型（Ollama、LM Studio、vLLM 等）。推理上下文不经 Atlas、
-            不出你自己的网络；模型由你自己部署与维护。开通由企业版 / 私有化部署提供，本机不自行开启。
+            开通后可接入你自己部署的模型（Ollama、LM Studio、vLLM 等）。送去推理的资料
+            不经过平台、不出你自己的网络；模型由你自己部署与维护。开通由企业版 / 私有化部署提供。
           </p>
         </>
       ) : (
@@ -2408,8 +2453,8 @@ function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | nul
           {view?.endpoint && (
             <p className="set-note text-muted-foreground">
               {view.endpoint.loopback
-                ? "服务在本机，推理上下文不出这台机器，也不经 Atlas 计量。"
-                : "服务不在本机：推理上下文会离开这台机器，到你指定的那台服务上；不经 Atlas，也不出你自己的网络。"}
+                ? "服务就在本机，送去推理的资料不出这台电脑，也不计入平台用量。"
+                : "服务不在本机：送去推理的资料会离开这台电脑，到你指定的那台服务上；不经过平台，也不出你自己的网络。"}
             </p>
           )}
 

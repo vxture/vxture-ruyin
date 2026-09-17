@@ -55,12 +55,12 @@ export function RuntimeMenu({
   const online = health.ok;
   const signedIn = session?.signedIn === true;
   // 三行的词与原用户面板逐字一致（那一套又与首页第一板块逐字一致）。
-  const runtimeLine = online ? `已就绪${health.version ? ` · Runtime ${health.version}` : ""}` : "未连接";
+  const runtimeLine = online ? `已就绪${health.version ? ` · ${health.version}` : ""}` : "未连接";
   // DPAPI 是主密钥的保护，不是加密算法（见 home.tsx 同处注释）。
   const encryptionLine = system
     ? system.keyProtection === "dpapi"
-      ? "已加密 · SQLCipher"
-      : "开发态 · 主密钥明文"
+      ? "已加密"
+      : "开发用途 · 密钥未受保护"
     : "…";
   const platformLine = signedIn
     ? `已连接${session?.workspace?.name ? ` · ${session.workspace.name}` : ""}`
@@ -75,7 +75,7 @@ export function RuntimeMenu({
           aria-label={online ? `运行时 · ${health.version ?? ""}` : "运行时 · 未连接"}
         >
           <StatusBadge tone={online ? "success" : "danger"} dot>
-            {online ? `Runtime ${health.version ?? ""}` : "未连接"}
+            {online ? `运行环境 ${health.version ?? ""}` : "未连接"}
           </StatusBadge>
           <Icon name="caret-up-down" size="xs" className="app-workspace-caret" />
         </button>
@@ -96,7 +96,7 @@ export function RuntimeMenu({
           <ShellPanelSection>
             {/* 说它是什么、会怎样 —— 一个只会变红的徽标不告诉用户该等还是该动手。 */}
             <p className="text-body-sm text-muted-foreground app-runtime-note">
-              界面暂时连不上本机的运行时，所以拿不到任何数据。桌面应用会自动重连；
+              暂时连不上本机的运行环境，所以读不到数据。应用会自动重连；
               一直连不上的话，关掉 RUYIN 再从开始菜单打开一次。
             </p>
           </ShellPanelSection>

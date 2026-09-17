@@ -55,14 +55,33 @@ export type UpdateCheck =
     }
   /**
    * 没查成。**不是「已是最新」**——把查不到说成最新，正是这个功能上一版做的事。
+   *
+   * 但「没查成」有两种，界面要说的话完全不同，所以这里必须**分开给出**
+   * （owner 2026-09-17）：渠道上压根没有发布过任何版本，与这一次问不到。
+   * 前者对用户就是「已经是最新版本」——他装的确实是现存最新的那一版，没有
+   * 别的可装；后者才是「暂时查不到，稍后再试」。此前两者都落进同一句
+   * 「没查到新版本：feed returned 404」，把**运维事实**端到了用户面前。
+   *
+   * `reason` 留着，但它是**给日志与排障看的**；界面一个字都不渲染，只认
+   * `reasonCode`。
    */
   | {
       status: "unreachable";
       current: string;
+      /** 界面据此选措辞。诊断细节在 `reason` 里，不进界面。 */
+      reasonCode: UpdateUnreachableReason;
       reason: string;
       channel: string;
       checkedAt: string;
     };
+
+/**
+ * - `no-release` —— 这个渠道上没有发布过任何版本（feed 不存在，或存在但没写
+ *   版本号）。用户手上的就是现存最新的那一版，界面说「已是最新版本」。
+ * - `unavailable` —— 这一次没问到：断网、超时、服务端出错、feed 读不动。
+ *   下次可能就好了，界面说「暂时无法检查更新」。
+ */
+export type UpdateUnreachableReason = "no-release" | "unavailable";
 
 export interface UpdateCheckOptions {
   currentVersion: string;
@@ -108,12 +127,23 @@ export async function checkForUpdate(
       headers: { accept: "text/yaml, application/yaml, text/plain" },
     });
     if (!res.ok) {
-      return unreachable(opts.currentVersion, `feed returned ${res.status}`, at, channel);
+      // 404 / 410 = 这个渠道还没发布过东西，不是故障；其余状态码是服务端
+      // 这一刻不对劲，下次可能就好了。
+      const code =
+        res.status === 404 || res.status === 410 ? "no-release" : "unavailable";
+      return unreachable(
+        opts.currentVersion,
+        code,
+        `feed returned ${res.status}`,
+        at,
+        channel,
+      );
     }
     body = await res.text();
   } catch (cause) {
     return unreachable(
       opts.currentVersion,
+      "unavailable",
       `feed unreachable: ${cause instanceof Error ? cause.message : String(cause)}`,
       at,
       channel,
@@ -128,6 +158,7 @@ export async function checkForUpdate(
   } catch (cause) {
     return unreachable(
       opts.currentVersion,
+      "unavailable",
       `feed is not readable YAML: ${cause instanceof Error ? cause.message : String(cause)}`,
       at,
       channel,
@@ -136,7 +167,15 @@ export async function checkForUpdate(
   const latest = typeof parsed.version === "string" ? parsed.version : "";
   if (!latest) {
     // 读不出版本就是没查成。**沉默地当作最新是这个功能原本的毛病。**
-    return unreachable(opts.currentVersion, "feed carries no version", at, channel);
+    // 但 feed 在、里面没有版本号，事实就是这个渠道还没发布过东西 ——
+    // 对用户与 404 是同一件事。
+    return unreachable(
+      opts.currentVersion,
+      "no-release",
+      "feed carries no version",
+      at,
+      channel,
+    );
   }
 
   const releasedAt =
@@ -167,9 +206,17 @@ export async function checkForUpdate(
 
 function unreachable(
   current: string,
+  reasonCode: UpdateUnreachableReason,
   reason: string,
   checkedAt: string,
   channel: string,
 ): UpdateCheck {
-  return { status: "unreachable", current, reason, channel, checkedAt };
+  return {
+    status: "unreachable",
+    current,
+    reasonCode,
+    reason,
+    channel,
+    checkedAt,
+  };
 }

@@ -135,7 +135,7 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
   useEffect(() => {
     if (!open) return;
     if (!session.entitlementsConfigured) {
-      setQuota({ status: "unavailable", reason: "权益服务未接通" });
+      setQuota({ status: "unavailable", reason: "暂时读不到" });
       return;
     }
     let alive = true;

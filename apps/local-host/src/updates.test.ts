@@ -42,7 +42,7 @@ void test("检查：feed 版本更低 → 也算 current，不谎报有更新", 
   assert.equal(r.status, "current");
 });
 
-void test("检查：网络不通 → unreachable，绝不是「已是最新」", async () => {
+void test("检查：网络不通 → unreachable · unavailable，绝不是「已是最新」", async () => {
   const r = await checkForUpdate({
     ...BASE,
     fetchImpl: (async () => {
@@ -50,24 +50,52 @@ void test("检查：网络不通 → unreachable，绝不是「已是最新」",
     }) as unknown as typeof fetch,
   });
   assert.equal(r.status, "unreachable");
+  assert.equal(r.status === "unreachable" ? r.reasonCode : "", "unavailable");
   assert.match(r.status === "unreachable" ? r.reason : "", /unreachable/);
 });
 
-void test("检查：feed 返回 404 / 500 → unreachable", async () => {
-  for (const status of [404, 500]) {
+/**
+ * 404 与 500 都是 `unreachable`，但**分属两档**（owner 2026-09-17）：404 是
+ * 「这个渠道还没发布过东西」，用户手上的就是现存最新的那一版；500 是「服务端
+ * 这一刻不对劲」，下次可能就好了。界面据此说两句不同的话，所以这里必须分开断言
+ * —— 只断言 `status` 会让两者重新合流。
+ */
+void test("检查：feed 返回 404 / 410 → no-release（渠道没发布过）", async () => {
+  for (const status of [404, 410]) {
     const r = await checkForUpdate({ ...BASE, fetchImpl: feed("nope", status) });
     assert.equal(r.status, "unreachable", `status ${status}`);
+    assert.equal(
+      r.status === "unreachable" ? r.reasonCode : "",
+      "no-release",
+      `status ${status}`,
+    );
   }
 });
 
-void test("检查：feed 不是可读 YAML → unreachable", async () => {
-  const r = await checkForUpdate({ ...BASE, fetchImpl: feed("\tversion: [oops\n") });
-  assert.equal(r.status, "unreachable");
+void test("检查：feed 返回 5xx / 403 → unavailable（这一次没问到）", async () => {
+  for (const status of [403, 500, 502]) {
+    const r = await checkForUpdate({ ...BASE, fetchImpl: feed("nope", status) });
+    assert.equal(r.status, "unreachable", `status ${status}`);
+    assert.equal(
+      r.status === "unreachable" ? r.reasonCode : "",
+      "unavailable",
+      `status ${status}`,
+    );
+  }
 });
 
-void test("检查：feed 里没有版本号 → unreachable，不静默当作最新", async () => {
+void test("检查：feed 不是可读 YAML → unavailable", async () => {
+  const r = await checkForUpdate({ ...BASE, fetchImpl: feed("\tversion: [oops\n") });
+  assert.equal(r.status, "unreachable");
+  assert.equal(r.status === "unreachable" ? r.reasonCode : "", "unavailable");
+});
+
+void test("检查：feed 里没有版本号 → no-release，不静默当作最新", async () => {
   const r = await checkForUpdate({ ...BASE, fetchImpl: feed("files: []\n") });
   assert.equal(r.status, "unreachable");
+  // feed 在、里面没有版本号 —— 事实就是这个渠道还没发布过东西，与 404 同档。
+  // 状态**仍然不是 `current`**：它是「没查成」，只是对用户说的话一样。
+  assert.equal(r.status === "unreachable" ? r.reasonCode : "", "no-release");
   assert.match(r.status === "unreachable" ? r.reason : "", /no version/);
 });
 

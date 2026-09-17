@@ -25,7 +25,7 @@ import {
 } from "@vxture/design-system";
 import { THIRD_PARTY, type ThirdPartyEntry } from "./third-party-list";
 
-const PART_LABEL: Record<string, string> = { daemon: "运行时", ui: "界面", shell: "桌面壳" };
+const PART_LABEL: Record<string, string> = { daemon: "运行环境", ui: "界面", shell: "桌面应用" };
 
 export function ThirdPartyNotices({ entries = THIRD_PARTY }: { entries?: ThirdPartyEntry[] }) {
   const [open, setOpen] = useState(false);
@@ -43,10 +43,8 @@ export function ThirdPartyNotices({ entries = THIRD_PARTY }: { entries?: ThirdPa
           <DialogHeader>
             <DialogTitle>随包第三方组件许可</DialogTitle>
             <DialogDescription>
-              RUYIN 本身是闭源商业软件。以下 {entries.length} 个是随安装包分发的第三方开源组件 ——
-              列在这里是它们的许可证要求的署名。许可证全文在安装目录的
-              resources\THIRD-PARTY-NOTICES.txt；Chromium 的在安装目录下的 LICENSES.chromium.html。
-              技能与工具的许可证逐条在「能力平台」页。
+              以下 {entries.length} 个是随 RUYIN 一起分发的第三方开源组件，列在这里是它们的
+              许可证要求的署名。许可证全文在安装目录里；技能与工具的许可证逐条写在「能力平台」页。
             </DialogDescription>
           </DialogHeader>
           <div className="third-party-scroll">

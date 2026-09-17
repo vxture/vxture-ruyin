@@ -158,9 +158,13 @@ export function UserSlot({
   /**
    * 菜单里那一行（**不是**侧栏那一格）。这里放邮箱是对的：菜单要回答「我登的
    * 是哪个账号」，而它只在点开时出现，不是一直摊在屏幕上。
+   *
+   * 登录正常时**没有兜底文案**（owner 2026-09-17）：原来邮箱和租户名都没有就
+   * 写一句「已登录」——那是纯废话，用户既然看得到自己的名字，当然是登着的。
+   * 没有可写的就不写，这一行整个不出现。
    */
   const subLine = signedIn
-    ? session?.profile?.email ?? session?.org?.name ?? "已登录"
+    ? session?.profile?.email ?? session?.org?.name
     : online
       ? "请重新登录以继续"
       : "未连接";
@@ -202,16 +206,25 @@ export function UserSlot({
           </Button>
         </PopoverTrigger>
         <ShellPanelContent side="top" align="start" sideOffset={10}>
+          {/* **面板里不再放头像**（owner 2026-09-17）：触发这个面板的按钮上就有
+              一个，点开又出现一个同样的，等于同一张脸挨着写了两遍。去掉之后
+              标题与那一行自然左对齐，也不必再为一个 40px 的圆让出缩进。
+
+              贴标只在**不正常**时出现：登录好好的时候写「已登录」是废话，而
+              「登录异常」是用户需要看见的那一种（owner 同一条）。 */}
           <ShellPanelHeader
-            {...(avatarSrc ? { avatarSrc, avatarAlt: displayName } : {})}
-            avatarFallback={displayName.slice(0, 1)}
+            className="user-panel-head"
             title={displayName}
-            titleAside={
-              <StatusBadge tone={signedIn ? "success" : "warning"} dot>
-                {signedIn ? "已登录" : "需重新登录"}
-              </StatusBadge>
-            }
-            metaRows={[{ key: "line", content: subLine }]}
+            {...(signedIn
+              ? {}
+              : {
+                  titleAside: (
+                    <StatusBadge tone="warning" dot>
+                      登录异常
+                    </StatusBadge>
+                  ),
+                })}
+            {...(subLine ? { metaRows: [{ key: "line", content: subLine }] } : {})}
           />
           {!signedIn && (
             <ShellPanelSection>

@@ -46,7 +46,7 @@ void test("PendingInbox: pending rows render, and the trigger's label says how m
   expect(screen.getByRole("button", { name: "2 项等待你确认" })).toBeInTheDocument();
   await openInbox();
   expect(await screen.findByText("某储能电站 EPC 投标")).toBeInTheDocument();
-  expect(screen.getByText("批准一次工具调用")).toBeInTheDocument();
+  expect(screen.getByText("批准一次工具使用")).toBeInTheDocument();
   expect(screen.getByText("城市轨道信号系统投标")).toBeInTheDocument();
   expect(screen.getByText("确认要送出的资料")).toBeInTheDocument();
 });

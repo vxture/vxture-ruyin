@@ -26,6 +26,21 @@ import { Api, type UpdateCheck } from "./api";
 
 const AUTO_CHECK_KEY = "ruyin-update-auto-check";
 
+/**
+ * 渠道名，用用户认得的词说（owner 2026-09-17）。
+ *
+ * **渠道必须写在明面上**（TD-021，`lint:update-policy` 守着）：用户可能正在装
+ * 一个测试版而以为自己用的是正式版。所以要改的只是措辞——`stable` / `beta`
+ * 是发布侧的词，「正式版」「测试版」才是用户读得懂的同一件事。
+ *
+ * 认不出来的值**原样显示**：编一个好听的名字比显示原值更糟，那会把一个未知
+ * 渠道说成正式版。
+ */
+export function channelLabel(channel?: string): string | undefined {
+  if (!channel) return undefined;
+  return { stable: "正式版", beta: "测试版" }[channel] ?? channel;
+}
+
 function readAutoCheck(): boolean {
   try {
     // 缺省开：这是一次不下载、不安装的网络问询，风险很低，而「装好就默认能看到
@@ -121,10 +136,12 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
   if (!result && !failed) return null;
 
   if (failed) {
+    // **不把 `failed` 里的原话端出来**：那是守护进程的报错，对用户没有意义。
+    // 用户能做的只有一件事——过会儿再点一次，所以就说这一件。
     return (
       <div className="set-callout update-notice" role="status">
         <Icon name="warning" size="sm" />
-        <span>检查失败：{failed}</span>
+        <span>暂时无法检查更新，请稍后再试</span>
         <button type="button" className="notice-bar-close" aria-label="关闭提醒" onClick={dismiss}>
           <Icon name="x" size="xs" />
         </button>
@@ -139,12 +156,7 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
         <span>
           有新版本 <span className="mono">{result!.latest}</span>
           （当前 <span className="mono">{result!.current}</span>
-          {result!.channel && (
-            <>
-              ，<span className="mono">{result!.channel}</span> 渠道
-            </>
-          )}
-          ）
+          {channelLabel(result!.channel) && <> · {channelLabel(result!.channel)}</>}）
         </span>
         <span className="update-notice-actions">
           {result!.downloadUrl ? (
@@ -152,8 +164,9 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
               升级
             </Button>
           ) : (
-            // **不拼一个猜出来的地址**：更新源里没写文件名，点下去只会得到 404。
-            <span className="text-body-sm">这次没能拿到安装包地址（更新源里没写文件名）</span>
+            // **不拼一个猜出来的地址**：点下去只会打不开。为什么拿不到是我们
+            // 这边的事，用户只需要知道现在装不了、过会儿再看。
+            <span className="text-body-sm">暂时拿不到安装包，请稍后再试</span>
           )}
           <Button variant="ghost" size="sm" onClick={dismiss}>
             关闭
@@ -163,11 +176,14 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
     );
   }
 
-  if (result!.status === "current") {
+  // 「已是最新版本」有两条路都到这里：比对过、确实没有更新的；以及这个渠道
+  // 压根没发布过东西 —— 后者对用户是同一件事（手上这版就是现存最新的那版），
+  // 所以说同一句话。**分得开的是「这一次没问到」**，那句在下面。
+  if (result!.status === "current" || result!.reasonCode === "no-release") {
     return (
       <div className="set-callout set-callout--success update-notice" role="status">
         <Icon name="check" size="sm" />
-        <span>已是最新（{result!.latest}）</span>
+        <span>已是最新版本</span>
         <button type="button" className="notice-bar-close" aria-label="关闭提醒" onClick={dismiss}>
           <Icon name="x" size="xs" />
         </button>
@@ -175,18 +191,17 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
     );
   }
 
-  // status === "unreachable"：**手动问的要给回应，自动问的不打扰**（owner
-  // 2026-09-16 第三次修正）。本仓当前只有 beta 发布，从没有过 stable 标签，
-  // `checkForUpdate` 默认只问 stable 渠道——在一个从未发布过 stable 的仓库里，
-  // 这一档几乎每次都会命中；自动检查天天弹一条「没查到」除了添堵没有别的
-  // 作用，继续不显示。但用户手动点了「检查更新」——点了按钮却什么都不发生，
-  // 比弹一条「没查到」更糟：那会让人以为按钮坏了。状态本身不折叠进
-  // "current"（不假装已是最新），有没有可见提示只取决于 `manual`。
+  // 剩下的只有 `unavailable`：**这一次没问到**。手动问的要给回应，自动问的
+  // 不打扰（owner 2026-09-16）——点了按钮却什么都不发生，会让人以为按钮坏了；
+  // 而后台自动问不到时弹一条，用户既没要也做不了什么。
+  //
+  // 这里**不写为什么没问到**（owner 2026-09-17）：断网、超时、服务端出错，
+  // 对用户是同一件事，能做的也只有一件——过会儿再点一次。
   if (manual) {
     return (
       <div className="set-callout update-notice" role="status">
         <Icon name="warning" size="sm" />
-        <span>没查到新版本：{result!.reason}</span>
+        <span>暂时无法检查更新，请稍后再试</span>
         <button type="button" className="notice-bar-close" aria-label="关闭提醒" onClick={dismiss}>
           <Icon name="x" size="xs" />
         </button>
@@ -221,12 +236,7 @@ export function UpdateToast({ state }: { state: UpdateCheckState }) {
       <p className="update-toast-body">
         <span className="mono">{result.latest}</span>
         （当前 <span className="mono">{result.current}</span>
-        {result.channel && (
-          <>
-            ，<span className="mono">{result.channel}</span> 渠道
-          </>
-        )}
-        ）
+        {channelLabel(result.channel) && <> · {channelLabel(result.channel)}</>}）
       </p>
       <div className="update-toast-actions">
         {result.downloadUrl ? (
@@ -234,7 +244,7 @@ export function UpdateToast({ state }: { state: UpdateCheckState }) {
             升级
           </Button>
         ) : (
-          <span className="text-body-sm">这次没能拿到安装包地址</span>
+          <span className="text-body-sm">暂时拿不到安装包，请稍后再试</span>
         )}
         <Button variant="ghost" size="sm" onClick={dismiss}>
           关闭

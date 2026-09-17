@@ -56,9 +56,10 @@ export function BrandInfoBlock({
       <p className="about-desc text-body-md text-muted-foreground">
         Vxture AI 原生智能体的本地智能工作环境
       </p>
+      {/* 「Runtime 0.2.0 · win32-x64」是给程序看的写法。这里只留版本号，
+          系统与位数在「设置 › 当前版本」里用用户认得的词写（owner 2026-09-17）。 */}
       <div className="about-runtime mono text-muted-foreground">
-        Runtime {system?.version ?? "…"} · {system?.platform ?? ""}-
-        {system?.arch ?? ""}
+        版本 {system?.version ?? "…"}
       </div>
       <p className="about-copyright text-body-sm text-muted-foreground">
         © 2026 Vxture · 保留所有权利

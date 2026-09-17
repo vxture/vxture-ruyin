@@ -83,7 +83,7 @@ test("ProductSurface: 没有入口或入口解析不了时不装（不自己拼�
 test("ProductSurface: 产品 origin 与工作台同源时拒绝渲染 iframe", () => {
   const same = surface({ origin: window.location.origin, entry: `${window.location.origin}/${SHA}/` });
   const { container } = render(<ProductSurface api={fakeApi()} projectId="prj_1" surface={same} />);
-  expect(screen.getByRole("alert")).toHaveTextContent("同源");
+  expect(screen.getByRole("alert")).toHaveTextContent("出于安全考虑");
   expect(container.querySelector("iframe")).toBeNull();
 });
 
@@ -94,7 +94,7 @@ test("ProductSurface: 产品 origin 与工作台同源时拒绝渲染 iframe", (
 test("ProductSurface: 同源拦截看入口地址本身，不看 origin 字段", () => {
   const lying = surface({ origin: ORIGIN, entry: `${window.location.origin}/${SHA}/` });
   const { container } = render(<ProductSurface api={fakeApi()} projectId="prj_1" surface={lying} />);
-  expect(screen.getByRole("alert")).toHaveTextContent("同源");
+  expect(screen.getByRole("alert")).toHaveTextContent("出于安全考虑");
   expect(container.querySelector("iframe")).toBeNull();
 });
 
@@ -177,7 +177,7 @@ test("ProductTab: 没声明界面（或问不到）→ 说这个产品没有自�
 test("ProductTab: 声明了但还没取回 → 如实说不可用；重新获取走契约拉取，完了再问一遍", async () => {
   const { api, onReload } = renderTab(surface({ available: false, entry: undefined, reason: "not_fetched" }));
   expect(screen.getByText("产品界面暂时不可用")).toBeInTheDocument();
-  expect(screen.getByText(/产品的其余功能照常可用/)).toBeInTheDocument();
+  expect(screen.getByText(/产品其余部分照常可用/)).toBeInTheDocument();
   await userEvent.setup().click(screen.getByRole("button", { name: "重新获取" }));
   expect(api.fetchProduct).toHaveBeenCalledWith("bidproposal");
   await waitFor(() => expect(onReload).toHaveBeenCalledTimes(1));
@@ -194,6 +194,6 @@ test("ProductTab: 重新获取失败时把原因说出来，不再问一遍", as
 
 test("ProductTab: 项目已归档 → 说清产品界面不再装入，不说成「没有界面」", () => {
   renderTab({ productId: "bidproposal", available: false, reason: "archived" });
-  expect(screen.getByText(/项目已归档：产品界面不再装入/)).toBeInTheDocument();
+  expect(screen.getByText(/项目已归档，产品界面不再载入/)).toBeInTheDocument();
   expect(screen.queryByText(/这个产品没有自己的界面/)).not.toBeInTheDocument();
 });
