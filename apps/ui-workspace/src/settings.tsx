@@ -64,6 +64,7 @@ import {
   type HardwareInfo,
   type SessionInfo,
   type SystemInfo,
+  type PrivateModelView,
 } from "./api";
 import { consoleAppBaseOf } from "./platform-base";
 // SectionId/SETTINGS_SECTIONS live in their own module (settings-sections.ts)
@@ -2245,10 +2246,10 @@ function ModelsSection({ api, system }: { api: Api; system: SystemInfo | null })
     <>
     <SettingsBlock
       icon="cpu"
-      title="可用模型"
+      title="平台模型服务"
       // 一句话说完（owner 2026-09-15：原句太长，标题行放不下会回行）。「本机不配置、
       // 不调用模型」这句边界不丢——挪到下面正文里单独一行，不挤在标题行的说明里。
-      desc="模型服务与 Vxture 云端 Atlas 同步，智能体按需调用。"
+      desc="本工作区在 Atlas 上被授权的模型。权威在平台，本机只展示。"
       {...(state.kind === "ready" ? { count: state.models.length } : {})}
     >
       <p className="set-note text-muted-foreground">本机不配置、不调用模型；用量与配额在平台查看。</p>
@@ -2266,7 +2267,7 @@ function ModelsSection({ api, system }: { api: Api; system: SystemInfo | null })
         (state.models.length === 0 ? (
           <p className="set-note">本工作区还没有被授权使用的模型。</p>
         ) : (
-          <ul className="row-list" aria-label="可用模型">
+          <ul className="row-list" aria-label="平台模型服务">
             {state.models.map((m) => (
               <li key={m.modelCode} className="row-item">
                 <span className="row-main">{m.modelName}</span>
@@ -2283,65 +2284,198 @@ function ModelsSection({ api, system }: { api: Api; system: SystemInfo | null })
           </ul>
         ))}
     </SettingsBlock>
-    <LocalInferenceBlock system={system} />
+    <PrivateModelBlock api={api} system={system} />
     </>
   );
 }
 
 /**
- * 本地推理（直连）—— **企业版 / 私有化部署的特性**（RY-100 A18，owner 2026-09-17）。
+ * 私有模型服务（RY-100 A15 / A16 / A18，RY-001 §07 #41）。
  *
- * 三态，缺一不可：
+ * 这一页的第二块。与上面那块的**权威不同，界面要说出来**：
  *
- *   不知道    /system 还没回来。**不显示成「未开通」** —— 把「不知道」说成一个
- *             确定的商业状态，是这一屏最容易犯也最难查的错（与产品卡标
- *             「未接通」同一条纪律，TD-033）。
- *   未开通    订阅版的常态。说清楚它是什么、怎么拿到，而不是假装没有这件事。
- *   已开通    显示接的是哪个模型，并说明这一路的实际含义：推理上下文**不出本机**。
+ *   平台模型服务   权威在平台（工作区在 Atlas 上被授权哪些模型）。
+ *                  **只展示，永远没有配置入口。**
+ *   私有模型服务   **开通**的权威在控制面（A18，企业版 / 私有化特性）；
+ *                  **地址与模型名是本机事实**，可以配。
  *
- * 这里**只展示不配置**：开通与否的权威是控制面（RY-100 §04），运行时不自判；
- * 地址与模型名今天由部署侧给（私有化部署的运维配），不是用户在这一屏填的东西。
+ * 「开通」与「配置」是两件事，不能混成一个开关 —— 三态各说各的话：
+ *
+ *   不知道     /system 还没回来。**不说「未开通」** —— 把「不知道」说成一个
+ *              确定的商业状态，是这一屏最容易犯也最难查的错（同 TD-033）。
+ *   未开通     订阅版的常态。说清它是什么、怎么拿到，**不给表单**。
+ *   已开通     给接入：没配就引导去填，配了就显示接的是什么、可改。
+ *
+ * **不叫「本地推理」**：它未必在本机 —— 企业把 Ollama / vLLM 放在局域网一台
+ * GPU 机器上是最常见的形态。那时上下文确实出了本机，只是不经 Atlas、不出这个
+ * 组织的网络。回环与非回环要分别说（`loopback`），一句话盖过去就是替用户做了
+ * 一个他没做过的承诺。
  */
-function LocalInferenceBlock({ system }: { system: SystemInfo | null }) {
+function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | null }) {
   const li = system?.localInference;
+  const [view, setView] = useState<PrivateModelView | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ baseUrl: "", model: "", apiKey: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      setView(await api.privateModel());
+    } catch {
+      /* 这套装配不提供它（503）。保持 null —— 与「还没读到」一样不下断言。 */
+    }
+  };
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api]);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setView(
+        await api.savePrivateModel({
+          baseUrl: form.baseUrl.trim(),
+          model: form.model.trim(),
+          ...(form.apiKey ? { apiKey: form.apiKey } : {}),
+        }),
+      );
+      setEditing(false);
+      setForm({ baseUrl: "", model: "", apiKey: "" });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setView(await api.clearPrivateModel());
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const provisioned = view?.source === "local" || view?.source === "deployment";
+
   return (
     <SettingsBlock
       icon="cpu"
-      title="本地推理"
-      desc="在本机直接调用自有模型，不经 Atlas。企业版 / 私有化部署特性。"
+      title="私有模型服务"
+      desc="接入你自己部署的模型，不经 Atlas。企业版 / 私有化部署特性。"
     >
       {li === undefined ? (
-        /* 还没读到 /system。不说「未开通」—— 那是一个我们此刻并不知道的事实。 */
+        /* 还没读到 /system。不说「未开通」—— 那是此刻并不知道的事实。 */
         <p className="set-note text-muted-foreground">正在读取运行时状态…</p>
-      ) : li.direct ? (
+      ) : !li.direct && !provisioned ? (
         <>
           <div className="update-line">
-            <span>
-              已接入本地模型
-              {li.model ? (
-                <>
-                  ：<code className="text-body-sm">{li.model}</code>
-                </>
-              ) : null}
-            </span>
-            <StatusBadge tone="success">已开通</StatusBadge>
+            <span>本工作区未开通私有模型服务</span>
+            <StatusBadge tone="neutral">未开通</StatusBadge>
           </div>
-          {/* 这一路真正的分别不是省钱，是边界：RY-100 §07 里「不出域的唯一
-              例外」在这一路被关掉。值得对企业用户明说。 */}
           <p className="set-note text-muted-foreground">
-            这一路的推理上下文不出本机，也不经 Atlas 计量。模型由你自己部署与维护。
+            开通后可接入自部署的模型（Ollama、LM Studio、vLLM 等）。推理上下文不经 Atlas、
+            不出你自己的网络；模型由你自己部署与维护。开通由企业版 / 私有化部署提供，本机不自行开启。
           </p>
         </>
       ) : (
         <>
           <div className="update-line">
-            <span>本工作区未开通本地推理</span>
-            <StatusBadge tone="neutral">未开通</StatusBadge>
+            <span>
+              {view?.endpoint ? (
+                <>
+                  已接入 <code className="text-body-sm">{view.endpoint.model}</code>
+                  {" @ "}
+                  <code className="text-body-sm">{view.endpoint.baseUrl}</code>
+                </>
+              ) : (
+                "已开通，尚未填写服务地址"
+              )}
+            </span>
+            <StatusBadge tone={view?.endpoint ? "success" : "neutral"}>
+              {view?.endpoint ? "已接入" : "待接入"}
+            </StatusBadge>
           </div>
-          <p className="set-note text-muted-foreground">
-            开通后可接入本机自部署的模型（Ollama、LM Studio、vLLM 等），推理上下文不出本机。
-            开通与配置由企业版 / 私有化部署提供，本机不自行开启。
-          </p>
+
+          {/* 边界这一句**按事实说**：回环与非回环是两种部署，不能一句话盖过去。 */}
+          {view?.endpoint && (
+            <p className="set-note text-muted-foreground">
+              {view.endpoint.loopback
+                ? "服务在本机，推理上下文不出这台机器，也不经 Atlas 计量。"
+                : "服务不在本机：推理上下文会离开这台机器，到你指定的那台服务上；不经 Atlas，也不出你自己的网络。"}
+            </p>
+          )}
+
+          {view && !view.editable && (
+            /* 运维选了哪台推理服务，用户不该绕过去 —— 与「预置连接器卸不掉、
+               只能停用」同一条模式。 */
+            <p className="set-note text-muted-foreground">由部署配置，本机不可更改。</p>
+          )}
+
+          {view?.editable && !editing && (
+            <div className="update-line">
+              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                {view.endpoint ? "更改…" : "接入…"}
+              </Button>
+              {view.endpoint && (
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => void disconnect()}>
+                  断开
+                </Button>
+              )}
+            </div>
+          )}
+
+          {editing && (
+            <div className="set-form">
+              <label className="set-field" htmlFor="private-model-base">
+                <span>服务地址</span>
+                <input
+                  id="private-model-base"
+                  value={form.baseUrl}
+                  placeholder="http://127.0.0.1:11434/v1"
+                  onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
+                />
+              </label>
+              <label className="set-field" htmlFor="private-model-name">
+                <span>模型名</span>
+                <input
+                  id="private-model-name"
+                  value={form.model}
+                  placeholder="qwen2.5:14b"
+                  onChange={(e) => setForm({ ...form, model: e.target.value })}
+                />
+              </label>
+              <label className="set-field" htmlFor="private-model-key">
+                {/* 这是**用户自己那台服务的口令**，不是 Vxture 的机密 —— 与填给连接器
+                    的数据库口令同类。「客户端零秘密」管的是后者。落盘随主密钥封存。 */}
+                <span>口令（可选）</span>
+                <input
+                  id="private-model-key"
+                  type="password"
+                  value={form.apiKey}
+                  placeholder="自建服务挂在代理后面时才需要"
+                  onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+                />
+              </label>
+              <div className="update-line">
+                <Button size="sm" disabled={busy} onClick={() => void submit()}>
+                  保存
+                </Button>
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(false)}>
+                  取消
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {error && <p className="set-note text-destructive">{error}</p>}
         </>
       )}
     </SettingsBlock>

@@ -1987,3 +1987,31 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   border-radius: var(--radius-md);
   background: var(--background);
 }
+
+/* 私有模型服务的接入表单（RY-001 §07 #41）。设置页此前没有多字段表单 —— 连接器
+   那一页有自己的布局，这里是块内的一小段，所以单独一组类而不是去改那边。 */
+.set-form {
+  display: grid;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+  max-width: 34em;
+}
+.set-field {
+  display: grid;
+  gap: var(--spacing-2xs);
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+}
+.set-field input {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--body-md-font-size);
+}
+.set-field input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}

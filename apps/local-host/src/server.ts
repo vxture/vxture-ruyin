@@ -60,6 +60,8 @@ import {
   PlatformNotConfiguredError,
   type PlatformService,
 } from "./platform.js";
+import type { PrivateModelStore } from "./private-model.js";
+import { validate as validatePrivateModel } from "./private-model.js";
 import {
   NotSignedInError as SessionNotSignedInError,
   PlatformReadError,
@@ -208,6 +210,11 @@ export interface LocalApiDeps {
    * 并存期间 `platformSession` 是唯一的登录入口，`platform` 只剩权益读那一半。
    */
   platformSession?: PlatformSession;
+  /**
+   * 私有模型服务的接入配置（RY-001 §07 #41）。缺省时那两条路由整个不存在 ——
+   * 「这套装配不提供它」与「提供了但没配」是两件事，不该长得一样。
+   */
+  privateModel?: PrivateModelStore;
   /**
    * 是否要求安装包经 Vxture Registry 副署（§18.2）。缺省 true（安全默认）；
    * 仅开发模式显式置 false 才允许装未签名包。
@@ -1039,6 +1046,57 @@ async function handle(
   }
 
   // GET /system/hardware - 本机固件信息（关于页），懒加载、装配没接就如实 503。
+  /*
+   * 私有模型服务（RY-001 §07 #41）。与 /platform/atlas/models 是这一页的两块：
+   * 那一块是**平台模型服务**（权威在平台，只展示、永远没有配置入口），这一块是
+   * **私有模型服务**（开通在控制面，地址与模型名是本机事实，可以配）。
+   *
+   * 投影里**永远没有口令** —— 它只出守护进程一次，就是写进去那一次。
+   */
+  if (method === "GET" && path === "/models/private") {
+    if (!deps.privateModel) {
+      send(res, 503, apiError("PRIVATE_MODEL_NOT_CONFIGURED", "这套装配不提供私有模型服务"));
+      return;
+    }
+    send(res, 200, deps.privateModel.view());
+    return;
+  }
+  if (method === "PUT" && path === "/models/private") {
+    if (!deps.privateModel) {
+      send(res, 503, apiError("PRIVATE_MODEL_NOT_CONFIGURED", "这套装配不提供私有模型服务"));
+      return;
+    }
+    const body = await readJson(req);
+    const invalid = validatePrivateModel(body as never);
+    if (invalid) {
+      send(res, 400, apiError("REQUEST_MALFORMED", invalid));
+      return;
+    }
+    try {
+      deps.privateModel.save(body as never);
+    } catch {
+      /* 部署侧配了就钉死 —— 运维选了哪台推理服务，用户不该绕过去。这是
+         POLICY_DENIED 而不是 400：请求本身没毛病，是本机策略不许。 */
+      send(res, 403, apiError(REJECTION.POLICY_DENIED, "这台的私有模型由部署配置，本机改不了"));
+      return;
+    }
+    send(res, 200, deps.privateModel.view());
+    return;
+  }
+  if (method === "DELETE" && path === "/models/private") {
+    if (!deps.privateModel) {
+      send(res, 503, apiError("PRIVATE_MODEL_NOT_CONFIGURED", "这套装配不提供私有模型服务"));
+      return;
+    }
+    try {
+      deps.privateModel.clear();
+    } catch {
+      send(res, 403, apiError(REJECTION.POLICY_DENIED, "这台的私有模型由部署配置，本机改不了"));
+      return;
+    }
+    send(res, 200, deps.privateModel.view());
+    return;
+  }
   if (method === "GET" && path === "/system/hardware") {
     if (!deps.hardwareInfo) {
       send(res, 503, apiError("HARDWARE_INFO_NOT_CONFIGURED", "这套装配没有本机固件信息采集"));
