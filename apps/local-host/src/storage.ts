@@ -1,6 +1,6 @@
 ﻿/**
  * SQLite StoragePort - one database per workspace under the data directory
- * (docs/30-design/60-technical-architecture.md section 7.1):
+ * (RY-301 s.03; formerly 30-design/60 section 7.1):
  *
  *   <dataDir>/projects/<id>/project.db
  *

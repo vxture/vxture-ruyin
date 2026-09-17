@@ -7,6 +7,8 @@
 > 文档状态：架构设计基线  
 > 所属平台：Vxture Platform  
 > 关联文档：02 Workspace Runtime Architecture（v0.3）、03 Runtime Contract Design（v0.3）、04 Context Architecture（v0.1）
+>
+> **2026-09-17 对齐说明。** 02 与 03 已退役（原文在 git 历史）；概念层的权威是 RY-100 §02（Runtime Contract 的五个动词）与 RY-203（两级供给）。本文件仍是**工程权威**：字段规范、§15 校验规则（稀疏编号）、包格式与 §18 分发，`contract.test.ts` 直接读它。正文里「03 §n」的引用保留作历史定位。
 
 ---
 

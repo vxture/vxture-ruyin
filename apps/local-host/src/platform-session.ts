@@ -342,17 +342,17 @@ export class PlatformSession {
    * 隔离，**换账号是真实用例**。选它而不是 `prompt=login`：后者每次都逼着重输密码，
    * 对个人桌面应用是纯摩擦。
    *
-   * 这个参数平台侧**只认 `none`、其余静默忽略**（TD-057，open）。owner 2026-09-16
-   * 现场复核：读 auth-bff 的 `oidc.service.ts#authorize()`，`req.prompt` 只在
-   * `=== "none"` 这一支分岔（没有可用会话时回 `login_required`）；除此之外，
-   * 有可用会话一律静默签发授权码（从不弹选择器），没有可用会话一律走普通登录页
-   * （同样从不弹选择器）——`select_account` 这个值本身在 authorize() 里**没有任何
-   * 独立分支**。此前这里写着「平台已在同批实现并公布 prompt_values_supported，
-   * 所以现在它真的生效」，那是没有对着 authorize() 的真实逻辑核实过的误记，
-   * 已删——discovery 元数据公布了不等于处理逻辑接了。
+   * **2026-09-17 订正（RY-103 §02 / 阶段 0a，TD-057 补记四、TD-069 补记四）：这一行是
+   * 「浏览器已登录仍要输账号密码」的真因，要拆。** 此前这里写着「平台只认 `none`、
+   * 其余静默忽略，这一行保留不要拆」——那是对着落后 origin/main 236 个提交的本机
+   * 检出读出来的。vxture-platform `5d38b97c` 的 `auth-bff/src/oidc/oidc.service.ts#authorize()`
+   * 现在是：`forcesInteraction = req.prompt === "login" || req.prompt === "select_account"`，
+   * 命中即 `hasUsableSession = false`——平台**兑现**了这个参数，兑现方式就是
+   * 「有会话也当没有」。于是无条件带它 = 每次登录都要求平台忽略浏览器会话。
    *
-   * **代码里这一行仍然保留，不要拆**：无害、合规，且平台哪天真的在 authorize()
-   * 里给 `select_account` 接上独立分支，这里不用改一个字就自动生效。
+   * 阶段 0a 的改法：正常登录**不带** `prompt`；只有「换账号」这个显式入口才带
+   * `select_account`。`POST /auth/login` 的形状不变。目标态（RY-100 A3）下 RUYIN 是
+   * 自己的 OIDC 客户端，这段握手的对端与身份一起换掉（RY-103 阶段 3）。
    */
   /** 实际在用的会话/读接口基址。启动播报要按这条说话，不按退役变量说话。 */
   get baseUrl(): string {

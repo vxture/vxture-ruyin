@@ -1,6 +1,6 @@
 /**
  * Workspace encryption key management (TD-009; design:
- * docs/30-design/60-technical-architecture.md section 7.3).
+ * RY-301 s.08, formerly 30-design/60 section 7.3).
  *
  *   per-workspace data key (random 32B)
  *       -> wrapped with AES-256-GCM under the master key (<wsDir>/key.enc)

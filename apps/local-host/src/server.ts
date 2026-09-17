@@ -1,6 +1,6 @@
 ﻿/**
  * Local API - loopback-only HTTP surface of the Runtime daemon
- * (docs/30-design/60-technical-architecture.md section 8). Every request
+ * (RY-102; formerly 30-design/60 section 8). Every request
  * except /health must carry the per-session bearer token; the server binds
  * 127.0.0.1 only. WebSocket event stream arrives in a later batch.
  */

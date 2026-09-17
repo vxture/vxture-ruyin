@@ -1,6 +1,6 @@
 ﻿/**
  * Workspace Runtime - workspace-scoped, long-lived kernel surface.
- * Design authority: docs/30-design/10-workspace-runtime.md section 7.
+ * Design authority: RY-100 s.05 and RY-101 s.02 (formerly 30-design/10 section 7).
  *
  * Owns workspace lifecycle (create/open/list), the business state machine
  * (contract-declared, human-confirm transitions enforced), and acts as the

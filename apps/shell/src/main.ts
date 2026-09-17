@@ -492,7 +492,7 @@ async function waitForHealth(timeoutMs = 15_000): Promise<void> {
 }
 
 /**
- * System notifications for tasks parked on a person (10-workspace-runtime:
+ * System notifications for tasks parked on a person (RY-401 s.04 「在等我」要常驻:
  * 系统通知 is the shell's job, not the runtime's).
  *
  * Polls the daemon's own HTTP surface rather than receiving a push from the
