@@ -623,7 +623,19 @@ export interface SystemInfo {
    * 产品卡据此标「未接通」（TD-033）。**缺失 ≠ mock**：拿不到 /system 时是「不知道」，
    * 不是「没接上」。
    */
-  capabilitySurface: "configured" | "mock";
+  capabilitySurface: "configured" | "mock" | "local_model";
+  /**
+   * 直连本地推理（RY-100 A15 / A16 / A18）—— **企业版 / 私有化部署的特性**。
+   *
+   * `direct` 是「这台上真的接上了一个本地模型」，不是「这个租户买没买」。
+   * 两者今天恰好同真同假（公网订阅版一个环境变量都不设），但它们是两件事：
+   * 前者是本机事实，后者是商业状态，权威在控制面（RY-100 §04）。控制面就位后
+   * 这一位由 `desired.policy.localInference.direct` 决定（RY-104 §06）。
+   *
+   * **字段缺席 ≠ 未开通**：拿不到 /system 时是「不知道」，界面不许把不知道
+   * 显示成没开通（与 `capabilitySurface` 同一条纪律）。
+   */
+  localInference?: { direct: boolean; model?: string };
   /**
    * 安装包签没签名。**`unpackaged` 不是「未签名」**：从仓里直接跑时没有安装包
    * 可谈。关于页只在 `unsigned` 时才在底部提醒，签了之后那条自己就没了。

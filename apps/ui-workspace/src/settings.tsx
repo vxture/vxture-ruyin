@@ -132,7 +132,7 @@ export function SettingsView({
       {view === "general" && <SystemSection system={system} api={api} />}
       {view === "connectors" && <ConnectorsSection api={api} />}
       {view === "connectors-add" && <AddConnectorPage api={api} />}
-      {view === "models" && <ModelsSection api={api} />}
+      {view === "models" && <ModelsSection api={api} system={system} />}
       {view === "skills" && <SkillsSection api={api} />}
       {view === "database" && <DatabaseSection />}
       {view === "updates" && <UpdatesSection system={system} updateCheck={updateCheck} />}
@@ -2199,7 +2199,7 @@ function modelsStateOf(e: unknown): ModelsState {
   return { kind: "failed", text: `这次没从平台取到模型：${(e as Error).message}` };
 }
 
-function ModelsSection({ api }: { api: Api }) {
+function ModelsSection({ api, system }: { api: Api; system: SystemInfo | null }) {
   const [state, setState] = useState<ModelsState>({ kind: "loading" });
   const load = async () => {
     setState({ kind: "loading" });
@@ -2215,6 +2215,7 @@ function ModelsSection({ api }: { api: Api }) {
   }, [api]);
 
   return (
+    <>
     <SettingsBlock
       icon="cpu"
       title="可用模型"
@@ -2254,6 +2255,68 @@ function ModelsSection({ api }: { api: Api }) {
             ))}
           </ul>
         ))}
+    </SettingsBlock>
+    <LocalInferenceBlock system={system} />
+    </>
+  );
+}
+
+/**
+ * 本地推理（直连）—— **企业版 / 私有化部署的特性**（RY-100 A18，owner 2026-09-17）。
+ *
+ * 三态，缺一不可：
+ *
+ *   不知道    /system 还没回来。**不显示成「未开通」** —— 把「不知道」说成一个
+ *             确定的商业状态，是这一屏最容易犯也最难查的错（与产品卡标
+ *             「未接通」同一条纪律，TD-033）。
+ *   未开通    订阅版的常态。说清楚它是什么、怎么拿到，而不是假装没有这件事。
+ *   已开通    显示接的是哪个模型，并说明这一路的实际含义：推理上下文**不出本机**。
+ *
+ * 这里**只展示不配置**：开通与否的权威是控制面（RY-100 §04），运行时不自判；
+ * 地址与模型名今天由部署侧给（私有化部署的运维配），不是用户在这一屏填的东西。
+ */
+function LocalInferenceBlock({ system }: { system: SystemInfo | null }) {
+  const li = system?.localInference;
+  return (
+    <SettingsBlock
+      icon="cpu"
+      title="本地推理"
+      desc="在本机直接调用自有模型，不经 Atlas。企业版 / 私有化部署特性。"
+    >
+      {li === undefined ? (
+        /* 还没读到 /system。不说「未开通」—— 那是一个我们此刻并不知道的事实。 */
+        <p className="set-note text-muted-foreground">正在读取运行时状态…</p>
+      ) : li.direct ? (
+        <>
+          <div className="update-line">
+            <span>
+              已接入本地模型
+              {li.model ? (
+                <>
+                  ：<code className="text-body-sm">{li.model}</code>
+                </>
+              ) : null}
+            </span>
+            <StatusBadge tone="success">已开通</StatusBadge>
+          </div>
+          {/* 这一路真正的分别不是省钱，是边界：RY-100 §07 里「不出域的唯一
+              例外」在这一路被关掉。值得对企业用户明说。 */}
+          <p className="set-note text-muted-foreground">
+            这一路的推理上下文不出本机，也不经 Atlas 计量。模型由你自己部署与维护。
+          </p>
+        </>
+      ) : (
+        <>
+          <div className="update-line">
+            <span>本工作区未开通本地推理</span>
+            <StatusBadge tone="neutral">未开通</StatusBadge>
+          </div>
+          <p className="set-note text-muted-foreground">
+            开通后可接入本机自部署的模型（Ollama、LM Studio、vLLM 等），推理上下文不出本机。
+            开通与配置由企业版 / 私有化部署提供，本机不自行开启。
+          </p>
+        </>
+      )}
     </SettingsBlock>
   );
 }
