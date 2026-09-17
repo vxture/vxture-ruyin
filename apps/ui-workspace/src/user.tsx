@@ -23,6 +23,7 @@ import {
   StatusBadge,
 } from "@vxture/design-system";
 import { Api, type SessionInfo } from "./api";
+import { consoleAppBaseOf } from "./platform-base";
 
 /** Poll /auth/session until signedIn flips (login completes in the browser). */
 const LOGIN_POLL_MS = 2000;
@@ -244,7 +245,7 @@ export function UserSlot({
               className="user-panel-row"
               icon="user-circle"
               label="用户中心"
-              href={`${session?.consoleAppBase ?? "https://console.vxture.com"}/profile`}
+              href={`${consoleAppBaseOf(session)}/profile`}
               newTab
               trailingIcon="external-link"
             />
@@ -252,7 +253,7 @@ export function UserSlot({
               className="user-panel-row"
               icon="gauge"
               label="配额用量"
-              href={`${session?.consoleAppBase ?? "https://console.vxture.com"}/quotas`}
+              href={`${consoleAppBaseOf(session)}/quotas`}
               newTab
               trailingIcon="external-link"
             />

@@ -3393,3 +3393,60 @@ void test("GET /platform/atlas/models：只投影展示字段；403 是角色事
     }
   }
 });
+
+/**
+ * 三条平台读把「平台不让这个角色看」与「这一次没取到」分开（0d，RY-103 §02）。
+ *
+ * 此前只有 `/platform/atlas/models` 分了，另外三条直接 `await` —— `PlatformReadError`
+ * 落到兜底分支变成 `500 INTERNAL`，而兜底给的是 `retryable: true`：**一个永远不会
+ * 成功的重试建议**。RY-102 §02 点名的正是这条。
+ *
+ * 这不是假想的路径。平台把 `tenant.billing.read` 授给 owner / manager / readonly，
+ * **`member` 没有**（vxture-platform `5d38b97c`：`2026-09-10-access-console-permission-catalog.sql`
+ * 与 `seed-catalog.mjs` 两处一致）。所以任何一个普通租户成员打开首页，订阅清单
+ * 那一路就会走到这里。权益与配额走 `tenant.quota.read`，`member` 有 —— 产品能用、
+ * 门控正常，只是看不到「还订了什么」。
+ */
+void test("三条平台读：403 是角色事实（不可重试），其余非 2xx 才是「这次没取到」", async () => {
+  const READS = [
+    { path: "/platform/subscribed-products", method: "subscribedProducts", denied: /tenant\.billing\.read/ },
+    { path: "/platform/entitlements", method: "entitlements", denied: /tenant\.quota\.read/ },
+    { path: "/platform/quota-usage", method: "quotaUsage", denied: /tenant\.quota\.read/ },
+  ] as const;
+
+  for (const r of READS) {
+    const rejecting = (status: number) =>
+      ({
+        ...signedInSession(true),
+        [r.method]: async () => {
+          throw new PlatformReadError(`/api/subscription${r.path}`, status);
+        },
+      }) as unknown as PlatformSession;
+
+    // 403：角色看不到。不可重试，且消息点名是哪一条平台权限 —— 不说清楚的话，
+    // 用户与支持只能靠猜「是不是没登录」。
+    let rig = await startServer({ platform: signedInTo("wsp_x"), platformSession: rejecting(403) });
+    try {
+      const res = await fetch(`${rig.base}${r.path}`, { headers: rig.headers });
+      assert.equal(res.status, 403, r.path);
+      const body = (await res.json()) as Record<string, unknown>;
+      assert.equal(body["code"], "POLICY_DENIED", r.path);
+      assert.equal(body["retryable"], false, `${r.path} 的 403 被标成了可重试`);
+      assert.match(String(body["message"]), r.denied, r.path);
+    } finally {
+      closeRig(rig);
+    }
+
+    // 其余非 2xx：这一次的事，重试有意义。
+    rig = await startServer({ platform: signedInTo("wsp_x"), platformSession: rejecting(503) });
+    try {
+      const res = await fetch(`${rig.base}${r.path}`, { headers: rig.headers });
+      assert.equal(res.status, 502, r.path);
+      const body = (await res.json()) as Record<string, unknown>;
+      assert.equal(body["code"], "PLATFORM_READ_FAILED", r.path);
+      assert.equal(body["retryable"], true, r.path);
+    } finally {
+      closeRig(rig);
+    }
+  }
+});

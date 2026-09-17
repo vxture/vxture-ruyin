@@ -29,6 +29,7 @@ import {
   ShellPanelSectionTitle,
 } from "@vxture/design-system";
 import { Api, type QuotaUsage, type SessionInfo } from "./api";
+import { consoleAppBaseOf } from "./platform-base";
 
 export interface QuotaLine {
   key: string;
@@ -126,7 +127,7 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
 
   // 「租户管理」落在 console-bff 本体上，不是官网 consoleBase（owner 2026-09-16
   // audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明）。
-  const consoleAppBase = session.consoleAppBase || "https://console.vxture.com";
+  const consoleAppBase = consoleAppBaseOf(session);
   const tenantName = session.org?.name ?? "未命名租户";
   const workspaceName = session.workspace?.name ?? "未选定工作区";
 
