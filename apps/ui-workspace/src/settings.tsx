@@ -514,6 +514,10 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
             一个换位置。 */}
         <DataDirRow system={system} api={api} />
         <FactRow label="产品目录" value={system?.productsDir} mono />
+        {/* 安装标识（阶段 3a）。和运行日志放在一起，因为它们服务的是同一件事：
+            用户报障时**对得上是哪一台**。刻意不叫「设备 ID」—— 它跟着安装走，
+            重装即换，而且将来限制的是同时在线数不是安装数（RY-100 A10）。 */}
+        <FactRow label="安装标识" value={system?.instanceId} mono />
         {/* 运行日志（TD-066）。**只给入口，不显示路径** —— 路径是壳自己算的
             （Electron 的标准日志位置），守护进程不知道它，界面更不该编一个出来。
             用户报障时要的就是这一下：打开、把文件拖过来。 */}
