@@ -147,10 +147,25 @@ jobs:
           PRE=(); [ "$CHANNEL" = "beta" ] && PRE=(--prerelease)
 
           # 1. The versioned release: immutable record of this exact build.
-          gh release create "$TAG" "${ASSETS[@]}" \
-            --title "Ruyin $VERSION ($CHANNEL, $TAG)" \
-            --notes "Channel: $CHANNEL. Unsigned installer (TD-001). Windows SmartScreen usually warns once: choose More info -> Run anyway. On a machine with Smart App Control on, the downloaded installer is blocked silently instead (double-click does nothing): run Unblock-File on the .exe in PowerShell first. Feed and manifest are the copies also served from the rolling '$CHANNEL' release." \
-            "${PRE[@]}"
+          #
+          # 重跑要能跑通（2026-09-18）。beta-20260918.1 那次：assets 上传到一半
+          # GitHub 的上传端回了一个 HTTP 500（`Error creating asset temp dir`），
+          # 这一步红了；而**重跑死在这一行** —— 版本化的那个 release 已经建出来了，
+          # `gh release create` 于是报「a release with the same tag name already
+          # exists」，发布再也走不完。一次瞬时的上游 500 就把一个渠道钉死了，要人
+          # 手工去删 release 才能重来。
+          #
+          # 改法：建过了就只补传（`--clobber` 覆盖同名的那几件）。**不会掩盖别的错**
+          # —— 只有「这个 tag 的 release 已存在」这一种情况走补传，其余照样红。
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG 已存在（多半是上一次跑到一半断了）—— 补传资产，不重建"
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --title "Ruyin $VERSION ($CHANNEL, $TAG)" \
+              --notes "Channel: $CHANNEL. Unsigned installer (TD-001). Windows SmartScreen usually warns once: choose More info -> Run anyway. On a machine with Smart App Control on, the downloaded installer is blocked silently instead (double-click does nothing): run Unblock-File on the .exe in PowerShell first. Feed and manifest are the copies also served from the rolling '$CHANNEL' release." \
+              "${PRE[@]}"
+          fi
 
           # 2. The rolling channel release: a fixed address whose assets are
           #    always the newest build of the channel. Created once, then its
@@ -162,13 +177,18 @@ jobs:
               --notes "Rolling release: assets are replaced on every $CHANNEL build. Update feed: releases/download/$CHANNEL/latest.yml. For a specific build use its versioned release." \
               "${PRE[@]}"
           fi
+          #    **先传新的，再删旧的**（2026-09-18）。反过来做过一次，代价是实测到的：
+          #    删除跑完、上传中途撞上 GitHub 的 500，于是这个渠道停在「一个安装包都
+          #    没有」的状态上 —— 下载链接 404，更新 feed 也没了，而唯一的提示是
+          #    Actions 里一条红的任务。顺序反过来之后，最坏的结果是渠道上多躺几件
+          #    上一版的资产（下面那一轮会把它们清掉），而不是一件都不剩。
+          gh release upload "$CHANNEL" "${ASSETS[@]}" --clobber
           KEEP=$(for f in "${ASSETS[@]}"; do basename "$f"; done)
           for old in $(gh release view "$CHANNEL" --json assets --jq '.assets[].name'); do
             if ! grep -qx "$old" <<<"$KEEP"; then
               gh release delete-asset "$CHANNEL" "$old" --yes
             fi
           done
-          gh release upload "$CHANNEL" "${ASSETS[@]}" --clobber
           echo "published $TAG and refreshed rolling '$CHANNEL':"
           echo "  https://github.com/${GITHUB_REPOSITORY}/releases/tag/$TAG"
           echo "  https://github.com/${GITHUB_REPOSITORY}/releases/download/$CHANNEL/latest.yml"
