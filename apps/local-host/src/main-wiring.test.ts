@@ -46,7 +46,6 @@
 
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { createServer } from "node:net";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -57,16 +56,13 @@ const MAIN = fileURLToPath(new URL("./main.js", import.meta.url));
 const PRODUCTS = resolve(fileURLToPath(new URL("../../../products", import.meta.url)));
 
 /** 要一个真的空闲端口：写死一个数字会在并行跑测试时偶发地撞车。 */
-async function freePort(): Promise<number> {
-  return new Promise((ok, fail) => {
-    const probe = createServer();
-    probe.on("error", fail);
-    probe.listen(0, "127.0.0.1", () => {
-      const port = (probe.address() as { port: number }).port;
-      probe.close(() => ok(port));
-    });
-  });
-}
+/* freePort() 删了 —— 它是一个 TOCTOU 竞态：先绑 0 号拿到号、关掉、再把号交给
+   子进程去绑，中间那段窗口里另一个并发用例（这套跑在 --test-concurrency=4 下）
+   完全可以从系统拿到同一个号。CI 上就是这么撞出 EADDRINUSE 的，而症状挂在一条
+   毫不相干的日志断言上。
+
+   现在让守护进程**自己去要一个空闲端口**（RUYIN_PORT=0），实际端口从它的启动
+   播报里读回来。没有预绑，也就没有窗口。 */
 
 interface Daemon {
   base: string;
@@ -89,7 +85,6 @@ interface Daemon {
 async function startDaemon(env: NodeJS.ProcessEnv = {}): Promise<Daemon> {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-wiring-"));
   const locationFile = join(tmpdir(), `ruyin-wiring-loc-${process.pid}-${Date.now()}.json`);
-  const port = await freePort();
   const token = "wiring-test-token";
   let out = "";
 
@@ -108,7 +103,8 @@ async function startDaemon(env: NodeJS.ProcessEnv = {}): Promise<Daemon> {
       RUYIN_DATA_DIR: dataDir,
       RUYIN_LOCATION_FILE: locationFile,
       RUYIN_PRODUCTS_DIR: PRODUCTS,
-      RUYIN_PORT: String(port),
+      /* 0 = 「随便给我一个空闲的」。真实端口从下面的播报里读，不预先占坑。 */
+      RUYIN_PORT: "0",
       RUYIN_TOKEN: token,
       // 能力面留空：这套用例问的是接线，不是跑任务。
       RUYIN_CAPABILITY_BASE: "",
@@ -131,7 +127,12 @@ async function startDaemon(env: NodeJS.ProcessEnv = {}): Promise<Daemon> {
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  const base = `http://127.0.0.1:${port}`;
+  /* 从播报里读实际端口。这一行同时是对「播报说真话」的断言：它要是又打回请求
+     的那个值（0），这里立刻拿不到端口，整套用例一起红 —— 比一条专门的断言更难
+     被绕过。 */
+  const listening = /listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(out);
+  if (!listening) throw new Error(`播报里没有可用的端口：\n${out}`);
+  const base = listening[1]!;
   const headers = { authorization: `Bearer ${token}` };
   return {
     base,

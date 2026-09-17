@@ -999,7 +999,10 @@ server.listen(port, "127.0.0.1", () => {
       `[ruyin] tools: bundled ${all.length} server definition(s)${bundledTools.toolsDir ? ` (${bundledTools.toolsDir})` : " (no bundled tools layer)"}, ${launchable.length} launchable, ${bundledTools.enabledIds().length} enabled`,
     );
   }
-  console.log(`[ruyin] listening on http://127.0.0.1:${port}`);
+  /* **播报实际绑上的那个端口，不是请求的那个。** `RUYIN_PORT=0` 是「随便给我
+     一个空闲的」，此时 `port` 就是字面量 0 —— 照它播报等于谎报，而这一行现在会
+     落进日志文件（TD-066），是用户报障时第一眼看的东西。 */
+  console.log(`[ruyin] listening on http://127.0.0.1:${workspacePort}`);
   console.log(`[ruyin] session token: ${token}`);
   if (process.env["RUYIN_SMOKE"] === "1") {
     // **顺序有意义，不是风格。** 壳等的是 PDF 那条自检的标记，等到就宣布通过并退出
