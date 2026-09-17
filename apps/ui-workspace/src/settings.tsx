@@ -139,7 +139,7 @@ export function SettingsView({
       {/* 「设置」两个字已经在标题栏和侧栏里，这里不再写第三遍。 */}
       {error && <NoticeBar message={error} onClose={() => setError(null)} />}
       <UpdateNotice state={updateCheck} />
-      {view === "account" && <AccountSection session={session} />}
+      {view === "account" && <AccountSection session={session} api={api} />}
       {view === "general" && <SystemSection system={system} api={api} />}
       {view === "connectors" && <ConnectorsSection api={api} />}
       {view === "connectors-add" && <AddConnectorPage api={api} />}
@@ -356,7 +356,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
  * 云平台的「个人信息」页（owner 2026-09-03 定：不能只留一个跳转页）。本机只读
  * 会话，不改身份 —— 改在平台改，这里如实写「在线修改」。
  */
-function AccountSection({ session }: { session: SessionInfo | null }) {
+function AccountSection({ session, api }: { session: SessionInfo | null; api: Api }) {
   const t = useT();
   if (!session?.signedIn) {
     return (
@@ -368,7 +368,7 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
             description={t("set.account.signInDesc")}
           />
         </div>
-        <PreferencesBlock />
+        <PreferencesBlock api={api} />
       </>
     );
   }
@@ -450,7 +450,7 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
           </span>
         </div>
       </SettingsBlock>
-      <PreferencesBlock />
+      <PreferencesBlock api={api} />
     </>
   );
 }
@@ -462,7 +462,7 @@ function AccountSection({ session }: { session: SessionInfo | null }) {
  * DS 的 ThemeProvider 自己写进 localStorage（`vx-theme` / `vx-density` /
  * `vx-font-size`），语言这一项由本文件存 `ruyin-language`。
  */
-function PreferencesBlock() {
+function PreferencesBlock({ api }: { api: Api }) {
   const { mode, setMode, density, setDensity, fontSize, setFontSize } = useTheme();
   const t = useT();
   // 语言不再由这一格自己存：它是**整棵树**的状态（换一门语言，屏幕上每一句话
@@ -482,7 +482,13 @@ function PreferencesBlock() {
             多半正读不懂当前这一门。 */}
         <NativeSelect
           value={locale}
-          onChange={(e) => setLocale(e.target.value as Locale)}
+          onChange={(e) => {
+            const next = e.target.value as Locale;
+            setLocale(next);
+            // 写给壳看的那一份（原生对话框、系统通知、搬家那一屏）。写不进去
+            // 不拦人：界面这一侧已经切好了，壳下次启动跟上就是。
+            void api.setLanguage(next).catch(() => {});
+          }}
         >
           {LOCALES.map((l) => (
             <option key={l} value={l}>

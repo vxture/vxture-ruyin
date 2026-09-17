@@ -1067,6 +1067,13 @@ export class Api {
    * 任意目录」的能力。
    */
   openLogDir = () => this.call<{ ok: boolean }>("/ui/open-log-dir", "POST");
+
+  /**
+   * 把界面语言写给守护进程，**只为壳**：原生对话框、系统通知、搬家那一屏都由壳
+   * 出，而壳读不到浏览器的存储。界面自己不靠这条读回来。
+   */
+  setLanguage = (language: string) =>
+    this.call<{ language: string }>("/system/language", "PUT", { language });
   /**
    * 弹系统目录选择框，等用户选完。
    *

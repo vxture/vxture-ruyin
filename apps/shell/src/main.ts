@@ -19,6 +19,7 @@ import {
   shell,
   utilityProcess,
 } from "electron";
+import { shellLocaleOf, shellT, type ShellKey } from "./i18n.js";
 
 import { randomBytes } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
@@ -91,6 +92,25 @@ const locationFile =
   (app.isPackaged
     ? join(app.getPath("userData"), "location.json")
     : join(homedir(), ".ruyin", "location.json"));
+
+/**
+ * 壳说话用哪门语言。界面切语言时经守护进程写进 `location.json`；还没人选过就
+ * 跟操作系统。**只在启动时读一次** —— 壳的这几句话都出现在启动前后，为它装一套
+ * 热更新不值当（切完语言下次启动就跟上了）。
+ *
+ * 读不到文件、字段不对，都按「没设过」处理：一句话说什么语言，不值得为它让
+ * 启动失败。
+ */
+const shellLocale = shellLocaleOf(
+  (() => {
+    try {
+      return (JSON.parse(readFileSync(locationFile, "utf8")) as { language?: unknown }).language;
+    } catch {
+      return undefined;
+    }
+  })(),
+  app.getLocale(),
+);
 /**
  * 数据目录的默认位置：**本地** `%LOCALAPPDATA%\Ruyin\data`（owner 2026-09-05 定）。
  *
@@ -224,7 +244,7 @@ async function pickFolder(parent: BrowserWindow): Promise<void> {
     });
     const start = res.ok ? ((await res.json()) as { start?: string }).start : undefined;
     const picked = await dialog.showOpenDialog(parent, {
-      title: "选择新的数据目录",
+      title: shellT(shellLocale, "pickDataDir"),
       // createDirectory 让用户能当场新建一个空目录 —— 校验要求目标是空的，
       // 没有这一项他得先去资源管理器建好再回来。
       properties: ["openDirectory", "createDirectory"],
@@ -465,7 +485,7 @@ function openMigrationWindow(target: string, bytes?: number): BrowserWindow {
     // 关不掉是有意的：搬家中途关窗会杀掉守护进程，那份副本要被丢弃重来。
     closable: false,
     // 标题写明白它是什么：任务栏上那一条是用户唯一能看到的解释。
-    title: "RUYIN — 正在搬移数据",
+    title: shellT(shellLocale, "migratingTitle"),
     backgroundColor: "#0b0b0c",
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   });
@@ -484,10 +504,14 @@ function openMigrationWindow(target: string, bytes?: number): BrowserWindow {
     .bar.known i{animation:none;transition:width .3s ease}
     #pct{margin-top:2px;color:#e8e8ea;font-size:12px;font-variant-numeric:tabular-nums}
     @keyframes s{0%{transform:translateX(-70px)}100%{transform:translateX(260px)}}
-  </style><div class="box"><h1>正在搬移数据</h1><div class="bar"><i></i></div>
-    <div id="pct">${size ? `约 ${size}` : "正在准备……"}</div>
-    <p>请不要关闭应用。完成后会自动打开。<br>
-    万一中途失败，数据会留在原来的位置，不会丢。</p></div>`;
+  </style><div class="box"><h1>${shellT(shellLocale, "migratingHead")}</h1><div class="bar"><i></i></div>
+    <div id="pct">${
+      size
+        ? shellT(shellLocale, "migratingAbout", { size })
+        : shellT(shellLocale, "migratingPreparing")
+    }</div>
+    <p>${shellT(shellLocale, "migratingNote1")}<br>
+    ${shellT(shellLocale, "migratingNote2")}</p></div>`;
   void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   // 真实进度：守护进程在搬家期间支了一个只答 /health 与 /migration 的小服务
   // （local-host/migration-server.ts）。这里每 500ms 问一次，把那一行字与条宽
@@ -510,7 +534,7 @@ async function paintProgress(win: BrowserWindow): Promise<void> {
       copiedBytes?: number;
       totalBytes?: number;
     };
-    const line = progressLine(p);
+    const line = progressLine(p, shellLocale);
     const pct = progressPercent(p);
     await win.webContents.executeJavaScript(
       `(() => {
@@ -576,12 +600,12 @@ async function waitForHealth(timeoutMs = 15_000): Promise<void> {
  * Only newly-raised confirmations notify. Re-announcing the same checkpoint on
  * every poll would train the user to dismiss the one that mattered.
  */
-const KIND_LABEL: Record<string, string> = {
-  context_confirm: "需要确认要送出的资料",
-  tool_ask: "需要批准一次工具使用",
-  verification_review: "需要人工复核",
+const KIND_KEY: Record<string, ShellKey> = {
+  context_confirm: "contextConfirm",
+  tool_ask: "toolAsk",
+  verification_review: "verificationReview",
   // 产品界面提出、要人确认的推进（ADR-022 片四）：产品只能提，只有人能批。
-  state_transition: "智能体请求推进阶段，需要你确认",
+  state_transition: "stateTransition",
 };
 
 interface PendingRow {
@@ -615,8 +639,10 @@ function watchPending(win: BrowserWindow): void {
     for (const row of diff.toNotify) {
       if (!Notification.isSupported()) continue;
       const n = new Notification({
-        title: `${row.projectName} 在等你`,
-        body: KIND_LABEL[row.kind] ?? "有一处需要你确认",
+        title: shellT(shellLocale, "waitingFor", { project: row.projectName }),
+        body: KIND_KEY[row.kind]
+          ? shellT(shellLocale, KIND_KEY[row.kind]!)
+          : shellT(shellLocale, "somethingToConfirm"),
       });
       // The point of the notification is to get back to the decision, so
       // it is a way there rather than an announcement to acknowledge.

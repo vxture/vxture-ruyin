@@ -42,6 +42,8 @@ function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
 
 function fakeApi(over: Partial<Api> = {}): Api {
   return {
+    /* 切语言时写给壳的那一条。不 stub 的话每条切语言的用例都会撞未定义。 */
+    setLanguage: vi.fn().mockResolvedValue({ language: "zh-CN" }),
     testConnector: vi.fn().mockResolvedValue({ ok: true, tools: [] }),
     activateConnector: vi.fn().mockResolvedValue({}),
     system: vi.fn().mockResolvedValue(systemInfo()),
@@ -388,9 +390,10 @@ void test("偏好设置（在账户之下）: language + the three axes, in that
  * 最后那一步是关键：此前这一格只把值写进 `localStorage`，界面一个字都不会变
  * —— 那时只有一门语言，看不出来。
  */
-void test("偏好设置: 选语言当场生效，并记在这台电脑上", () => {
+void test("偏好设置: 选语言当场生效、记在这台电脑上，并写给壳", () => {
   localStorage.clear();
-  renderSection("account");
+  const api = fakeApi();
+  renderSection("account", api);
   const select = screen.getByRole("combobox");
   // 两门语言都在，而且各用自己那门语言写名字。
   expect(Array.from((select as HTMLSelectElement).options).map((o) => o.textContent)).toEqual([
@@ -400,12 +403,16 @@ void test("偏好设置: 选语言当场生效，并记在这台电脑上", () =
 
   fireEvent.change(select, { target: { value: "en" } });
   expect(localStorage.getItem("ruyin-language")).toBe("en");
+  // 壳读不到浏览器的存储，所以同一下还要写给守护进程 —— 原生对话框、系统通知、
+  // 搬家那一屏都由壳出。
+  expect(api.setLanguage).toHaveBeenCalledWith("en");
   // 当场换掉：区块标题与这一行的名称都成了英文。
   expect(screen.getByText("Language")).toBeInTheDocument();
   expect(screen.queryByText("语言")).not.toBeInTheDocument();
 
   fireEvent.change(screen.getByRole("combobox"), { target: { value: "zh-CN" } });
   expect(localStorage.getItem("ruyin-language")).toBe("zh-CN");
+  expect(api.setLanguage).toHaveBeenCalledWith("zh-CN");
   expect(screen.getByText("语言")).toBeInTheDocument();
 });
 

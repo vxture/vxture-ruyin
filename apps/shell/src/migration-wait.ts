@@ -11,6 +11,8 @@
  * 已经算过（守护进程的 `checkTarget`），随指针一起记下来，壳读它。
  */
 
+import { shellT, type ShellLocale } from "./i18n.js";
+
 /** 按这个速率估时。故意取得保守 —— 机械盘、网络盘、杀毒软件扫描都比它慢。 */
 const BYTES_PER_MS = 2 * 1024; // 约 2 MB/s
 
@@ -46,14 +48,21 @@ export function humanBytes(bytes?: number): string {
  * 两段分开说（复制 / 核对）：核对与复制一样费时间（两边全部字节都要读一遍），
  * 混成一个 0–100% 会让进度条走到一半突然回头，而分开说只是「第二步」。
  */
-export function progressLine(p?: {
-  phase?: "copy" | "verify";
-  copiedBytes?: number;
-  totalBytes?: number;
-}): string {
-  if (!p || !p.totalBytes || p.copiedBytes === undefined) return "正在准备……";
+export function progressLine(
+  p:
+    | {
+        phase?: "copy" | "verify";
+        copiedBytes?: number;
+        totalBytes?: number;
+      }
+    | undefined,
+  locale: ShellLocale = "zh-CN",
+): string {
+  if (!p || !p.totalBytes || p.copiedBytes === undefined) {
+    return shellT(locale, "migratingPreparing");
+  }
   const pct = Math.min(100, Math.floor((p.copiedBytes / p.totalBytes) * 100));
-  const step = p.phase === "verify" ? "正在核对" : "正在复制";
+  const step = shellT(locale, p.phase === "verify" ? "verifying" : "copying");
   return `${step} ${humanBytes(p.copiedBytes)} / ${humanBytes(p.totalBytes)}（${pct}%）`;
 }
 

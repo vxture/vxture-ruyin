@@ -409,6 +409,13 @@ const WRAPPER_CASES: WrapperCase[] = [
   { name: "openDataDir", call: (api) => api.openDataDir(), method: "POST", path: "/ui/open-data-dir" },
   { name: "openLogDir", call: (api) => api.openLogDir(), method: "POST", path: "/ui/open-log-dir" },
   {
+    name: "setLanguage",
+    call: (api) => api.setLanguage("en"),
+    method: "PUT",
+    path: "/system/language",
+    body: { language: "en" },
+  },
+  {
     name: "pickFolder",
     call: (api) => api.pickFolder("C:/data"),
     method: "POST",

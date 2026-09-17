@@ -688,6 +688,10 @@ const server = createLocalApi({
     },
   },
   privateModel,
+  /* 语言写进 location.json —— 壳读的就是那一份（见 data-location.ts 的说明）。 */
+  setLanguage: (language: string) => {
+    writeLocation(locationFile, { ...readLocation(locationFile), language });
+  },
   systemInfo: {
     version: VERSION,
     platform: process.platform,
