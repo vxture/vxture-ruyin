@@ -315,7 +315,13 @@ export interface LocalApiDeps {
      * `MockAIGateway` 的字面量占位输出。界面据此在产品卡上标「未接通」（TD-033）——
      * 「没接上」绝不能看起来像「在工作」，而守护进程日志到不了用户眼前。
      */
-    capabilitySurface: "configured" | "mock";
+    /**
+     * `local_model` = 直连本地模型（企业版 / 私有化，RY-100 A18）。它与
+     * `configured` 的区别对用户是实的：那一路推理上下文**不出本机**。
+     */
+    capabilitySurface: "configured" | "mock" | "local_model";
+    /** 直连本地推理开没开通、开通时用的哪个模型（RY-001 §07 #36）。 */
+    localInference?: { direct: boolean; model?: string };
     /**
      * 这个安装包签没签名（build-info.ts）。**`unpackaged` 不是「未签名」** ——
      * 从仓里直接跑时没有安装包可谈。界面只在明确是 `unsigned` 时才提醒，
