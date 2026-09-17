@@ -88,6 +88,7 @@ import {
   type TFn,
 } from "./i18n";
 import { useSetLocale } from "./locale-provider";
+import { describeError } from "./api-message";
 const UI_VERSION = "0.2.0";
 
 /**
@@ -738,7 +739,7 @@ function ConnectorsSection({ api }: { api: Api }) {
       // 503 = 这套装配没有注册表。这不是错误，是一个事实，单独说。
       if (e instanceof ApiError && e.status === 503) {
         setItems([]);
-        setUnavailable(e.message);
+        setUnavailable(describeError(t, e));
       } else {
         setFailed(String((e as Error).message));
       }
@@ -1916,7 +1917,7 @@ function SkillsSection({ api }: { api: Api }) {
       // 503 = 这套装配没有技能登记册。这是一个事实，不是错误，单独说。
       if (e instanceof ApiError && e.status === 503) {
         setListing({ items: [], layers: [], scannedAt: "" });
-        setUnavailable(e.message);
+        setUnavailable(describeError(t, e));
       } else {
         setFailed(String((e as Error).message));
       }

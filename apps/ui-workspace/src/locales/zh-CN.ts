@@ -779,6 +779,22 @@ export const zhCN = {
   "set.private.apiKey": "口令（可选）",
   "set.private.apiKeyPlaceholder": "自建服务挂在代理后面时才需要",
 
+  /* ── 守护进程的通用错误 → 界面说什么（api-message.ts） ──────────────── */
+  "err.unreachable": "暂时连不上本机的运行环境，请稍后再试",
+  "err.authRequired": "登录状态已失效，请重新打开应用",
+  "err.migrating": "正在搬移数据，请稍候",
+  "err.notConfigured.catalog": "当前版本暂不提供云端能力清单",
+  "err.notConfigured.routing": "当前版本暂不提供云端能力调用",
+  "err.notConfigured.components": "当前版本暂不提供按需获取",
+  "err.notConfigured.connectors": "当前版本暂不提供连接器",
+  "err.notConfigured.hardware": "当前版本暂不提供本机配置信息",
+  "err.notConfigured.privateModel": "当前版本暂不提供私有模型服务",
+  "err.notConfigured.skills": "当前版本暂不提供技能管理",
+  "err.notConfigured.tools": "当前版本暂不提供工具管理",
+  "err.notConfigured.events": "当前版本暂不提供实时通知",
+  "err.notConfigured.platform": "当前版本暂不提供平台登录",
+  "err.notConfigured.language": "当前版本暂不提供语言设置",
+
   /* ── 语言（设置 › 通用设置 › 偏好设置） ──────────────────────────── */
   "prefs.language": "语言",
 } as const;

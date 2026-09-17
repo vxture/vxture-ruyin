@@ -727,7 +727,11 @@ export interface DataDirCheck {
 export class ApiError extends Error {
   constructor(
     readonly status: number,
-    readonly body: { error?: string; message?: string; details?: unknown },
+    /**
+     * 封套原样。**`code` 是界面决定说什么的依据**（见 api-message.ts）：
+     * `message` 同时服务排障的人与最终用户，一句话满足不了两边。
+     */
+    readonly body: { code?: string; error?: string; message?: string; details?: unknown },
   ) {
     super(body.message ?? body.error ?? `HTTP ${status}`);
   }

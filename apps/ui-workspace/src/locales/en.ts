@@ -836,6 +836,22 @@ export const en: Catalog = {
   "set.private.apiKey": "Token (optional)",
   "set.private.apiKeyPlaceholder": "Only needed when your service sits behind a proxy",
 
+  /* ── Generic daemon errors → what the interface says (api-message.ts) ─ */
+  "err.unreachable": "The runtime on this computer is not reachable right now — try again later",
+  "err.authRequired": "Your session has expired; please reopen the app",
+  "err.migrating": "Moving your data; please wait",
+  "err.notConfigured.catalog": "This build does not offer the cloud capability listing",
+  "err.notConfigured.routing": "This build does not offer cloud capability calls",
+  "err.notConfigured.components": "This build does not offer on-demand fetching",
+  "err.notConfigured.connectors": "This build does not offer connectors",
+  "err.notConfigured.hardware": "This build does not offer machine details",
+  "err.notConfigured.privateModel": "This build does not offer your own models",
+  "err.notConfigured.skills": "This build does not offer skill management",
+  "err.notConfigured.tools": "This build does not offer tool management",
+  "err.notConfigured.events": "This build does not offer live notifications",
+  "err.notConfigured.platform": "This build does not offer platform sign-in",
+  "err.notConfigured.language": "This build does not offer a language setting",
+
   /* ── Language ─────────────────────────────────────────────────────── */
   "prefs.language": "Language",
 };
