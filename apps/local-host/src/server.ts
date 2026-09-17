@@ -794,7 +794,7 @@ async function handle(
     // 永远不断的流 —— 作废（TD-059）对它不起作用。桥那一侧见流断了，换张新凭据重连。
     if (method === "GET" && path === "/bridge/events") {
       if (!deps.events) {
-        send(res, 503, apiError("EVENTS_UNAVAILABLE", "此运行时未接事件流"));
+        send(res, 503, apiError("EVENTS_UNAVAILABLE", "当前版本暂不提供实时通知"));
         return;
       }
       const bus = deps.events;
@@ -999,7 +999,7 @@ async function handle(
 
   const auth = req.headers.authorization ?? "";
   if (auth !== `Bearer ${deps.token}`) {
-    send(res, 401, apiError("AUTH_REQUIRED", "缺少或无效的会话令牌"));
+    send(res, 401, apiError("AUTH_REQUIRED", "登录状态已失效，请重新打开应用"));
     return;
   }
 
@@ -1012,7 +1012,7 @@ async function handle(
   // 那条路上的护栏（授权、工作区边界、审计）要重新写一遍。
   if (method === "GET" && path === "/events") {
     if (!deps.events) {
-      send(res, 503, apiError("EVENTS_UNAVAILABLE", "此运行时未接事件流"));
+      send(res, 503, apiError("EVENTS_UNAVAILABLE", "当前版本暂不提供实时通知"));
       return;
     }
     res.writeHead(200, {
@@ -1055,7 +1055,7 @@ async function handle(
    */
   if (method === "GET" && path === "/models/private") {
     if (!deps.privateModel) {
-      send(res, 503, apiError("PRIVATE_MODEL_NOT_CONFIGURED", "这套装配不提供私有模型服务"));
+      send(res, 503, apiError("PRIVATE_MODEL_NOT_CONFIGURED", "当前版本暂不提供私有模型服务"));
       return;
     }
     send(res, 200, deps.privateModel.view());
@@ -1063,7 +1063,7 @@ async function handle(
   }
   if (method === "PUT" && path === "/models/private") {
     if (!deps.privateModel) {
-      send(res, 503, apiError("PRIVATE_MODEL_NOT_CONFIGURED", "这套装配不提供私有模型服务"));
+      send(res, 503, apiError("PRIVATE_MODEL_NOT_CONFIGURED", "当前版本暂不提供私有模型服务"));
       return;
     }
     const body = await readJson(req);
@@ -1085,7 +1085,7 @@ async function handle(
   }
   if (method === "DELETE" && path === "/models/private") {
     if (!deps.privateModel) {
-      send(res, 503, apiError("PRIVATE_MODEL_NOT_CONFIGURED", "这套装配不提供私有模型服务"));
+      send(res, 503, apiError("PRIVATE_MODEL_NOT_CONFIGURED", "当前版本暂不提供私有模型服务"));
       return;
     }
     try {
@@ -1099,7 +1099,7 @@ async function handle(
   }
   if (method === "GET" && path === "/system/hardware") {
     if (!deps.hardwareInfo) {
-      send(res, 503, apiError("HARDWARE_INFO_NOT_CONFIGURED", "这套装配没有本机固件信息采集"));
+      send(res, 503, apiError("HARDWARE_INFO_NOT_CONFIGURED", "当前版本暂不提供本机配置信息"));
       return;
     }
     send(res, 200, await deps.hardwareInfo());
@@ -1110,7 +1110,7 @@ async function handle(
   // 云端通路开没开，以及名字必须带着的那句说明。档位按当前会话的租户 / 工作区取。
   if (method === "GET" && path === "/capabilities/routing") {
     if (!deps.capabilityRouting) {
-      send(res, 503, apiError("CAPABILITY_ROUTING_NOT_CONFIGURED", "这套装配没有能力路由配置"));
+      send(res, 503, apiError("CAPABILITY_ROUTING_NOT_CONFIGURED", "当前版本暂不提供云端能力调用"));
       return;
     }
     const { policy, source, errors } = deps.capabilityRouting();
@@ -1136,7 +1136,7 @@ async function handle(
   // 从未取到时是空列表加一句为什么，不是 404；每条带「本机可运行」，按登记册的事实算。
   if (method === "GET" && path === "/capabilities/catalog") {
     if (!deps.capabilityCatalog) {
-      send(res, 503, apiError("CAPABILITY_CATALOG_NOT_CONFIGURED", "这套装配没有能力清单"));
+      send(res, 503, apiError("CAPABILITY_CATALOG_NOT_CONFIGURED", "当前版本暂不提供云端能力清单"));
       return;
     }
     const { catalog, localFacts } = deps.capabilityCatalog;
@@ -1163,7 +1163,7 @@ async function handle(
   // 失败保留上一份：502 只说这一次没取成，界面照样显示旧的那份并标 stale。
   if (method === "POST" && path === "/capabilities/catalog/refresh") {
     if (!deps.capabilityCatalog) {
-      send(res, 503, apiError("CAPABILITY_CATALOG_NOT_CONFIGURED", "这套装配没有能力清单"));
+      send(res, 503, apiError("CAPABILITY_CATALOG_NOT_CONFIGURED", "当前版本暂不提供云端能力清单"));
       return;
     }
     const body = await readJson(req);
@@ -1179,7 +1179,7 @@ async function handle(
       return;
     }
     if (!deps.platformSession?.signedIn()) {
-      send(res, 401, apiError("AUTH_REQUIRED", "登录平台后才能取能力目录"));
+      send(res, 401, apiError("AUTH_REQUIRED", "请先登录，再查看云端能力清单"));
       return;
     }
     const outcome = await catalog.sync(reason as RefreshReason);
@@ -1237,7 +1237,7 @@ async function handle(
     }
     if (method === "POST" && path === "/auth/login") {
       if (!deps.platformSession) {
-        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "当前版本暂不提供平台登录"));
         return;
       }
       /* `switchAccount` 只跟着**用户按了「换个账号」**这个动作走（0a / RY-102 §03）。
@@ -1272,7 +1272,7 @@ async function handle(
      */
     if (method === "GET" && path === "/platform/subscribed-products") {
       if (!deps.platformSession) {
-        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "当前版本暂不提供平台登录"));
         return;
       }
       await sendPlatformRead(
@@ -1284,7 +1284,7 @@ async function handle(
     }
     if (method === "GET" && path === "/platform/entitlements") {
       if (!deps.platformSession) {
-        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "当前版本暂不提供平台登录"));
         return;
       }
       await sendPlatformRead(
@@ -1298,7 +1298,7 @@ async function handle(
     // 不再按「本机碰巧装了哪几个产品」逐个拼。
     if (method === "GET" && path === "/platform/quota-usage") {
       if (!deps.platformSession) {
-        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "当前版本暂不提供平台登录"));
         return;
       }
       await sendPlatformRead(
@@ -1313,7 +1313,7 @@ async function handle(
     // 不存在」误读，界面这边靠状态码分支去兜首字母图标，204 更准。
     if (method === "GET" && path === "/platform/org-logo") {
       if (!deps.platformSession) {
-        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "当前版本暂不提供平台登录"));
         return;
       }
       const logo = await deps.platformSession.orgLogo();
@@ -1333,7 +1333,7 @@ async function handle(
     // 守护进程。平台只授租户所有者 tenant.model.read：403 是角色事实，不是「这次没取到」。
     if (method === "GET" && path === "/platform/atlas/models") {
       if (!deps.platformSession) {
-        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "未配置平台会话"));
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "当前版本暂不提供平台登录"));
         return;
       }
       await sendPlatformRead(
@@ -1623,7 +1623,7 @@ async function handle(
       send(
         res,
         503,
-        apiError("CONNECTORS_NOT_AVAILABLE", "这套装配没有进程外连接器注册表"),
+        apiError("CONNECTORS_NOT_AVAILABLE", "当前版本暂不提供连接器"),
       );
       return;
     }
@@ -1722,7 +1722,7 @@ async function handle(
   // --- 能力平台（ADR-018）：技能登记册（四层，近者优先）与工具登记册 ---
   if (segments[0] === "skills") {
     if (!deps.skills) {
-      send(res, 503, apiError("SKILLS_NOT_AVAILABLE", "这套装配没有技能登记册"));
+      send(res, 503, apiError("SKILLS_NOT_AVAILABLE", "当前版本暂不提供技能管理"));
       return;
     }
     const project = url.searchParams.get("project") ?? undefined;
@@ -1780,7 +1780,7 @@ async function handle(
   }
   if (method === "GET" && path === "/tools") {
     if (!deps.tools) {
-      send(res, 503, apiError("TOOLS_NOT_AVAILABLE", "这套装配没有工具登记册"));
+      send(res, 503, apiError("TOOLS_NOT_AVAILABLE", "当前版本暂不提供工具管理"));
       return;
     }
     send(res, 200, { items: await deps.tools.list() });
@@ -1793,7 +1793,7 @@ async function handle(
   // （check-update-policy.mjs 钉住那三处）—— 模型的一次工具调用永远不能引发下载。
   if (segments[0] === "components") {
     if (!deps.components) {
-      send(res, 503, apiError("COMPONENTS_NOT_AVAILABLE", "这套装配没有获取通道"));
+      send(res, 503, apiError("COMPONENTS_NOT_AVAILABLE", "当前版本暂不提供按需获取"));
       return;
     }
     if (method === "GET" && segments.length === 1) {

@@ -213,23 +213,25 @@ void test("ProjectPanel: the summary strip reports phase, task counts, resources
   expect(screen.getByText("1 待确认")).toBeInTheDocument();
   expect(screen.getByText("1 运行中")).toBeInTheDocument();
   expect(screen.getByText("1 类 · 1 个授权目录")).toBeInTheDocument();
-  expect(await screen.findByText("链完整")).toBeInTheDocument();
+  expect(await screen.findByText("记录完整")).toBeInTheDocument();
   expect(screen.getByText("标书编写 1.0.0")).toBeInTheDocument();
   expect(screen.getByText("project")).toBeInTheDocument();
   expect(screen.getByText("建于 2026-06-01")).toBeInTheDocument();
   expect(screen.getByText("prj_1")).toBeInTheDocument();
 });
 
-void test("ProjectPanel: a broken hash chain reads as 链断裂 in the summary and 哈希链断裂 in the audit tab", async () => {
+void test("ProjectPanel: 链坏了时摘要带与审计页都写「记录被改动过」", async () => {
   const { verifyChain } = await import("./chain");
   vi.mocked(verifyChain).mockResolvedValueOnce(false);
   const api = fakeApi({ audit: vi.fn().mockResolvedValue([auditEvent()]) });
   render(<ProjectPanel api={api} id="prj_1" tab="audit" />);
-  expect(await screen.findByText("链断裂")).toBeInTheDocument();
-  expect(screen.getByText("哈希链断裂")).toBeInTheDocument();
+  // 摘要带与审计页现在说的是同一句话（owner 2026-09-17：「哈希链」是我们的
+  // 行话），所以断言的是两处都在，而不是两句不同的话。
+  await screen.findAllByText("记录被改动过");
+  expect(screen.getAllByText("记录被改动过")).toHaveLength(2);
 });
 
-void test("ProjectPanel: chain verification starts as 校验中 and resolves to 链完整/哈希链完整 in both the summary and audit tab", async () => {
+void test("ProjectPanel: chain verification starts as 校验中 and resolves to 记录完整 in both the summary and audit tab", async () => {
   let resolveChain: (ok: boolean) => void = () => {};
   const { verifyChain } = await import("./chain");
   vi.mocked(verifyChain).mockReturnValueOnce(
@@ -245,8 +247,8 @@ void test("ProjectPanel: chain verification starts as 校验中 and resolves to 
   expect(screen.getByText("校验中…")).toBeInTheDocument();
 
   resolveChain(true);
-  expect(await screen.findByText("链完整")).toBeInTheDocument();
-  expect(screen.getByText("哈希链完整（本地重算）")).toBeInTheDocument();
+  await screen.findAllByText("记录完整");
+  expect(screen.getAllByText("记录完整")).toHaveLength(2);
 });
 
 void test("ProjectPanel: a load failure surfaces as an error box, not a silent blank panel", async () => {
@@ -262,7 +264,7 @@ void test("ProjectPanel: an unattributed project (no workspaceId) shows the impo
     workspace: vi.fn().mockResolvedValue(projectView({ meta: { ...projectView().meta, workspaceId: undefined } })),
   });
   render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
-  expect(await screen.findByText("该项目尚未归属工作区")).toBeInTheDocument();
+  expect(await screen.findByText("这个项目还没有归入工作区")).toBeInTheDocument();
 
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "导入当前工作区" }));
@@ -274,7 +276,7 @@ void test("ProjectPanel: an attributed project shows no import notice", async ()
   const api = fakeApi();
   render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
   await screen.findByText("标书编写 1.0.0");
-  expect(screen.queryByText("该项目尚未归属工作区")).not.toBeInTheDocument();
+  expect(screen.queryByText("这个项目还没有归入工作区")).not.toBeInTheDocument();
 });
 
 /* ---------------- Checkpoints ---------------- */
@@ -429,7 +431,7 @@ void test("ProjectPanel/Overview: a suspended task reads as paused-not-broken; a
   });
   render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
   await screen.findByText("paused_task");
-  expect(screen.getByText("已暂停（服务暂时不可用）")).toBeInTheDocument();
+  expect(screen.getByText("已暂停（稍后自动继续）")).toBeInTheDocument();
   expect(screen.getByText("some_new_state")).toBeInTheDocument();
 });
 
@@ -458,7 +460,7 @@ void test("ProjectPanel/Overview: exporting reports the file count, chain head, 
   await user.click(exportButton);
 
   expect(await screen.findByText("已导出 2 个文件到 D:\\exports\\prj_1")).toBeInTheDocument();
-  expect(screen.getByText(/尚未签名/)).toBeInTheDocument();
+  expect(screen.getByText(/未签名：/)).toBeInTheDocument();
   expect(api.exportProject).toHaveBeenCalledWith("prj_1", "D:\\exports\\prj_1");
 });
 
@@ -645,7 +647,7 @@ void test("ProjectPanel/Context: 取不回来时说出来，不装作点了没�
 void test("ProjectPanel/Context: 问不到文件区时整段不出现，其余照常", async () => {
   const api = fakeApi({ files: vi.fn().mockRejectedValue(new Error("503")) });
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);
-  await screen.findByText("类型绑定 · Bindings");
+  await screen.findByText("资料来源");
   expect(screen.queryByLabelText("项目文件")).not.toBeInTheDocument();
   expect(screen.queryByText("还没有收进任何原件")).not.toBeInTheDocument();
 });
@@ -727,7 +729,7 @@ void test("ProjectPanel/Context: 底线之下的放宽被拒时，把守护进�
 void test("ProjectPanel/Context: 契约里没有工具时，这一段整段不出现 —— 不解释一件用户没有的东西", async () => {
   const api = fakeApi({ toolPolicy: vi.fn().mockResolvedValue({ items: [] }) });
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);
-  await screen.findByText("类型绑定 · Bindings");
+  await screen.findByText("资料来源");
   expect(screen.queryByLabelText("工具权限")).not.toBeInTheDocument();
 });
 
@@ -735,7 +737,7 @@ void test("ProjectPanel/Context: 问不到工具权限时这一段不出现，�
   const api = fakeApi({ toolPolicy: vi.fn().mockRejectedValue(new Error("503")) });
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);
   // 上下文页的其余部分要照常渲染：一个问不到的分段不该让用户连授权都改不了。
-  await screen.findByText("类型绑定 · Bindings");
+  await screen.findByText("资料来源");
   expect(screen.queryByLabelText("工具权限")).not.toBeInTheDocument();
 });
 
@@ -744,7 +746,7 @@ void test("ProjectPanel/Context: binding a type+root calls api.setBinding and cl
     workspace: vi.fn().mockResolvedValue(projectView({ tasks: [taskDef({ input_types: ["tender_doc"] })] })),
   });
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);
-  await screen.findByText("类型绑定 · Bindings");
+  await screen.findByText("资料来源");
 
   const user = userEvent.setup();
   const rootInput = screen.getByPlaceholderText("已授权文件夹内的路径") as HTMLInputElement;
@@ -761,7 +763,7 @@ void test("ProjectPanel/Context: choosing a non-default context type in the bind
     ),
   });
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);
-  await screen.findByText("类型绑定 · Bindings");
+  await screen.findByText("资料来源");
 
   const user = userEvent.setup();
   await user.selectOptions(screen.getByRole("combobox"), "budget_sheet");
@@ -815,7 +817,7 @@ void test("ProjectPanel/Tasks: a blocked task disables launch and explains why",
     ),
   });
   render(<ProjectPanel api={api} id="prj_1" tab="tasks" />);
-  expect(await screen.findByText(/本机跑不了这个任务/)).toBeInTheDocument();
+  expect(await screen.findByText(/这个任务现在还跑不了/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "启动（自动选择上下文）" })).toBeDisabled();
 });
 
@@ -890,7 +892,7 @@ void test("ProjectPanel/Tasks: instances list newest-first; expanding one reveal
   const user = userEvent.setup();
   await user.click(screen.getByText("new_task"));
   expect(await screen.findByText("完成起草")).toBeInTheDocument();
-  expect(screen.getByText(/来源（Provenance）: 招标文件\.pdf/)).toBeInTheDocument();
+  expect(screen.getByText(/来源：招标文件\.pdf/)).toBeInTheDocument();
 
   // 详情区自己的 onClick 会 stopPropagation——点详情区内部不应该冒泡到卡片
   // 头部，把刚展开的面板又收起来。
@@ -930,12 +932,12 @@ void test("ProjectPanel/Audit: lists events and filters by kind; an unparseable 
   expect(rows().getByText("task.started")).toBeInTheDocument();
 });
 
-void test("ProjectPanel/Audit: an unknown outcome reads as 结果未记录, not silently as success", async () => {
+void test("ProjectPanel/Audit: an unknown outcome reads as 未记录, not silently as success", async () => {
   const api = fakeApi({
     audit: vi.fn().mockResolvedValue([auditEvent({ outcome: "unknown" as AuditEvent["outcome"] })]),
   });
   render(<ProjectPanel api={api} id="prj_1" tab="audit" />);
-  expect(await screen.findByText("结果未记录")).toBeInTheDocument();
+  expect(await screen.findByText("未记录")).toBeInTheDocument();
 });
 
 void test("ProjectPanel/Audit: a genuinely unmapped outcome falls back to the raw string with a neutral tone", async () => {
@@ -998,7 +1000,7 @@ void test("ProjectPanel/Context: no connectors installed -> the connector sectio
   const api = fakeApi({ grants: vi.fn().mockResolvedValue([grant()]) });
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);
   await screen.findByText("C:\\proj\\docs");
-  expect(screen.queryByText("连接器授权 · Connectors")).not.toBeInTheDocument();
+  expect(screen.queryByText("连接器授权")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("经由")).not.toBeInTheDocument();
 });
 
@@ -1008,7 +1010,7 @@ void test("ProjectPanel/Context: an installed, ungranted connector can be grante
     connectors: vi.fn().mockResolvedValue({ items: [crm] }),
   });
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);
-  expect(await screen.findByText("连接器授权 · Connectors")).toBeInTheDocument();
+  expect(await screen.findByText("连接器授权")).toBeInTheDocument();
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "授权连接器" }));
   expect(api.addConnectorGrant).toHaveBeenCalledWith("prj_1", "crm");
@@ -1026,7 +1028,7 @@ void test("ProjectPanel/Context: a granted connector is listed, counted apart fr
     connectors: vi.fn().mockResolvedValue({ items: [crm] }),
   });
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);
-  await screen.findByText("连接器授权 · Connectors");
+  await screen.findByText("连接器授权");
   expect(within(screen.getByLabelText("已授权的连接器")).getByText("crm")).toBeInTheDocument();
   // Already granted -> nothing left to grant, the control is gone.
   expect(screen.queryByRole("button", { name: "授权连接器" })).not.toBeInTheDocument();
@@ -1062,7 +1064,7 @@ void test("ProjectPanel/Context: when /connectors cannot be reached the connecto
   });
   render(<ProjectPanel api={api} id="prj_1" tab="context" />);
   await screen.findByText("rw");
-  expect(screen.queryByText("连接器授权 · Connectors")).not.toBeInTheDocument();
+  expect(screen.queryByText("连接器授权")).not.toBeInTheDocument();
 });
 
 void test("ProjectPanel/Context: with two grantable connectors the chosen one is granted, and an unhealthy one says so in the option", async () => {
@@ -1149,7 +1151,7 @@ void test("产品提出的推进：钉一张确认卡；确认与拒绝都带着
   const api = fakeApi({ stateRequest: vi.fn().mockResolvedValue({ pending: REQUEST }) });
   render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
   expect(await screen.findByText("「标书编写」请求把项目推进到「reviewing」")).toBeInTheDocument();
-  expect(screen.getByText(/产品只能提出，推不推进由你决定/)).toBeInTheDocument();
+  expect(screen.getByText(/智能体只能提出，推不推进由你决定/)).toBeInTheDocument();
 
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "确认推进" }));

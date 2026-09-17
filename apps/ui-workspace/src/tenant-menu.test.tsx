@@ -138,7 +138,7 @@ test("TenantMenu: entitlements not configured, or a failed fetch, each say why -
     <TenantMenu api={fakeApi({ quotaUsage })} session={session({ entitlementsConfigured: false })} />,
   );
   await user.click(screen.getByRole("button", { name: /某工作区/ }));
-  expect(await screen.findByText("权益服务未接通")).toBeInTheDocument();
+  expect(await screen.findByText("暂时读不到")).toBeInTheDocument();
   expect(quotaUsage).not.toHaveBeenCalled();
   a.unmount();
 

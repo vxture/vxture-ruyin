@@ -1935,7 +1935,7 @@ test("bundled tool servers: /connectors lists them, activate starts, deactivate 
 
 // ────────────────── 获取通道（ADR-018 §7.2）：/components ──────────────────
 
-test("components: 这套装配没有获取通道时如实回 503 —— 空列表会被读成「一件可获取的都没有」", async () => {
+test("components: 当前版本暂不提供按需获取时如实回 503 —— 空列表会被读成「一件可获取的都没有」", async () => {
   const rig = await startServer();
   try {
     const res = await fetch(`${rig.base}/components`, { headers: rig.headers });

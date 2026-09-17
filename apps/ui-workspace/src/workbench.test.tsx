@@ -219,7 +219,7 @@ void test("Workbench: 点 RUYIN 字标弹出软件信息面板，只讲本软件
   expect(await screen.findByText("Vxture AI 原生智能体的本地智能工作环境")).toBeInTheDocument();
   // 标题栏自己的 Runtime 徽章也写着「Runtime 0.2.0」——scope 到这个面板自己的
   // `.about-runtime` 上，不跟那一个撞。
-  expect(document.querySelector(".about-runtime")?.textContent).toContain("Runtime 0.2.0 · win32-x64");
+  expect(document.querySelector(".about-runtime")?.textContent).toContain("版本 0.2.0");
   expect(screen.getByText(/保留所有权利/)).toBeInTheDocument();
   expect(screen.getByText("隐私政策").closest("a")).toHaveAttribute(
     "href",
@@ -778,7 +778,7 @@ void test("Header workspace control: icon + name only (no 工作区 label); open
     (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   // 2026-09-04: Runtime sits right after the brand (leading); the tenant menu is on the right,
   // before pending and settings. Document order: brand < Runtime < tenant menu < 设置.
-  const runtime = within(document.querySelector(".app-header-context") as HTMLElement).getByText(/Runtime/);
+  const runtime = within(document.querySelector(".app-header-context") as HTMLElement).getByText(/运行环境/);
   const trailing = document.querySelector(".app-header-trailing") as HTMLElement;
   expect(trailing.contains(trigger)).toBe(true);
   const settings = within(trailing).getByRole("button", { name: "设置" });

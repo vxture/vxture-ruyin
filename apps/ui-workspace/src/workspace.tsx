@@ -76,7 +76,7 @@ const OUTCOME_LABEL: Record<string, string> = {
   success: "成功",
   rejected: "被拒",
   failed: "失败",
-  unknown: "结果未记录",
+  unknown: "未记录",
 };
 const OUTCOME_TONE: Record<string, StatusBadgeTone> = {
   success: "success",
@@ -110,7 +110,7 @@ const TASK_STATE_LABEL: Record<string, string> = {
   verifying: "校验中",
   finalizing: "收尾中",
   waiting_human: "等待确认",
-  suspended: "已暂停（服务暂时不可用）",
+  suspended: "已暂停（稍后自动继续）",
   completed: "已完成",
   failed: "已失败",
   cancelled: "已取消",
@@ -250,10 +250,9 @@ export function ProjectPanel({
       {!view.meta.workspaceId && (
         <div className="notice-box">
           <div className="flex flex-col gap-2xs">
-            <strong>该项目尚未归属工作区</strong>
+            <strong>这个项目还没有归入工作区</strong>
             <span className="text-body-sm text-muted-foreground">
-              它建于工作区归属启用之前。订阅、权益与数据边界都按工作区划分，
-              导入后它才会随工作区一起呈现。
+              它是在工作区启用之前建的。导入之后，它才会跟着当前工作区一起显示。
             </span>
           </div>
           <Button
@@ -427,7 +426,7 @@ function ProjectSummary({
           {audit.length} 条
           {/* 链状态就摆在条数旁边：一个数字不说自己可不可信，等于没说。 */}
           <em className={chainOk === false ? "proj-summary-flag" : "proj-summary-ok"}>
-            {chainOk === null ? "校验中" : chainOk ? "链完整" : "链断裂"}
+            {chainOk === null ? "校验中" : chainOk ? "记录完整" : "记录被改动过"}
           </em>
         </span>
       </div>
@@ -558,8 +557,8 @@ function ExportCard({ api, projectId }: { api: Api; projectId: string }) {
   return (
     <div className="card flex flex-col gap-sm">
       <div className="text-body-sm text-muted-foreground">
-        导出项目档案、契约、业务状态、任务实例与完整审计链。产出文档不在其中
-        —— 那些本来就写在你自己的目录里。目录须已授权。
+        导出这个项目的全部记录：阶段、任务与审计。产出的文档不在其中 ——
+        它们本来就写在你自己的文件夹里。导出目标须是已授权的文件夹。
       </div>
       <div className="row">
         <Input
@@ -589,14 +588,14 @@ function ExportCard({ api, projectId }: { api: Api; projectId: string }) {
           <div className="flex flex-col gap-2xs">
             <strong>已导出 {done.files.length} 个文件到 {done.path}</strong>
             <span className="text-body-sm text-muted-foreground">
-              审计链 {done.chain.events} 条记录，链头 {done.chain.head.slice(0, 12)}…
+              含 {done.chain.events} 条审计记录
             </span>
             {/* 照实说：客户端零密钥，签不了。可验篡改，不可归属 —— 两件事
                 分开说，别让人以为这份导出已经带了身份。 */}
             <span className="text-body-sm text-muted-foreground">
               {done.signed
                 ? "已签名。"
-                : "尚未签名：收件人可以验出它有没有被改过，但无法据此确认它出自谁。"}
+                : "未签名：收件人能验出它有没有被改过，但无法确认它出自谁。"}
             </span>
           </div>
         </div>
@@ -641,7 +640,7 @@ function StateStepper({
                 if (t.confirm === "human") {
                   if (
                     window.confirm(
-                      `状态转换 ${view.businessState} → ${t.to} 需要人工确认，确定执行？`,
+                      `这一步要从「${view.businessState}」推进到「${t.to}」，需要你确认。继续吗？`,
                     )
                   ) {
                     onTransition(t.to, true);
@@ -713,7 +712,7 @@ function ProjectFilesSection({
         // 未授权的路径会被守护进程拒（FILE_NOT_GRANTED）。**把原话给用户** ——
         // 它说清了下一步是「先授权那个文件夹」。
         const body = (cause as { body?: { message?: string } })?.body;
-        setNotice(body?.message ?? "收不进来");
+        setNotice(body?.message ?? "这个文件收不进来");
       });
   };
 
@@ -734,7 +733,7 @@ function ProjectFilesSection({
 
   return (
     <>
-      <SectionHeader level={2} title="项目文件 · Files" icon="archive" />
+      <SectionHeader level={2} title="项目文件" icon="archive" />
       <p className="hint">
         {/* 这是渲染出去的正文，不是注释 —— 别在这儿用 Markdown 的星号，JSX
             不解析它，用户会看见两个星号。要加重就用 <strong>。 */}
@@ -863,13 +862,13 @@ function ToolPolicySection({
         // 底线之下的放宽会被拒（POLICY_DENIED）。**把原话给用户** —— 它说明了
         // 为什么不行、以及还能改到哪儿。一句「操作失败」在这里等于没说。
         const body = (cause as { body?: { message?: string } })?.body;
-        setRefusal(body?.message ?? "改不了这一条");
+        setRefusal(body?.message ?? "这一条改不了");
       });
   };
 
   return (
     <>
-      <SectionHeader level={2} title="工具权限 · Tool policy" icon="shield-check" />
+      <SectionHeader level={2} title="工具权限" icon="shield-check" />
       <p className="hint">
         只对这个项目生效。收紧随时可以；带「底线」标记的那几条不能放宽 ——
         数据发出去收不回来，所以每次都要有人点头。
@@ -967,12 +966,12 @@ function ContextTab({
     : undefined;
   return (
     <>
-      <SectionHeader level={2} title="文件授权 · Grants" icon="folder-open" />
+      <SectionHeader level={2} title="文件授权" icon="folder-open" />
       {folderGrants.length === 0 && (
         <EmptyState
           icon="lock"
           title="尚未授权任何文件夹"
-          description="Runtime 只能访问你显式授权的目录。"
+          description="只能读取你授权过的文件夹，其余一概访问不到。"
         />
       )}
       {/* 一条授权是一行字（路径 + 读写模式）。一条一张卡，等于给一行字配
@@ -1008,7 +1007,7 @@ function ContextTab({
           出现 —— 一个永远空着的板块是在解释一件用户没有的东西。 */}
       {(installed?.length ?? 0) + connectorGrants.length > 0 && (
         <>
-          <SectionHeader level={2} title="连接器授权 · Connectors" icon="plugs-connected" />
+          <SectionHeader level={2} title="连接器授权" icon="plugs-connected" />
           {connectorGrants.length > 0 && (
             <ul className="row-list" aria-label="已授权的连接器">
               {connectorGrants.map((g) => (
@@ -1051,7 +1050,7 @@ function ContextTab({
 
       <ToolPolicySection api={api} projectId={projectId} />
 
-      <SectionHeader level={2} title="类型绑定 · Bindings" icon="plugs-connected" />
+      <SectionHeader level={2} title="资料来源" icon="plugs-connected" />
       {bindings.map((b) => (
         <BindingCard key={b.type} api={api} projectId={projectId} binding={b} />
       ))}
@@ -1235,7 +1234,7 @@ function TaskLauncher({
       </div>
       {blocked && (
         <div className="error-box">
-          本机跑不了这个任务：还没有实现 {def.unrunnable.join("、")}
+          这个任务现在还跑不了，缺少：{def.unrunnable.join("、")}
         </div>
       )}
       <div className="row" style={{ marginTop: 6 }}>
@@ -1335,7 +1334,7 @@ function InstanceCard({ instance }: { instance: TaskInstance }) {
             ))}
           {instance.result && (
             <div className="text-body-sm text-muted-foreground">
-              来源（Provenance）: {instance.result.sources.join(", ")}
+              来源：{instance.result.sources.join("、")}
             </div>
           )}
         </div>
@@ -1366,13 +1365,13 @@ function StateRequestCard({
       tone="warning"
       icon="shield-warning"
       title={`「${productName}」请求把项目推进到「${request.to}」`}
-      description={`当前阶段「${current}」。这一步在产品的契约里要求人确认 —— 产品只能提出，推不推进由你决定。`}
+      description={`当前阶段「${current}」。这一步要你点头才能走 —— 智能体只能提出，推不推进由你决定。`}
       action={
         <div className="flex items-center gap-xs">
           <Button onClick={() => onDecide(true)}>确认推进</Button>
           <Button
             variant="destructive"
-            confirmExempt="这张卡本身就是人工确认步骤（契约的 confirm: human），无需二次弹窗"
+            confirmExempt="这张卡本身就是那一次人工确认，无需二次弹窗"
             onClick={() => onDecide(false)}
           >
             拒绝
@@ -1410,7 +1409,7 @@ function CheckpointCard({
         kind === "context_confirm"
           ? // 说清用户在批准什么：资料会作为「材料」送出去做推理，而其中
             // 任何看起来像指示的文字都不会被当作指示执行。
-            "含高敏感项，执行前需要你确认。这些文件将作为资料送出用于推理——其中任何看起来像指令的文字都不会被执行"
+            "其中含高敏感内容，送出前要你确认。这些文件只作为资料参考——里面任何看起来像指令的文字都不会被执行"
           : kind === "tool_ask"
             ? "该调用由模型在读过下列资料之后提出，请据此判断"
             : "验证结论如下，批准后任务继续"
@@ -1420,7 +1419,7 @@ function CheckpointCard({
           <Button onClick={() => onDecide(true)}>批准</Button>
           <Button
             variant="destructive"
-            confirmExempt="Checkpoint 决策本身就是人工确认步骤（50-harness §6），无需二次弹窗"
+            confirmExempt="这张卡本身就是那一次人工确认，无需二次弹窗"
             onClick={() => onDecide(false)}
           >
             拒绝
@@ -1495,8 +1494,8 @@ function AuditTab({
             {chainOk === null
               ? "校验中…"
               : chainOk
-                ? "哈希链完整（本地重算）"
-                : "哈希链断裂"}
+                ? "记录完整"
+                : "记录被改动过"}
           </StatusBadge>
         }
       />

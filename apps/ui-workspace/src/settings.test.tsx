@@ -130,7 +130,7 @@ afterEach(() => {
 
 void test("SettingsView: renders exactly the requested section, not a mix", async () => {
   renderSection("account");
-  expect(await screen.findByText("账户由左下角的账户菜单管理")).toBeInTheDocument();
+  expect(await screen.findByText("请先登录")).toBeInTheDocument();
   expect(screen.queryByText("检查更新")).not.toBeInTheDocument();
   expect(screen.queryByText("数据目录")).not.toBeInTheDocument();
 });
@@ -151,7 +151,7 @@ void test("SettingsView: a system() fetch failure shows an error box without cra
 void test("AboutSection: shows version/platform/arch once system loads, placeholders before", async () => {
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ version: "0.2.0", platform: "win32", arch: "x64" })) });
   renderSection("about", api);
-  expect(await screen.findByText("Runtime 0.2.0 · win32-x64")).toBeInTheDocument();
+  expect(await screen.findByText("版本 0.2.0")).toBeInTheDocument();
 });
 
 /**
@@ -230,7 +230,7 @@ void test("AboutSection: 本机固件信息 —— CPU/操作系统整块都没�
 /** 守护进程没接这一路（旧版本 / 装配没配）：如实说不可用，不是空着或报错崩页。 */
 void test("AboutSection: 本机固件信息 —— 守护进程未接这一路时如实说不可用", async () => {
   renderSection("about"); // fakeApi() 缺省就是 503（HARDWARE_INFO_NOT_CONFIGURED）
-  expect(await screen.findByText(/本机固件信息暂不可用/)).toBeInTheDocument();
+  expect(await screen.findByText(/暂时读不到本机配置/)).toBeInTheDocument();
   expect(screen.queryByText("处理器")).not.toBeInTheDocument();
 });
 
@@ -274,7 +274,7 @@ void test("AboutSection: 「本机配置」是独立一块，不在「关于」�
   expect(container.querySelector(".about-main")?.contains(block)).toBe(false);
   // 图标 + 标题 + 说明，与设置页别处同一个版式（owner 2026-09-15 第二次修正）。
   expect(block?.querySelector(".set-block-icon")).toBeInTheDocument();
-  expect(within(block as HTMLElement).getByText(/仅用于确定本机运行环境/)).toBeInTheDocument();
+  expect(within(block as HTMLElement).getByText(/只在这台电脑上显示/)).toBeInTheDocument();
 });
 
 /**
@@ -404,7 +404,7 @@ void test("通用设置: data dir / product dir / key protection reflect system 
   // 拼接结果，用回调按完整 textContent 判等。
   expect(
     screen.getByText(
-      (_, el) => el?.textContent === "Windows DPAPI 保护（当前用户作用域），不落明文",
+      (_, el) => el?.textContent === "受 Windows DPAPI 保护，只有你这个 Windows 账户能解开",
     ),
   ).toBeInTheDocument();
   expect(document.body.textContent).not.toContain("主密钥由 Windows DPAPI 保护");
@@ -415,7 +415,7 @@ void test("通用设置: 明文保护时那条「不可用于真实数据」的�
     system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "plaintext" })),
   });
   renderSection("general", api);
-  expect(await screen.findByText("开发态：主密钥明文存储，不可用于真实数据")).toBeInTheDocument();
+  expect(await screen.findByText("开发用途：请勿放入真实数据")).toBeInTheDocument();
   expect(screen.queryByText("主密钥由 Windows DPAPI 保护")).not.toBeInTheDocument();
 });
 
@@ -470,10 +470,10 @@ void test("UpdatesSection: checking shows a busy state, then 已是最新 on a c
   const api = fakeApi({ checkUpdate: vi.fn().mockResolvedValue(currentResult({ latest: "0.2.0" })) });
   renderSection("updates", api);
   await clickCheck();
-  expect(await screen.findByText("已是最新（0.2.0）")).toBeInTheDocument();
+  expect(await screen.findByText("已是最新版本")).toBeInTheDocument();
 });
 
-void test("UpdatesSection: an available update offers the exact package, with its channel named", async () => {
+void test("UpdatesSection: an available update offers the exact package", async () => {
   const api = fakeApi({
     checkUpdate: vi.fn().mockResolvedValue(
       availableResult({
@@ -493,13 +493,12 @@ void test("UpdatesSection: an available update offers the exact package, with it
     "_blank",
     "noopener",
   );
-  // 渠道要写在明面上：用户有权知道自己要装的是 stable 还是 beta。
-  // 收进提示条里断言 —— 「更新渠道」那一行也写着 stable，全页找会撞上它。
+  // 渠道**不进提示条**（owner 2026-09-17）：stable / beta 是发布侧的词，
+  // 用户要做的判断里没有它。想知道装的是哪一档，「安装方式」那一行写着。
   const line = document.querySelector(".update-notice");
-  expect(line?.textContent).toContain("stable");
+  expect(line?.textContent).not.toContain("stable");
   // 本应用不会自动安装 —— 这句话必须说出来，否则用户会等着它自己装。
-  // 「不自动安装」现在是「安装方式」那个板块在说，不再挂在下载按钮旁边。
-  expect(document.body.textContent).toContain("不会自动下载或自动安装");
+  expect(document.body.textContent).toContain("不会自动下载或安装");
 });
 
 void test("UpdatesSection: no path in the feed means no link - never a guessed URL", async () => {
@@ -508,28 +507,51 @@ void test("UpdatesSection: no path in the feed means no link - never a guessed U
   });
   renderSection("updates", api);
   await clickCheck();
-  // 猜出来的地址点下去是 404，而用户会以为是产品坏了。照实说这次拿不到。
-  expect(await screen.findByText(/更新源里没写文件名/)).toBeInTheDocument();
+  // 猜出来的地址点下去打不开，而用户会以为是产品坏了。说这次拿不到就够了 ——
+  // **为什么拿不到是我们这边的事**，不写给用户看（owner 2026-09-17）。
+  expect(await screen.findByText("暂时拿不到安装包，请稍后再试")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "升级" })).not.toBeInTheDocument();
   // 没有地址可给，「关闭」这个动作还在——这一档不是「什么都做不了」，是「先不装」。
   expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
 });
 
 /**
- * unreachable：**自动检查静默，手动检查必须给反馈**（owner 2026-09-16 第三次
- * 修正）。本仓当前只发过 beta，从没有过 stable 标签，检查默认只问 stable
- * 渠道——这一档因此几乎每次都命中；自动检查天天弹一条「没查到」除了添堵没有
- * 别的作用，继续静默。但用户手动点了「检查更新」——点了按钮却什么都不发生，
- * 比看到「没查到」更糟：那会让人以为按钮坏了或者没点中。
+ * 「没查成」的两档（owner 2026-09-17）。守护进程分得开，界面就得说不同的话：
  *
- * 无论哪种触发，都**绝不能悄悄折叠成「已是最新」**——那正是这个功能上一版真的
+ * - `no-release` —— 这个渠道还没发布过任何版本。**对用户就是「已是最新版本」**：
+ *   他手上的确实是现存最新的那一版，没有别的可装。此前这一档显示的是
+ *   「没查到新版本：feed returned 404」，把运维事实端到了用户面前。
+ * - `unavailable` —— 这一次没问到（断网、超时、服务端出错）。说「暂时无法检查
+ *   更新，请稍后再试」，**不写为什么**：三种原因对用户是同一件事，能做的也只有
+ *   过会儿再点一次。
+ *
+ * 自动检查仍然静默，手动检查必须给反馈——点了按钮什么都不发生，会让人以为按钮
+ * 坏了。而 `unavailable` **绝不能折叠成「已是最新」**，那正是这个功能上一版真的
  * 犯过的错（TD-021）。
  */
-void test("UpdatesSection: unreachable 时自动检查静默、手动检查给反馈，都绝不能悄悄说成「已是最新」", async () => {
+void test("UpdatesSection: 渠道没发布过版本 = 已是最新版本，不把 404 端给用户", async () => {
   const checkUpdate = vi.fn().mockResolvedValue({
     status: "unreachable",
     current: "0.2.0",
-    reason: "渠道 feed 无法访问",
+    reasonCode: "no-release",
+    reason: "feed returned 404",
+    channel: "stable",
+    checkedAt: "2026-09-02T00:00:00Z",
+  });
+  renderSection("updates", fakeApi({ checkUpdate }));
+  await clickCheck();
+  expect(await screen.findByText("已是最新版本")).toBeInTheDocument();
+  // 诊断细节一个字都不许露面。
+  expect(document.body.textContent).not.toContain("404");
+  expect(document.body.textContent).not.toContain("feed");
+});
+
+void test("UpdatesSection: 这一次没问到时自动检查静默、手动检查给反馈，都绝不能说成「已是最新」", async () => {
+  const checkUpdate = vi.fn().mockResolvedValue({
+    status: "unreachable",
+    current: "0.2.0",
+    reasonCode: "unavailable",
+    reason: "feed unreachable: ECONNREFUSED",
     channel: "stable",
     checkedAt: "2026-09-02T00:00:00Z",
   });
@@ -538,25 +560,26 @@ void test("UpdatesSection: unreachable 时自动检查静默、手动检查给�
   // 挂载时的自动检查先问一次——这一次不给反馈。
   await screen.findByRole("button", { name: "检查更新" });
   expect(checkUpdate).toHaveBeenCalledTimes(1);
-  expect(screen.queryByText(/没查到/)).not.toBeInTheDocument();
   expect(document.querySelector(".update-notice")).not.toBeInTheDocument();
 
   // 手动点一次——这次必须有反馈。
   await clickCheck();
-  expect(await screen.findByText(/没查到新版本/)).toBeInTheDocument();
-  expect(screen.getByText(/渠道 feed 无法访问/)).toBeInTheDocument();
-  expect(screen.queryByText(/已是最新（/)).not.toBeInTheDocument();
+  expect(await screen.findByText("暂时无法检查更新，请稍后再试")).toBeInTheDocument();
+  expect(screen.queryByText("已是最新版本")).not.toBeInTheDocument();
+  // 守护进程那句原话不进界面。
+  expect(document.body.textContent).not.toContain("ECONNREFUSED");
 
   // 关得掉，跟其余几档同一个叉号。
   await userEvent.setup().click(screen.getByRole("button", { name: "关闭提醒" }));
   expect(document.querySelector(".update-notice")).not.toBeInTheDocument();
 });
 
-void test("UpdatesSection: checkUpdate() rejecting reads '检查失败', not silently 'current'", async () => {
-  const api = fakeApi({ checkUpdate: vi.fn().mockRejectedValue(new Error("网络不可达")) });
+void test("UpdatesSection: 连守护进程都没问到时给同一句话，不泄露报错，也不说成「已是最新」", async () => {
+  const api = fakeApi({ checkUpdate: vi.fn().mockRejectedValue(new Error("fetch failed: ECONNREFUSED")) });
   renderSection("updates", api);
   await clickCheck();
-  expect(await screen.findByText("检查失败：网络不可达")).toBeInTheDocument();
+  expect(await screen.findByText("暂时无法检查更新，请稍后再试")).toBeInTheDocument();
+  expect(document.body.textContent).not.toContain("ECONNREFUSED");
   expect(screen.queryByText(/已是最新/)).not.toBeInTheDocument();
 });
 
@@ -590,7 +613,7 @@ void test("Settings/连接器: lists installed connectors with live health, and 
   // 启用时（state: "active"）自动展开——每个工具名各自一块。「暴露的工具」
   // 不够人话，改叫「工具清单」并加一句概要。
   expect(within(list).getByText("工具清单")).toBeInTheDocument();
-  expect(within(list).getByText("契约里声明了同名工具才能调用")).toBeInTheDocument();
+  expect(within(list).getByText("智能体声明过同名工具才能调用")).toBeInTheDocument();
   expect(within(list).getByText("lookup_account")).toBeInTheDocument();
   expect(within(list).getByText("update_account")).toBeInTheDocument();
   const user = userEvent.setup();
@@ -942,7 +965,7 @@ void test("Settings/账户: signed in shows the identity - name, email, tenant, 
   await user.click(screen.getByRole("button", { name: "在线修改" }));
   expect(open).toHaveBeenCalledWith("https://console.vxture.com/profile", "_blank", "noopener");
   open.mockRestore();
-  expect(screen.queryByText("账户由左下角的账户菜单管理")).not.toBeInTheDocument();
+  expect(screen.queryByText("请先登录")).not.toBeInTheDocument();
 });
 
 /**
@@ -1014,7 +1037,7 @@ void test("Settings/账户: signed in without org/workspace names shows — rath
 void test("Settings/账户: a session() failure falls back to the signed-out guidance", async () => {
   const api = fakeApi({ session: vi.fn().mockRejectedValue(new Error("daemon down")) });
   renderSection("account", api);
-  expect(await screen.findByText("账户由左下角的账户菜单管理")).toBeInTheDocument();
+  expect(await screen.findByText("请先登录")).toBeInTheDocument();
 });
 
 void test("Settings/通用设置: the encryption chain spells out all three layers, never claims '三次加密', and doesn't expose what's NOT encrypted (owner: 别把技术设计说给用户)", async () => {
@@ -1024,7 +1047,7 @@ void test("Settings/通用设置: the encryption chain spells out all three laye
   expect(rows.map((r) => r.textContent)).toEqual([
     "业务数据每个项目库整库加密 · SQLCipher（AES-256）",
     "库密钥一库一把随机密钥 · AES-256-GCM 封装在主密钥下",
-    "主密钥Windows DPAPI 保护（当前用户作用域），不落明文",
+    "主密钥受 Windows DPAPI 保护，只有你这个 Windows 账户能解开",
   ]);
   // 一次加密 + 两层密钥保护。把层数说成加密次数是在核实的那一刻会崩掉的话。
   expect(container.textContent).not.toContain("三次加密");
@@ -1038,8 +1061,8 @@ void test("Settings/通用设置: the encryption chain spells out all three laye
 void test("Settings/通用设置: 没有 OS 级密钥保护时，行里与警告里都说清楚", async () => {
   const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ keyProtection: "plaintext" })) });
   renderSection("general", api);
-  expect(await screen.findByText("明文存放 —— 本平台没有 OS 级密钥保护")).toBeInTheDocument();
-  expect(screen.getByText("开发态：主密钥明文存储，不可用于真实数据")).toBeInTheDocument();
+  expect(await screen.findByText("当前系统没有可用的密钥保护，主密钥未加密存放")).toBeInTheDocument();
+  expect(screen.getByText("开发用途：请勿放入真实数据")).toBeInTheDocument();
   // 库仍然是加密的 —— 暴露的是主密钥，别把两件事混成一件。「SQLCipher（AES-256）」
   // 是高亮 tag，文字拆进嵌套 span，按完整 textContent 判等（同上一条的理由）。
   expect(
@@ -1419,21 +1442,30 @@ void test("Settings/存储位置: 上次搬移失败要如实说，并且说清�
   expect(screen.getByText(/空间不够/)).toBeInTheDocument();
 });
 
-void test("Settings/软件更新: three blocks (检查更新收进「当前版本」的标题行了); the channel is a select with only stable; nothing is auto-installed", async () => {
-  const api = fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ version: "0.1.0" })) });
+void test("Settings/软件更新: 两块（检查更新收进「当前版本」的标题行）；渠道是一行事实、用用户的词；什么都不自动装", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ version: "0.1.0" })),
+    checkUpdate: vi.fn().mockResolvedValue(currentResult({ latest: "0.1.0" })),
+  });
   renderSection("updates", api);
   const titles = Array.from(document.querySelectorAll(".set-block-title")).map((e) => e.textContent);
   // owner 2026-09-15 收口为三块：「检查更新」不再单独占一块，按钮挪进「当前版本」
   // 的标题行。
-  expect(titles).toEqual(["当前版本", "更新渠道", "安装方式"]);
+  // 「更新渠道」那一块删了（owner 2026-09-17）：里面只有一个停用的下拉框、
+  // 一个选项，外加一句解释别的渠道为什么选不了 —— 选不了的选择不是选择。
+  // 渠道收成「安装方式」里的一行事实。
+  expect(titles).toEqual(["当前版本", "安装方式"]);
   // 「自动检查」默认开着，挂载时会自己问一次——等它问完，按钮才落回「检查更新」。
   expect(await screen.findByRole("button", { name: "检查更新" })).toBeInTheDocument();
   expect(screen.getByRole("checkbox", { name: "自动检查" })).toBeInTheDocument();
-  const channel = screen.getByRole("combobox") as HTMLSelectElement;
-  expect(channel.value).toBe("stable");
-  expect(channel.disabled).toBe(true);
-  expect(Array.from(channel.options).map((o) => o.value)).toEqual(["stable"]);
-  expect(document.body.textContent).toContain("不会自动下载或自动安装");
+  // 渠道不再是一个控件，是一行事实；页面上也不该再出现停用的下拉框。
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  expect(screen.getByText("更新渠道")).toBeInTheDocument();
+  // **渠道仍然写在明面上**（TD-021）——改的只是措辞：`stable` 是发布侧的词，
+  // 「正式版」是同一件事的人话。取的是刚查过的那份结果，不是写死的字面量。
+  expect(await screen.findByText("正式版")).toBeInTheDocument();
+  expect(document.body.textContent).not.toContain("stable");
+  expect(document.body.textContent).toContain("不会自动下载或安装");
 });
 
 /**
@@ -1441,27 +1473,34 @@ void test("Settings/软件更新: three blocks (检查更新收进「当前版�
  * 用户正要点下载的这一刻，才是这句话真正管用的地方。判断式：签了就自己没了。
  *
  * 三种状态各钉一条，**中间那条最要紧**：`unpackaged` 绝不能当成「未签名」——
- * 从仓里直接跑时根本没有安装包可谈，那时挂一条讲 SmartScreen 的提醒是错的。
+ * 从仓里直接跑时根本没有安装包可谈，那时挂一条讲安装提示的提醒是错的。
  * 缺失 ≠ 否定，同 `capabilitySurface` 的纪律。
+ *
+ * 措辞（owner 2026-09-17）：**不教用户去「解除锁定」**。那是逐台机器的绕行，
+ * 不是产品解法（TD-001 补记：SAC 那一层只有签名做得到）；写进界面等于让用户
+ * 自己去掉系统给的保护。开着智能应用控制时就照实说装不上，等签名版本。
  */
 void test("Settings/软件更新: 未签名才提醒；已签名与开发态都不提醒", async () => {
   const withSigning = (v: SystemInfo["codeSigning"]) =>
     fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ codeSigning: v })) });
 
   const unsignedRender = renderSection("updates", withSigning("unsigned"));
-  expect(await screen.findByText(/SmartScreen/)).toBeInTheDocument();
-  // 只讲 SmartScreen 会误导开着智能应用控制的用户：那里是封锁，不是警告（TD-001 补记）。
+  expect(await screen.findByText(/还没有数字签名/)).toBeInTheDocument();
+  // 只讲「点仍要运行」会误导开着智能应用控制的用户：那里是封锁，不是警告
+  // （TD-001 补记）。两种情形都要说到。
   expect(screen.getByText(/智能应用控制/)).toBeInTheDocument();
+  // **不教「解除锁定」**：那是让用户自己去掉系统给的保护。
+  expect(document.body.textContent).not.toContain("解除锁定");
   cleanup();
 
   renderSection("updates", withSigning("signed"));
   await screen.findByText("检查更新");
-  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/还没有数字签名/)).not.toBeInTheDocument();
   cleanup();
 
   renderSection("updates", withSigning("unpackaged"));
   await screen.findByText("检查更新");
-  expect(screen.queryByText(/SmartScreen/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/还没有数字签名/)).not.toBeInTheDocument();
 });
 
 /**
@@ -1474,7 +1513,7 @@ void test("软件更新: 自动检查——勾选持久化；开着时打开设�
   renderSection("updates", api);
   // 缺省开：不用先勾选就已经问过一次了。
   await vi.waitFor(() => expect(api.checkUpdate).toHaveBeenCalledTimes(1));
-  expect(await screen.findByText("已是最新（0.2.0）")).toBeInTheDocument();
+  expect(await screen.findByText("已是最新版本")).toBeInTheDocument();
 
   const box = screen.getByRole("checkbox", { name: "自动检查" });
   expect(box).toBeChecked();
@@ -1513,9 +1552,9 @@ void test("软件更新: 页顶提示条点关闭之后真的消失", async () =
   const api = fakeApi({ checkUpdate: vi.fn().mockResolvedValue(currentResult({ latest: "0.2.0" })) });
   renderSection("updates", api);
   await clickCheck();
-  await screen.findByText("已是最新（0.2.0）");
+  await screen.findByText("已是最新版本");
   await userEvent.setup().click(screen.getByRole("button", { name: "关闭提醒" }));
-  expect(screen.queryByText("已是最新（0.2.0）")).not.toBeInTheDocument();
+  expect(screen.queryByText("已是最新版本")).not.toBeInTheDocument();
 });
 
 void test("Settings/连接器: 添加页有自己的地址 —— 点进去地址就变，直接开那个地址也能进", async () => {
@@ -1536,7 +1575,7 @@ void test("Settings/连接器: 添加页有自己的地址 —— 点进去地�
 
 void test("Settings/数据库: 只说功能未开通，不摆一个连不上任何东西的表单", async () => {
   renderRouted("database");
-  expect(await screen.findByText("功能暂未开通")).toBeInTheDocument();
+  expect(await screen.findByText("暂未开放")).toBeInTheDocument();
   // 假控件比空页更糟：填完连不上，人会以为是自己配错了。
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
@@ -1727,7 +1766,7 @@ test("能力平台：拉不到（非 503）就说拉不到；开关与刷新失�
   });
   renderSection("skills", api);
   const rows = await capabilityRows("技能");
-  expect(await screen.findByText("没有工具登记册。")).toBeTruthy();
+  expect(await screen.findByText("这台电脑上还没有可用的工具。")).toBeTruthy();
   await userEvent.click(within(rowWith(rows, "sn-deep-research")).getByRole("button", { name: "启用" }));
   expect(await screen.findByText("state.json 写不进去")).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "刷新" }));
@@ -2139,7 +2178,7 @@ function catalogPage(over: Record<string, unknown> = {}) {
 }
 
 async function catalogBlock(): Promise<HTMLElement> {
-  const title = await screen.findByText("云端能力清单 RUNOS");
+  const title = await screen.findByText("云端能力清单");
   return title.closest("section") as HTMLElement;
 }
 
@@ -2157,7 +2196,7 @@ test("Runos 清单：平台还没有目录端点时如实说没有 —— 刷新
   // 一句话说完，issue 号在里面；原因不再单独重复一行（RY-001 #23）。
   expect(await screen.findByText("平台尚未提供能力目录（vxture-platform#339），暂时没有清单。")).toBeInTheDocument();
   expect(screen.getAllByText(/平台尚未提供能力目录/)).toHaveLength(1);
-  expect(screen.getByText(/不是安装：条目不会下载到本机/)).toBeInTheDocument();
+  expect(screen.getByText(/不会装到本机/)).toBeInTheDocument();
   expect(within(await catalogBlock()).getByRole("button", { name: "刷新" })).toBeDisabled();
   expect(screen.queryByRole("textbox", { name: "搜索 Runos 清单" })).not.toBeInTheDocument();
 });
@@ -2312,7 +2351,7 @@ test("Runos 清单：这套装配没有清单（503）时整块不显示，不�
     } as Partial<Api>),
   );
   await capabilityRows("技能");
-  expect(screen.queryByText("云端能力清单 RUNOS")).not.toBeInTheDocument();
+  expect(screen.queryByText("云端能力清单")).not.toBeInTheDocument();
 });
 
 // ───────────────────────── 模型平台（RY-001 #24，只展示） ─────────────────────────
@@ -2335,13 +2374,13 @@ test("模型平台：列出本工作区被授权的模型 —— 名称、模型
   expect(within(rows[0]!).getByText("已启用")).toBeInTheDocument();
   expect(within(rows[1]!).getByText("已停用")).toBeInTheDocument();
   expect(within(list).queryByRole("button")).not.toBeInTheDocument();
-  expect(screen.getByText(/本机不配置、不调用模型/)).toBeInTheDocument();
+  expect(screen.getByText(/用量与配额请在平台查看/)).toBeInTheDocument();
   expect(atlasModels).toHaveBeenCalledTimes(1);
 });
 
 test("模型平台：一个都没有时直说没有", async () => {
   renderSection("models", fakeApi({ atlasModels: vi.fn().mockResolvedValue([]) } as Partial<Api>));
-  expect(await screen.findByText("本工作区还没有被授权使用的模型。")).toBeInTheDocument();
+  expect(await screen.findByText("本工作区还没有可用的模型。")).toBeInTheDocument();
 });
 
 test("模型平台：平台拒绝（403）只说一句 —— 守护进程那句已经说清谁能看，不再重复", async () => {
@@ -2363,13 +2402,13 @@ test("模型平台：没登录平台时说登录后才能看", async () => {
   expect(await screen.findByText("登录平台后才能查看本工作区的模型。")).toBeInTheDocument();
 });
 
-test("模型平台：没接平台的装配（503 与 404 同一句）", async () => {
+test("模型平台：没接平台时 503 与 404 同一句", async () => {
   for (const status of [503, 404]) {
     const view = renderSection(
       "models",
       fakeApi({ atlasModels: vi.fn().mockRejectedValue(new ApiError(status, { message: "x" })) } as Partial<Api>),
     );
-    expect(await screen.findByText("这套装配没有接平台，没有模型可展示。")).toBeInTheDocument();
+    expect(await screen.findByText("尚未连接平台，暂时没有可展示的模型。")).toBeInTheDocument();
     view.unmount();
   }
 });
@@ -2444,8 +2483,8 @@ test("私有模型服务：回环地址说「不出这台机器」", async () =>
   renderSection("models", api);
 
   expect(await screen.findByText("已接入")).toBeInTheDocument();
-  expect(screen.getByText(/不出这台机器/)).toBeInTheDocument();
-  expect(screen.queryByText(/会离开这台机器/)).not.toBeInTheDocument();
+  expect(screen.getByText(/不出这台电脑/)).toBeInTheDocument();
+  expect(screen.queryByText(/会离开这台电脑/)).not.toBeInTheDocument();
 });
 
 test("私有模型服务：局域网地址如实说「会离开这台机器」", async () => {
@@ -2459,8 +2498,8 @@ test("私有模型服务：局域网地址如实说「会离开这台机器」",
   } as Partial<Api>);
   renderSection("models", api);
 
-  expect(await screen.findByText(/会离开这台机器/)).toBeInTheDocument();
-  expect(screen.queryByText(/不出这台机器/)).not.toBeInTheDocument();
+  expect(await screen.findByText(/会离开这台电脑/)).toBeInTheDocument();
+  expect(screen.queryByText(/不出这台电脑/)).not.toBeInTheDocument();
 });
 
 /**
@@ -2578,7 +2617,7 @@ void test("Settings/运行日志: 壳里给「打开目录」并发请求，浏�
       <Web api={api} section="general" updateCheck={stubUpdateCheck()} />
     </ThemeProvider>,
   );
-  expect(await screen.findByText(/按天滚动，保留 7 天/)).toBeInTheDocument();
+  expect(await screen.findByText(/只留最近 7 天/)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "打开日志目录" })).not.toBeInTheDocument();
   Object.defineProperty(navigator, "userAgent", { value: ua, configurable: true });
 });

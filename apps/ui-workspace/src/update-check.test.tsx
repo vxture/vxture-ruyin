@@ -43,7 +43,16 @@ test("UpdateToast: 没有新版本时不弹 —— 已是最新 / 没查到 / �
   const cases: Array<Partial<UpdateCheckState>> = [
     {},
     { result: { status: "current", current: "0.2.0", latest: "0.2.0", channel: "stable", checkedAt: "t" } },
-    { result: { status: "unreachable", current: "0.2.0", reason: "feed 502", channel: "stable", checkedAt: "t" } },
+    {
+      result: {
+        status: "unreachable",
+        current: "0.2.0",
+        reasonCode: "unavailable",
+        reason: "feed 502",
+        channel: "stable",
+        checkedAt: "t",
+      },
+    },
     { failed: "网络不可达" },
   ];
   for (const over of cases) {
@@ -53,7 +62,7 @@ test("UpdateToast: 没有新版本时不弹 —— 已是最新 / 没查到 / �
   }
 });
 
-test("UpdateToast: 有新版本时弹出，说清当前/最新版本与渠道，点「升级」打开下载地址", async () => {
+test("UpdateToast: 有新版本时弹出，说清当前与最新版本，点「升级」打开下载地址", async () => {
   vi.stubGlobal("open", vi.fn());
   const dismiss = vi.fn();
   render(<UpdateToast state={state({ result: availableResult(), dismiss })} />);
@@ -61,7 +70,8 @@ test("UpdateToast: 有新版本时弹出，说清当前/最新版本与渠道，
   expect(screen.getByText("发现新版本")).toBeInTheDocument();
   const body = screen.getByText(/0\.3\.0/).closest("p");
   expect(body?.textContent).toContain("0.2.0");
-  expect(body?.textContent).toContain("stable");
+  // 渠道是发布侧的事实，**不进用户视线**（owner 2026-09-17）。
+  expect(body?.textContent).not.toContain("stable");
 
   await userEvent.setup().click(screen.getByRole("button", { name: "升级" }));
   expect(globalThis.open).toHaveBeenCalledWith(
@@ -77,7 +87,7 @@ test("UpdateToast: 有新版本时弹出，说清当前/最新版本与渠道，
 
 test("UpdateToast: 没有下载地址时不拼一个猜出来的地址，只说明拿不到", () => {
   render(<UpdateToast state={state({ result: availableResult({ downloadUrl: undefined }) })} />);
-  expect(screen.getByText("这次没能拿到安装包地址")).toBeInTheDocument();
+  expect(screen.getByText("暂时拿不到安装包，请稍后再试")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "升级" })).not.toBeInTheDocument();
 });
 
@@ -88,8 +98,21 @@ test("UpdateToast: 右上角的叉号也能关（与「关闭」按钮是同一�
   expect(dismiss).toHaveBeenCalled();
 });
 
-test("UpdateToast: 渠道信息缺失时不硬拼一个", () => {
-  render(<UpdateToast state={state({ result: availableResult({ channel: "" }) })} />);
+test("UpdateToast: 渠道用用户的词写；发布侧的原值不出现", () => {
+  render(<UpdateToast state={state({ result: availableResult({ channel: "beta" }) })} />);
   const body = screen.getByText(/0\.3\.0/).closest("p");
-  expect(body?.textContent).not.toContain("渠道");
+  // 渠道必须写出来（TD-021：别让人以为自己装的是正式版），但写的是人话。
+  expect(body?.textContent).toContain("测试版");
+  expect(body?.textContent).not.toContain("beta");
+});
+
+test("UpdateToast: 渠道缺失时不硬拼一个；认不出来的值原样显示，不冒充正式版", () => {
+  const { unmount } = render(<UpdateToast state={state({ result: availableResult({ channel: "" }) })} />);
+  expect(screen.getByText(/0\.3\.0/).closest("p")?.textContent).toBe("0.3.0（当前 0.2.0）");
+  unmount();
+
+  render(<UpdateToast state={state({ result: availableResult({ channel: "nightly" }) })} />);
+  const body = screen.getByText(/0\.3\.0/).closest("p");
+  expect(body?.textContent).toContain("nightly");
+  expect(body?.textContent).not.toContain("正式版");
 });

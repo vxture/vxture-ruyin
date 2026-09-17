@@ -48,7 +48,7 @@ async function open(): Promise<void> {
 afterEach(() => vi.restoreAllMocks());
 
 /** 徽标保持短：只是版本，详情在下拉里 —— 省出来的地方不该又被一串运行信息占回去。 */
-test("RuntimeMenu: 徽标只写 Runtime 与版本；详情要点开才看得到", async () => {
+test("RuntimeMenu: 徽标只写运行环境与版本；详情要点开才看得到", async () => {
   render(
     <RuntimeMenu
       api={fakeApi(() => Promise.resolve(systemInfo()))}
@@ -56,7 +56,7 @@ test("RuntimeMenu: 徽标只写 Runtime 与版本；详情要点开才看得到"
       session={signedIn()}
     />,
   );
-  expect(screen.getByText("Runtime 0.1.0")).toBeInTheDocument();
+  expect(screen.getByText("运行环境 0.1.0")).toBeInTheDocument();
   expect(screen.queryByText("运行环境")).not.toBeInTheDocument();
 });
 
@@ -73,9 +73,9 @@ test("RuntimeMenu: 三行环境事实与首页逐字一致", async () => {
   );
   await open();
   expect(await screen.findByText("运行环境")).toBeInTheDocument();
-  expect(screen.getByText("已就绪 · Runtime 0.1.0")).toBeInTheDocument();
+  expect(screen.getByText("已就绪 · 0.1.0")).toBeInTheDocument();
   expect(screen.getByText("数据加密")).toBeInTheDocument();
-  expect(await screen.findByText("已加密 · SQLCipher")).toBeInTheDocument();
+  expect(await screen.findByText("已加密")).toBeInTheDocument();
   expect(screen.getByText("平台连接")).toBeInTheDocument();
   expect(screen.getByText("已连接 · 某工作区")).toBeInTheDocument();
 });
@@ -90,7 +90,7 @@ test("RuntimeMenu: 非 DPAPI 的主密钥保护读作开发态，不是留空", 
     />,
   );
   await open();
-  expect(await screen.findByText("开发态 · 主密钥明文")).toBeInTheDocument();
+  expect(await screen.findByText("开发用途 · 密钥未受保护")).toBeInTheDocument();
 });
 
 /**
@@ -135,7 +135,7 @@ test("RuntimeMenu: 连不上时徽标写未连接，点开说清楚会怎样", a
   // 徽标与下拉里「运行环境」那一行都写「未连接」—— 这里先认徽标。
   expect(screen.getByText("未连接")).toBeInTheDocument();
   await open();
-  expect(await screen.findByText(/连不上本机的运行时/)).toBeInTheDocument();
+  expect(await screen.findByText(/连不上本机的运行环境/)).toBeInTheDocument();
 });
 
 /** 连得上的时候不出现那句说明 —— 一直挂着的警告会教人忽略它。 */
@@ -149,5 +149,5 @@ test("RuntimeMenu: 连得上时不出现连不上的说明", async () => {
   );
   await open();
   await screen.findByText("运行环境");
-  expect(screen.queryByText(/连不上本机的运行时/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/连不上本机的运行环境/)).not.toBeInTheDocument();
 });

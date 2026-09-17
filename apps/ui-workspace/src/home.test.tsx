@@ -192,12 +192,10 @@ void test("HomePage: the metric row is the three framework facts - runtime, encr
   );
   expect(screen.getByText("运行环境")).toBeInTheDocument();
   expect(screen.getByText("已就绪")).toBeInTheDocument();
-  expect(screen.getByText("Runtime 0.2.0")).toBeInTheDocument();
+  expect(screen.getByText("0.2.0")).toBeInTheDocument();
 
   expect(screen.getByText("数据加密")).toBeInTheDocument();
   expect(await screen.findByText("已加密")).toBeInTheDocument();
-  // 说加密就说加密算法：DPAPI 保护的是主密钥，不是库（owner 2026-09-04 问及）。
-  expect(screen.getByText("SQLCipher")).toBeInTheDocument();
 
   expect(screen.getByText("平台连接")).toBeInTheDocument();
   expect(await screen.findByText("已连接")).toBeInTheDocument();
@@ -245,7 +243,7 @@ void test("HomePage: an unreachable daemon shows 未连接, not a stale 就绪",
   );
   expect(screen.getByText("未连接")).toBeInTheDocument();
   expect(document.querySelector(".status-card")?.getAttribute("title")).toContain(
-    "守护进程未响应",
+    "暂时没有响应",
   );
 });
 
@@ -262,7 +260,7 @@ void test("HomePage: entitled products with entitled=null anywhere still count a
       onError={noop}
     />,
   );
-  expect(screen.getByText("订阅状态尚未接通，以下为本地运行时已安装的产品。")).toBeInTheDocument();
+  expect(screen.getByText("暂时读不到订阅信息，以下是这台电脑上已安装的智能体。")).toBeInTheDocument();
 });
 
 void test("HomePage: once any product has a known entitlement, the caveat line disappears", () => {
@@ -279,7 +277,7 @@ void test("HomePage: once any product has a known entitlement, the caveat line d
     />,
   );
   expect(
-    screen.queryByText("订阅状态尚未接通，以下为本地运行时已安装的产品。"),
+    screen.queryByText("暂时读不到订阅信息，以下是这台电脑上已安装的智能体。"),
   ).not.toBeInTheDocument();
 });
 
@@ -373,11 +371,12 @@ void test("StatusCards: three cards in a row, the explanation lives in the toolt
   const cards = document.querySelectorAll(".status-card");
   // 三件事就是三张卡 —— 合并成一根条，读者得自己去数分隔点在哪。
   expect(cards).toHaveLength(3);
-  // 版面上只留结论和一小截事实；「怎么加密的」这种解释在 title 里。
-  expect(cards[1]?.textContent).toContain("SQLCipher");
+  // 版面上只留结论。**算法名不在首页出现**（owner 2026-09-17）：首页这张卡是
+  // 一眼扫过去的状态，不是加密说明书；完整三层写在「设置 › 数据加密」，同一套
+  // 事实抄两份迟早两份各自漂。
+  expect(cards[1]?.textContent).not.toContain("SQLCipher");
   expect(cards[1]?.textContent).not.toContain("AES-256-GCM");
-  // 三层（库 / 库钥 / 主密钥）在 tooltip 里，版面上只留结论。
-  expect(cards[1]?.getAttribute("title")).toContain("DPAPI");
+  expect(cards[1]?.getAttribute("title")).toContain("加密保存");
 });
 
 void test("ProductCard: only this product's projects are counted, not every project on the machine", () => {
@@ -582,7 +581,7 @@ void test("热门智能体: NOTHING in the catalog is openable - 打开 belongs 
 void test("热门智能体: says where the list came from and when - it is a snapshot, not live", () => {
   renderHome({ products: [] });
   expect(
-    screen.getByText(`取自 Vxture 平台目录（${CATALOG_SOURCE.capturedAt} 快照）。`),
+    screen.getByText(`来自 Vxture 平台，更新于 ${CATALOG_SOURCE.capturedAt}`),
   ).toBeInTheDocument();
 });
 
@@ -668,7 +667,7 @@ void test("InstallPackageRow: installing shows a busy state then the signed/unsi
   await user.upload(input, file);
 
   expect(installPackage).toHaveBeenCalledWith(file);
-  expect(await screen.findByText("已安装 vxture.new@1.0.0（已副署）")).toBeInTheDocument();
+  expect(await screen.findByText("已安装 vxture.new@1.0.0（已签名）")).toBeInTheDocument();
 });
 
 void test("InstallPackageRow: an unsigned package says so explicitly, not the same as signed", async () => {
@@ -738,7 +737,7 @@ void test("HomePage: daemon says capabilitySurface=mock -> usable product card i
     />,
   );
   expect(await screen.findByText("未接通")).toBeInTheDocument();
-  expect(screen.getByText(/能力面未接通/)).toBeInTheDocument();
+  expect(screen.getByText(/AI 能力尚未开通/)).toBeInTheDocument();
   // 订阅徽章不被顶掉：两件事都成立。
   expect(screen.getByText("已订阅")).toBeInTheDocument();
   // 要分清，不是要拦住：打开入口还在。
@@ -763,7 +762,7 @@ void test("HomePage: capabilitySurface=configured -> no 未接通 anywhere", asy
   );
   await screen.findByText("已加密");
   expect(screen.queryByText("未接通")).not.toBeInTheDocument();
-  expect(screen.queryByText(/能力面未接通/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/AI 能力尚未开通/)).not.toBeInTheDocument();
 });
 
 void test("HomePage: /system unknown (null) is not 'mock' - no 未接通 badge on a guess", async () => {
@@ -842,12 +841,16 @@ void test("HomePage/产品库: nothing is fetched until opened; unreachable says
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "安装" }));
   await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
-  expect(await screen.findByText(/产品库没查到 —— index unreachable: ECONNREFUSED/)).toBeInTheDocument();
-  expect(screen.getByText(/这不代表产品库是空的/)).toBeInTheDocument();
+  // 守护进程那句 `index unreachable: ECONNREFUSED` **不进界面**（owner 2026-09-17）。
+  expect(await screen.findByText("这次没读到产品库，请稍后再试")).toBeInTheDocument();
+  expect(document.body.textContent).not.toContain("ECONNREFUSED");
+  // 「这不代表产品库是空的」那半句删了：新话本身就没有说成「空的」，
+  // 再解释一遍反而把一句提示变成一段说明（owner 2026-09-17）。
+  expect(screen.queryByText(/没有产品/)).not.toBeInTheDocument();
   expect(registry).toHaveBeenCalledTimes(1);
   await user.click(screen.getByRole("button", { name: "安装" }));
   await user.click(await screen.findByRole("menuitem", { name: "收起产品库" }));
-  expect(screen.queryByText(/产品库没查到/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/这次没读到产品库/)).not.toBeInTheDocument();
   // Reopening does not refetch - the catalog is kept.
   await user.click(screen.getByRole("button", { name: "安装" }));
   await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
@@ -886,7 +889,7 @@ void test("HomePage/产品库: a production machine can see the catalog but is t
   await user.click(screen.getByRole("button", { name: "安装" }));
   await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
   const list = await screen.findByLabelText("产品库");
-  expect(within(list).getByText("本机不装未签名包")).toBeInTheDocument();
+  expect(within(list).getByText("未签名，不能安装")).toBeInTheDocument();
   expect(within(list).queryByRole("button", { name: "安装" })).not.toBeInTheDocument();
 });
 
@@ -901,7 +904,7 @@ void test("HomePage/产品库: an empty catalog says so; a failed fetch and a fa
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "安装" }));
   await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
-  expect(await screen.findByText("产品库里目前没有产品包")).toBeInTheDocument();
+  expect(await screen.findByText("产品库里暂时没有可安装的智能体")).toBeInTheDocument();
   first.unmount();
 
   const failing = fakeApi({
@@ -1032,7 +1035,7 @@ void test("ProductCard: the warning about an unwired capability surface is style
   );
   const note = await screen.findByRole("note");
   expect(note.className).toContain("pcard-alert--warning");
-  expect(note.textContent).toContain("能力面未接通");
+  expect(note.textContent).toContain("AI 能力尚未开通");
 });
 
 void test("ProductCard: clicking the card body selects it for the sidebar; buttons and links do not toggle", async () => {
@@ -1088,13 +1091,13 @@ void test("我的智能体 header: 从产品库安装 toggles the registry list 
     <HomePage api={fakeApi({ registry })} products={[]} workspaces={[]} health={{ ok: true }} onOpen={noop} onCreated={noop} onRefresh={noop} onError={noop} />,
   );
   const user = userEvent.setup();
-  expect(screen.queryByText(/产品库没查到/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/这次没读到产品库/)).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "安装" }));
   await user.click(await screen.findByRole("menuitem", { name: "从产品库拉取" }));
-  expect(await screen.findByText(/产品库没查到 —— 没网/)).toBeInTheDocument();
+  expect(await screen.findByText("这次没读到产品库，请稍后再试")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "安装" }));
   await user.click(await screen.findByRole("menuitem", { name: "收起产品库" }));
-  expect(screen.queryByText(/产品库没查到/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/这次没读到产品库/)).not.toBeInTheDocument();
 });
 
 void test("更新 button: carries a new tag only while some product has a newer version waiting, and checks on click", async () => {
@@ -1192,7 +1195,7 @@ void test("更新: 能力面没接时，按钮是关着的，启动也不去问 
     return b;
   });
   // 关着的按钮要说明白为什么，而且用用户的话 —— 环境变量名是给部署的人看的。
-  expect(btn.getAttribute("title")).toBe("还没接产品能力面，暂时问不到新版本");
+  expect(btn.getAttribute("title")).toBe("AI 能力尚未开通，暂时查不了新版本");
   expect(btn.getAttribute("title")).not.toContain("RUYIN_CAPABILITY_BASE");
   // 启动自检也不去打这一轮注定 503 的请求。
   await new Promise((r) => setTimeout(r, 30));
@@ -1268,7 +1271,7 @@ void test("HomePage: 平台上订了、本机没装的智能体照样列出，�
   // 本地卡只有 bidproposal 一张
   expect(screen.getAllByText("bidproposal")).toHaveLength(1);
   // 订阅清单问到了：「订阅状态尚未接通」那句不再出现
-  expect(screen.queryByText("订阅状态尚未接通，以下为本地运行时已安装的产品。")).not.toBeInTheDocument();
+  expect(screen.queryByText("暂时读不到订阅信息，以下是这台电脑上已安装的智能体。")).not.toBeInTheDocument();
 
   const renew = screen.getByRole("button", { name: "续订" });
   await userEvent.setup().click(renew);
@@ -1344,7 +1347,7 @@ void test("HomePage: 订阅清单问失败、或返回的不是数组 —— 当
       />,
     );
     await vi.waitFor(() => expect(subscribedProducts).toHaveBeenCalled());
-    expect(screen.getByText("订阅状态尚未接通，以下为本地运行时已安装的产品。")).toBeInTheDocument();
+    expect(screen.getByText("暂时读不到订阅信息，以下是这台电脑上已安装的智能体。")).toBeInTheDocument();
     expect(screen.queryByText("本机未安装")).not.toBeInTheDocument();
     view.unmount();
   }
@@ -1375,7 +1378,7 @@ void test("HomePage: 没登录不去问订阅清单", async () => {
  * 「本地已装」会让人以为那是一个自己拥有的产品。平台说订了（entitled=true）时
  * 以平台为准。
  */
-void test("ProductCard: 随包夹具没有订阅事实时标「测试夹具」，平台说订了就是「已订阅」", () => {
+void test("ProductCard: 随包夹具没有订阅事实时标「内置示例」，平台说订了就是「已订阅」", () => {
   const view = render(
     <HomePage
       api={fakeApi()}
@@ -1388,7 +1391,7 @@ void test("ProductCard: 随包夹具没有订阅事实时标「测试夹具」�
       onError={noop}
     />,
   );
-  expect(screen.getByText("测试夹具")).toBeInTheDocument();
+  expect(screen.getByText("内置示例")).toBeInTheDocument();
   expect(screen.queryByText("本地已装")).not.toBeInTheDocument();
   view.unmount();
 
@@ -1405,5 +1408,5 @@ void test("ProductCard: 随包夹具没有订阅事实时标「测试夹具」�
     />,
   );
   expect(screen.getByText("已订阅")).toBeInTheDocument();
-  expect(screen.queryByText("测试夹具")).not.toBeInTheDocument();
+  expect(screen.queryByText("内置示例")).not.toBeInTheDocument();
 });
