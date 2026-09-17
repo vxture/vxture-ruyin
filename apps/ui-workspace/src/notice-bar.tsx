@@ -11,6 +11,7 @@
  * 通知，是那块内容当前的状态，关掉它等于把状态藏起来。
  */
 import { Icon } from "@vxture/design-system";
+import { useT } from "./i18n";
 
 export function NoticeBar({
   message,
@@ -19,13 +20,14 @@ export function NoticeBar({
   message: string;
   onClose: () => void;
 }) {
+  const t = useT();
   return (
     <div className="error-box notice-bar" role="status">
       <span>{message}</span>
       <button
         type="button"
         className="notice-bar-close"
-        aria-label="关闭提醒"
+        aria-label={t("common.closeNotice")}
         onClick={onClose}
       >
         <Icon name="x" size="xs" />

@@ -26,6 +26,11 @@ import {
   type ToolPolicyRow,
   type ProjectFile,
 } from "./api";
+import { translate, type TKey, type Vars } from "./i18n";
+
+/** 直接调纯函数的那几条用例用得上的两个 t()。 */
+const tzh = (k: TKey, v?: Vars) => translate("zh-CN", k, v);
+const ten = (k: TKey, v?: Vars) => translate("en", k, v);
 
 // 产品界面的沙箱宿主有自己的用例文件（product-surface.test.tsx）；这里只关心
 // 项目面板自己的编排，照 workbench.test 的做法桩掉子组件，而不是在每个项目面板用例
@@ -1280,8 +1285,20 @@ void test("describeBreaks：前三处点名，其余说「等 N 处」；认不�
       { path: "tools.b", change: "narrowed" },
       { path: "states.draft->review", change: "removed" },
       { path: "objects.c", change: "removed" },
-    ]),
+    ], tzh),
   ).toBe("任务 a、工具 b、阶段 draft->review 等 4 处");
-  expect(describeBreaks([{ path: "mystery.x", change: "removed" }])).toBe("mystery x");
-  expect(describeBreaks([{ path: "project.type", change: "narrowed" }])).toBe("项目形态 type");
+  expect(describeBreaks([{ path: "mystery.x", change: "removed" }], tzh)).toBe("mystery x");
+  expect(describeBreaks([{ path: "project.type", change: "narrowed" }], tzh)).toBe("项目形态 type");
+  // 英文那一侧同一条逻辑，只是词与分隔符换了 —— 顿号在英文里读不通。
+  expect(
+    describeBreaks(
+      [
+        { path: "tasks.a", change: "removed" },
+        { path: "tools.b", change: "narrowed" },
+        { path: "states.draft->review", change: "removed" },
+        { path: "objects.c", change: "removed" },
+      ],
+      ten,
+    ),
+  ).toBe("tasks a, tools b, stages draft->review and 4 more");
 });

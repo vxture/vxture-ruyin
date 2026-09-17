@@ -24,10 +24,17 @@ import {
   TableRow,
 } from "@vxture/design-system";
 import { THIRD_PARTY, type ThirdPartyEntry } from "./third-party-list";
+import { useT, type MessageKey } from "./i18n";
 
-const PART_LABEL: Record<string, string> = { daemon: "运行环境", ui: "界面", shell: "桌面应用" };
+const PART_KEY: Record<string, MessageKey> = {
+  daemon: "thirdParty.part.daemon",
+  ui: "thirdParty.part.ui",
+  shell: "thirdParty.part.shell",
+};
 
 export function ThirdPartyNotices({ entries = THIRD_PARTY }: { entries?: ThirdPartyEntry[] }) {
+  const t = useT();
+  const listSep = t("common.listSep");
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -36,15 +43,14 @@ export function ThirdPartyNotices({ entries = THIRD_PARTY }: { entries?: ThirdPa
           伪装成链接。总数字**只在弹出面板里**说，这里不重复（第一眼先说清「这是
           什么」，不是「有多少个」）。 */}
       <button type="button" className="about-third-party" onClick={() => setOpen(true)}>
-        三方许可
+        {t("thirdParty.trigger")}
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="third-party-dialog">
           <DialogHeader>
-            <DialogTitle>随包第三方组件许可</DialogTitle>
+            <DialogTitle>{t("thirdParty.title")}</DialogTitle>
             <DialogDescription>
-              以下 {entries.length} 个是随 RUYIN 一起分发的第三方开源组件，列在这里是它们的
-              许可证要求的署名。许可证全文在安装目录里；技能与工具的许可证逐条写在「能力平台」页。
+              {t("thirdParty.desc", { count: entries.length })}
             </DialogDescription>
           </DialogHeader>
           <div className="third-party-scroll">
@@ -54,10 +60,10 @@ export function ThirdPartyNotices({ entries = THIRD_PARTY }: { entries?: ThirdPa
                   {/* 序号右对齐（owner 2026-09-15）：数字天然右对齐读起来才整齐，
                       左对齐的话个位数与两位数对不齐左边缘。 */}
                   <TableHead className="third-party-idx">#</TableHead>
-                  <TableHead>组件</TableHead>
-                  <TableHead>版本</TableHead>
-                  <TableHead>许可证</TableHead>
-                  <TableHead className="third-party-part">所属模块</TableHead>
+                  <TableHead>{t("thirdParty.col.component")}</TableHead>
+                  <TableHead>{t("thirdParty.col.version")}</TableHead>
+                  <TableHead>{t("thirdParty.col.license")}</TableHead>
+                  <TableHead className="third-party-part">{t("thirdParty.col.part")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -68,7 +74,7 @@ export function ThirdPartyNotices({ entries = THIRD_PARTY }: { entries?: ThirdPa
                     <TableCell className="mono text-muted-foreground">{e.version}</TableCell>
                     <TableCell>{e.license}</TableCell>
                     <TableCell className="text-muted-foreground third-party-part">
-                      {e.usedBy.map((u) => PART_LABEL[u] ?? u).join("、")}
+                      {e.usedBy.map((u) => (PART_KEY[u] ? t(PART_KEY[u]) : u)).join(listSep)}
                     </TableCell>
                   </TableRow>
                 ))}

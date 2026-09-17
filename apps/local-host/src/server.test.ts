@@ -1737,6 +1737,58 @@ test("ui open-log-dir: 只发一条不带路径的事件", async () => {
   }
 });
 
+/**
+ * PUT /system/language —— 界面切语言时**写给壳看**的那一条。
+ *
+ * 壳读不到浏览器的存储，而它要说话的三个场合（原生对话框、系统通知、搬移数据
+ * 那一屏）都在界面之外；最后那个还在守护进程起来之前。所以语言得落在一个两个
+ * 进程都读得到的地方。
+ *
+ * 值只认目录里真有的那几门。不认识的**原样拒绝，不悄悄落回中文** —— 悄悄落回
+ * 会让「设置里选了、壳里没变」看起来像个随机 bug。
+ */
+test("system/language: 认得的语言写下来；不认得的拒绝；装配没接时如实 503", async () => {
+  const written: string[] = [];
+  const rig = await startServer({ setLanguage: (l: string) => written.push(l) });
+  try {
+    const ok = await fetch(`${rig.base}/system/language`, {
+      method: "PUT",
+      headers: rig.json,
+      body: JSON.stringify({ language: "en" }),
+    });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { language: "en" });
+    assert.deepEqual(written, ["en"]);
+
+    const bad = await fetch(`${rig.base}/system/language`, {
+      method: "PUT",
+      headers: rig.json,
+      body: JSON.stringify({ language: "klingon" }),
+    });
+    assert.equal(bad.status, 400);
+    assert.equal(((await bad.json()) as { code: string }).code, "REQUEST_MALFORMED");
+    // 拒绝就是拒绝：没有写下任何东西。
+    assert.deepEqual(written, ["en"]);
+  } finally {
+    closeRig(rig);
+  }
+});
+
+test("system/language: 这套装配没接语言时如实 503，不假装写成功", async () => {
+  const rig = await startServer({});
+  try {
+    const res = await fetch(`${rig.base}/system/language`, {
+      method: "PUT",
+      headers: rig.json,
+      body: JSON.stringify({ language: "en" }),
+    });
+    assert.equal(res.status, 503);
+    assert.equal(((await res.json()) as { code: string }).code, "LANGUAGE_NOT_CONFIGURED");
+  } finally {
+    closeRig(rig);
+  }
+});
+
 test("pick-folder: 请求挂着等壳送结果；壳先问起始目录；没接这个能力时端点不存在", async () => {
   const events = new EventBus();
   const seen: string[] = [];

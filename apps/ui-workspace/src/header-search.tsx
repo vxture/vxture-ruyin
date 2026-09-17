@@ -19,12 +19,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ShellIconButton, ShellSearchBox, type ShellSearchGroup } from "@vxture/design-system";
+import { useT } from "./i18n";
 
-const LABELS = {
-  placeholder: "搜索项目、产品与动作…",
-  empty: "没有匹配的结果",
-  resultsLabel: "搜索结果",
-};
+/** 搜索框那三句由 DS 收在一个对象里 —— 键在这里，句子按语言取。 */
+const LABEL_KEYS = {
+  placeholder: "search.placeholder",
+  empty: "search.empty",
+  resultsLabel: "search.results",
+} as const;
 
 export function HeaderSearch({
   query,
@@ -35,8 +37,14 @@ export function HeaderSearch({
   onQueryChange: (q: string) => void;
   groups: ReadonlyArray<ShellSearchGroup>;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const labels = {
+    placeholder: t(LABEL_KEYS.placeholder),
+    empty: t(LABEL_KEYS.empty),
+    resultsLabel: t(LABEL_KEYS.resultsLabel),
+  };
 
   // 接管 Ctrl/⌘+K（见文件头）。挂在 window 上，所以收起时照样听得见。
   useEffect(() => {
@@ -102,12 +110,12 @@ export function HeaderSearch({
             query={query}
             onQueryChange={onQueryChange}
             groups={closing}
-            labels={LABELS}
+            labels={labels}
             shortcutKey={null}
           />
         </div>
       ) : (
-        <ShellIconButton icon="search" label="搜索（Ctrl K）" onClick={() => setOpen(true)} />
+        <ShellIconButton icon="search" label={t("common.search")} onClick={() => setOpen(true)} />
       )}
     </span>
   );

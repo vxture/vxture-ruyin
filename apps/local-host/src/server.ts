@@ -148,6 +148,13 @@ function withRunState(
   };
 }
 
+/**
+ * 界面支持的语言。与 `ui-workspace/src/i18n.ts` 的 `LOCALES` 是同一份事实，
+ * 只是那一头是界面的类型、这一头是路由的校验。两门语言时抄一份比造一条依赖
+ * 划算；真到了第三门，`lint:shared-shapes` 那类守卫才是该管这件事的地方。
+ */
+export const UI_LANGUAGES = ["zh-CN", "en"];
+
 export interface LocalApiDeps {
   runtime: ProjectRuntime;
   /** 受管产品资产（安装 / 启用 / 订阅可用性，30-contract-schema §18）。 */
@@ -309,6 +316,11 @@ export interface LocalApiDeps {
    * 失效后多久收掉一条安静的流」的上限。只为测试注入：真实装配用缺省值。
    */
   bridgeEventBeatMs?: number;
+  /**
+   * 界面切语言时把它写下来给**壳**读（PUT /system/language）。没接就是这套装配
+   * 不管语言 —— 那时路由如实 503，界面照样能切（它自己有一份缓存），只是壳跟不上。
+   */
+  setLanguage?: (language: string) => void;
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
     version: string;
@@ -1042,6 +1054,39 @@ async function handle(
   // GET /system - runtime transparency for the settings panel
   if (method === "GET" && path === "/system") {
     send(res, 200, deps.systemInfo);
+    return;
+  }
+
+  /*
+   * PUT /system/language —— 界面切语言时写一份给**壳**看。
+   *
+   * 界面自己不靠这条读回来（它有 localStorage，切了当场生效）；这条存在的唯一
+   * 理由是壳：原生对话框、系统通知、搬家那一屏都由壳出，而壳读不到浏览器的
+   * 存储。写进 `location.json` —— 那是唯一一份两个进程都读得到、且在开任何库
+   * 之前就读得到的文件。
+   *
+   * 值只认目录里真有的那几门语言。不认识的值**原样拒绝**，不悄悄落回中文：
+   * 悄悄落回会让「设置里选了、壳里没变」看起来像个随机 bug。
+   */
+  if (method === "PUT" && path === "/system/language") {
+    if (!deps.setLanguage) {
+      send(res, 503, apiError("LANGUAGE_NOT_CONFIGURED", "当前版本暂不提供语言设置"));
+      return;
+    }
+    const body = (await readJson(req)) as { language?: unknown };
+    const language = typeof body.language === "string" ? body.language : "";
+    if (!UI_LANGUAGES.includes(language)) {
+      send(
+        res,
+        400,
+        apiError("REQUEST_MALFORMED", `language 只能是 ${UI_LANGUAGES.join(" / ")}`, {
+          field: "language",
+        }),
+      );
+      return;
+    }
+    deps.setLanguage(language);
+    send(res, 200, { language });
     return;
   }
 

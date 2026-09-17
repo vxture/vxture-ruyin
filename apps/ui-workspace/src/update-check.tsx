@@ -23,6 +23,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Icon } from "@vxture/design-system";
 import { Api, type UpdateCheck } from "./api";
+import { useT, type MessageKey, type TFn } from "./i18n";
 
 const AUTO_CHECK_KEY = "ruyin-update-auto-check";
 
@@ -36,9 +37,14 @@ const AUTO_CHECK_KEY = "ruyin-update-auto-check";
  * 认不出来的值**原样显示**：编一个好听的名字比显示原值更糟，那会把一个未知
  * 渠道说成正式版。
  */
-export function channelLabel(channel?: string): string | undefined {
+export function channelLabel(t: TFn, channel?: string): string | undefined {
   if (!channel) return undefined;
-  return { stable: "正式版", beta: "测试版" }[channel] ?? channel;
+  const key = { stable: "update.channel.stable", beta: "update.channel.beta" }[
+    channel
+  ] as MessageKey | undefined;
+  // 认不出来的渠道**原样显示**：它不在目录里，翻译不了，也不该被翻译成一个
+  // 好听的名字 —— 那会把一个未知渠道说成正式版。
+  return key ? t(key) : channel;
 }
 
 function readAutoCheck(): boolean {
@@ -133,6 +139,7 @@ export function useUpdateCheck(api: Api): UpdateCheckState {
  */
 export function UpdateNotice({ state }: { state: UpdateCheckState }) {
   const { result, failed, manual, dismiss } = state;
+  const t = useT();
   if (!result && !failed) return null;
 
   if (failed) {
@@ -141,8 +148,8 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
     return (
       <div className="set-callout update-notice" role="status">
         <Icon name="warning" size="sm" />
-        <span>暂时无法检查更新，请稍后再试</span>
-        <button type="button" className="notice-bar-close" aria-label="关闭提醒" onClick={dismiss}>
+        <span>{t("update.unavailable")}</span>
+        <button type="button" className="notice-bar-close" aria-label={t("common.closeNotice")} onClick={dismiss}>
           <Icon name="x" size="xs" />
         </button>
       </div>
@@ -150,26 +157,33 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
   }
 
   if (result!.status === "available") {
+    const channel = channelLabel(t, result!.channel);
     return (
       <div className="set-callout set-callout--info update-notice" role="status">
         <Icon name="arrow-down" size="sm" />
-        <span>
-          有新版本 <span className="mono">{result!.latest}</span>
-          （当前 <span className="mono">{result!.current}</span>
-          {channelLabel(result!.channel) && <> · {channelLabel(result!.channel)}</>}）
+        {/* 整句一条 —— 版本号原先套着 `.mono`，那是**排版**，而它把一句话切成了
+            三段。语序一旦随语言变，三段就接不回去。 */}
+        <span className="update-notice-line">
+          {channel
+            ? t("update.availableLineWithChannel", {
+                latest: result!.latest,
+                current: result!.current,
+                channel,
+              })
+            : t("update.availableLine", { latest: result!.latest, current: result!.current })}
         </span>
         <span className="update-notice-actions">
           {result!.downloadUrl ? (
             <Button size="sm" onClick={() => window.open(result!.downloadUrl, "_blank", "noopener")}>
-              升级
+              {t("update.upgrade")}
             </Button>
           ) : (
             // **不拼一个猜出来的地址**：点下去只会打不开。为什么拿不到是我们
             // 这边的事，用户只需要知道现在装不了、过会儿再看。
-            <span className="text-body-sm">暂时拿不到安装包，请稍后再试</span>
+            <span className="text-body-sm">{t("update.noPackage")}</span>
           )}
           <Button variant="ghost" size="sm" onClick={dismiss}>
-            关闭
+            {t("update.close")}
           </Button>
         </span>
       </div>
@@ -183,8 +197,8 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
     return (
       <div className="set-callout set-callout--success update-notice" role="status">
         <Icon name="check" size="sm" />
-        <span>已是最新版本</span>
-        <button type="button" className="notice-bar-close" aria-label="关闭提醒" onClick={dismiss}>
+        <span>{t("update.current")}</span>
+        <button type="button" className="notice-bar-close" aria-label={t("common.closeNotice")} onClick={dismiss}>
           <Icon name="x" size="xs" />
         </button>
       </div>
@@ -201,8 +215,8 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
     return (
       <div className="set-callout update-notice" role="status">
         <Icon name="warning" size="sm" />
-        <span>暂时无法检查更新，请稍后再试</span>
-        <button type="button" className="notice-bar-close" aria-label="关闭提醒" onClick={dismiss}>
+        <span>{t("update.unavailable")}</span>
+        <button type="button" className="notice-bar-close" aria-label={t("common.closeNotice")} onClick={dismiss}>
           <Icon name="x" size="xs" />
         </button>
       </div>
@@ -222,32 +236,38 @@ export function UpdateNotice({ state }: { state: UpdateCheckState }) {
  */
 export function UpdateToast({ state }: { state: UpdateCheckState }) {
   const { result, dismiss } = state;
+  const t = useT();
   if (result?.status !== "available") return null;
+  const channel = channelLabel(t, result.channel);
 
   return (
     <div className="update-toast" role="status">
       <div className="update-toast-head">
         <Icon name="arrow-down" size="sm" />
-        <span>发现新版本</span>
-        <button type="button" className="notice-bar-close" aria-label="关闭提醒" onClick={dismiss}>
+        <span>{t("update.found")}</span>
+        <button type="button" className="notice-bar-close" aria-label={t("common.closeNotice")} onClick={dismiss}>
           <Icon name="x" size="xs" />
         </button>
       </div>
       <p className="update-toast-body">
-        <span className="mono">{result.latest}</span>
-        （当前 <span className="mono">{result.current}</span>
-        {channelLabel(result.channel) && <> · {channelLabel(result.channel)}</>}）
+        {channel
+          ? t("update.toastLineWithChannel", {
+              latest: result.latest,
+              current: result.current,
+              channel,
+            })
+          : t("update.toastLine", { latest: result.latest, current: result.current })}
       </p>
       <div className="update-toast-actions">
         {result.downloadUrl ? (
           <Button size="sm" onClick={() => window.open(result.downloadUrl, "_blank", "noopener")}>
-            升级
+            {t("update.upgrade")}
           </Button>
         ) : (
-          <span className="text-body-sm">暂时拿不到安装包，请稍后再试</span>
+          <span className="text-body-sm">{t("update.noPackage")}</span>
         )}
         <Button variant="ghost" size="sm" onClick={dismiss}>
-          关闭
+          {t("update.close")}
         </Button>
       </div>
     </div>

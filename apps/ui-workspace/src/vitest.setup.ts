@@ -36,6 +36,21 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   };
 }
 
+// **用例说中文。** 没存过语言偏好时，界面按系统/浏览器说的那门语言挑一个
+// （`preferredLocale`），而 jsdom 报的是 `en-US` —— 于是每一个 `localStorage.clear()`
+// 之后渲染出来的都是英文界面，几百条中文断言会一起红，而产品代码没有任何问题。
+//
+// 所以这里把测试环境的语言**声明成简体中文**：断言写的是哪门语言，环境就该说哪门。
+// 要测英文界面，在那条用例里自己存 `ruyin-language: "en"` 或包一层指定语言的 Provider。
+Object.defineProperty(navigator, "languages", {
+  configurable: true,
+  get: () => ["zh-CN"],
+});
+Object.defineProperty(navigator, "language", {
+  configurable: true,
+  get: () => "zh-CN",
+});
+
 // Unmount whatever the previous test rendered - without this, a component
 // left mounted (and its effects/timers/subscriptions still running) leaks
 // into the next test file's DOM and can make an unrelated assertion flaky.

@@ -1,3 +1,5 @@
+import type { MessageKey } from "./i18n";
+
 /** 设置的分区 id。单独一个文件（不是定义在 settings.tsx 里）：同 TabId 的
  *  理由——SettingsView 本身现在是懒加载的（TD-011②），从 settings.tsx 里
  *  连同它一起导入这份数据会拖进整个设置页的 DS 组件面。 */
@@ -31,9 +33,17 @@ export type SectionId =
  * 256px 和这里的 180px，436px 全是导航，右边才是内容。设置是一个应用，应用有
  * 自己的框架（和产品态同一套道理）。
  */
-export const SETTINGS_SECTIONS: Array<{ id: SectionId; label: string; icon: string }> = [
-  { id: "account", label: "账户", icon: "role" },
-  { id: "general", label: "通用设置", icon: "settings" },
+/**
+ * 分区表里放的是**目录键**，不是那句中文（2026-09-17 起）：这份数据在侧栏、
+ * 搜索、面包屑各用一次，词句只能有一处来源，而它现在按语言取。
+ */
+export const SETTINGS_SECTIONS: Array<{
+  id: SectionId;
+  labelKey: MessageKey;
+  icon: string;
+}> = [
+  { id: "account", labelKey: "sections.account", icon: "role" },
+  { id: "general", labelKey: "sections.general", icon: "settings" },
   /**
    * 能力平台在连接器**前面**（owner 2026-09-07）。
    *
@@ -42,12 +52,12 @@ export const SETTINGS_SECTIONS: Array<{ id: SectionId; label: string; icon: stri
    * 他还没有理由关心的东西。
    */
   /** 模型平台排在能力平台**前面**（owner 2026-09-15）。只展示，不调用。 */
-  { id: "models", label: "模型平台", icon: "cpu" },
-  { id: "skills", label: "能力平台", icon: "sparkles" },
-  { id: "connectors", label: "连接器", icon: "plugs-connected" },
-  { id: "database", label: "数据库", icon: "table" },
-  { id: "updates", label: "软件更新", icon: "arrow-down" },
-  { id: "about", label: "关于", icon: "info" },
+  { id: "models", labelKey: "sections.models", icon: "cpu" },
+  { id: "skills", labelKey: "sections.skills", icon: "sparkles" },
+  { id: "connectors", labelKey: "sections.connectors", icon: "plugs-connected" },
+  { id: "database", labelKey: "sections.database", icon: "table" },
+  { id: "updates", labelKey: "sections.updates", icon: "arrow-down" },
+  { id: "about", labelKey: "sections.about", icon: "info" },
 ];
 
 /**

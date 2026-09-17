@@ -12,6 +12,7 @@ import { Button } from "@vxture/design-system";
 import { Api, type SessionInfo } from "./api";
 import { syncChromeTheme } from "./chrome-theme";
 import { useHostChrome } from "./host-chrome";
+import { useT, type MessageKey } from "./i18n";
 
 // Workbench (~570 lines, plus its own lazy-loaded home/settings/workspace
 // views) only exists once signed in - the login screen has no reason to wait
@@ -33,16 +34,16 @@ function DragStrip() {
 const LOGIN_POLL_MS = 2000;
 const LOGIN_POLL_MAX_MS = 5 * 60 * 1000;
 
-/**
- * 「换个账号登录」停用期间给出的替代做法（TD-070）。
- *
- * 说的是**用户自己能做到的那条路**，不是「暂不可用」——后者只告诉人此路不通，
- * 而他要的是换个账号，那件事今天仍然做得到，只是得先在浏览器里退出。
+/*
+ * 「换个账号登录」停用期间给出的替代做法（TD-070）在目录里，键是
+ * `login.switchAccountHint`：说的是**用户自己能做到的那条路**，不是
+ * 「暂不可用」—— 后者只告诉人此路不通，而他要的是换个账号，那件事今天仍然
+ * 做得到，只是得先在浏览器里退出。
  */
-const SWITCH_ACCOUNT_HINT = "先在浏览器里退出登录账号，然后点击登录";
 
 /** Decides the first surface once the daemon is reachable: login vs product. */
 export function SessionGate({ api }: { api: Api }) {
+  const t = useT();
   const [session, setSession] = useState<SessionInfo | "loading">("loading");
 
   const refresh = useCallback(async () => {
@@ -75,7 +76,7 @@ export function SessionGate({ api }: { api: Api }) {
       <div className="splash">
         <DragStrip />
         <img className="splash-mark" src="/logo.svg" alt="" aria-hidden />
-        <div className="text-body-md text-muted-foreground">正在连接运行时…</div>
+        <div className="text-body-md text-muted-foreground">{t("login.connecting")}</div>
       </div>
     );
   }
@@ -97,7 +98,7 @@ export function SessionGate({ api }: { api: Api }) {
         <div className="splash">
           <DragStrip />
           <img className="splash-mark" src="/logo.svg" alt="" aria-hidden />
-          <div className="text-body-md text-muted-foreground">正在加载…</div>
+          <div className="text-body-md text-muted-foreground">{t("login.loading")}</div>
         </div>
       }
     >
@@ -118,6 +119,7 @@ function LoginScreen({
   consoleBase: string;
   onSignedIn: () => void;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   /** 从「已发起、还没等到浏览器那边签完」到「签完或放弃」——只驱动按钮自身
    *  的文案，不再另起一段提示（owner 2026-09-16：一个页面，按钮变文案就够，
@@ -179,15 +181,17 @@ function LoginScreen({
           <span className="brand-name">RUYIN</span>
           <span className="brand-tag">Intelligent Workbench</span>
         </h1>
-        <p className="login-sub">
-          智能工作台 · 你的数据留在这台电脑上
-        </p>
+        <p className="login-sub">{t("login.tagline")}</p>
         <Button
           className="login-btn"
           disabled={busy}
           onClick={() => void startLogin()}
         >
-          {busy ? "正在打开浏览器…" : verifying ? "登录验证中…" : "登录 Vxture 账号"}
+          {busy
+            ? t("login.button.opening")
+            : verifying
+              ? t("login.button.verifying")
+              : t("login.button.idle")}
         </Button>
         {/* 「换个账号」：**入口留着，但停用**（owner 2026-09-17，TD-070）。
 
@@ -213,22 +217,20 @@ function LoginScreen({
 
             提示挂在外层 span 上而不是按钮上：**停用的按钮不派发鼠标事件**，
             `title` 写在它自己身上多半不会显示。 */}
-        <span className="login-alt-wrap" title={SWITCH_ACCOUNT_HINT}>
+        <span className="login-alt-wrap" title={t("login.switchAccountHint")}>
           <button
             type="button"
             className="login-alt text-body-sm text-muted-foreground"
             disabled
             aria-describedby="switch-account-hint"
           >
-            换个账号登录
+            {t("login.switchAccount")}
           </button>
         </span>
         <span id="switch-account-hint" hidden>
-          {SWITCH_ACCOUNT_HINT}
+          {t("login.switchAccountHint")}
         </span>
-        <p className="login-note text-body-sm text-muted-foreground">
-          浏览器中若已登录，会直接用那个账号继续。
-        </p>
+        <p className="login-note text-body-sm text-muted-foreground">{t("login.note")}</p>
         {/* 这里曾有两个次级入口，都已移除，理由是同一条：入口不该承诺它
             兑现不了的东西。
 
@@ -244,10 +246,10 @@ function LoginScreen({
         {/* 网站的条款都在 /legal/ 一级目录下（vxture.com/legal/{privacy,terms}，
             经语言前缀跳转后 200）；此前少了这一级，两个链接都是 404。2026-09-03 实测。 */}
         <a href={`${consoleBase}/legal/privacy`} target="_blank" rel="noopener noreferrer">
-          隐私政策
+          {t("login.legal.privacy")}
         </a>
         <a href={`${consoleBase}/legal/terms`} target="_blank" rel="noopener noreferrer">
-          服务条款
+          {t("login.legal.terms")}
         </a>
       </div>
     </div>

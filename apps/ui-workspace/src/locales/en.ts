@@ -1,0 +1,866 @@
+/**
+ * English catalog.
+ *
+ * Typed as `Catalog`, so a missing or stray key is a compile error — key
+ * parity is not something anyone has to remember to check.
+ *
+ * Written as product English, not as a translation of the Chinese: same
+ * meaning, same restraint (a prompt, not a manual), but the phrasing is
+ * whatever reads naturally here. Where the Chinese leans on a turn of phrase
+ * that does not travel, the English says the thing plainly instead.
+ */
+import type { Catalog } from "../i18n";
+
+export const en: Catalog = {
+  /* ── Not connected to the runtime ─────────────────────────────────── */
+  "app.notConnected.title": "Not connected to the local runtime",
+  "app.notConnected.body":
+    "RUYIN runs on your own machine, started by the RUYIN desktop app. Open “RUYIN” from the Start menu — the runtime starts with it and connects on its own. There is nothing for you to enter.",
+  "app.notConnected.note":
+    "What you are looking at is the runtime's web interface. It needs the runtime to be running — opening this page on its own will not start RUYIN.",
+
+  /* ── Sign-in ──────────────────────────────────────────────────────── */
+  "login.connecting": "Connecting to the runtime…",
+  "login.loading": "Loading…",
+  "login.tagline": "Intelligent Workbench · Your data stays on this computer",
+  "login.button.idle": "Sign in with Vxture",
+  "login.button.opening": "Opening your browser…",
+  "login.button.verifying": "Verifying…",
+  "login.switchAccount": "Use a different account",
+  "login.switchAccountHint": "Sign out in your browser first, then sign in here",
+  "login.note": "If you are already signed in the browser, that account is used.",
+  "login.legal.privacy": "Privacy Policy",
+  "login.legal.terms": "Terms of Service",
+  "login.legal.refund": "Refund Policy",
+
+  /* ── Account chip and its panel ───────────────────────────────────── */
+  "user.aria.chip": "Account · {name}",
+  "user.defaultName": "Vxture user",
+  "user.sessionExpired": "Session expired",
+  "user.relogin": "Sign in again to continue",
+  "user.offline": "Not connected",
+  "user.badge.loginError": "Sign-in problem",
+  "user.login.return": "Finish signing in your browser; this returns on its own…",
+  "user.login.fallback": "Nothing opened? Continue here ↗",
+  "user.row.profile": "Account center",
+  "user.row.quota": "Usage",
+  "user.row.settings": "Settings",
+  "user.row.logout": "Sign out",
+
+  /* ── Runtime menu in the title bar ────────────────────────────────── */
+  "runtime.ready": "Ready",
+  "runtime.readyWith": "Ready · {version}",
+  "runtime.connectedWith": "Connected · {workspace}",
+  "runtime.offline": "Not connected",
+  "runtime.encrypted": "Encrypted",
+  "runtime.devKey": "Development use · key is not protected",
+  "runtime.platform.connected": "Connected",
+  "runtime.platform.signedOut": "Signed out",
+  "runtime.badge": "Runtime {version}",
+  "runtime.aria.online": "Runtime · {version}",
+  "runtime.aria.offline": "Runtime · not connected",
+  "runtime.row.env": "Runtime",
+  "runtime.row.encryption": "Encryption",
+  "runtime.row.platform": "Platform",
+  "runtime.offlineBody":
+    "The runtime on this computer is not reachable right now, so there is no data to show. The app keeps trying; if it stays this way, quit RUYIN and open it again from the Start menu.",
+
+  /* ── Tenant / workspace menu ──────────────────────────────────────── */
+  "tenant.unnamed": "Unnamed tenant",
+  "tenant.noWorkspace": "No workspace selected",
+  "tenant.aria": "Tenant {tenant} · workspace {workspace}",
+  "tenant.quota.section": "Usage",
+  "tenant.quota.loading": "Loading…",
+  "tenant.quota.label": "Usage",
+  "tenant.quota.unavailable": "Unavailable right now",
+  "tenant.quota.caption": "{used} used of {limit}",
+  "tenant.quota.points": "{n} credits",
+  "tenant.admin": "Tenant administration",
+
+  /* ── Waiting on you ───────────────────────────────────────────────── */
+  "pending.kind.context_confirm": "Confirm what gets sent",
+  "pending.kind.tool_ask": "Approve a tool use",
+  "pending.kind.verification_review": "Review needed",
+  "pending.kind.state_transition": "Confirm the stage the agent proposed",
+  "pending.waited.justNow": "just now",
+  "pending.waited.minutes_one": "waiting # minute",
+  "pending.waited.minutes_other": "waiting # minutes",
+  "pending.waited.hours_one": "waiting # hour",
+  "pending.waited.hours_other": "waiting # hours",
+  "pending.waited.days_one": "waiting # day",
+  "pending.waited.days_other": "waiting # days",
+  "pending.aria.count_one": "# item waiting for you",
+  "pending.aria.count_other": "# items waiting for you",
+  "pending.aria.none": "Nothing waiting for you",
+  "pending.empty.title": "Nothing is waiting for you",
+  "pending.empty.desc":
+    "When a task stops and needs your decision, it shows up here and you get a system notification.",
+
+  /* ── Small shared pieces ──────────────────────────────────────────── */
+  "common.closeNotice": "Dismiss",
+  "common.copy": "Copy",
+  "common.copied": "Copied",
+  "common.search": "Search (Ctrl K)",
+  "search.placeholder": "Search projects, products and actions…",
+  "search.empty": "No matches",
+  "search.results": "Search results",
+
+  /* ── Updates ──────────────────────────────────────────────────────── */
+  "update.unavailable": "Can't check for updates right now — try again later",
+  "update.current": "You're on the latest version",
+  "update.found": "Update available",
+  "update.availableLine": "Version {latest} is available (you have {current})",
+  "update.availableLineWithChannel":
+    "Version {latest} is available (you have {current} · {channel})",
+  "update.toastLine": "{latest} (you have {current})",
+  "update.toastLineWithChannel": "{latest} (you have {current} · {channel})",
+  "update.noPackage": "The installer isn't available right now — try again later",
+  "update.upgrade": "Update",
+  "update.close": "Dismiss",
+  "update.channel.stable": "Stable",
+  "update.channel.beta": "Beta",
+
+  /* ── The product's own surface ────────────────────────────────────── */
+  "productSurface.title": "Product interface",
+  "productSurface.loading": "Loading…",
+  "productSurface.refused": "This product interface was not loaded, for safety reasons.",
+  "productSurface.archived":
+    "This project is archived, so the product interface is no longer loaded. The record stays readable and exportable; restore the project and the interface comes back.",
+  "productSurface.none":
+    "This product has no interface of its own. Tasks, materials and results are all on the left.",
+  "productSurface.unavailable.title": "Product interface unavailable",
+  "productSurface.unavailable.body":
+    "Its interface hasn't been fetched to this computer yet — you may have been offline. The rest of the product works as usual: tasks, materials and results are all on the left.",
+  "productSurface.retry": "Fetch again",
+  "productSurface.retrying": "Fetching…",
+
+  /* ── About / third-party notices ──────────────────────────────────── */
+  "about.desc": "The local workbench for Vxture AI-native agents",
+  "about.version": "Version {version}",
+  "about.copyright": "© 2026 Vxture · All rights reserved",
+  "thirdParty.trigger": "Third-party licenses",
+  "thirdParty.title": "Third-party components",
+  "thirdParty.desc_one":
+    "# open-source component ships with RUYIN. It is listed here because its license asks for attribution. Full license texts are in the installation folder; licenses for skills and tools are listed on the Capabilities page.",
+  "thirdParty.desc_other":
+    "# open-source components ship with RUYIN. They are listed here because their licenses ask for attribution. Full license texts are in the installation folder; licenses for skills and tools are listed on the Capabilities page.",
+  "thirdParty.col.component": "Component",
+  "thirdParty.col.version": "Version",
+  "thirdParty.col.license": "License",
+  "thirdParty.col.part": "Used by",
+  "thirdParty.part.daemon": "Runtime",
+  "thirdParty.part.ui": "Interface",
+  "thirdParty.part.shell": "Desktop app",
+  "common.listSep": ", ",
+
+  /* ── Settings sections ────────────────────────────────────────────── */
+  "sections.account": "Account",
+  "sections.general": "General",
+  "sections.models": "Models",
+  "sections.skills": "Capabilities",
+  "sections.connectors": "Connectors",
+  "sections.database": "Databases",
+  "sections.updates": "Updates",
+  "sections.about": "About",
+
+  /* ── Project tabs ─────────────────────────────────────────────────── */
+  "tabs.overview": "Overview",
+  "tabs.context": "Materials",
+  "tabs.tasks": "Tasks",
+  "tabs.audit": "Audit",
+  "tabs.product": "Product",
+
+  /* ── Sidebar and title bar ────────────────────────────────────────── */
+  "nav.home": "Home",
+  "nav.recent": "Recent",
+  "nav.archived": "Archived",
+  "nav.pendingImport": "Waiting to be imported",
+  "nav.sample": "Example · {product}",
+  "nav.siblings": "Other projects in this product",
+  "nav.elsewhere_one": "# more project in another workspace",
+  "nav.elsewhere_other": "# more projects in other workspaces",
+  "nav.expand": "Expand sidebar",
+  "nav.collapse": "Collapse sidebar",
+  "nav.expandGroups": "Expand all groups",
+  "nav.collapseGroups": "Collapse all groups",
+  "nav.tabWithCount": "{label} ({count})",
+  "chrome.back": "Back to the workbench",
+  "chrome.settings": "Settings",
+  "chrome.project": "Project",
+  "chrome.website": "ruyin.work",
+  "chrome.loading": "Loading…",
+  "nav.projectMeta": "{product} · {type}",
+  "nav.projectMetaArchived": "{product} · {type} · archived",
+
+  /* ── Search result groups ─────────────────────────────────────────── */
+  "search.group.projects": "Projects",
+  "search.group.products": "Products",
+  "search.group.actions": "Actions",
+  "search.meta.installed": "Installed",
+  "search.action.home": "Go to Home",
+  "search.action.settings": "Open Settings",
+
+  /* ── Home: the three status cards ─────────────────────────────────── */
+  "home.cards.aria": "Runtime status",
+  "home.card.runtime": "Runtime",
+  "home.card.runtime.ok": "Ready",
+  "home.card.runtime.off": "Not connected",
+  "home.card.runtime.hintOk": "The runtime on this computer is healthy",
+  "home.card.runtime.hintOff":
+    "The runtime on this computer is not responding; reconnecting",
+  "home.card.encryption": "Encryption",
+  "home.card.encryption.on": "Encrypted",
+  "home.card.encryption.dev": "Development use",
+  "home.card.encryption.hintOn":
+    "All your data is stored encrypted, and only you on this computer can unlock it",
+  "home.card.encryption.hintDev":
+    "Data is still encrypted, but the key has no system-level protection — do not put real data here",
+  "home.card.platform": "Platform",
+  "home.card.platform.on": "Connected",
+  "home.card.platform.off": "Signed out",
+  "home.card.platform.hintOn":
+    "Workspace “{workspace}” — the agents and data available here belong to it",
+  "home.card.platform.hintOff":
+    "Sign in with Vxture and the agents you subscribe to appear on this computer",
+  "home.workspace.unset": "none selected",
+
+  /* ── Home: my agents ──────────────────────────────────────────────── */
+  "home.mine.title": "My agents",
+  "home.mine.subscriptionUnknown":
+    "Subscription information is unavailable right now; below is what is installed on this computer.",
+  "home.mine.updateBlocked": "AI is not enabled yet, so updates cannot be checked",
+  "home.mine.checking": "Checking…",
+  "home.mine.update": "Check for updates",
+  "home.empty.signedIn": "No agents available for this account",
+  "home.empty.signedOut": "Sign in to sync your agents",
+  "home.empty.descSignedIn":
+    "The runtime is ready. Subscribe on the Vxture platform and your agents appear here.",
+  "home.empty.descSignedOut":
+    "The runtime is ready. Sign in with Vxture and the agents you subscribe to appear here.",
+  "home.empty.subscribe": "Subscribe on Vxture",
+
+  /* ── Home: popular agents ─────────────────────────────────────────── */
+  "home.catalog.title": "Popular agents",
+  "home.catalog.desc": "The three most popular on the platform; subscribe there",
+  "home.catalog.browseAll": "Browse all",
+  "home.catalog.released": "Released",
+  "home.catalog.preview": "In development",
+  "home.catalog.learnMore": "Learn more",
+  "home.catalog.source": "From the Vxture platform, updated {date}",
+
+  /* ── Home: product cards ──────────────────────────────────────────── */
+  "home.card.blurbFallback": "Vxture agent",
+  "home.blurb.bidproposal":
+    "Tender analysis · requirement matrix · proposal drafting · coverage checks",
+  "home.card.identTitle": "Product code {id}",
+  "home.card.platformVersion": "Version on the platform: {version}",
+  "home.card.activeVersion": "Version in use: {version}",
+  "home.badge.expired": "Expired",
+  "home.badge.subscribed": "Subscribed",
+  "home.badge.notInstalled": "Not installed",
+  "home.badge.notEntitled": "Not subscribed",
+  "home.badge.disabled": "Disabled",
+  "home.badge.builtinSample": "Built-in example",
+  "home.badge.localOnly": "Installed locally",
+  "home.badge.notWired": "Not enabled",
+  "home.alert.notWired":
+    "AI is not enabled yet: starting a task now returns example content, not real results",
+  "home.card.renew": "Renew",
+  "home.card.useOnline": "Use online",
+  "home.card.about": "About this agent",
+  "home.card.upgradeTo": "Update to v{version}",
+  "home.card.open": "Open",
+  "home.card.opening": "Opening…",
+  "home.card.goRenew": "Renew on the platform",
+  "home.card.goSubscribe": "Subscribe on the platform",
+  "home.card.enable": "Enable",
+  "home.card.projects": "projects",
+  "home.card.projectsTitleBoth": "{local} here of {total} in total",
+  "home.card.projectsTitleLocal": "Projects for this product on this computer: {local}",
+
+  /* ── Home: installing and the package registry ────────────────────── */
+  "home.install.reading": "Loading…",
+  "home.install.catalogUnreachable": "Could not read the registry this time — try again later",
+  "home.install.catalogEmpty": "No agents available to install right now",
+  "home.install.catalogAria": "Package registry",
+  "home.install.signed": "Signed",
+  "home.install.unsigned": "Unsigned",
+  "home.install.installed": "Installed",
+  "home.install.installing": "Installing…",
+  "home.install.install": "Install",
+  "home.install.unsignedBlockedTitle": "For safety, release builds only install signed agents",
+  "home.install.unsignedBlocked": "Unsigned — cannot install",
+  "home.install.fromFile": "Install from a local package",
+  "home.install.hideRegistry": "Hide the registry",
+  "home.install.showRegistry": "Browse the registry",
+  "home.install.doneSigned": "Installed {id}@{version} (signed)",
+  "home.install.doneUnsigned": "Installed {id}@{version} (unsigned)",
+
+  /* ── Project: outcome and task states ─────────────────────────────── */
+  "ws.outcome.success": "Succeeded",
+  "ws.outcome.rejected": "Rejected",
+  "ws.outcome.failed": "Failed",
+  "ws.outcome.unknown": "Not recorded",
+  "ws.task.created": "Not started",
+  "ws.task.selecting": "Gathering materials",
+  "ws.task.executing": "Running",
+  "ws.task.verifying": "Checking",
+  "ws.task.finalizing": "Finishing up",
+  "ws.task.waiting_human": "Waiting for you",
+  "ws.task.suspended": "Paused (resumes automatically)",
+  "ws.task.completed": "Done",
+  "ws.task.failed": "Failed",
+  "ws.task.cancelled": "Cancelled",
+
+  /* ── Project: notices at the top ──────────────────────────────────── */
+  "ws.loading": "Loading…",
+  "ws.unattributed.title": "This project is not in a workspace yet",
+  "ws.unattributed.body":
+    "It was created before workspaces were in use. Import it and it will show up with the current workspace.",
+  "ws.unattributed.import": "Import into this workspace",
+  "ws.upgradeBlocked":
+    "Version {version} of this agent is available, but it removes or narrows something this project uses ({breaks}), so the project stays on {current}.",
+  "ws.archived.title": "Project archived ({at})",
+  "ws.archived.body":
+    "An archived project is read-only: no new tasks, no stage changes, no changes to grants or materials. The record stays readable and exportable.",
+  "ws.archived.restore": "Restore project",
+
+  /* ── Project: summary strip ───────────────────────────────────────── */
+  "ws.summary.stage": "Stage",
+  "ws.summary.tasks": "Tasks",
+  "ws.summary.waiting": "{n} waiting",
+  "ws.summary.running": "{n} running",
+  "ws.summary.materials": "Materials",
+  "ws.summary.bindings": "{types} types · {folders} folders",
+  "ws.summary.connectors": " · {n} connectors",
+  "ws.summary.audit": "Audit",
+  "ws.summary.auditCount": "{n} entries",
+  "ws.summary.verifying": "Checking",
+  "ws.summary.chainOk": "Record intact",
+  "ws.summary.chainBroken": "Record was altered",
+  "ws.summary.createdAt": "Created {date}",
+
+  /* ── Project: overview ────────────────────────────────────────────── */
+  "ws.recentTasks": "Recent tasks",
+  "ws.recentTasks.empty": "No task runs yet",
+  "ws.export.title": "Export the project record",
+  "ws.export.desc":
+    "Exports everything recorded for this project: stages, tasks and the audit trail. Documents the agent produced are not included — those are already in your own folders. The destination must be a folder you have granted.",
+  "ws.export.placeholder": "Export to (a granted folder)",
+  "ws.export.run": "Export",
+  "ws.export.running": "Exporting…",
+  "ws.export.done": "Exported {count} files to {path}",
+  "ws.export.auditCount": "Includes {n} audit entries",
+  "ws.export.signed": "Signed.",
+  "ws.export.unsigned":
+    "Unsigned: the recipient can tell whether it was altered, but not who it came from.",
+  "ws.archive.title": "Archive the project",
+  "ws.archive.descRestorable":
+    "An archived project is read-only: no new tasks, no stage changes, no changes to grants or materials; the record stays readable and exportable, and you can restore it at any time. A project cannot be archived while tasks are still in flight.",
+  "ws.archive.descOneWay":
+    "An archived project is read-only: no new tasks, no stage changes, no changes to grants or materials; the record stays readable and exportable. This product does not support restoring, so archiving is one-way. A project cannot be archived while tasks are still in flight.",
+  "ws.archive.run": "Archive",
+
+  /* ── Project: what a contract change touched ──────────────────────── */
+  "ws.break.objects": "objects",
+  "ws.break.states": "stages",
+  "ws.break.context": "material types",
+  "ws.break.capabilities": "capabilities",
+  "ws.break.tools": "tools",
+  "ws.break.tasks": "tasks",
+  "ws.break.project": "project shape",
+  "ws.break.more": "{named} and {count} more",
+
+  /* ── Project: advancing a stage ───────────────────────────────────── */
+  "ws.advance.label": "Advance to:",
+  "ws.advance.confirm":
+    "This moves the project from “{from}” to “{to}” and needs your confirmation. Continue?",
+  "ws.advance.needsConfirm": " (needs confirmation)",
+
+  /* ── Project: project files ───────────────────────────────────────── */
+  "ws.files.title": "Project files",
+  "ws.files.desc":
+    "A file you take in is copied into this project and encrypted with the same key as the project itself. Move or delete your own copy and this one stays — the evidence behind your results does not disappear with it. Files can only be taken in from folders you have granted.",
+  "ws.files.cloudWarning":
+    "Do not take files in from a cloud-sync folder (OneDrive, Dropbox, Google Drive…): those files may be placeholders, and what you take in would be an empty shell. The common ones are rejected; for any we cannot recognise, please avoid them yourself.",
+  "ws.files.empty.title": "No files taken in yet",
+  "ws.files.empty.desc":
+    "Reference material is read from where you keep it. To keep the evidence available long-term, take the originals in.",
+  "ws.files.aria": "Project files",
+  "ws.files.fromLocal": "from this computer",
+  "ws.files.fetchBack": "Save a copy",
+  "ws.files.remove": "Remove",
+  "ws.files.cannotIngest": "That file cannot be taken in",
+  "ws.files.cannotFetch": "Could not retrieve {name}",
+  "ws.files.placeholderExample": "A file in a granted folder (for example {example})",
+  "ws.files.placeholderNoGrant": "Grant a folder above first, then take files in from it",
+  "ws.files.ingest": "Take into the project",
+
+  /* ── Project: tool permissions ────────────────────────────────────── */
+  "ws.perm.allow": "Run without asking",
+  "ws.perm.ask": "Ask me every time",
+  "ws.perm.deny": "Never",
+  "ws.permSource.hard_floor": "hard limit",
+  "ws.permSource.user_policy": "your setting",
+  "ws.permSource.contract_default": "product default",
+  "ws.permSource.ask_cache": "approved for this task",
+  "ws.tools.title": "Tool permissions",
+  "ws.tools.desc":
+    "These apply to this project only. You can always tighten them; the ones marked as a hard limit cannot be loosened — data that leaves cannot be called back, so someone has to say yes each time.",
+  "ws.tools.aria": "Tool permissions",
+  "ws.tools.floorTag": "hard limit: {permission}",
+  "ws.tools.rowAria": "Permission for {tool}",
+  "ws.tools.followContract": "Product default ({permission})",
+  "ws.tools.cannotChange": "That one cannot be changed",
+
+  /* ── Project: grants and sources ──────────────────────────────────── */
+  "ws.grants.title": "Folder access",
+  "ws.grants.empty.title": "No folders granted yet",
+  "ws.grants.empty.desc": "Only folders you grant can be read; nothing else is reachable.",
+  "ws.grants.placeholder": "Full path to a folder",
+  "ws.grants.grant": "Grant",
+  "ws.connectors.title": "Connector access",
+  "ws.connectors.aria": "Granted connectors",
+  "ws.connectors.pickAria": "Connector to grant",
+  "ws.connectors.option": "{id} ({source})",
+  "ws.connectors.optionStopped": "{id} ({source}, not running)",
+  "ws.connectors.grant": "Grant connector",
+  "ws.bindings.title": "Where materials come from",
+  "ws.bindings.viaAria": "Source",
+  "ws.bindings.viaLocal": "A local folder",
+  "ws.bindings.viaConnector": "Connector {id}",
+  "ws.bindings.placeholderUri": "Resource URI prefix (e.g. crm://accounts/)",
+  "ws.bindings.placeholderPath": "A path inside a granted folder",
+  "ws.bindings.bind": "Bind and index",
+  "ws.bindings.fromConnector": "Connector {connector} · {source}",
+  "ws.bindings.collapse": "Hide",
+  "ws.bindings.expand": "Show entries",
+  "ws.bindings.noEntries": "(nothing found for this binding right now)",
+
+  /* ── Project: tasks ───────────────────────────────────────────────── */
+  "ws.taskDefs.title": "What this agent can do",
+  "ws.instances.title": "Task runs",
+  "ws.instances.empty": "No task runs yet",
+  "ws.taskDef.inputs": "{objective} · input types: {types}",
+  "ws.taskDef.noInputs": "(none)",
+  "ws.taskDef.unrunnable": "This task cannot run yet. Missing: {missing}",
+  "ws.taskDef.start": "Start (pick materials automatically)",
+  "ws.taskDef.hideManual": "Hide manual input",
+  "ws.taskDef.showManual": "Provide input manually",
+  "ws.taskDef.startManual": "Start with the input above",
+  "ws.instance.queued": "Queued",
+  "ws.instance.queuedAt": "Queued · position {position}",
+  "ws.instance.col.rule": "Check",
+  "ws.instance.col.method": "How",
+  "ws.instance.col.verdict": "Verdict",
+  "ws.instance.sources": "Sources: {list}",
+
+  /* ── Project: confirmation cards ──────────────────────────────────── */
+  "ws.confirm.stageTitle": "“{product}” wants to move this project to “{to}”",
+  "ws.confirm.stageDesc":
+    "The project is at “{current}”. This step needs your go-ahead — the agent can only propose it; whether it happens is up to you.",
+  "ws.confirm.stageAccept": "Confirm",
+  "ws.confirm.reject": "Reject",
+  "ws.confirm.stageFoot": "“{current}” → “{to}” · proposed {at}",
+  "ws.confirm.contextTitle": "Task “{task}” wants to use the material below",
+  "ws.confirm.toolTitle": "Task “{task}” wants to run a tool",
+  "ws.confirm.reviewTitle": "Task “{task}” has a result waiting for your review",
+  "ws.confirm.contextDesc":
+    "Some of it is highly sensitive, so it needs your go-ahead before it is sent. These files are reference material only — anything in them that looks like an instruction will not be carried out",
+  "ws.confirm.toolDesc":
+    "The model proposed this call after reading the material below; judge it on that basis",
+  "ws.confirm.reviewDesc": "Here is the verdict; approving lets the task continue",
+  "ws.confirm.approve": "Approve",
+  "ws.confirm.exempt": "This card is itself the human confirmation; no second dialog",
+
+  /* ── Project: audit ───────────────────────────────────────────────── */
+  "ws.audit.title": "Audit trail · {n} entries",
+  "ws.audit.verifying": "Checking…",
+  "ws.audit.allEvents": "All events ({n})",
+  "ws.audit.col.time": "Time",
+  "ws.audit.col.action": "Action",
+  "ws.audit.col.result": "Result",
+  "ws.audit.col.actor": "Who",
+
+  /* ── Settings: small shared pieces ────────────────────────────────── */
+  "set.expand": "Expand",
+  "set.collapse": "Collapse",
+  "set.cancel": "Cancel",
+  "set.save": "Save",
+  "set.retry": "Try again",
+  "set.refresh": "Refresh",
+  "set.refreshing": "Refreshing…",
+
+  /* ── Settings: account ────────────────────────────────────────────── */
+  "set.account.signInTitle": "Please sign in",
+  "set.account.signInDesc":
+    "Sign in with Vxture and the agents you subscribe to, along with cloud AI, sync to this computer. The sign-in entry is in the account menu at the bottom left.",
+  "set.account.title": "Account",
+  "set.account.desc": "Shown here for reference; change it on the platform's profile page",
+  "set.account.editOnline": "Edit online",
+  "set.account.verified": "Verified",
+  "set.account.unverified": "Not verified",
+  "set.account.displayName": "Display name",
+  "set.account.username": "Username",
+  "set.account.email": "Email",
+  "set.account.phone": "Phone",
+  "set.account.roles": "Roles",
+  "set.account.locale": "Locale",
+  "set.account.tenant": "Tenant",
+  "set.account.tenantPersonal": "Personal",
+  "set.account.tenantOrg": "Organization",
+
+  /* ── Settings: preferences ────────────────────────────────────────── */
+  "set.prefs.title": "Preferences",
+  "set.prefs.desc": "These apply to this computer only and do not follow your account",
+  "set.prefs.theme": "Theme",
+  "set.prefs.theme.dark": "Dark",
+  "set.prefs.theme.light": "Light",
+  "set.prefs.theme.system": "System",
+  "set.prefs.density": "Density",
+  "set.prefs.density.compact": "Compact",
+  "set.prefs.density.default": "Default",
+  "set.prefs.density.comfortable": "Comfortable",
+  "set.prefs.fontSize": "Text size",
+  "set.prefs.fontSize.small": "Smaller",
+  "set.prefs.fontSize.default": "Default",
+  "set.prefs.fontSize.large": "Larger",
+
+  /* ── Settings: where data lives ───────────────────────────────────── */
+  "set.storage.title": "Where your data lives",
+  "set.storage.desc": "Everything is kept on this computer, in these two folders",
+  "set.storage.productsDir": "Products folder",
+  "set.storage.instanceId": "Installation ID",
+  "set.storage.copyInstanceId": "Copy the installation ID",
+  "set.storage.logs": "Logs",
+  "set.storage.logsValue": "Used to diagnose problems; kept per day, last 7 days only",
+  "set.storage.openLogDir": "Open the log folder",
+  "set.storage.openDir": "Open folder",
+  "set.storage.dataDir": "Data folder",
+  "set.storage.openDataDir": "Open the data folder",
+  "set.storage.change": "Change…",
+  "set.storage.movePlanned": "A move is scheduled and takes effect after a restart.",
+  "set.storage.movePlannedBody":
+    "Destination: {path}. The move happens at the next start, before any database is opened; if it does not succeed, the app starts from the original folder as before and tells you why.",
+  "set.storage.moveFailed": "The last move did not succeed; your data is still where it was.",
+  "set.storage.moveDone":
+    "Your data has been moved to the new location above; only cache is left in the old folder.",
+  "set.storage.restartAndMove": "Restart and move now",
+  "set.storage.cancelMove": "Cancel this move",
+  "set.storage.dialogTitle": "Change the data folder",
+  "set.storage.dialogDesc":
+    "Your data and keys move to the new location. The move happens at the next start, before any database is opened.",
+  "set.storage.cloudWarning":
+    "Do not choose a cloud-sync folder (OneDrive, Dropbox, Google Drive, iCloud…). A sync client will change database files while they are in use, which makes the whole encrypted store unreadable — and it uploads a full copy of your data to the cloud. The common ones are rejected automatically, but the ones mounted as a drive letter cannot be recognised — please make sure the location you pick is not inside any sync folder.",
+  "set.storage.current": "Now",
+  "set.storage.moveTo": "Move to",
+  "set.storage.pick": "Choose a folder…",
+  "set.storage.pickAgain": "Choose another…",
+  "set.storage.sizeToMove": "About {mb} MB to move",
+  "set.storage.sameDrive": " · same drive, so it is a rename and finishes almost instantly.",
+  "set.storage.crossDrive":
+    " · a different drive, so every file is copied and verified; this can take a few minutes.",
+  "set.storage.cacheNotMoved": " Cache is not moved (it rebuilds itself).",
+  "set.storage.restartNote":
+    "The app closes and reopens, showing progress while it moves. The source folder stays authoritative until the copy is verified — if it fails part-way, the app starts from the original location and nothing is lost. Data is encrypted for the current Windows user, so do not choose another user's folder or a removable drive.",
+  "set.storage.restartConfirm": "Restart and move",
+
+  /* ── Settings: encryption ─────────────────────────────────────────── */
+  "set.crypto.title": "Encryption",
+  "set.crypto.desc": "Data is encrypted the moment it is saved, and the key itself has two more layers of protection",
+  "set.crypto.data": "Your data",
+  "set.crypto.dataHow": "Each project database encrypted whole · ",
+  "set.crypto.dbKey": "Database key",
+  "set.crypto.dbKeyHow": "A random key per database · ",
+  "set.crypto.dbKeyWrapped": " wrapped under the master key",
+  "set.crypto.masterKey": "Master key",
+  "set.crypto.masterKeyProtectedPrefix": "Protected by ",
+  "set.crypto.masterKeyProtectedSuffix": " — only your Windows account can unlock it",
+  "set.crypto.masterKeyPlain":
+    "This system offers no key protection, so the master key is stored unencrypted",
+  "set.crypto.devBadge": "Development use: do not put real data here",
+
+  /* ── Settings: inference policy and audit ─────────────────────────── */
+  "set.inference.title": "Before sending to AI",
+  "set.inference.desc": "When you want to be asked before material goes to cloud AI",
+  "set.inference.grain": "Ask me",
+  "set.inference.note":
+    "Whichever you choose, highly sensitive content is always confirmed with you first. Material sent for inference is used and discarded, never stored.",
+  "set.inference.aria": "When to confirm before sending",
+  "set.inference.bySensitivity": "By sensitivity (recommended)",
+  "set.inference.always": "Every time",
+  "set.audit.title": "Audit",
+  "set.audit.desc":
+    "Every transfer and every execution is recorded, and the record itself can be verified. There is no switch here",
+  "set.audit.scope": "What is recorded",
+  "set.audit.scopeValue": "Every transfer of material, every tool run, every decision you make",
+  "set.audit.tamper": "Tamper-evident",
+  "set.audit.tamperValue": "Each entry follows the one before it, so any change to any entry shows up",
+  "set.audit.view": "Where to look",
+  "set.audit.viewValue": "In the project's Audit tab, verifiable at any time",
+  "set.audit.note": "Entries hold a fingerprint of the content, never the content itself.",
+
+  /* ── Settings: connectors ─────────────────────────────────────────── */
+  "set.conn.title": "Connectors",
+  "set.conn.desc": "Bring a LAN or in-house system in for agents to use",
+  "set.conn.add": "Add a connector",
+  "set.conn.none": "No connectors installed yet.",
+  "set.conn.listAria": "Installed connectors",
+  "set.conn.bundled": "Built in",
+  "set.conn.custom": "Custom",
+  "set.conn.staged": "Staged",
+  "set.conn.running": "Running",
+  "set.conn.stopped": "Not running",
+  "set.conn.stoppedWhy": "Not running: {detail}",
+  "set.conn.enable": "Enable",
+  "set.conn.disable": "Disable",
+  "set.conn.uninstall": "Uninstall",
+  "set.conn.toolsLabel": "Tools it offers",
+  "set.conn.toolsCaption": "An agent can only call a tool it has declared by the same name",
+  "set.conn.addTitle": "Add a connector",
+  "set.conn.addDesc":
+    "Give a command to run locally, or the address of a service already running. Test it first, then enable it",
+  "set.conn.back": "Back to the list",
+  "set.conn.id": "Connector id",
+  "set.conn.idPlaceholder": "e.g. crm",
+  "set.conn.transport": "How to reach it",
+  "set.conn.transportStdio": "Run a local command",
+  "set.conn.transportHttp": "An address already running",
+  "set.conn.url": "Address",
+  "set.conn.urlNote": "Starts with http or https; the service must support Streamable HTTP.",
+  "set.conn.command": "Command",
+  "set.conn.commandPlaceholder": "e.g. node, or the full path to an executable",
+  "set.conn.args": "Arguments",
+  "set.conn.argsNote": "Space-separated; may be left empty.",
+  "set.conn.kind": "Kind of source",
+  "set.conn.kindNote": "Only material types declared as LAN or private can bind to it.",
+  "set.conn.kindLan": "A system on your network",
+  "set.conn.kindPrivate": "A private service",
+  "set.conn.test": "Test the connection",
+  "set.conn.testing": "Testing…",
+  "set.conn.saving": "Adding…",
+  "set.conn.saveEnable": "Add and enable",
+  "set.conn.stage": "Stage it (not enabled)",
+  "set.conn.probeOk": "Connected",
+  "set.conn.probeTools": " and it offers {n} tools:",
+  "set.conn.probeNoTools":
+    " but it offers no tools — anything that relies on its tools will not work",
+  "set.conn.probeFail":
+    "Could not connect. Adjust the settings and test again, or stage it for now — a staged connector never starts and is never used by a task.",
+  "set.conn.probeFailWhy":
+    "Could not connect: {detail}. Adjust the settings and test again, or stage it for now — a staged connector never starts and is never used by a task.",
+  "set.conn.signNoteHttp":
+    "Release builds only install signed connectors and say why when they cannot. The test itself stores nothing; it just sends one handshake.",
+  "set.conn.signNoteStdio":
+    "Release builds only install signed connectors and say why when they cannot. The test itself stores nothing; it starts the command and stops it.",
+
+  /* ── Settings: databases ──────────────────────────────────────────── */
+  "set.db.title": "Not available yet",
+  "set.db.desc":
+    "External databases are still in development. To bring data from a LAN or in-house system in today, use a connector.",
+
+  /* ── Settings: updates ────────────────────────────────────────────── */
+  "set.update.currentTitle": "This version",
+  "set.update.autoCheck": "Check automatically",
+  "set.update.autoCheckTip": "Check for a newer version each time the app starts",
+  "set.update.check": "Check for updates",
+  "set.update.checking": "Checking…",
+  "set.update.runtime": "Runtime",
+  "set.update.ui": "Interface",
+  "set.update.system": "System",
+  "set.update.startedAt": "Started",
+  "set.update.os.win32": "Windows",
+  "set.update.os.darwin": "macOS",
+  "set.update.os.linux": "Linux",
+  "set.update.arch.x64": "64-bit",
+  "set.update.arch.arm64": "ARM 64-bit",
+  "set.update.platformValue": "{os} · {arch}",
+  "set.update.installTitle": "How updating works",
+  "set.update.installDesc": "Nothing downloads or installs on its own; when to update is up to you",
+  "set.update.channelRow": "Channel",
+  "set.update.howCheck": "Checking",
+  "set.update.howCheckValue":
+    "Press “Check for updates”, or leave “Check automatically” on and it checks at each start",
+  "set.update.howDownload": "Downloading",
+  "set.update.howDownloadValue": "In your browser; the installer lands in your Downloads folder",
+  "set.update.howInstall": "Installing",
+  "set.update.howInstallValue": "Run the installer over the top; your data is untouched",
+  "set.update.unsignedTitle": "This build is not digitally signed yet.",
+  "set.update.unsignedBody":
+    "Windows may show a warning when you install it; choose “More info” → “Run anyway” to continue. On the few computers with Smart App Control enabled it is blocked outright and double-clicking does nothing — in that case, please wait for a signed build. Only download the installer from the official Vxture download page.",
+
+  /* ── Settings: this machine ───────────────────────────────────────── */
+  "set.hw.title": "This machine",
+  "set.hw.desc": "Shown on this computer only; never uploaded",
+  "set.hw.unavailable": "Machine details are unavailable right now; nothing else is affected.",
+  "set.hw.cpu": "Processor",
+  "set.hw.cores": "{n} cores",
+  "set.hw.memory": "Memory",
+  "set.hw.board": "Motherboard / BIOS",
+  "set.hw.os": "Operating system",
+  "set.hw.disk": "Disk",
+  "set.hw.mac": "MAC address",
+  "set.hw.machineId": "Machine ID",
+
+  /* ── Settings: capabilities ───────────────────────────────────────── */
+  "set.cap.layer.bundled": "Built in",
+  "set.cap.layer.distributed": "From a product",
+  "set.cap.layer.user": "Yours",
+  "set.cap.layer.project": "Project",
+  "set.cap.supply.default": "On by default",
+  "set.cap.supply.installedDisabled": "Installed, not enabled",
+  "set.cap.supply.runos": "Via Runos",
+  "set.cap.state.available": "Available",
+  "set.cap.state.unavailable": "Unavailable",
+  "set.cap.state.needsAcquisition": "Not fetched",
+  "set.cap.state.acquiring": "Fetching",
+  "set.cap.state.registered": "Listed",
+  "set.cap.component.acquired": "Fetched",
+  "set.cap.component.notAcquired": "Not fetched",
+  "set.cap.component.acquiring": "Fetching",
+  "set.cap.component.unreachable":
+    "Cannot reach the network — you can also import it from a local file",
+  "set.cap.component.gone":
+    "Upstream no longer has this version — retrying will not help; it needs a RUYIN build with an updated manifest",
+  "set.cap.component.payloadMissing":
+    "It was installed, but the files are gone (antivirus quarantine or a disk clean-up) — remove it and fetch again",
+  "set.cap.component.mismatch":
+    "What was fetched does not match the digest in the manifest, so it was discarded",
+  "set.cap.component.noSpace": "Not enough disk space",
+  "set.cap.component.tooLarge": "Larger than the manifest says",
+  "set.cap.component.licenseMissing": "The license file was missing after unpacking, so it was rolled back",
+  "set.cap.component.refusedOrigin": "The source is not on the allowed list, so no request was sent",
+  "set.cap.component.pathTooLong": "The destination path is too long",
+  "set.cap.component.cancelled": "Cancelled",
+  "set.cap.component.failed": "Could not fetch it",
+  "set.cap.bundledSummary": "{n} built in, shipped with the installer and downloading nothing",
+  "set.cap.bundledBlocked": " ({n} of them need configuring before they start)",
+  "set.cap.bundledNeeds":
+    "; {n} more need fetching (online, or imported from a local file).",
+  "set.cap.bundledEnd": ".",
+  "set.cap.kind.builtin": "Built in",
+  "set.cap.kind.connector": "Connector",
+  "set.cap.kind.mcpServer": "MCP server",
+  "set.cap.filter.allSources": "All sources",
+  "set.cap.filter.allKinds": "All kinds",
+  "set.cap.filter.all": "All",
+  "set.cap.filter.skill": "Skills",
+  "set.cap.filter.connector": "Connectors",
+  "set.cap.filter.executor": "Executors",
+  "set.cap.catalog.noEndpoint": "{reason}, so there is no listing yet.",
+  "set.cap.catalog.noEndpointDefault": "The platform does not offer a capability catalog yet",
+  "set.cap.catalog.neverFetched": "The Runos listing has not been fetched yet.",
+  "set.cap.catalog.fresh": "{total} entries · updated {at}",
+  "set.cap.catalog.stale": "This is the listing as of {at}; it has not updated since.",
+  "set.cap.catalog.diff": "{added} added · {removed} removed · {changed} changed",
+  "set.cap.local.runnable": "Runs here",
+  "set.cap.local.none": "Not here",
+  "set.cap.local.cloudOnly": "Cloud only",
+  "set.cap.syncLine":
+    "Capabilities stay in sync with Vxture's cloud Runos; this computer provides the runtime.",
+  "set.cap.cloudClosed": "Cloud not open yet",
+  "set.skills.title": "Skills on this computer",
+  "set.skills.desc":
+    "The skill packs installed here. An agent only reaches the ones it has declared",
+  "set.skills.filterAria": "Filter by source layer",
+  "set.skills.none": "No skills yet",
+  "set.skills.emptyAll":
+    "No skills on this computer yet. The built-in layer ships with the installer; in development, run pnpm skills:pull first.",
+  "set.skills.emptyLayer": "No skills in this layer.",
+  "set.skills.groupAria": "Skills · {group}",
+  "set.skills.hasScripts": "Includes scripts (not run locally)",
+  "set.skills.shadowed": "Shadowed by the {layer} layer",
+  "set.skills.enabled": "Enabled",
+  "set.skills.disabled": "Disabled",
+  "set.tools.title": "Tools on this computer",
+  "set.tools.desc":
+    "What agents can actually do here. Every call goes through the permissions you set",
+  "set.tools.filterAria": "Filter by kind",
+  "set.tools.none": "No tools available on this computer yet.",
+  "set.tools.emptyKind": "No tools of this kind.",
+  "set.tools.groupAria": "Tools · {group}",
+  "set.tools.toolList": "Tools: {list}",
+  "set.tools.unprobed": "Tool names not discovered: {reason}",
+  "set.tools.componentLine":
+    "{state} · {download} to download ({disk} on disk) · {license} · from {origin}",
+  "set.tools.acquire": "Fetch",
+  "set.tools.acquiring": "Fetching…",
+  "set.tools.importLocal": "Import from a local file",
+  "set.tools.starting": "…",
+  "set.tools.stop": "Stop",
+  "set.tools.start": "Start",
+  "set.catalog.title": "Cloud capability listing",
+  "set.catalog.desc":
+    "What the platform offers, for reference. Nothing here installs onto this computer — what you can actually use is in Skills and Tools above",
+  "set.catalog.filterAria": "Filter by type",
+  "set.catalog.searchAria": "Search the Runos listing",
+  "set.catalog.searchPlaceholder": "Search by name, id or tag",
+  "set.catalog.noMatch": "Nothing matches.",
+  "set.catalog.listAria": "Runos listing entries",
+  "set.catalog.more": "Show more",
+
+  /* ── Settings: models ─────────────────────────────────────────────── */
+  "set.models.needSignIn": "Sign in to see the models available to this workspace.",
+  "set.models.noPlatform": "Not connected to the platform, so there are no models to show.",
+  "set.models.failed": "Could not read models from the platform this time: {reason}",
+  "set.models.title": "Platform models",
+  "set.models.desc": "Models this workspace can use, granted by the platform; shown here only",
+  "set.models.quotaNote": "Usage and quota are on the platform.",
+  "set.models.loading": "Reading models from the platform…",
+  "set.models.empty": "No models available to this workspace yet.",
+  "set.models.listAria": "Platform models",
+  "set.models.on": "Enabled",
+  "set.models.off": "Disabled",
+  /*
+   * 「Private models」与隔壁的「Platform models」成对 —— 两块本来就是同一屏上
+   * 的两半，标题一长一短会让人以为它们不是一类东西（owner 2026-09-17 指出
+   * 「Your own models」太长）。「private」也正是这门技术自己的说法。
+   */
+  "set.private.title": "Private models",
+  "set.private.desc":
+    "Connect a model you host yourself, bypassing the platform. Available with the enterprise and self-hosted editions",
+  "set.private.loading": "Reading the runtime state…",
+  "set.private.notProvisioned": "Private models are not enabled for this workspace",
+  "set.private.notProvisionedBadge": "Not enabled",
+  "set.private.notProvisionedNote":
+    "Once enabled, you can connect a model you host yourself (Ollama, LM Studio, vLLM…). Material sent for inference does not pass through the platform and never leaves your own network; you host and maintain the model. Enabling it comes with the enterprise and self-hosted editions.",
+  "set.private.connectedPrefix": "Connected to ",
+  "set.private.noEndpointYet": "Enabled, but no service address yet",
+  "set.private.connected": "Connected",
+  "set.private.pending": "Not connected",
+  "set.private.loopbackNote":
+    "The service runs on this computer, so material sent for inference never leaves it and does not count against platform usage.",
+  "set.private.remoteNote":
+    "The service is not on this computer: material sent for inference leaves this machine for the server you named. It does not pass through the platform, and it does not leave your own network.",
+  "set.private.fromDeployment": "Set by your deployment; it cannot be changed here.",
+  "set.private.change": "Change…",
+  "set.private.connect": "Connect…",
+  "set.private.disconnect": "Disconnect",
+  "set.private.baseUrl": "Service address",
+  "set.private.model": "Model name",
+  "set.private.apiKey": "Token (optional)",
+  "set.private.apiKeyPlaceholder": "Only needed when your service sits behind a proxy",
+
+  /* ── Generic daemon errors → what the interface says (api-message.ts) ─ */
+  "err.unreachable": "The runtime on this computer is not reachable right now — try again later",
+  "err.authRequired": "Your session has expired; please reopen the app",
+  "err.migrating": "Moving your data; please wait",
+  "err.notConfigured.catalog": "This build does not offer the cloud capability listing",
+  "err.notConfigured.routing": "This build does not offer cloud capability calls",
+  "err.notConfigured.components": "This build does not offer on-demand fetching",
+  "err.notConfigured.connectors": "This build does not offer connectors",
+  "err.notConfigured.hardware": "This build does not offer machine details",
+  "err.notConfigured.privateModel": "This build does not offer your own models",
+  "err.notConfigured.skills": "This build does not offer skill management",
+  "err.notConfigured.tools": "This build does not offer tool management",
+  "err.notConfigured.events": "This build does not offer live notifications",
+  "err.notConfigured.platform": "This build does not offer platform sign-in",
+  "err.notConfigured.language": "This build does not offer a language setting",
+
+  /* ── The two quota names ──────────────────────────────────────────── */
+  "quota.aiCredit": "AI Credits",
+  "quota.storage": "Storage Spaces",
+
+  /* ── Language ─────────────────────────────────────────────────────── */
+  "prefs.language": "Language",
+};

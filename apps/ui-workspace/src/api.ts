@@ -727,7 +727,11 @@ export interface DataDirCheck {
 export class ApiError extends Error {
   constructor(
     readonly status: number,
-    readonly body: { error?: string; message?: string; details?: unknown },
+    /**
+     * 封套原样。**`code` 是界面决定说什么的依据**（见 api-message.ts）：
+     * `message` 同时服务排障的人与最终用户，一句话满足不了两边。
+     */
+    readonly body: { code?: string; error?: string; message?: string; details?: unknown },
   ) {
     super(body.message ?? body.error ?? `HTTP ${status}`);
   }
@@ -1067,6 +1071,13 @@ export class Api {
    * 任意目录」的能力。
    */
   openLogDir = () => this.call<{ ok: boolean }>("/ui/open-log-dir", "POST");
+
+  /**
+   * 把界面语言写给守护进程，**只为壳**：原生对话框、系统通知、搬家那一屏都由壳
+   * 出，而壳读不到浏览器的存储。界面自己不靠这条读回来。
+   */
+  setLanguage = (language: string) =>
+    this.call<{ language: string }>("/system/language", "PUT", { language });
   /**
    * 弹系统目录选择框，等用户选完。
    *
