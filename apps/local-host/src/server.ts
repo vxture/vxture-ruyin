@@ -311,6 +311,11 @@ export interface LocalApiDeps {
     productsDir: string;
     keyProtection: "dpapi" | "plaintext";
     /**
+     * 这一次安装的公钥指纹（RFC 7638 的 `jkt`，阶段 3a）。**稳定跨重启**，
+     * 用户报障时用来对上是哪一台。目标态里实例凭据绑在它上面（RY-104 §03）。
+     */
+    instanceId?: string;
+    /**
      * 能力面接没接（ADR-009）。`mock` = 没配 `RUYIN_CAPABILITY_BASE`，任务会拿到
      * `MockAIGateway` 的字面量占位输出。界面据此在产品卡上标「未接通」（TD-033）——
      * 「没接上」绝不能看起来像「在工作」，而守护进程日志到不了用户眼前。

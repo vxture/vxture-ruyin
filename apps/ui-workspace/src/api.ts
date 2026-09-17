@@ -620,6 +620,11 @@ export interface SystemInfo {
   productsDir: string;
   keyProtection: "dpapi" | "plaintext";
   /**
+   * 这一次安装的公钥指纹（阶段 3a）。稳定跨重启 —— 关于页把它显示出来，用户
+   * 报障时对得上是哪一台。**不是用户标识**：它跟着安装走，重装即换。
+   */
+  instanceId?: string;
+  /**
    * 能力面接没接（daemon 判定，界面不重算）。`mock` = 任务只会拿到占位输出，
    * 产品卡据此标「未接通」（TD-033）。**缺失 ≠ mock**：拿不到 /system 时是「不知道」，
    * 不是「没接上」。

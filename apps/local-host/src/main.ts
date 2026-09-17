@@ -53,6 +53,7 @@ import { getHardwareInfo } from "./hardware-info.js";
 import { createProductUiServer, productUiPortFor } from "./product-ui-server.js";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
+import { InstanceIdentity } from "./instance-identity.js";
 import {
   LocalModelGateway,
   type LocalModelConfig,
@@ -249,6 +250,18 @@ let chromeTheme: "dark" | "light" = "dark";
 const keys = await KeyManager.open(dataDir);
 const storage = new SqliteStoragePort(dataDir, keys);
 console.log(`[ruyin] master key protection: ${keys.protection}`);
+
+/**
+ * 这一次安装的身份（RY-100 A2，RY-104 §03，阶段 3a）。
+ *
+ * **今天没有对端**：没有任何端点收 DPoP 证明，控制面还不存在。建它的理由是
+ * 每一种候选设计都要它，而它的形状由 RFC 定、不由平台定（见模块头注释）。
+ *
+ * 当下唯一的用处：指纹进 `/system`，配合日志文件（TD-066）给出一个稳定的
+ * 安装标识，用户报障时对得上是哪一台。**私钥永不出本机，也永不进播报**。
+ */
+const instance = InstanceIdentity.load(keys, dataDir);
+console.log(`[ruyin] instance: ${instance.jkt}`);
 // Native binding self-check (TD-010): fail fast if the SQLite binding does
 // not load in this runtime (Electron utilityProcess vs host Node ABI).
 try {
@@ -673,6 +686,9 @@ const server = createLocalApi({
     dataDir,
     productsDir,
     keyProtection: keys.protection,
+    /* 公钥指纹。**只给指纹，不给公钥、更不给私钥** —— 指纹足够回答「是哪一台」，
+       而那正是这个字段今天唯一的用处（RY-001 §07 #38）。 */
+    instanceId: instance.jkt,
     capabilitySurface: capabilityBase
       ? "configured"
       : localModel
