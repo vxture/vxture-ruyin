@@ -235,21 +235,25 @@ interface ChatTool {
 /**
  * 工具清单。
  *
- * **参数 schema 这里给不出来**：`ToolOffer` 只有 `id` 与 `description`，契约里的
- * `input_schema` 没有传到这一层。所以给一个放行的对象 schema，让模型自己拟参数 ——
- * 拟错了由 `validateToolCall()` 当场挡下（RY-100 §05），**闸门仍是最后一站**，
- * 这里松不等于那里松。
+ * 参数 schema 现在**逐字来自契约**（`ToolOffer.parameters`，RY-001 §07 #43）。
+ * 此前这里给的是一个放行的对象 schema，模型只能猜参数名 —— 猜错了闸门会挡下，
+ * 安全是安全，但那一回合白花了。
  *
- * 代价是模型要多猜一次，成功率不如带 schema 的。把 `input_schema` 一路带到
- * `ToolOffer` 是一处独立改动，牵动内核的公共类型，不混在本条里做。
+ * **仍然容忍它缺席**：老的调用方、或将来某种没有 schema 的合成工具，都还能走
+ * 这条路 —— 那时退回放行的形状，与改动之前一样。
+ *
+ * **给了 schema 不等于放松校验**：`validateToolCall()` 照旧按契约判，闸门仍是
+ * 最后一站（RY-100 §05）。
  */
+const PERMISSIVE: Record<string, unknown> = { type: "object", additionalProperties: true };
+
 function toChatTools(req: CapabilityTurnRequest): ChatTool[] {
   return req.tools.map((t) => ({
     type: "function" as const,
     function: {
       name: t.id,
       ...(t.description ? { description: t.description } : {}),
-      parameters: { type: "object", additionalProperties: true },
+      parameters: (t.parameters as Record<string, unknown> | undefined) ?? PERMISSIVE,
     },
   }));
 }

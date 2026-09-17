@@ -365,23 +365,40 @@ describe("LocalModelGateway", () => {
     });
 
     /**
-     * 契约的 `input_schema` 没传到 `ToolOffer` 这一层，所以给放行的对象 schema，
-     * 让模型自己拟参数 —— **拟错了由闸门挡下**，这里松不等于那里松。
+     * 参数 schema **逐字来自契约**（#43）。不带它，模型只能猜参数名 —— 猜错了
+     * 闸门会挡下，安全是安全，但那一回合白花了，而且模型从一个「参数不对」的
+     * 拒绝里学不到正确的形状。
      */
-    it("工具给放行的对象 schema（ToolOffer 不带参数 schema）", async () => {
+    it("工具的参数 schema 逐字来自契约", async () => {
+      const { seen } = stubFetch(contentReply("ok"));
+      const schema = {
+        type: "object" as const,
+        properties: { path: { type: "string" }, encoding: { type: "string" } },
+        required: ["path"],
+      };
+      await new LocalModelGateway(CONFIG).turn(
+        req({ tools: [{ id: "read_file", description: "local_read (risk: low)", parameters: schema }] }),
+      );
+      const t = seen[0]!.body.tools[0];
+      assert.equal(t.function.name, "read_file");
+      assert.deepEqual(t.function.parameters, schema, "schema 没有原样传下去");
+      // 普通回合不强制调工具 —— 那会逼着模型在该回答时去调工具。
+      assert.equal(seen[0]!.body.tool_choice, undefined);
+    });
+
+    /**
+     * 缺席时退回放行的形状，与改动之前一样。老的调用方、或将来某种没有 schema
+     * 的合成工具，都还能走这条路 —— **少一份 schema 不该让一次回合发不出去**。
+     */
+    it("没有 schema 时退回放行的对象形状，不抛", async () => {
       const { seen } = stubFetch(contentReply("ok"));
       await new LocalModelGateway(CONFIG).turn(
         req({ tools: [{ id: "read_file", description: "读一个文件" }] }),
       );
-      const t = seen[0]!.body.tools[0];
-      assert.equal(t.function.name, "read_file");
-      assert.equal(t.function.description, "读一个文件");
-      assert.deepEqual(t.function.parameters, {
+      assert.deepEqual(seen[0]!.body.tools[0].function.parameters, {
         type: "object",
         additionalProperties: true,
       });
-      // 普通回合不强制调工具 —— 那会逼着模型在该回答时去调工具。
-      assert.equal(seen[0]!.body.tool_choice, undefined);
     });
 
     it("技能只给目录不给正文（ADR-018 §2.4）", async () => {
