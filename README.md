@@ -18,7 +18,7 @@ Packages, .ruyinpkg product packages to a static registry directory).
 ## Design documentation
 
 Product definition, architecture and interface design are authoritative in
-the RY artifact doc set (RY-001, RY-100..103, RY-201..204, RY-301, RY-401,
+the RY artifact doc set (RY-001, RY-100..104, RY-201..204, RY-301, RY-401,
 RY-501; see CLAUDE.md "Design authority"). `docs/` (org taxonomy) keeps the
 engineering specs that code and CI depend on; start at
 `docs/00-meta/00-index.md` for the map, the RY table and the legacy
