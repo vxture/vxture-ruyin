@@ -21,6 +21,10 @@
  *   RUYIN_CONSOLE_API_BASE   **平台会话与 C2 读**（default https://console.vxture.com）
  *   RUYIN_UPDATE_FEED        update feed base (default: stable channel on dl)
  *   RUYIN_REGISTRY_BASE      static product registry base (default: products dir on dl)
+ *   RUYIN_LOCAL_MODEL_BASE   直连本地模型的 OpenAI 兼容基址（企业版 / 私有化）
+ *   RUYIN_LOCAL_MODEL        模型名；与上一条**成对**才算配了，否则视为未配
+ *   RUYIN_LOCAL_MODEL_KEY    自建服务挂代理时的口令（可选，属用户不属平台）
+ *   RUYIN_LOCAL_MODEL_TIMEOUT_MS  一回合上限（可选，缺省 120000）
  *   RUYIN_CAPABILITY_BASE    business-product capability surface (unset = mock);
  *                            also the source for contract fetch (ADR-012)
  *
@@ -49,6 +53,10 @@ import { getHardwareInfo } from "./hardware-info.js";
 import { createProductUiServer, productUiPortFor } from "./product-ui-server.js";
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
+import {
+  LocalModelGateway,
+  type LocalModelConfig,
+} from "./local-model-gateway.js";
 import {
   ProductRegistry,
   projectSubscriptionFacts,
@@ -189,6 +197,36 @@ const productsDir = resolve(process.env["RUYIN_PRODUCTS_DIR"] ?? "products");
 // "not wired up" must never look like "working".
 const capabilityBase = process.env["RUYIN_CAPABILITY_BASE"] ?? "";
 
+/**
+ * 直连本地模型（RY-100 A15 / A16 / A18）—— **企业版 / 私有化部署的特性**。
+ *
+ * 缺省不开：订阅版把功能实现出来、界面标「未开通」（owner 2026-09-17 答 Q8）。
+ * 权益的权威是控制面（RY-100 §04），运行时**只执行不自判** —— 所以这里读的是
+ * 一个部署侧的配置，不是任何「这个租户配不配用」的本地判断。
+ *
+ * 目标态由控制面随期望状态下发（`desired.policy.localInference.direct`，
+ * RY-104 §06）；在控制面就位之前，私有化部署靠这几个环境变量把它打开，
+ * 公网订阅版一个都不设，于是恒为未开通。
+ */
+const localModel = readLocalModelConfig();
+
+function readLocalModelConfig(): LocalModelConfig | undefined {
+  const baseUrl = process.env["RUYIN_LOCAL_MODEL_BASE"] ?? "";
+  const model = process.env["RUYIN_LOCAL_MODEL"] ?? "";
+  /* 两个都要有才算配了：只给基址不给模型名，请求必然被提供方拒掉，而那种失败
+     要到第一次跑任务时才看得见。入口就要成对。 */
+  if (!baseUrl || !model) return undefined;
+  const timeout = Number(process.env["RUYIN_LOCAL_MODEL_TIMEOUT_MS"] ?? "");
+  return {
+    baseUrl,
+    model,
+    ...(process.env["RUYIN_LOCAL_MODEL_KEY"]
+      ? { apiKey: process.env["RUYIN_LOCAL_MODEL_KEY"] }
+      : {}),
+    ...(Number.isFinite(timeout) && timeout > 0 ? { timeoutMs: timeout } : {}),
+  };
+}
+
 // 技能登记册与预置 MCP 服务器的预置层（ADR-018 §2.2 / §2.3）：packaged 由壳给出
 // RUYIN_SKILLS_DIR / RUYIN_TOOLS_DIR，开发态是仓内 resources/ —— 拉过
 // （pnpm skills:pull / tools:pull）才有，没拉过就是没有预置层，启动日志会说。
@@ -318,6 +356,12 @@ const runtime = new ProjectRuntime({
   clock: nodeClock,
   id: nodeId,
   crypto: nodeCrypto,
+  /* 三选一，优先级有理由：
+       ① 配了能力面 → 走它（既有行为不变）。
+       ② 否则配了直连本地模型 → 走它。**推理上下文一个字节都不出本机** ——
+          RY-100 §07 那个「不出域的唯一例外」在这一路被关掉。
+       ③ 都没有 → MockAIGateway，并且启动时明说。「没接上」绝不能看起来像
+          「在工作」。 */
   gateway: capabilityBase
     ? new CapabilityClient({
         baseUrl: capabilityBase,
@@ -325,7 +369,9 @@ const runtime = new ProjectRuntime({
         // only called once a task runs - long after startup.
         token: () => platform.bearerToken(),
       })
-    : new MockAIGateway(),
+    : localModel
+      ? new LocalModelGateway(localModel)
+      : new MockAIGateway(),
   connectors,
   ranker: new FtsRanker(storage),
   tools: toolExecutor,
@@ -627,7 +673,19 @@ const server = createLocalApi({
     dataDir,
     productsDir,
     keyProtection: keys.protection,
-    capabilitySurface: capabilityBase ? "configured" : "mock",
+    capabilitySurface: capabilityBase
+      ? "configured"
+      : localModel
+        ? "local_model"
+        : "mock",
+    /* 界面要能把「没开通」与「开通了但没配」分开说（RY-001 §07 #36）：
+       前者是商业状态，后者是一句「去设置里填地址」。今天公网订阅版恒为
+       false —— 控制面就位后这一位由 `desired.policy.localInference.direct`
+       决定（RY-104 §06）。 */
+    localInference: {
+      direct: localModel !== undefined,
+      ...(localModel ? { model: localModel.model } : {}),
+    },
     // 构建期落的印，跟着守护进程一起被打进 resources；仓里跑时它不存在。
     codeSigning,
     startedAt: new Date().toISOString(),
@@ -875,7 +933,9 @@ server.listen(port, "127.0.0.1", () => {
   console.log(
     capabilityBase
       ? `[ruyin] capability surface: ${capabilityBase}`
-      : "[ruyin] capability surface: NOT configured - tasks will return mock output",
+      : localModel
+        ? `[ruyin] capability surface: local model ${localModel.model} @ ${localModel.baseUrl} (直连，不经 Atlas，不计量)`
+        : "[ruyin] capability surface: NOT configured - tasks will return mock output",
   );
   // **这一行是给打包链看的，不只是给人看的。**
   //
