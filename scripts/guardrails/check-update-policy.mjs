@@ -118,9 +118,14 @@ if (existsSync(componentStore)) {
     if (!existsSync(full)) continue;
     const text = readFileSync(full, "utf8");
     // 声明依赖（`components: componentStore`）不算，调用（`.acquire(`）才算。
-    if (/\.acquire(FromDir)?\s*\(/.test(text)) {
+    //
+    // `.provision(` 同一条纪律（2026-09-18，TD-042 ②）：装 Python 半边要取 uv 的
+    // 字节，再让 uv 去取 CPython 与 wheel —— 那是一次几百兆的下载，只能由用户点下
+    // 的那一次触发（`POST /python-runtime/provision`）。
+    const hit = /\.acquire(FromDir)?\s*\(/.test(text) ? "acquire" : /\.provision\s*\(/.test(text) ? "provision" : undefined;
+    if (hit) {
       problems.push(
-        `${file} 里调用了 acquire —— ${where}不许下载任何东西。\n` +
+        `${file} 里调用了 ${hit} —— ${where}不许下载任何东西。\n` +
           `    ${why}；契约要的工具落在未获取的载荷后面时，startTask 在开跑前按名拒绝。`,
       );
     }

@@ -54,6 +54,8 @@ export type ToolDetailCode =
   | "launchable"
   | "not-enabled"
   | "needs-env"
+  /** Python 半边还没装（uv 拿到了，CPython / wheel 还没有）。 */
+  | "needs-python"
   | "blocked";
 
 export interface ToolView {
@@ -111,7 +113,7 @@ export interface ToolRegistrySources {
   /** 预置的 MCP 服务器定义（tools/index.json）；缺省 = 没有预置工具层。 */
   bundledServers?: () => BundledServer[];
   /** 这台机器上现在能不能起它 —— 起不了时说清是哪一种起不了。 */
-  planFor?: (id: string) => { ok: boolean; reason?: string; needsComponent?: string };
+  planFor?: (id: string) => { ok: boolean; reason?: string; needsComponent?: string; needsPython?: boolean };
   /** 获取通道的组件此刻的样子（体积 / 许可证 / 来源 / 进度）。 */
   componentStatus?: (id: string) => ToolView["component"] | undefined;
 }
@@ -231,6 +233,13 @@ export class ToolRegistryView {
           delete view.detailCode;
           delete view.detailVars;
         }
+      }
+      // uv 的字节已经在本机了，缺的是用它装出来的那个环境 —— 这不是一次下载，
+      // 所以不给「获取」按钮，给的是 Python 运行环境那一块自己的按钮。
+      if (plan && !plan.ok && plan.needsPython && view.status !== "available") {
+        view.status = "unavailable";
+        view.detailCode = "needs-python";
+        delete view.detailVars;
       }
       out.push(view);
     }

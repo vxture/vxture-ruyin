@@ -41,12 +41,13 @@ extraResources:
   # vendored 到 resources/tools/<id>/node_modules，连同 index.json（启动规格 + 许可证）。
   - from: ../../resources/tools
     to: tools
-  # Python 引导件（ADR-018 §7.2，owner 2026-09-06 定第 1 条）：uv 静态二进制 +
-  # uv 托管的 CPython + 预取好的 wheel 缓存。没有它，uvx 形态的服务器在气隙 /
-  # 域受限的机器上永远是死的 —— 连侧载来的 wheel 都跑不了。
-  # 由 scripts/release/seed-uv-cache.mjs 生成，那一步自己核对 uv 的 sha256。
-  - from: ../../resources/uv
-    to: uv
+  # **Python 半边不在这里**（2026-09-18，TD-042 ②）。曾经这里有一行
+  # `- from: ../../resources/uv` —— uv 静态二进制 + uv 托管的 CPython + 预取好的
+  # wheel 缓存，合计 219 MB，而绝大多数租户一次 Python 形态的服务器都不会起。
+  # owner 2026-09-17 定性：「安装包小一些，租户按照需求，安装必要环境」。
+  # 现在 uv 是一条按需获取的组件（resources/skill-manifest.json 的 python.uv），
+  # CPython 与 wheel 由守护进程在用户点下「安装」的那一次装好，落在数据目录。
+  # 加回来之前先改那个定性；pack.mjs 会在安装目录里查 resources/uv 在不在。
   # 随包真 node.exe（owner 2026-09-16）：node 形态的预置 MCP 服务器用它起，不再
   # 借 Ruyin.exe 自己 + ELECTRON_RUN_AS_NODE 重执行——那条路子在 Windows 上会弹出
   # 一个空白 cmd 窗口。由 scripts/release/seed-node-runtime.mjs 生成，那一步自己

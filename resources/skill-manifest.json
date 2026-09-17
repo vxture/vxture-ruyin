@@ -15,23 +15,9 @@
     "https://storage.googleapis.com",
     "https://nodejs.org"
   ],
-  "$comment_pythonRuntime": "Python 半边的使能件：机器上没有 uv，侧载来的 wheel 也一样跑不了。uv 与 uv 托管的 CPython 随安装包走，运行时 UV_PYTHON_DOWNLOADS=never + uvx --offline，不留联网回退 —— 有回退，首次运行就可能悄悄偏离钉死的版本。seed 列的包在构建时预取进随包的 uv cache（scripts/release/seed-uv-cache.mjs），由 pack.mjs 断言，不是手写的承诺。",
+  "$comment_pythonRuntime": "Python 半边：uv 是使能件（机器上没有它，侧载来的 wheel 也跑不了），但它**不随安装包** —— owner 2026-09-17 的定性是「安装包小一些，租户按照需求，安装必要环境」。所以 uv 走获取通道（components 里的 python.uv），CPython 与 seed 那几个包的 wheel 由守护进程在**用户点下获取的那一次**用刚拿到的 uv 装好，落在数据目录。照实记一条：我们自己钉 sha256 的只有 uv 那一条，CPython 与 wheel 是 uv 按上游校验和自核的 —— 这是委托，不是省略。运行时仍然 uvx --offline + UV_PYTHON_DOWNLOADS=never，不留联网回退。气隙机器这条路要等离线侧载包（TD-042 ③）。",
   "pythonRuntime": {
-    "uv": {
-      "version": "0.12.10",
-      "license": "MIT OR Apache-2.0",
-      "licenseSource": "0.12.10 tag 上 LICENSE-MIT 与 LICENSE-APACHE 并存（2026-09-06 核）",
-      "upstream": "https://github.com/astral-sh/uv/releases/download/0.12.10/uv-x86_64-pc-windows-msvc.zip",
-      "note": "uvx.exe 只是壳，离开 uv.exe 跑不了 —— 两个都装进包",
-      "sha256": "f65744f94072152b1f86ba2aace4d01f1124d9a8ecb235805039e3718c36cac2",
-      "size": 16989876,
-      "checksumUpstream": "https://github.com/astral-sh/uv/releases/download/0.12.10/uv-x86_64-pc-windows-msvc.zip.sha256",
-      "checksumNote": "上游发布了 .sha256，2026-09-06 取回与实际字节逐位一致 —— 这一条不是我们自己算完就算数的孤证。",
-      "licenseFiles": [
-        "LICENSE-MIT",
-        "LICENSE-APACHE"
-      ]
-    },
+    "component": "python.uv",
     "cpython": {
       "version": "3.13.15",
       "via": "uv python install 3.13"
@@ -84,6 +70,38 @@
       ],
       "redistribution": "download-only",
       "note": "只有本机既无 Chrome 也无 Edge 时才需要 —— playwright-mcp 默认 channel 就是本机已装的 Chrome，--browser msedge 同样可用，Win11 一定有 Edge。Chrome for Testing 二进制无公开再分发授权，所以永不进包、永不镜像；也永不取完整 chrome-win64（205,123,748 B / 431.9 MB，压缩包内 308 个条目零个许可证文件）。上游会删旧构建，而 Chrome for Testing 不发布任何校验和（.sha256 / SHA256SUMS 一律 404）—— 我们记的这一条是唯一的钉子，由 .github/workflows/components-verify.yml 每周一核对一次（GitHub 的 schedule 只在 main 上触发；本地随时 pnpm components:verify）。"
+    },
+    {
+      "id": "python.uv",
+      "kind": "program",
+      "version": "0.12.10",
+      "unlocks": [
+        "haris-musa.excel-mcp-server",
+        "vivekvells.mcp-pandoc"
+      ],
+      "source": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.10/uv-x86_64-pc-windows-msvc.zip",
+        "note": "astral 自己的发布页直链，不经镜像。GitHub 的下载会 302 到 objects.githubusercontent.com —— 两个 origin 都在白名单里，而获取通道不跟跳，所以这里写的是最终存字节的那一条。"
+      },
+      "sha256": "f65744f94072152b1f86ba2aace4d01f1124d9a8ecb235805039e3718c36cac2",
+      "size": 16989876,
+      "unpackedBytes": 42103296,
+      "install": {
+        "kind": "zip",
+        "into": "uv",
+        "expect": "uv.exe"
+      },
+      "license": "MIT OR Apache-2.0",
+      "licenseSource": "0.12.10 tag 上 LICENSE-MIT 与 LICENSE-APACHE 并存（2026-09-06 核）",
+      "checksumUpstream": "https://github.com/astral-sh/uv/releases/download/0.12.10/uv-x86_64-pc-windows-msvc.zip.sha256",
+      "checksumNote": "上游发布了 .sha256，2026-09-06 取回与实际字节逐位一致 —— 这一条不是我们自己算完就算数的孤证。",
+      "licenseFile": [],
+      "licenseAbsent": {
+        "verifiedAt": "2026-09-18",
+        "why": "上游的 windows zip 里只有 uv.exe / uvx.exe / uvw.exe 三个文件，一个许可证正文都没有（2026-09-18 取回那 16,989,876 字节解包逐条看过，sha256 与本条钉的逐位相同）。这条载荷是 download-only：字节从 astral 自己的发布页直接到用户机器，我们既不分发也不镜像，所以没有「随件」可附。许可证与出处写在上面两行，界面上也照着显示。"
+      },
+      "redistribution": "download-only",
+      "note": "Python 半边的使能件。**不随安装包**（owner 2026-09-17 定性：安装包小一些，租户按需装必要环境）—— 用户在能力平台点一次「获取」才落到本机，随后由守护进程用它装 CPython、预热 seed 里那几个包的 wheel。uvx.exe 只是壳，离开 uv.exe 跑不了，所以三个可执行文件整包落地。"
     }
   ],
   "skills": [
@@ -546,7 +564,7 @@
       "license": "MIT",
       "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
       "stars": 4156,
-      "tier": "default",
+      "tier": "acquire-on-demand",
       "subpath": null,
       "needsKey": false,
       "launch": {
@@ -557,15 +575,12 @@
         "args": [
           "stdio"
         ],
-        "offline": {
-          "cacheSeeded": true
-        }
+        "requiresComponent": [
+          "python.uv"
+        ]
       },
-      "note": "xlsx 读写：公式、格式、图表、透视。wheel 在构建时预取进随包的 uv cache，运行时 --offline 起，一个字节都不下载",
-      "launchNote": "启动契约在 tool-servers.ts（随包 uv.exe 的绝对路径 + --offline + UV_CACHE_DIR / UV_PYTHON_INSTALL_DIR / UV_PYTHON_DOWNLOADS=never / UV_TOOL_DIR，不留联网回退），预取脚本是 scripts/release/seed-uv-cache.mjs。**uv、CPython 与预热好的 wheel 缓存已随包**（2026-09-06 进 electron-builder 的 extraResources），packaged-smoke 在装好的应用里真起过一次：`[pack] uvx self-check: ok (haris-musa.excel-mcp-server, 25 tool(s))` —— 所以这一行是 default。档位与「装没装进包、能不能起」是同一件事（lint:skill-manifest 第 1 条），offline.cacheSeeded 要与 pythonRuntime.seed 对上。TD-042。",
-      "offline": {
-        "cacheSeeded": true
-      }
+      "note": "xlsx 读写：公式、格式、图表、透视。要先获取 Python 运行环境（python.uv），获取那一次会把它的 wheel 预热好，之后每次起都是 --offline，一个字节都不下载",
+      "launchNote": "启动契约在 tool-servers.ts（已获取的 uv.exe 绝对路径 + --offline + UV_CACHE_DIR / UV_PYTHON_INSTALL_DIR / UV_PYTHON_DOWNLOADS=never / UV_TOOL_DIR，不留联网回退）。**2026-09-18 起 uv 不再随包**：档位从 default 落到 acquire-on-demand —— owner 2026-09-17 定性「安装包小一些，租户按照需求，安装必要环境」，而档位与「装没装进包」是同一件事（lint:skill-manifest 第 1 条）。预热与离线复核搬到了守护进程的 python-runtime.ts，在用户点「获取」的那一次里跑，跑的是与运行时一模一样的那条命令（只是不带 --offline）。TD-042。"
     },
     {
       "id": "vivekvells.mcp-pandoc",
@@ -576,7 +591,7 @@
       "license": "MIT",
       "licenseSource": "仓库级 LICENSE（GitHub API license.spdx_id）",
       "stars": 579,
-      "tier": "installed-disabled",
+      "tier": "acquire-on-demand",
       "subpath": null,
       "needsKey": false,
       "launch": {
@@ -586,10 +601,13 @@
         "bin": "mcp-pandoc",
         "args": [],
         "requiresBin": "pandoc",
-        "note": "还要本机 PATH 上有 pandoc.exe（自己装的就用自己的）"
+        "note": "还要本机 PATH 上有 pandoc.exe（自己装的就用自己的）",
+        "requiresComponent": [
+          "python.uv"
+        ]
       },
       "note": "pandoc 转换；docx/pptx 离线生成缺口先走它",
-      "launchNote": "本机自己装了 pandoc 就能起（requiresBin 探测 PATH）。我们**不**提供 pandoc 载荷：pandoc.exe 233,626,888 B 且是 GPL-2.0-or-later —— 放进闭源安装包就是分发，所以它只能是 redistribution: download-only 的组件，而那要求一条真取回来算过的 sha256（pandoc 的 GitHub release 不发布任何校验和文件，得自己取一次记下来）。摘要没有之前不写进 components[]。TD-042。"
+      "launchNote": "两件都要：本机 PATH 上有 pandoc.exe（自己装的就用自己的，requiresBin 探测），以及已获取的 Python 运行环境（python.uv）。我们**不**提供 pandoc 载荷：pandoc.exe 233,626,888 B 且是 GPL-2.0-or-later —— 放进闭源安装包就是分发，所以它只能是 redistribution: download-only 的组件，而那要求一条真取回来算过的 sha256（pandoc 的 GitHub release 不发布任何校验和文件，得自己取一次记下来）。摘要没有之前不写进 components[]。档位 2026-09-18 从 installed-disabled 改成 acquire-on-demand：包里本来就没有它的任何字节，「装而不启用」对它从来不成立。TD-042。"
     },
     {
       "id": "nickclyde.duckduckgo-mcp-server",

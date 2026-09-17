@@ -56,6 +56,9 @@ function fakeApi(over: Partial<Api> = {}): Api {
     // 缺省当作「守护进程没接这一路」（真实的常见状态：老版本守护进程、或装配
     // 没配）—— 与 server.ts 那一路没配 hardwareInfo 时如实回的 503 一致。
     hardware: vi.fn().mockRejectedValue(new ApiError(503, { error: "HARDWARE_INFO_NOT_CONFIGURED" })),
+    // Python 半边（TD-042 ②）：缺省当作「这一版不带」—— 绝大多数用例不关心它，
+    // 而不 stub 的话每条能力平台的用例都会撞未定义。
+    pythonRuntime: vi.fn().mockRejectedValue(new ApiError(503, { error: "PYTHON_RUNTIME_NOT_AVAILABLE" })),
     ...over,
   } as unknown as Api;
 }
@@ -2787,4 +2790,174 @@ test("私有模型服务：读不到配置时不下断言", async () => {
   // 已开通，但配置读不到 —— 显示「尚未填写」，不显示「未开通」。
   expect(await screen.findByText(/已开通，尚未填写服务地址/)).toBeInTheDocument();
   expect(screen.queryByText("未开通")).not.toBeInTheDocument();
+});
+
+/* ── Python 运行环境（TD-042 ②）────────────────────────────────────────────
+ *
+ * uv 与 CPython 不随安装包，所以这一块要回答的是「装没装、要下多少、装到哪一步、
+ * 没装成是哪一种没装成」。**四种状态各说各的**：把它们折叠成「未就绪」，用户就
+ * 分不清该等一会儿、该重试，还是该换台机器。
+ */
+function pythonStatus(over: Record<string, unknown> = {}) {
+  return {
+    state: "not-acquired",
+    component: "python.uv",
+    uvVersion: null,
+    pythonVersion: null,
+    packages: [],
+    wanted: ["excel-mcp-server==0.1.8"],
+    payload: {
+      id: "python.uv",
+      kind: "program",
+      version: "0.12.10",
+      state: "not-acquired",
+      downloadBytes: 16989876,
+      diskBytes: 42103296,
+      license: "MIT OR Apache-2.0",
+      origin: "https://github.com",
+      redistribution: "download-only",
+      unlocks: ["haris-musa.excel-mcp-server"],
+    },
+    ...over,
+  };
+}
+
+test("Python 运行环境：没装时点之前就看得见要下多少、许可证与来源，点「安装」走的是那一条", async () => {
+  const provisionPython = vi.fn().mockResolvedValue(pythonStatus({ state: "provisioning", stepCode: "acquire-uv" }));
+  const api = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()), provisionPython });
+  renderSection("skills", api);
+  const line = await screen.findByText(/还没装 · 需下载 16\.2 MB/);
+  expect(line.textContent).toContain("MIT OR Apache-2.0");
+  expect(line.textContent).toContain("github.com");
+  // 安装还会再取 Python 本身与依赖：按流量计费的网络上这句话是有用的。
+  expect(screen.getByText(/安装时还会取 Python 本身/)).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "安装" }));
+  expect(provisionPython).toHaveBeenCalled();
+});
+
+test("Python 运行环境：装的时候说在做哪一步，且能取消", async () => {
+  const cancelPython = vi.fn().mockResolvedValue({ cancelled: true });
+  const api = skillsApi({
+    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "provisioning", stepCode: "install-python" })),
+    cancelPython,
+  });
+  renderSection("skills", api);
+  expect(await screen.findByText("正在安装 Python…")).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "取消" }));
+  expect(cancelPython).toHaveBeenCalled();
+});
+
+test("Python 运行环境：装好了报版本与备好了几个工具包，并且可以移除", async () => {
+  const removePython = vi.fn().mockResolvedValue({ removed: true });
+  const api = skillsApi({
+    pythonRuntime: vi.fn().mockResolvedValue(
+      pythonStatus({ state: "ready", uvVersion: "0.12.10", pythonVersion: "3.13.15", packages: ["excel-mcp-server==0.1.8"] }),
+    ),
+    removePython,
+  });
+  renderSection("skills", api);
+  expect(await screen.findByText("已就绪 · uv 0.12.10 · Python 3.13.15 · 已备好 1 个工具包")).toBeTruthy();
+  // 装好了就不再念叨还要下什么。
+  expect(screen.queryByText(/安装时还会取 Python 本身/)).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "移除" }));
+  expect(removePython).toHaveBeenCalled();
+});
+
+test("Python 运行环境：没装成时说的是**哪一种**没装成，守护进程那句原文一个字不上屏", async () => {
+  const api = skillsApi({
+    pythonRuntime: vi.fn().mockResolvedValue(
+      pythonStatus({ state: "failed", code: "verify-failed", reason: "error: distribution not found in cache" }),
+    ),
+  });
+  renderSection("skills", api);
+  expect(await screen.findByText("装好了，但试跑没通过 —— 这些工具现在还起不来。")).toBeTruthy();
+  expect(screen.queryByText(/distribution not found/)).toBeNull();
+  expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
+});
+
+test("Python 运行环境：装了一半、或清单换了包，说的都不是「没装过」", async () => {
+  const half = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "not-provisioned" })) });
+  const { unmount } = renderSection("skills", half);
+  expect(await screen.findByText("装了一半 —— Python 本身还没装上。")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "继续安装" })).toBeTruthy();
+  unmount();
+
+  const stale = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "stale" })) });
+  renderSection("skills", stale);
+  expect(await screen.findByText("这一版要的工具包变了，重装一次就好。")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "重新安装" })).toBeTruthy();
+});
+
+test("Python 运行环境：这一版不带它（守护进程回 503）时整块不显示 —— 不摆一个点不动的按钮", async () => {
+  const api = skillsApi({ pythonRuntime: vi.fn().mockRejectedValue(new ApiError(503, { error: "PYTHON_RUNTIME_NOT_AVAILABLE" })) });
+  renderSection("skills", api);
+  await screen.findByText("本机技能");
+  expect(screen.queryByText("Python 运行环境")).toBeNull();
+});
+
+test("能力平台：uvx 形态的工具在 Python 装好之前说「要先装」—— 不在自己那一行摆第二个下载按钮", async () => {
+  const api = skillsApi({
+    tools: vi.fn().mockResolvedValue({
+      items: [
+        { id: "haris-musa.excel-mcp-server", kind: "mcp-server", source: "haris-musa.excel-mcp-server", status: "unavailable", launchable: true, detailCode: "needs-python", license: "MIT", tier: "acquire-on-demand" },
+      ],
+    }),
+    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
+  });
+  renderSection("skills", api);
+  const rows = await capabilityRows("工具");
+  const row = rowWith(rows, "haris-musa.excel-mcp-server");
+  expect(within(row).getByText("要先装 Python 运行环境")).toBeTruthy();
+  expect(within(row).queryByRole("button", { name: "获取" })).toBeNull();
+});
+
+test("Python 运行环境：点下去没成 / 移除没成，都要说出来 —— 悄悄没反应是这条路最不该有的失败方式", async () => {
+  const api = skillsApi({
+    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
+    provisionPython: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
+  });
+  renderSection("skills", api);
+  await userEvent.click(await screen.findByRole("button", { name: "安装" }));
+  expect(await screen.findByText(/daemon unreachable/)).toBeTruthy();
+
+  const removeFails = skillsApi({
+    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "ready", uvVersion: "0.12.10", pythonVersion: "3.13.15" })),
+    removePython: vi.fn().mockRejectedValue(new Error("在跑，删不掉")),
+  });
+  const { unmount } = renderSection("skills", removeFails);
+  await userEvent.click(await screen.findByRole("button", { name: "移除" }));
+  expect(await screen.findByText(/在跑，删不掉/)).toBeTruthy();
+  unmount();
+});
+
+test("Python 运行环境：守护进程少给了几样（没有载荷、没有步骤码、没有失败码）时也不编 —— 宁可少说一句", async () => {
+  // 清单里没有这条载荷：不编一个体积出来。
+  const noPayload = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue({ ...pythonStatus(), payload: undefined }) });
+  const a = renderSection("skills", noPayload);
+  expect((await screen.findAllByText("未安装")).length).toBeGreaterThan(0);
+  a.unmount();
+
+  // 在装，但没说到哪一步：按第一步说，不空着。
+  const noStep = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "provisioning" })) });
+  const b = renderSection("skills", noStep);
+  expect(await screen.findByText("正在下载…")).toBeTruthy();
+  b.unmount();
+
+  // 没成，但没给码：也要说一句人话，而不是一片空白。
+  const noCode = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "failed" })) });
+  const c = renderSection("skills", noCode);
+  expect(await screen.findByText("没下载成功，请稍后再试。")).toBeTruthy();
+  c.unmount();
+
+  // 装好了但版本没报上来：句子照样成立（版本是补充，不是主语）。
+  const noVersions = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "ready" })) });
+  renderSection("skills", noVersions);
+  expect(await screen.findByText(/已备好 0 个工具包/)).toBeTruthy();
+});
+
+test("Python 运行环境：清单里整段没有（component 为 null）时同样不显示", async () => {
+  const api = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue({ ...pythonStatus(), component: null, payload: undefined }) });
+  renderSection("skills", api);
+  await screen.findByText("本机技能");
+  expect(screen.queryByText("Python 运行环境")).toBeNull();
 });

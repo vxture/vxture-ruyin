@@ -407,7 +407,7 @@ void test("装配线：RUYIN_SMOKE=1 时界面自检真的跑，且排在 PDF �
     );
     // 另外两条如实说「没有可试的」，而不是去起任何服务器。
     assert.match(log, /tools self-check: no vendored node server to try/);
-    assert.match(log, /uvx self-check: no seeded uvx server to try/);
+    assert.match(log, /uvx self-check: python runtime not installed/);
   } finally {
     await d?.stop();
     rmSync(dist, { recursive: true, force: true });

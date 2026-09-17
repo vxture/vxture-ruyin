@@ -11,8 +11,8 @@
  * 另外两支（snapshotTree / diffTree）给「冒烟不许往安装目录里写」那条断言用：只读
  * 文件系统，不写；判定本身是纯的。
  *
- * 只读演练那三支（denyWrites / parseUvSeed / judgeReadOnlySmoke）给「装到只读位置也
- * 起得来」那条用：denyWrites 会改 ACL / 权限位并回一个 restore，其余两支是纯的。
+ * 只读演练那两支（denyWrites / judgeReadOnlySmoke）给「装到只读位置也起得来」那条用：
+ * denyWrites 会改 ACL / 权限位并回一个 restore，判读那一支是纯的。
  */
 
 import { spawnSync } from "node:child_process";
@@ -314,36 +314,21 @@ export function denyWrites(dir, probeDirs = [dir]) {
 }
 
 /**
- * uv 种子那一行：`[ruyin] uv cache: seeded N file(s) from <种子> -> <缓存> (M ms)`
- * （apps/local-host/src/tool-servers.ts 的 seedUvCacheOnce）。第二次起、或随包没种子，
- * 都没有这一行 —— 返回 undefined。路径段用 `(.+?)` 收到 ` -> ` / ` (` 之前，Windows
- * 路径的反斜杠、空格、括号都在里面；`\r` 跟在收尾的 `)` 之后，不会被收进去。
- *
- * @param {string} smokeOut
- * @returns {{ files: number, from: string, to: string, ms: number } | undefined}
- */
-export function parseUvSeed(smokeOut) {
-  const m = /\[ruyin\] uv cache: seeded (\d+) file\(s\) from (.+?) -> (.+?) \((\d+) ms\)/.exec(smokeOut);
-  if (!m) return undefined;
-  return { files: Number(m[1]), from: m[2], to: m[3], ms: Number(m[4]) };
-}
-
-/**
  * 只读演练那一轮冒烟的判读（TD-062 的第 2 条）。
  *
  * 这一轮的条件照 Program Files 那台机器摆：安装目录拒绝写入、数据目录是个空的临时
- * 目录。所以判据比第一轮多两条：uvx 自检必须 ok（Python 半边正是当初写进包里的那
- * 一支），而且守护进程必须报了「uv cache: seeded」且种到了这一轮的数据目录之下 ——
- * 空数据目录里没有种子却 ok，只可能是缓存又指回了包里（在可写工作区里那也能过）。
- * 种子落在别处多半是守护进程按它自己的规则钉住了老数据目录（data-location.ts：老位置
- * 有数据就不搬），那是这台机器的状态，不是包的问题 —— 报错里把落点写出来。
+ * 目录。判的只有一件事 —— **安装目录写不了的时候，这个应用起不起得来**。
  *
- * `expectUvx` 为 false（RUYIN_SKIP_SKILL_PULL=1，没种 Python 半边）时只看壳的 OK。
+ * 2026-09-18 这里少了两条（TD-042 ②）：uvx 自检必须 ok、以及守护进程必须报
+ * 「uv cache: seeded」且种到了这一轮的数据目录之下。那两条守的是「随包的 uv 缓存
+ * 能不能从只读的包里种到数据目录」，而 **uv 与 CPython 不再随安装包**了 —— 包里
+ * 没有那份种子，缓存从一开始就写在数据目录，这条缝本身不存在了。留着它们就是两条
+ * 永远不会失败的断言，而一条永不失败的断言读起来和一条在守着的一模一样。
  *
- * @param {{ smokeOut: string, dataDir: string, expectUvx: boolean }} x
+ * @param {{ smokeOut: string, dataDir: string }} x
  * @returns {{ ok: true, detail: string } | { ok: false, message: string }}
  */
-export function judgeReadOnlySmoke({ smokeOut, dataDir, expectUvx }) {
+export function judgeReadOnlySmoke({ smokeOut }) {
   if (!smokeOut.includes("[shell-smoke] OK")) {
     return {
       ok: false,
@@ -352,40 +337,5 @@ export function judgeReadOnlySmoke({ smokeOut, dataDir, expectUvx }) {
         "装到 Program Files 的用户看到的就是这个（TD-062）。",
     };
   }
-  if (!expectUvx) return { ok: true, detail: "壳 OK（没种 Python 半边，uvx 与种子不在这一轮的判据里）" };
-  const uvx = /\[ruyin\] uvx self-check: ([^\r\n]*)/.exec(smokeOut);
-  if (!uvx || !uvx[1].startsWith("ok")) {
-    return {
-      ok: false,
-      message:
-        `[pack] FAILED: 安装目录只读时 uvx 自检没过（${uvx?.[1] ?? "没报"}）—— Python 半边还在依赖包里可写` +
-        "（apps/local-host/src/tool-servers.ts 的 uvxPlan / seedUvCacheOnce）。",
-    };
-  }
-  const seed = parseUvSeed(smokeOut);
-  if (!seed) {
-    return {
-      ok: false,
-      message:
-        "[pack] FAILED: 只读演练用的是空数据目录，守护进程却没报「uv cache: seeded」—— 种子没从只读的包里种过去，" +
-        "那 uvx 是靠什么起来的？多半是 UV_CACHE_DIR 又指回了包里（在可写工作区里那也能过，所以才有这一轮）。",
-    };
-  }
-  // 两个路径来自同一台机器；按形状挑 API —— 判读本身要能在 Linux 上被 Windows 形状的
-  // 样本钉住（自测跑在 ubuntu），而 win32 的 relative 顺带不分大小写。
-  const P = /^[A-Za-z]:[\\/]/.test(dataDir) ? win32 : posix;
-  const rel = P.relative(dataDir, seed.to);
-  if (rel === "" || rel.startsWith("..") || P.isAbsolute(rel)) {
-    return {
-      ok: false,
-      message:
-        `[pack] FAILED: uv 种子落在了 ${seed.to}，不在这一轮的数据目录 ${dataDir} 之下。` +
-        "多半是守护进程钉住了这台机器的老数据目录（apps/local-host/src/data-location.ts：老位置有数据就不搬）；" +
-        "CI 的 runner 上不会有老数据，本机跑到这一条要先看 %APPDATA%\\Ruyin\\data。",
-    };
-  }
-  return {
-    ok: true,
-    detail: `壳 OK；uvx ${uvx[1]}；种子 ${seed.files} 个文件从只读的包里种到 ${seed.to}（${seed.ms} ms）`,
-  };
+  return { ok: true, detail: "壳 OK（安装目录拒绝写入、数据目录是空的）" };
 }

@@ -55,6 +55,10 @@ import {
   type SkillListing,
   type SkillView,
   type ComponentState,
+  type PythonRuntimeStatus,
+  type PythonRuntimeState,
+  type PythonStepCode,
+  type PythonFailureCode,
   type ToolView,
   type CapabilityRouting,
   type CapabilityCatalogPage,
@@ -1763,8 +1767,87 @@ const TOOL_DETAIL_KEY: Record<string, MessageKey> = {
   launchable: "set.tools.detail.launchable",
   "not-enabled": "set.tools.detail.notEnabled",
   "needs-env": "set.tools.detail.needsEnv",
+  "needs-python": "set.tools.detail.needsPython",
   blocked: "set.tools.detail.blocked",
 };
+
+/** 正在做哪一步（守护进程只给码）。 */
+const PYTHON_STEP_KEY: Record<PythonStepCode, MessageKey> = {
+  "acquire-uv": "set.python.step.acquireUv",
+  "install-python": "set.python.step.installPython",
+  "warm-cache": "set.python.step.warmCache",
+  "verify-offline": "set.python.step.verifyOffline",
+};
+
+/**
+ * 没装成是因为什么。**「没下载成功」与「试跑没通过」不能是同一句话** —— 前者
+ * 再点一次多半就好了，后者再点一百次也是同一个结果。守护进程那句原文（uv 自己
+ * 说的话）一个字都不上屏。
+ */
+/** 徽章上那两三个字。 */
+const PYTHON_STATE_KEY: Record<PythonRuntimeState, MessageKey> = {
+  "not-acquired": "set.python.badge.notInstalled",
+  "not-provisioned": "set.python.badge.partial",
+  stale: "set.python.badge.stale",
+  provisioning: "set.python.badge.installing",
+  ready: "set.python.badge.ready",
+  failed: "set.python.badge.failed",
+};
+
+const PYTHON_TONE: Record<PythonRuntimeState, "success" | "warning" | "danger" | "neutral"> = {
+  "not-acquired": "neutral",
+  "not-provisioned": "warning",
+  stale: "warning",
+  provisioning: "neutral",
+  ready: "success",
+  failed: "danger",
+};
+
+/** 按钮上那两个字。**「安装」与「重新安装」不是同一句话** —— 装过的人要知道他没记错。 */
+const PYTHON_ACTION_KEY: Record<PythonRuntimeState, MessageKey> = {
+  "not-acquired": "set.python.install",
+  "not-provisioned": "set.python.resume",
+  stale: "set.python.reinstall",
+  provisioning: "set.python.install",
+  ready: "set.python.reinstall",
+  failed: "set.python.retry",
+};
+
+const PYTHON_FAIL_KEY: Record<PythonFailureCode, MessageKey> = {
+  "no-config": "set.python.fail.noConfig",
+  "uv-missing": "set.python.fail.download",
+  "acquire-failed": "set.python.fail.download",
+  "install-python-failed": "set.python.fail.installPython",
+  "warm-failed": "set.python.fail.warm",
+  "verify-failed": "set.python.fail.verify",
+  cancelled: "set.python.fail.cancelled",
+};
+
+/**
+ * Python 那一行说什么。每种状态各说各的 —— 装好了报版本，没装报要下多少，
+ * 装到一半报卡在哪，没装成报是哪一种没装成（**不是守护进程那句原文**）。
+ */
+function pythonLine(t: TFn, python: PythonRuntimeStatus): string {
+  if (python.state === "provisioning") return t(PYTHON_STEP_KEY[python.stepCode ?? "acquire-uv"]);
+  if (python.state === "failed") return t(PYTHON_FAIL_KEY[python.code ?? "acquire-failed"]);
+  if (python.state === "ready") {
+    return `${t("set.python.ready", { uv: python.uvVersion ?? "", python: python.pythonVersion ?? "" })} · ${t(
+      "set.python.readyPackages",
+      { count: python.packages.length },
+    )}`;
+  }
+  if (python.state === "not-provisioned") return t("set.python.notProvisioned");
+  if (python.state === "stale") return t("set.python.stale");
+  const p = python.payload;
+  // 载荷读不出来（这一版清单里没有它）时不编一个体积：**宁可少说一句**。
+  if (!p) return t("set.python.badge.notInstalled");
+  return t("set.python.notAcquired", {
+    download: mb(p.downloadBytes),
+    disk: mb(p.diskBytes),
+    license: p.license,
+    origin: p.origin,
+  });
+}
 
 /** 那半句话：认得的码按语言说，没有码就不说 —— **不拿守护进程的原话凑一句**。 */
 function toolDetail(t: TFn, tool: ToolView): string | undefined {
@@ -1895,6 +1978,8 @@ function SkillsSection({ api }: { api: Api }) {
   const locale = useLocale();
   const [listing, setListing] = useState<SkillListing | null>(null);
   const [tools, setTools] = useState<ToolView[] | null>(null);
+  // Python 半边（TD-042 ②）：null = 这一版不带它，整块不显示。
+  const [python, setPython] = useState<PythonRuntimeStatus | null>(null);
   /** 能力调用路径（ADR-025）。null = 没问到 —— 那时不显示那一行，不猜一个档位。 */
   const [routing, setRouting] = useState<CapabilityRouting | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
@@ -1967,6 +2052,15 @@ function SkillsSection({ api }: { api: Api }) {
       setRouting(await api.capabilityRouting());
     } catch {
       setRouting(null);
+    }
+    await reloadPython();
+  };
+  /** Python 半边此刻的样子。503 = 这一版不带它 —— 那就整块不显示。 */
+  const reloadPython = async () => {
+    try {
+      setPython(await api.pythonRuntime());
+    } catch {
+      setPython(null);
     }
   };
   useEffect(() => {
@@ -2056,6 +2150,52 @@ function SkillsSection({ api }: { api: Api }) {
     if (!picked.path) return;
     await acquire(componentId, picked.path);
   };
+  /**
+   * 装 Python 半边。守护进程那一头**不等它装完就回**（要几分钟），所以这里也不等：
+   * 点完就重问一次，之后靠下面那个轮询跟着走。
+   */
+  const provisionPython = async () => {
+    setFailed(null);
+    let message: string | null = null;
+    try {
+      setPython(await api.provisionPython());
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    if (message) setFailed(message);
+  };
+  const cancelPython = async () => {
+    try {
+      await api.cancelPython();
+    } catch {
+      // 取消本来就可能已经晚了一步；下一次轮询会说出它真正的样子。
+    }
+    await reloadPython();
+  };
+  const removePython = async () => {
+    let message: string | null = null;
+    try {
+      await api.removePython();
+    } catch (e) {
+      message = String((e as Error).message);
+    }
+    await reloadPython();
+    await reload();
+    // **在 reload 之后再放这句话**（同 acquire 那一处）：reload 成功会清掉 failed，
+    // 先设就会被它抹掉 —— 一次失败的移除于是变得无声无息。
+    if (message) setFailed(message);
+  };
+  /**
+   * 装的时候**盯着它**：这一块的进度不走事件（守护进程只发「有东西变了」，而这里
+   * 变的是步骤名），所以装的过程中每两秒问一次。装完就停 —— 一个永远在轮询的
+   * 设置页，在用不到 Python 的机器上是纯粹的浪费。
+   */
+  useEffect(() => {
+    if (python?.state !== "provisioning") return;
+    const timer = setInterval(() => void reloadPython(), 2000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [python?.state]);
 
   const skillGroups = groupCapabilities(items, (s) => ({ name: s.name, description: s.description }));
   // 分组看的是关键词，而那半句话现在是按语言给的 —— 用它分组会让**分组随语言
@@ -2311,6 +2451,43 @@ function SkillsSection({ api }: { api: Api }) {
           </>
         )}
       </SettingsBlock>
+      {/*
+        Python 运行环境（TD-042 ②）：uv 与 CPython **不随安装包**（owner 2026-09-17
+        定性「安装包小一些，租户按照需求，安装必要环境」）。
+
+        为什么它自己一块、而不是挂在用到它的那两行工具旁边：那是**一次安装**，
+        不是两次。挂在工具行上，同一件事会在几行里各摆一个按钮，读起来像几笔
+        各自独立的下载 —— 与载荷单列而不挂在服务器上是同一条理由。
+      */}
+      {python && python.component && (
+        <SettingsBlock icon="terminal" title={t("set.python.title")} desc={t("set.python.desc")}>
+          <div className="row-line">
+            {/* 体积、许可证、来源主机都在按钮**左边** —— 点之前就看得见要下多少。 */}
+            <span className="text-body-sm text-muted-foreground">{pythonLine(t, python)}</span>
+            <StatusBadge tone={PYTHON_TONE[python.state]}>{t(PYTHON_STATE_KEY[python.state])}</StatusBadge>
+            {python.state === "provisioning" ? (
+              <Button variant="ghost" size="sm" onClick={() => void cancelPython()}>
+                {t("set.cancel")}
+              </Button>
+            ) : (
+              <>
+                <Button variant="outline" size="sm" onClick={() => void provisionPython()}>
+                  {t(PYTHON_ACTION_KEY[python.state])}
+                </Button>
+                {(python.state === "ready" || python.state === "stale") && (
+                  <Button variant="ghost" size="sm" onClick={() => void removePython()}>
+                    {t("set.python.remove")}
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+          {/* 安装会再取 Python 本身与依赖：**按流量计费的网络上这句话是有用的**。 */}
+          {python.state !== "ready" && python.state !== "provisioning" && (
+            <p className="set-note">{t("set.python.alsoFetches")}</p>
+          )}
+        </SettingsBlock>
+      )}
       {catalog && (
         /* Runos 清单（ADR-020 §6.2，RY-204 D2）：平台目录的投影，与上面「本机装着的」
            两块不是一回事 —— 所以它自己一块，且第一句话就说它不是安装。 */

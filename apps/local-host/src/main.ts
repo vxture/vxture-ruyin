@@ -82,6 +82,7 @@ import { SkillRegistry } from "./skill-registry.js";
 import { refreshDistributedSkills } from "./skill-distribution.js";
 import { ToolRegistryView } from "./tool-registry.js";
 import { ComponentStore, readComponentSpecs } from "./component-store.js";
+import { PythonRuntime } from "./python-runtime.js";
 import { BundledToolServers } from "./tool-servers.js";
 import { fetchContract } from "./contract-fetch.js";
 import { fetchUiAfterContract } from "./ui-fetch.js";
@@ -312,6 +313,20 @@ const bundledTools = new BundledToolServers({
   components: componentStore,
   log: (line) => console.error(line),
 });
+/**
+ * Python 半边（TD-042 ②）：uv 与 CPython **不随安装包**（owner 2026-09-17 定性
+ * 「安装包小一些，租户按照需求，安装必要环境」）。这里只构造它 —— 读盘、算状态，
+ * **一个字节都不取**；真的装发生在用户点下那一次（`POST /python-runtime/provision`）。
+ */
+const pythonRuntime = new PythonRuntime({
+  dataDir,
+  components: componentStore,
+  config: () => bundledTools.pythonConfig(),
+  seeds: () => bundledTools.pythonSeeds(),
+  onChanged: () => events.publish({ kind: "component" }),
+  log: (line) => console.error(line),
+});
+bundledTools.setPython(pythonRuntime);
 const resourceLimits = resourceLimitsFromEnv();
 
 const connectorRegistry = new ConnectorRegistry(dataDir, connectors, {
@@ -610,6 +625,7 @@ const server = createLocalApi({
     },
   }),
   components: componentStore,
+  python: pythonRuntime,
   ...(capabilityBase ? { refreshDistributedSkills: refreshAllDistributed } : {}),
   uiDir,
   platform,
@@ -871,16 +887,22 @@ async function toolsSelfCheck(): Promise<void> {
 }
 
 /**
- * uvx 形态也真起一次（TD-042 点名缺的那条）。
+ * uvx 形态也真起一次 —— **但只在这台机器上真装过 Python 半边时**。
  *
- * 与 node 形态是两条完全不同的链：随包的 uv.exe 要在**这台机器上**跑起来、
- * 预取的 CPython 要能被它认出来、缓存要真的够解析出那个包 —— 少一样都只在
- * 装机之后才现形。缓存不在包里用，而是 `prepare()` 首次种到数据目录再用
- * （TD-062）：这一跑也顺便证明种得出来、种出来的够用。构建时 `seed-uv-cache.mjs` 已经在一个空的 UV_TOOL_DIR 里
- * 断网起过一次，但那是**构建机**；这一跑证明的是 electron-builder 把这棵树
- * 拷进包之后它还成立。
+ * 2026-09-18 起 uv 与 CPython 不随安装包（TD-042 ②），所以在一台刚装完、
+ * 没点过「安装 Python 运行环境」的机器上，这条链本来就不该成立。那不是失败，
+ * 是这一版的设计 —— 所以这里**如实说一句「还没装」就走**，不抛。
+ *
+ * 装过之后这一跑仍然有价值，而且是别处替不了的：uv.exe 要在**这台机器上**跑起来、
+ * 装下的 CPython 要能被它认出来、缓存要真的够解析出那个包。provision 的最后一步
+ * 已经在一个空的 UV_TOOL_DIR 里 `--offline` 起过一次，但那是**装的那一刻**；
+ * 这一跑证明的是重启之后它还成立。
  */
 async function uvxSelfCheck(): Promise<void> {
+  if (!pythonRuntime.isReady()) {
+    console.log(`[ruyin] uvx self-check: python runtime not installed (${pythonRuntime.status().state})`);
+    return;
+  }
   const candidate = bundledTools
     .launchable()
     .find((s) => s.launch?.runtime === "uvx" && !(s.launch.requiresEnv?.length) && !s.launch.requiresBin);
