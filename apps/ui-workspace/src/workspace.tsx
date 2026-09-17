@@ -53,6 +53,7 @@ import {
 import { ProductTab } from "./product-surface";
 import type { SurfaceInfo } from "./product-surface-info";
 import { verifyChain } from "./chain";
+import { useT, type MessageKey, type TFn } from "./i18n";
 // TabId/PROJECT_TABS live in their own module (workspace-tabs.ts) so the
 // sidebar can know the tab list without pulling in this file's DS-heavy
 // ProjectPanel - see that file's header comment (TD-011②).
@@ -72,12 +73,24 @@ function shortTime(iso: string): string {
 }
 
 /** 审计结果的呈现。`unknown` 是 X-3 之前的记录，**不知道就是不知道**。 */
-const OUTCOME_LABEL: Record<string, string> = {
-  success: "成功",
-  rejected: "被拒",
-  failed: "失败",
-  unknown: "未记录",
+const OUTCOME_KEY: Record<string, MessageKey> = {
+  success: "ws.outcome.success",
+  rejected: "ws.outcome.rejected",
+  failed: "ws.outcome.failed",
+  unknown: "ws.outcome.unknown",
 };
+/** 认得的结果给它那句话；不认得的原样显示 —— **不知道就是不知道**。 */
+function outcomeLabel(t: TFn, outcome: string): string {
+  const key = OUTCOME_KEY[outcome];
+  return key ? t(key) : outcome;
+}
+
+/** 同上：没见过的状态原样显示，不悄悄吞掉。 */
+export function taskStateLabel(t: TFn, state: string): string {
+  const key = TASK_STATE_KEY[state];
+  return key ? t(key) : state;
+}
+
 const OUTCOME_TONE: Record<string, StatusBadgeTone> = {
   success: "success",
   rejected: "warning",
@@ -103,17 +116,17 @@ function stateTone(state: string): StatusBadgeTone {
 }
 
 /** What the user is actually looking at, in their words. */
-const TASK_STATE_LABEL: Record<string, string> = {
-  created: "待启动",
-  selecting: "选取资料中",
-  executing: "执行中",
-  verifying: "校验中",
-  finalizing: "收尾中",
-  waiting_human: "等待确认",
-  suspended: "已暂停（稍后自动继续）",
-  completed: "已完成",
-  failed: "已失败",
-  cancelled: "已取消",
+const TASK_STATE_KEY: Record<string, MessageKey> = {
+  created: "ws.task.created",
+  selecting: "ws.task.selecting",
+  executing: "ws.task.executing",
+  verifying: "ws.task.verifying",
+  finalizing: "ws.task.finalizing",
+  waiting_human: "ws.task.waiting_human",
+  suspended: "ws.task.suspended",
+  completed: "ws.task.completed",
+  failed: "ws.task.failed",
+  cancelled: "ws.task.cancelled",
 };
 
 export function ProjectPanel({
@@ -137,6 +150,7 @@ export function ProjectPanel({
   /** 「重新获取」之后让上层再问一次。 */
   onReloadSurface?: () => void;
 }) {
+  const t = useT();
   const [view, setView] = useState<ProjectView | null>(null);
   const [instances, setInstances] = useState<TaskInstance[]>([]);
   const [grants, setGrants] = useState<Grant[]>([]);
@@ -227,7 +241,7 @@ export function ProjectPanel({
     return error ? (
       <div className="error-box">{error}</div>
     ) : (
-      <p className="text-body-md text-muted-foreground">加载中……</p>
+      <p className="text-body-md text-muted-foreground">{t("ws.loading")}</p>
     );
   }
   return (
@@ -250,9 +264,9 @@ export function ProjectPanel({
       {!view.meta.workspaceId && (
         <div className="notice-box">
           <div className="flex flex-col gap-2xs">
-            <strong>这个项目还没有归入工作区</strong>
+            <strong>{t("ws.unattributed.title")}</strong>
             <span className="text-body-sm text-muted-foreground">
-              它是在工作区启用之前建的。导入之后，它才会跟着当前工作区一起显示。
+              {t("ws.unattributed.body")}
             </span>
           </div>
           <Button
@@ -260,7 +274,7 @@ export function ProjectPanel({
             // 不然一次点击悄悄拉两遍全部五个端点。
             onClick={() => void guard(() => api.importProject(id))}
           >
-            导入当前工作区
+            {t("ws.unattributed.import")}
           </Button>
         </div>
       )}
@@ -270,8 +284,11 @@ export function ProjectPanel({
       {view.upgradeBlocked && (
         <div className="notice-box">
           <span className="text-body-sm">
-            智能体已有新版本 {view.upgradeBlocked.version}，但它删去或改窄了本项目在用的内容（
-            {describeBreaks(view.upgradeBlocked.breaks)}），本项目继续用 {view.meta.productVersion}。
+            {t("ws.upgradeBlocked", {
+              version: view.upgradeBlocked.version,
+              breaks: describeBreaks(view.upgradeBlocked.breaks, t),
+              current: view.meta.productVersion,
+            })}
           </span>
         </div>
       )}
@@ -280,13 +297,15 @@ export function ProjectPanel({
       {view.meta.archivedAt && (
         <div className="notice-box">
           <div className="flex flex-col gap-2xs">
-            <strong>项目已归档（{shortTime(view.meta.archivedAt)}）</strong>
+            <strong>{t("ws.archived.title", { at: shortTime(view.meta.archivedAt) })}</strong>
             <span className="text-body-sm text-muted-foreground">
-              归档的项目只读：不能发起任务、推进阶段、改授权与资料。记录照常可看、可导出。
+              {t("ws.archived.body")}
             </span>
           </div>
           {view.operations.includes("restore") && (
-            <Button onClick={() => void guard(() => api.restoreProject(id))}>恢复项目</Button>
+            <Button onClick={() => void guard(() => api.restoreProject(id))}>
+              {t("ws.archived.restore")}
+            </Button>
           )}
         </div>
       )}
@@ -389,6 +408,7 @@ function ProjectSummary({
   audit: StoredAuditEvent[];
   chainOk: boolean | null;
 }) {
+  const t = useT();
   const folders = grants.filter((g) => !isConnectorGrant(g)).length;
   const connectorGrants = grants.length - folders;
   const waiting = instances.filter((t) => t.state === "waiting_human").length;
@@ -399,34 +419,44 @@ function ProjectSummary({
     <div className="proj-summary">
       <div className="proj-summary-row">
       <div className="proj-summary-cell">
-        <span className="proj-summary-k">阶段</span>
+        <span className="proj-summary-k">{t("ws.summary.stage")}</span>
         <StatusBadge tone={stateTone(view.businessState)}>
           {view.businessState}
         </StatusBadge>
       </div>
       <div className="proj-summary-cell">
-        <span className="proj-summary-k">任务</span>
+        <span className="proj-summary-k">{t("ws.summary.tasks")}</span>
         <span className="proj-summary-v">
           {instances.length}
-          {waiting > 0 && <em className="proj-summary-flag">{waiting} 待确认</em>}
-          {running > 0 && <em className="proj-summary-run">{running} 运行中</em>}
+          {waiting > 0 && (
+            <em className="proj-summary-flag">{t("ws.summary.waiting", { n: waiting })}</em>
+          )}
+          {running > 0 && (
+            <em className="proj-summary-run">{t("ws.summary.running", { n: running })}</em>
+          )}
         </span>
       </div>
       <div className="proj-summary-cell">
-        <span className="proj-summary-k">资料</span>
+        <span className="proj-summary-k">{t("ws.summary.materials")}</span>
         <span className="proj-summary-v">
-          {bindings.length} 类 · {folders} 个授权目录
+          {t("ws.summary.bindings", { types: bindings.length, folders })}
           {/* 连接器授权只在有的时候才说：没有就不占字。 */}
-          {connectorGrants > 0 && <> · {connectorGrants} 个连接器</>}
+          {connectorGrants > 0 && <>{t("ws.summary.connectors", { n: connectorGrants })}</>}
         </span>
       </div>
       <div className="proj-summary-cell">
-        <span className="proj-summary-k">审计</span>
+        <span className="proj-summary-k">{t("ws.summary.audit")}</span>
         <span className="proj-summary-v">
-          {audit.length} 条
+          {t("ws.summary.auditCount", { n: audit.length })}
           {/* 链状态就摆在条数旁边：一个数字不说自己可不可信，等于没说。 */}
           <em className={chainOk === false ? "proj-summary-flag" : "proj-summary-ok"}>
-            {chainOk === null ? "校验中" : chainOk ? "记录完整" : "记录被改动过"}
+            {t(
+              chainOk === null
+                ? "ws.summary.verifying"
+                : chainOk
+                  ? "ws.summary.chainOk"
+                  : "ws.summary.chainBroken",
+            )}
           </em>
         </span>
       </div>
@@ -439,7 +469,7 @@ function ProjectSummary({
           {view.product.name} {view.product.version}
         </span>
         <span>{view.meta.projectType}</span>
-        <span>建于 {view.meta.createdAt.slice(0, 10)}</span>
+        <span>{t("ws.summary.createdAt", { date: view.meta.createdAt.slice(0, 10) })}</span>
         <code>{view.meta.id}</code>
       </div>
     </div>
@@ -463,6 +493,7 @@ function OverviewTab({
   onTransition: (to: string, humanConfirmed: boolean) => void;
   onArchive: () => void;
 }) {
+  const t = useT();
   const recent = [...instances].reverse().slice(0, 5);
   const archived = !!view.meta.archivedAt;
   return (
@@ -471,34 +502,37 @@ function OverviewTab({
       <ReadOnlyWhenArchived archived={archived}>
         <StateStepper view={view} onTransition={onTransition} />
       </ReadOnlyWhenArchived>
-      <SectionHeader level={2} title="最近任务" icon="clock-counter-clockwise" />
+      <SectionHeader level={2} title={t("ws.recentTasks")} icon="clock-counter-clockwise" />
       {recent.length === 0 && (
-        <EmptyState icon="list-checks" title="尚无任务执行记录" />
+        <EmptyState icon="list-checks" title={t("ws.recentTasks.empty")} />
       )}
-      {recent.map((t) => (
-        <div key={t.id} className="card">
-          <b>{t.taskId}</b>{" "}
-          <StatusBadge tone={stateTone(t.state)}>
-            {TASK_STATE_LABEL[t.state] ?? t.state}
+      {/* map 的参数原先叫 `t`，会盖住翻译函数；改叫 `run`（一次任务执行）。 */}
+      {recent.map((run) => (
+        <div key={run.id} className="card">
+          <b>{run.taskId}</b>{" "}
+          <StatusBadge tone={stateTone(run.state)}>
+            {taskStateLabel(t, run.state)}
           </StatusBadge>
           <span className="text-body-sm text-muted-foreground ml-sm">
-            {t.updatedAt}
+            {run.updatedAt}
           </span>
         </div>
       ))}
-      <SectionHeader level={2} title="导出项目记录" icon="folder-open" />
+      <SectionHeader level={2} title={t("ws.export.title")} icon="folder-open" />
       <ExportCard api={api} projectId={projectId} />
       {/* 归档入口：契约声明了 archive 才有（容器能做什么由产品的契约定）。 */}
       {!archived && view.operations.includes("archive") && (
         <>
-          <SectionHeader level={2} title="归档项目" icon="archive" />
+          <SectionHeader level={2} title={t("ws.archive.title")} icon="archive" />
           <div className="card flex items-center justify-between gap-md">
             <span className="text-body-sm text-muted-foreground">
-              归档后项目只读：不能再发起任务、推进阶段、改授权与资料；记录照常可看、可导出
-              {view.operations.includes("restore") ? "，随时可以恢复" : "。这个产品不支持恢复，归档是单向的"}
-              。还有任务没落定时不能归档。
+              {t(
+                view.operations.includes("restore")
+                  ? "ws.archive.descRestorable"
+                  : "ws.archive.descOneWay",
+              )}
             </span>
-            <Button onClick={onArchive}>归档</Button>
+            <Button onClick={onArchive}>{t("ws.archive.run")}</Button>
           </div>
         </>
       )}
@@ -507,27 +541,34 @@ function OverviewTab({
 }
 
 /** 契约里各段的叫法（给人看的，不是给机器看的）。 */
-const BREAK_SECTION: Record<string, string> = {
-  objects: "对象",
-  states: "阶段",
-  context: "资料类型",
-  capabilities: "能力",
-  tools: "工具",
-  tasks: "任务",
-  project: "项目形态",
+const BREAK_SECTION_KEY: Record<string, MessageKey> = {
+  objects: "ws.break.objects",
+  states: "ws.break.states",
+  context: "ws.break.context",
+  capabilities: "ws.break.capabilities",
+  tools: "ws.break.tools",
+  tasks: "ws.break.tasks",
+  project: "ws.break.project",
 };
 
 /**
  * 新版本删了 / 改窄了什么，压成一句：前三处点名，其余说「等 N 处」。
  * `tasks.generate_proposal` → 「任务 generate_proposal」；`context.types.x` → 「资料类型 x」。
  */
-export function describeBreaks(breaks: ReadonlyArray<{ path: string; change: string }>): string {
+export function describeBreaks(
+  breaks: ReadonlyArray<{ path: string; change: string }>,
+  t: TFn,
+): string {
+  const sep = t("common.listSep");
   const named = breaks.slice(0, 3).map(({ path }) => {
     const [section = "", ...rest] = path.split(".");
     const tail = (section === "context" ? rest.slice(1) : rest)[0] ?? "";
-    return `${BREAK_SECTION[section] ?? section} ${tail}`.trim();
+    const head = BREAK_SECTION_KEY[section] ? t(BREAK_SECTION_KEY[section]) : section;
+    return `${head} ${tail}`.trim();
   });
-  return breaks.length > 3 ? `${named.join("、")} 等 ${breaks.length} 处` : named.join("、");
+  return breaks.length > 3
+    ? t("ws.break.more", { named: named.join(sep), count: breaks.length })
+    : named.join(sep);
 }
 
 /**
@@ -536,6 +577,7 @@ export function describeBreaks(breaks: ReadonlyArray<{ path: string; change: str
  * 一个注定被拒的按钮）；导出与恢复不在这一块里。
  */
 function ReadOnlyWhenArchived({ archived, children }: { archived: boolean; children: ReactNode }) {
+  const t = useT();
   return (
     <fieldset disabled={archived} className="flex flex-col gap-lg border-0 p-0 m-0 min-w-0">
       {children}
@@ -550,6 +592,7 @@ function ReadOnlyWhenArchived({ archived, children }: { archived: boolean; child
  * 无处可点**：端点在，用户够不着，等于没有。
  */
 function ExportCard({ api, projectId }: { api: Api; projectId: string }) {
+  const t = useT();
   const [dir, setDir] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<ProjectExport | null>(null);
@@ -557,13 +600,12 @@ function ExportCard({ api, projectId }: { api: Api; projectId: string }) {
   return (
     <div className="card flex flex-col gap-sm">
       <div className="text-body-sm text-muted-foreground">
-        导出这个项目的全部记录：阶段、任务与审计。产出的文档不在其中 ——
-        它们本来就写在你自己的文件夹里。导出目标须是已授权的文件夹。
+        {t("ws.export.desc")}
       </div>
       <div className="row">
         <Input
           value={dir}
-          placeholder="导出到（已授权的目录）"
+          placeholder={t("ws.export.placeholder")}
           onChange={(e) => setDir(e.target.value)}
         />
         <Button
@@ -579,23 +621,23 @@ function ExportCard({ api, projectId }: { api: Api; projectId: string }) {
               .finally(() => setBusy(false));
           }}
         >
-          {busy ? "导出中……" : "导出"}
+          {t(busy ? "ws.export.running" : "ws.export.run")}
         </Button>
       </div>
       {error && <div className="error-box">{error}</div>}
       {done && (
         <div className="notice-box">
           <div className="flex flex-col gap-2xs">
-            <strong>已导出 {done.files.length} 个文件到 {done.path}</strong>
+            <strong>{t("ws.export.done", { count: done.files.length, path: done.path })}</strong>
             <span className="text-body-sm text-muted-foreground">
-              含 {done.chain.events} 条审计记录
+              {t("ws.export.auditCount", { n: done.chain.events })}
             </span>
             {/* 照实说：客户端零密钥，签不了。可验篡改，不可归属 —— 两件事
                 分开说，别让人以为这份导出已经带了身份。 */}
             <span className="text-body-sm text-muted-foreground">
               {done.signed
-                ? "已签名。"
-                : "未签名：收件人能验出它有没有被改过，但无法确认它出自谁。"}
+                ? t("ws.export.signed")
+                : t("ws.export.unsigned")}
             </span>
           </div>
         </div>
@@ -611,6 +653,7 @@ function StateStepper({
   view: ProjectView;
   onTransition: (to: string, humanConfirmed: boolean) => void;
 }) {
+  const t = useT();
   const items = view.states?.items ?? [];
   const currentIndex = items.findIndex((s) => s.name === view.businessState);
   const current = items[currentIndex];
@@ -631,27 +674,29 @@ function StateStepper({
       </div>
       {transitions.length > 0 && (
         <div className="row">
-          <span className="text-body-sm text-muted-foreground">推进：</span>
-          {transitions.map((t) => (
+          <span className="text-body-sm text-muted-foreground">{t("ws.advance.label")}</span>
+          {/* 这个 map 的参数原先也叫 `t` —— 翻译函数一进来就被它盖住了。
+              改叫 `tr`（transition）。 */}
+          {transitions.map((tr) => (
             <Button
               variant="outline"
-              key={t.to}
+              key={tr.to}
               onClick={() => {
-                if (t.confirm === "human") {
+                if (tr.confirm === "human") {
                   if (
                     window.confirm(
-                      `这一步要从「${view.businessState}」推进到「${t.to}」，需要你确认。继续吗？`,
+                      t("ws.advance.confirm", { from: view.businessState, to: tr.to }),
                     )
                   ) {
-                    onTransition(t.to, true);
+                    onTransition(tr.to, true);
                   }
                 } else {
-                  onTransition(t.to, false);
+                  onTransition(tr.to, false);
                 }
               }}
             >
-              → {t.to}
-              {t.confirm === "human" ? "（需确认）" : ""}
+              → {tr.to}
+              {tr.confirm === "human" ? t("ws.advance.needsConfirm") : ""}
             </Button>
           ))}
         </div>
@@ -686,6 +731,7 @@ function ProjectFilesSection({
   projectId: string;
   grants: Grant[];
 }) {
+  const t = useT();
   const [files, setFiles] = useState<ProjectFile[] | null>(null);
   const [path, setPath] = useState("");
   const [notice, setNotice] = useState("");
@@ -712,7 +758,7 @@ function ProjectFilesSection({
         // 未授权的路径会被守护进程拒（FILE_NOT_GRANTED）。**把原话给用户** ——
         // 它说清了下一步是「先授权那个文件夹」。
         const body = (cause as { body?: { message?: string } })?.body;
-        setNotice(body?.message ?? "这个文件收不进来");
+        setNotice(body?.message ?? t("ws.files.cannotIngest"));
       });
   };
 
@@ -728,22 +774,20 @@ function ProjectFilesSection({
         a.click();
         URL.revokeObjectURL(url);
       })
-      .catch(() => setNotice(`取不回 ${file.name}`));
+      .catch(() => setNotice(t("ws.files.cannotFetch", { name: file.name })));
   };
 
   return (
     <>
-      <SectionHeader level={2} title="项目文件" icon="archive" />
+      <SectionHeader level={2} title={t("ws.files.title")} icon="archive" />
       <p className="hint">
         {/* 这是渲染出去的正文，不是注释 —— 别在这儿用 Markdown 的星号，JSX
             不解析它，用户会看见两个星号。要加重就用 <strong>。 */}
-        收进来的原件复制一份进本项目，和项目库<strong>同一把钥匙加密</strong>。你把自己
-        那份挪走或删掉，这一份仍然在 —— 成果的依据不会因此断掉。只能从已授权的文件夹里收。
+        {t("ws.files.desc")}
         <br />
         {/* 提醒在前、拦截在后（TD-051）：常见的几家会被拒，但挂成盘符的那些认不
             出来 —— 而从云盘里收进来的可能只是一个占位存根，看起来和收好了一样。 */}
-        <strong>不要从云同步盘里收</strong>（OneDrive、坚果云、百度网盘…）：那里的文件
-        可能只是占位存根，收进来会是一份空壳。常见的几家会被拒，认不出来的请你自己避开。
+        {t("ws.files.cloudWarning")}
       </p>
       {notice && (
         <p className="hint" role="alert">
@@ -753,12 +797,12 @@ function ProjectFilesSection({
       {files && files.length === 0 && (
         <EmptyState
           icon="archive"
-          title="还没有收进任何原件"
-          description="参考资料默认是从你自己的位置读的；要让依据长期可查，把原件收进来。"
+          title={t("ws.files.empty.title")}
+          description={t("ws.files.empty.desc")}
         />
       )}
       {files && files.length > 0 && (
-        <ul className="row-list" aria-label="项目文件">
+        <ul className="row-list" aria-label={t("ws.files.aria")}>
           {files.map((f) => (
             <li key={f.id} className="row-item">
               <code className="row-main">{f.name}</code>
@@ -766,11 +810,11 @@ function ProjectFilesSection({
               {/* 来源只是记录，那个路径现在可能已经不在了 —— 所以不做成链接。 */}
               {f.sourceRef && (
                 <span className="row-tag" title={f.sourceRef}>
-                  收自本机
+                  {t("ws.files.fromLocal")}
                 </span>
               )}
               <Button variant="outline" onClick={() => download(f)}>
-                取回
+                {t("ws.files.fetchBack")}
               </Button>
               <Button
                 variant="outline"
@@ -778,7 +822,7 @@ function ProjectFilesSection({
                   void api.removeFile(projectId, f.id).then(reload);
                 }}
               >
-                移出
+                {t("ws.files.remove")}
               </Button>
             </li>
           ))}
@@ -790,12 +834,12 @@ function ProjectFilesSection({
           onChange={(e) => setPath(e.target.value)}
           placeholder={
             folders.length > 0
-              ? `已授权文件夹里的文件（例如 ${folders[0]!.path}\\招标文件.pdf）`
-              : "先在上面授权一个文件夹，再从里面收文件"
+              ? t("ws.files.placeholderExample", { example: `${folders[0]!.path}\\tender.pdf` })
+              : t("ws.files.placeholderNoGrant")
           }
         />
         <Button disabled={!path || folders.length === 0} onClick={add}>
-          收进项目
+          {t("ws.files.ingest")}
         </Button>
       </div>
     </>
@@ -803,18 +847,18 @@ function ProjectFilesSection({
 }
 
 /** 三个权限值给人看的说法。`allow` 不写成「允许」——「直接执行」才说清了没人会被问。 */
-const PERMISSION_LABEL: Record<"allow" | "ask" | "deny", string> = {
-  allow: "直接执行",
-  ask: "每次问我",
-  deny: "禁止",
+const PERMISSION_KEY: Record<"allow" | "ask" | "deny", MessageKey> = {
+  allow: "ws.perm.allow",
+  ask: "ws.perm.ask",
+  deny: "ws.perm.deny",
 };
 
 /** 这一行现在是谁说了算。**要说得出来**：一个只显示结果的开关无法回答「我明明设过」。 */
-const SOURCE_LABEL: Record<ToolPolicyRow["source"], string> = {
-  hard_floor: "底线",
-  user_policy: "你设的",
-  contract_default: "产品默认",
-  ask_cache: "本次任务内已批准",
+const SOURCE_KEY: Record<ToolPolicyRow["source"], MessageKey> = {
+  hard_floor: "ws.permSource.hard_floor",
+  user_policy: "ws.permSource.user_policy",
+  contract_default: "ws.permSource.contract_default",
+  ask_cache: "ws.permSource.ask_cache",
 };
 
 /**
@@ -835,6 +879,7 @@ function ToolPolicySection({
   api: Api;
   projectId: string;
 }) {
+  const t = useT();
   const [rows, setRows] = useState<ToolPolicyRow[] | null>(null);
   /** 被拒的那句话照原样显示 —— 它写清了能改到哪儿为止。 */
   const [refusal, setRefusal] = useState("");
@@ -862,23 +907,22 @@ function ToolPolicySection({
         // 底线之下的放宽会被拒（POLICY_DENIED）。**把原话给用户** —— 它说明了
         // 为什么不行、以及还能改到哪儿。一句「操作失败」在这里等于没说。
         const body = (cause as { body?: { message?: string } })?.body;
-        setRefusal(body?.message ?? "这一条改不了");
+        setRefusal(body?.message ?? t("ws.tools.cannotChange"));
       });
   };
 
   return (
     <>
-      <SectionHeader level={2} title="工具权限" icon="shield-check" />
+      <SectionHeader level={2} title={t("ws.tools.title")} icon="shield-check" />
       <p className="hint">
-        只对这个项目生效。收紧随时可以；带「底线」标记的那几条不能放宽 ——
-        数据发出去收不回来，所以每次都要有人点头。
+        {t("ws.tools.desc")}
       </p>
       {refusal && (
         <p className="hint" role="alert">
           {refusal}
         </p>
       )}
-      <ul className="row-list" aria-label="工具权限">
+      <ul className="row-list" aria-label={t("ws.tools.aria")}>
         {rows.map((row) => (
           <li key={row.tool} className="row-item">
             {/* **不要给这里加 title**：title 会顶掉 `<code>` 的无障碍名，于是读屏
@@ -886,20 +930,28 @@ function ToolPolicySection({
                 一个标签，它也确实要露出来：有没有底线是按类别定的。 */}
             <code className="row-main">{row.tool}</code>
             <span className="row-tag">{row.category}</span>
-            <span className="row-tag">{SOURCE_LABEL[row.source]}</span>
-            {row.floor && <span className="row-tag">底线 {PERMISSION_LABEL[row.floor]}</span>}
+            <span className="row-tag">{t(SOURCE_KEY[row.source])}</span>
+            {row.floor && (
+              <span className="row-tag">
+                {t("ws.tools.floorTag", { permission: t(PERMISSION_KEY[row.floor]) })}
+              </span>
+            )}
             <NativeSelect
-              aria-label={`${row.tool} 的权限`}
+              aria-label={t("ws.tools.rowAria", { tool: row.tool })}
               value={row.userPolicy ?? ""}
               onChange={(e) => change(row.tool, e.target.value)}
               wrapperClassName="sel-narrow"
             >
               {/* 空选项 = 交给产品默认。与「设成默认此刻的那个值」不是一回事：
                   契约会升级，而一条钉死的记录不会跟着变。 */}
-              <option value="">跟随产品默认（{PERMISSION_LABEL[row.contractDefault]}）</option>
-              <option value="allow">直接执行</option>
-              <option value="ask">每次问我</option>
-              <option value="deny">禁止</option>
+              <option value="">
+                {t("ws.tools.followContract", {
+                  permission: t(PERMISSION_KEY[row.contractDefault]),
+                })}
+              </option>
+              <option value="allow">{t("ws.perm.allow")}</option>
+              <option value="ask">{t("ws.perm.ask")}</option>
+              <option value="deny">{t("ws.perm.deny")}</option>
             </NativeSelect>
           </li>
         ))}
@@ -927,6 +979,7 @@ function ContextTab({
   onGrantConnector: (connector: string) => void;
   onBind: (type: string, root: string, via?: { connector: string; source: string }) => void;
 }) {
+  const t = useT();
   const [grantPath, setGrantPath] = useState("");
   const [bindType, setBindType] = useState("");
   const [bindRoot, setBindRoot] = useState("");
@@ -966,12 +1019,12 @@ function ContextTab({
     : undefined;
   return (
     <>
-      <SectionHeader level={2} title="文件授权" icon="folder-open" />
+      <SectionHeader level={2} title={t("ws.grants.title")} icon="folder-open" />
       {folderGrants.length === 0 && (
         <EmptyState
           icon="lock"
-          title="尚未授权任何文件夹"
-          description="只能读取你授权过的文件夹，其余一概访问不到。"
+          title={t("ws.grants.empty.title")}
+          description={t("ws.grants.empty.desc")}
         />
       )}
       {/* 一条授权是一行字（路径 + 读写模式）。一条一张卡，等于给一行字配
@@ -990,7 +1043,7 @@ function ContextTab({
         <Input
           value={grantPath}
           onChange={(e) => setGrantPath(e.target.value)}
-          placeholder="文件夹绝对路径"
+          placeholder={t("ws.grants.placeholder")}
         />
         <Button
           disabled={!grantPath}
@@ -999,7 +1052,7 @@ function ContextTab({
             setGrantPath("");
           }}
         >
-          授权
+          {t("ws.grants.grant")}
         </Button>
       </div>
 
@@ -1007,9 +1060,9 @@ function ContextTab({
           出现 —— 一个永远空着的板块是在解释一件用户没有的东西。 */}
       {(installed?.length ?? 0) + connectorGrants.length > 0 && (
         <>
-          <SectionHeader level={2} title="连接器授权" icon="plugs-connected" />
+          <SectionHeader level={2} title={t("ws.connectors.title")} icon="plugs-connected" />
           {connectorGrants.length > 0 && (
-            <ul className="row-list" aria-label="已授权的连接器">
+            <ul className="row-list" aria-label={t("ws.connectors.aria")}>
               {connectorGrants.map((g) => (
                 <li key={g.id} className="row-item">
                   <code className="row-main">{g.connector}</code>
@@ -1021,14 +1074,17 @@ function ContextTab({
           {grantable.length > 0 && (
             <div className="row">
               <NativeSelect
-                aria-label="要授权的连接器"
+                aria-label={t("ws.connectors.pickAria")}
                 value={effectiveGrantConnector}
                 onChange={(e) => setGrantConnector(e.target.value)}
                 wrapperClassName="sel-narrow"
               >
                 {grantable.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.id}（{c.source}{c.health.ok ? "" : "，未运行"}）
+                    {t(c.health.ok ? "ws.connectors.option" : "ws.connectors.optionStopped", {
+                  id: c.id,
+                  source: c.source,
+                })}
                   </option>
                 ))}
               </NativeSelect>
@@ -1039,7 +1095,7 @@ function ContextTab({
                   setGrantConnector("");
                 }}
               >
-                授权连接器
+                {t("ws.connectors.grant")}
               </Button>
             </div>
           )}
@@ -1050,7 +1106,7 @@ function ContextTab({
 
       <ToolPolicySection api={api} projectId={projectId} />
 
-      <SectionHeader level={2} title="资料来源" icon="plugs-connected" />
+      <SectionHeader level={2} title={t("ws.bindings.title")} icon="plugs-connected" />
       {bindings.map((b) => (
         <BindingCard key={b.type} api={api} projectId={projectId} binding={b} />
       ))}
@@ -1070,15 +1126,15 @@ function ContextTab({
             文件夹，和从前一样，不多问一句。 */}
         {connectorGrants.length > 0 && (
           <NativeSelect
-            aria-label="经由"
+            aria-label={t("ws.bindings.viaAria")}
             value={bindVia}
             onChange={(e) => setBindVia(e.target.value)}
             wrapperClassName="sel-narrow"
           >
-            <option value="">本地文件夹</option>
+            <option value="">{t("ws.bindings.viaLocal")}</option>
             {connectorGrants.map((g) => (
               <option key={g.id} value={g.connector}>
-                连接器 {g.connector}
+                {t("ws.bindings.viaConnector", { id: g.connector })}
               </option>
             ))}
           </NativeSelect>
@@ -1086,7 +1142,7 @@ function ContextTab({
         <Input
           value={bindRoot}
           onChange={(e) => setBindRoot(e.target.value)}
-          placeholder={bindVia ? "资源 URI 前缀（如 crm://accounts/）" : "已授权文件夹内的路径"}
+          placeholder={t(bindVia ? "ws.bindings.placeholderUri" : "ws.bindings.placeholderPath")}
         />
         <Button
           variant="outline"
@@ -1104,7 +1160,7 @@ function ContextTab({
             setBindRoot("");
           }}
         >
-          绑定并索引
+          {t("ws.bindings.bind")}
         </Button>
       </div>
     </>
@@ -1120,6 +1176,7 @@ function BindingCard({
   projectId: string;
   binding: Binding;
 }) {
+  const t = useT();
   const [items, setItems] = useState<ContextItemMeta[] | null>(null);
   const [open, setOpen] = useState(false);
   return (
@@ -1148,12 +1205,15 @@ function BindingCard({
               它从哪个连接器来，而两个连接器可以暴露同一个地址。 */}
           {binding.connector !== "local-fs" && (
             <span className="row-tag" style={{ marginLeft: 8 }}>
-              连接器 {binding.connector} · {binding.source}
+              {t("ws.bindings.fromConnector", {
+                connector: binding.connector,
+                source: binding.source,
+              })}
             </span>
           )}
         </span>
         <span className="text-body-sm text-muted-foreground">
-          {open ? "收起" : "查看条目"}
+          {t(open ? "ws.bindings.collapse" : "ws.bindings.expand")}
         </span>
       </div>
       {open && items !== null && (
@@ -1162,7 +1222,7 @@ function BindingCard({
             {items.length === 0 && (
               <TableRow>
                 <TableCell className="text-muted-foreground">
-                  （该绑定当前未发现任何条目）
+                  {t("ws.bindings.noEntries")}
                 </TableCell>
               </TableRow>
             )}
@@ -1195,17 +1255,18 @@ function TasksTab({
   instances: TaskInstance[];
   onLaunch: (task: string, inputs?: Record<string, unknown>) => void;
 }) {
+  const t = useT();
   return (
     <>
       {/* 智能在这里：业务契约声明的 AI 任务（Harness 执行 + 人工检查点），
           不是壳级助手（20-specs/10 §1.3 定位）。 */}
-      <SectionHeader level={2} title="任务定义" icon="sparkles" />
+      <SectionHeader level={2} title={t("ws.taskDefs.title")} icon="sparkles" />
       {view.tasks.map((t) => (
         <TaskLauncher key={t.id} def={t} onLaunch={(inputs) => onLaunch(t.id, inputs)} />
       ))}
-      <SectionHeader level={2} title="任务实例" icon="list-checks" />
+      <SectionHeader level={2} title={t("ws.instances.title")} icon="list-checks" />
       {instances.length === 0 && (
-        <EmptyState icon="circle-dashed" title="尚无任务实例" />
+        <EmptyState icon="circle-dashed" title={t("ws.instances.empty")} />
       )}
       {[...instances].reverse().map((t) => (
         <InstanceCard key={t.id} instance={t} />
@@ -1221,6 +1282,7 @@ function TaskLauncher({
   def: TaskDef;
   onLaunch: (inputs?: Record<string, unknown>) => void;
 }) {
+  const t = useT();
   const [manual, setManual] = useState(false);
   const [json, setJson] = useState("{}");
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -1230,23 +1292,26 @@ function TaskLauncher({
     <div className="card">
       <div style={{ fontWeight: 600 }}>{def.id}</div>
       <div className="text-body-sm text-muted-foreground">
-        {def.objective} · 输入类型: {def.input_types.join(", ") || "（无）"}
+        {t("ws.taskDef.inputs", {
+          objective: def.objective,
+          types: def.input_types.join(", ") || t("ws.taskDef.noInputs"),
+        })}
       </div>
       {blocked && (
         <div className="error-box">
-          这个任务现在还跑不了，缺少：{def.unrunnable.join("、")}
+          {t("ws.taskDef.unrunnable", { missing: def.unrunnable.join(t("common.listSep")) })}
         </div>
       )}
       <div className="row" style={{ marginTop: 6 }}>
         <Button disabled={blocked} onClick={() => onLaunch(undefined)}>
-          启动（自动选择上下文）
+          {t("ws.taskDef.start")}
         </Button>
         <Button
           variant="outline"
           disabled={blocked}
           onClick={() => setManual(!manual)}
         >
-          {manual ? "收起手动模式" : "手动提供输入"}
+          {t(manual ? "ws.taskDef.hideManual" : "ws.taskDef.showManual")}
         </Button>
       </div>
       {manual && (
@@ -1264,7 +1329,7 @@ function TaskLauncher({
               }
             }}
           >
-            以手动输入启动
+            {t("ws.taskDef.startManual")}
           </Button>
         </>
       )}
@@ -1273,6 +1338,7 @@ function TaskLauncher({
 }
 
 function InstanceCard({ instance }: { instance: TaskInstance }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   return (
     <div className="card clickable" onClick={() => setOpen(!open)}>
@@ -1288,7 +1354,9 @@ function InstanceCard({ instance }: { instance: TaskInstance }) {
               不显示位置就等于不告诉用户「还要多久」，而那正是他此刻唯一想知道的。 */}
           {instance.queued && (
             <StatusBadge tone="neutral">
-              {instance.queuePosition ? `排队中 · 第 ${instance.queuePosition}` : "排队中"}
+              {instance.queuePosition
+            ? t("ws.instance.queuedAt", { position: instance.queuePosition })
+            : t("ws.instance.queued")}
             </StatusBadge>
           )}
         </span>
@@ -1303,9 +1371,9 @@ function InstanceCard({ instance }: { instance: TaskInstance }) {
             <Table className="mb-sm">
               <TableHeader>
                 <TableRow>
-                  <TableHead>验证规则</TableHead>
-                  <TableHead>方式</TableHead>
-                  <TableHead>结论</TableHead>
+                  <TableHead>{t("ws.instance.col.rule")}</TableHead>
+                  <TableHead>{t("ws.instance.col.method")}</TableHead>
+                  <TableHead>{t("ws.instance.col.verdict")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1334,7 +1402,9 @@ function InstanceCard({ instance }: { instance: TaskInstance }) {
             ))}
           {instance.result && (
             <div className="text-body-sm text-muted-foreground">
-              来源：{instance.result.sources.join("、")}
+              {t("ws.instance.sources", {
+                list: instance.result.sources.join(t("common.listSep")),
+              })}
             </div>
           )}
         </div>
@@ -1360,27 +1430,32 @@ function StateRequestCard({
   current: string;
   onDecide: (approve: boolean) => void;
 }) {
+  const t = useT();
   return (
     <PanelCard
       tone="warning"
       icon="shield-warning"
-      title={`「${productName}」请求把项目推进到「${request.to}」`}
-      description={`当前阶段「${current}」。这一步要你点头才能走 —— 智能体只能提出，推不推进由你决定。`}
+      title={t("ws.confirm.stageTitle", { product: productName, to: request.to })}
+      description={t("ws.confirm.stageDesc", { current })}
       action={
         <div className="flex items-center gap-xs">
-          <Button onClick={() => onDecide(true)}>确认推进</Button>
+          <Button onClick={() => onDecide(true)}>{t("ws.confirm.stageAccept")}</Button>
           <Button
             variant="destructive"
-            confirmExempt="这张卡本身就是那一次人工确认，无需二次弹窗"
+            confirmExempt={t("ws.confirm.exempt")}
             onClick={() => onDecide(false)}
           >
-            拒绝
+            {t("ws.confirm.reject")}
           </Button>
         </div>
       }
     >
       <p className="text-body-sm text-muted-foreground">
-        「{current}」→「{request.to}」 · 提出于 {shortTime(request.requestedAt)}
+        {t("ws.confirm.stageFoot", {
+          current,
+          to: request.to,
+          at: shortTime(request.requestedAt),
+        })}
       </p>
     </PanelCard>
   );
@@ -1393,6 +1468,7 @@ function CheckpointCard({
   instance: TaskInstance;
   onDecide: (approve: boolean) => void;
 }) {
+  const t = useT();
   const kind = pendingCheckpoint(instance)?.kind ?? "verification_review";
   return (
     <PanelCard
@@ -1400,29 +1476,29 @@ function CheckpointCard({
       icon="shield-warning"
       title={
         kind === "context_confirm"
-          ? `任务「${instance.taskId}」请求使用以下上下文`
+          ? t("ws.confirm.contextTitle", { task: instance.taskId })
           : kind === "tool_ask"
-            ? `任务「${instance.taskId}」请求执行一个工具`
-            : `任务「${instance.taskId}」的成果等待人工评审`
+            ? t("ws.confirm.toolTitle", { task: instance.taskId })
+            : t("ws.confirm.reviewTitle", { task: instance.taskId })
       }
+      /* 上下文那一档要说清用户在批准什么：资料作为「材料」送出去做推理，而其中
+         任何看起来像指示的文字都不会被当作指示执行。 */
       description={
         kind === "context_confirm"
-          ? // 说清用户在批准什么：资料会作为「材料」送出去做推理，而其中
-            // 任何看起来像指示的文字都不会被当作指示执行。
-            "其中含高敏感内容，送出前要你确认。这些文件只作为资料参考——里面任何看起来像指令的文字都不会被执行"
+          ? t("ws.confirm.contextDesc")
           : kind === "tool_ask"
-            ? "该调用由模型在读过下列资料之后提出，请据此判断"
-            : "验证结论如下，批准后任务继续"
+            ? t("ws.confirm.toolDesc")
+            : t("ws.confirm.reviewDesc")
       }
       action={
         <div className="flex items-center gap-xs">
-          <Button onClick={() => onDecide(true)}>批准</Button>
+          <Button onClick={() => onDecide(true)}>{t("ws.confirm.approve")}</Button>
           <Button
             variant="destructive"
-            confirmExempt="这张卡本身就是那一次人工确认，无需二次弹窗"
+            confirmExempt={t("ws.confirm.exempt")}
             onClick={() => onDecide(false)}
           >
-            拒绝
+            {t("ws.confirm.reject")}
           </Button>
         </div>
       }
@@ -1471,6 +1547,7 @@ function AuditTab({
   audit: StoredAuditEvent[];
   chainOk: boolean | null;
 }) {
+  const t = useT();
   const [kindFilter, setKindFilter] = useState("");
   // 显示走投影，重算走原样 —— 链的哈希是按存进去时的字段名算的。
   const views = useMemo(() => audit.map(auditView), [audit]);
@@ -1486,16 +1563,16 @@ function AuditTab({
       <SectionHeader
         level={2}
         icon="fingerprint"
-        title={`审计轨迹 · ${audit.length} 条`}
+        title={t("ws.audit.title", { n: audit.length })}
         titleSuffix={
           <StatusBadge
             tone={chainOk === true ? "success" : chainOk === false ? "danger" : "neutral"}
           >
             {chainOk === null
-              ? "校验中…"
+              ? t("ws.audit.verifying")
               : chainOk
-                ? "记录完整"
-                : "记录被改动过"}
+                ? t("ws.summary.chainOk")
+                : t("ws.summary.chainBroken")}
           </StatusBadge>
         }
       />
@@ -1505,7 +1582,7 @@ function AuditTab({
           onChange={(e) => setKindFilter(e.target.value)}
           wrapperClassName="sel-audit"
         >
-          <option value="">全部事件（{audit.length}）</option>
+          <option value="">{t("ws.audit.allEvents", { n: audit.length })}</option>
           {kinds.map((k) => (
             <option key={k} value={k}>
               {k}
@@ -1518,10 +1595,10 @@ function AuditTab({
           <TableHeader>
             <TableRow>
               <TableHead>#</TableHead>
-              <TableHead>时间</TableHead>
-              <TableHead>动作</TableHead>
-              <TableHead>结果</TableHead>
-              <TableHead>操作者</TableHead>
+              <TableHead>{t("ws.audit.col.time")}</TableHead>
+                              <TableHead>{t("ws.audit.col.action")}</TableHead>
+                              <TableHead>{t("ws.audit.col.result")}</TableHead>
+                              <TableHead>{t("ws.audit.col.actor")}</TableHead>
               <TableHead>payload</TableHead>
             </TableRow>
           </TableHeader>
@@ -1538,7 +1615,7 @@ function AuditTab({
                 <TableCell>
                   {/* 旧记录的结果是 unknown —— 显示成 unknown，不显示成成功。 */}
                   <StatusBadge tone={OUTCOME_TONE[e.outcome] ?? "neutral"}>
-                    {OUTCOME_LABEL[e.outcome] ?? e.outcome}
+                    {outcomeLabel(t, e.outcome)}
                   </StatusBadge>
                 </TableCell>
                 <TableCell className="audit-action">{e.actor}</TableCell>

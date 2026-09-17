@@ -30,7 +30,7 @@ const HAN = /[一-鿿]/;
  * 输入**，不是文案。翻译掉它，能力分组就会漂。`catalog.ts` 同理 —— 那是平台
  * 产品目录的快照，产品名与简介是产品方写的，我们不改也不猜。
  */
-const PENDING = new Set(["settings.tsx", "workspace.tsx"]);
+const PENDING = new Set(["settings.tsx"]);
 
 /** 本来就不是文案的文件。 */
 const NOT_COPY = new Set([
