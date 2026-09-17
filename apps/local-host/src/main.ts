@@ -54,6 +54,7 @@ import { createProductUiServer, productUiPortFor } from "./product-ui-server.js"
 import { SqliteStoragePort } from "./storage.js";
 import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { InstanceIdentity } from "./instance-identity.js";
+import { PrivateModelStore } from "./private-model.js";
 import {
   LocalModelGateway,
   type LocalModelConfig,
@@ -209,7 +210,7 @@ const capabilityBase = process.env["RUYIN_CAPABILITY_BASE"] ?? "";
  * RY-104 §06）；在控制面就位之前，私有化部署靠这几个环境变量把它打开，
  * 公网订阅版一个都不设，于是恒为未开通。
  */
-const localModel = readLocalModelConfig();
+const deployedModel = readLocalModelConfig();
 
 function readLocalModelConfig(): LocalModelConfig | undefined {
   const baseUrl = process.env["RUYIN_LOCAL_MODEL_BASE"] ?? "";
@@ -261,6 +262,13 @@ console.log(`[ruyin] master key protection: ${keys.protection}`);
  * 安装标识，用户报障时对得上是哪一台。**私钥永不出本机，也永不进播报**。
  */
 const instance = InstanceIdentity.load(keys, dataDir);
+
+/**
+ * 私有模型服务的接入（RY-001 §07 #41）。两级来源：部署侧（环境变量）优先且
+ * 界面不可改；否则读本机那份用户自己填的。**开通与否不在这里判** —— 那是控制面
+ * 的权威（A18），这里只回答「配了没有、配的是什么」。
+ */
+const privateModel = new PrivateModelStore(keys, dataDir, deployedModel);
 console.log(`[ruyin] instance: ${instance.jkt}`);
 // Native binding self-check (TD-010): fail fast if the SQLite binding does
 // not load in this runtime (Electron utilityProcess vs host Node ABI).
@@ -382,8 +390,8 @@ const runtime = new ProjectRuntime({
         // only called once a task runs - long after startup.
         token: () => platform.bearerToken(),
       })
-    : localModel
-      ? new LocalModelGateway(localModel)
+    : privateModel.effective()
+      ? new LocalModelGateway(privateModel.effective()!)
       : new MockAIGateway(),
   connectors,
   ranker: new FtsRanker(storage),
@@ -679,6 +687,7 @@ const server = createLocalApi({
       });
     },
   },
+  privateModel,
   systemInfo: {
     version: VERSION,
     platform: process.platform,
@@ -689,18 +698,25 @@ const server = createLocalApi({
     /* 公钥指纹。**只给指纹，不给公钥、更不给私钥** —— 指纹足够回答「是哪一台」，
        而那正是这个字段今天唯一的用处（RY-001 §07 #38）。 */
     instanceId: instance.jkt,
-    capabilitySurface: capabilityBase
-      ? "configured"
-      : localModel
-        ? "local_model"
-        : "mock",
+    get capabilitySurface() {
+      /* getter 而不是定值：私有模型可以在运行中被配上，而 /system 每次都该说当下
+         的事实。此前它是启动那一刻的快照，用户填完地址仍看到 "mock"。 */
+      return capabilityBase
+        ? ("configured" as const)
+        : privateModel.effective()
+          ? ("local_model" as const)
+          : ("mock" as const);
+    },
     /* 界面要能把「没开通」与「开通了但没配」分开说（RY-001 §07 #36）：
        前者是商业状态，后者是一句「去设置里填地址」。今天公网订阅版恒为
        false —— 控制面就位后这一位由 `desired.policy.localInference.direct`
        决定（RY-104 §06）。 */
-    localInference: {
-      direct: localModel !== undefined,
-      ...(localModel ? { model: localModel.model } : {}),
+    get localInference() {
+      const cfg = privateModel.effective();
+      return {
+        direct: cfg !== undefined,
+        ...(cfg ? { model: cfg.model } : {}),
+      };
     },
     // 构建期落的印，跟着守护进程一起被打进 resources；仓里跑时它不存在。
     codeSigning,
@@ -949,8 +965,8 @@ server.listen(port, "127.0.0.1", () => {
   console.log(
     capabilityBase
       ? `[ruyin] capability surface: ${capabilityBase}`
-      : localModel
-        ? `[ruyin] capability surface: local model ${localModel.model} @ ${localModel.baseUrl} (直连，不经 Atlas，不计量)`
+      : privateModel.effective()
+        ? `[ruyin] capability surface: private model ${privateModel.effective()!.model} @ ${privateModel.effective()!.baseUrl} (不经 Atlas，不计量)`
         : "[ruyin] capability surface: NOT configured - tasks will return mock output",
   );
   // **这一行是给打包链看的，不只是给人看的。**

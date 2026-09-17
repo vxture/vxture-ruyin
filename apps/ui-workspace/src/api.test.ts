@@ -505,6 +505,15 @@ const WRAPPER_CASES: WrapperCase[] = [
     path: "/capabilities/catalog/refresh",
     body: { reason: "focus" },
   },
+  { name: "privateModel", call: (api) => api.privateModel(), method: "GET", path: "/models/private" },
+  {
+    name: "savePrivateModel",
+    call: (api) => api.savePrivateModel({ baseUrl: "http://127.0.0.1:1/v1", model: "m" }),
+    method: "PUT",
+    path: "/models/private",
+    body: { baseUrl: "http://127.0.0.1:1/v1", model: "m" },
+  },
+  { name: "clearPrivateModel", call: (api) => api.clearPrivateModel(), method: "DELETE", path: "/models/private" },
   { name: "atlasModels", call: (api) => api.atlasModels(), method: "GET", path: "/platform/atlas/models" },
 ];
 

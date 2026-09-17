@@ -589,6 +589,28 @@ export interface SessionInfo {
   entitlementsConfigured: boolean;
 }
 
+/**
+ * 私有模型服务的投影。
+ *
+ * `loopback` 决定界面说哪一句：回环 → 上下文**不出本机**；否则 → 不经 Atlas，
+ * 但**会离开这台机器**，到你自己指定的那台服务上。两句都对，只有一句对得上
+ * 用户的实际部署。
+ *
+ * `editable` 为假 = 部署侧（私有化部署的运维）配好了，本机改不了。
+ */
+export interface PrivateModelView {
+  endpoint?: { baseUrl: string; model: string; hasKey: boolean; loopback: boolean };
+  source: "deployment" | "local" | "none";
+  editable: boolean;
+}
+
+export interface PrivateModelInput {
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  timeoutMs?: number;
+}
+
 /** C2 envelope (integration spec; consumed read-only, never persisted). */
 export interface EntitlementEnvelope {
   status: string | null;
@@ -1118,6 +1140,15 @@ export class Api {
    * 直接对接 Atlas（ADR-026 §2 第 3 条），本机不配置、不调用。平台只授租户所有者读，
    * 其他角色守护进程回 403。
    */
+  /**
+   * 私有模型服务的接入（设置 › 模型服务的第二块）。**投影里永远没有口令** ——
+   * 它只出守护进程一次，就是写进去那一次。
+   */
+  privateModel = () => this.call<PrivateModelView>("/models/private");
+  savePrivateModel = (input: PrivateModelInput) =>
+    this.call<PrivateModelView>("/models/private", "PUT", input);
+  clearPrivateModel = () => this.call<PrivateModelView>("/models/private", "DELETE");
+
   atlasModels = () => this.list<AtlasModel>("/platform/atlas/models");
 }
 

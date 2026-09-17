@@ -17,6 +17,7 @@
 import { strict as assert } from "node:assert";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { PrivateModelStore } from "./private-model.js";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { basename, join, resolve } from "node:path";
@@ -3473,5 +3474,144 @@ void test("三条平台读：403 是角色事实（不可重试），其余非 2
     } finally {
       closeRig(rig);
     }
+  }
+});
+
+/* ---------------- 私有模型服务的接入（RY-001 §07 #41） ---------------- */
+
+/** 真加密不是这组用例的重点；封存过才是（口令不以明文落盘由 private-model.test 守）。 */
+function fakeKeysFor(): never {
+  return {
+    protection: "plaintext",
+    seal: (d: Buffer) => Buffer.concat([Buffer.from("S:"), d]),
+    open: (b: Buffer) => {
+      if (b.subarray(0, 2).toString() !== "S:") throw new Error("not ours");
+      return b.subarray(2);
+    },
+  } as never;
+}
+
+/**
+ * 这一页的两块：`/platform/atlas/models` 是**平台模型服务**（权威在平台，只展示、
+ * 永远没有配置入口），`/models/private` 是**私有模型服务**（开通在控制面，地址与
+ * 模型名是本机事实，可以配）。
+ *
+ * 用例盯三件：口令不出守护进程、部署侧配了就钉死、装配没接时端点如实说 503。
+ */
+void test("GET/PUT/DELETE /models/private：配得进读得回，投影里永远没有口令", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-pmroute-"));
+  const rig = await startServer({ privateModel: new PrivateModelStore(fakeKeysFor(), dir) });
+  try {
+    let res = await fetch(`${rig.base}/models/private`, { headers: rig.headers });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { source: "none", editable: true });
+
+    res = await fetch(`${rig.base}/models/private`, {
+      method: "PUT",
+      headers: rig.json,
+      body: JSON.stringify({
+        baseUrl: "http://127.0.0.1:11434/v1",
+        model: "qwen2.5:14b",
+        apiKey: "super-secret",
+      }),
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(JSON.stringify(body).includes("super-secret"), false, "口令漏进了响应");
+    assert.deepEqual(body["endpoint"], {
+      baseUrl: "http://127.0.0.1:11434/v1",
+      model: "qwen2.5:14b",
+      hasKey: true,
+      loopback: true,
+    });
+
+    res = await fetch(`${rig.base}/models/private`, { method: "DELETE", headers: rig.headers });
+    assert.equal(res.status, 200);
+    assert.equal(((await res.json()) as Record<string, unknown>)["source"], "none");
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("PUT /models/private：地址与模型名成对才算配了，地址要合法", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-pmbad-"));
+  const rig = await startServer({ privateModel: new PrivateModelStore(fakeKeysFor(), dir) });
+  try {
+    for (const body of [
+      { baseUrl: "http://127.0.0.1:11434/v1" },
+      { model: "m" },
+      { baseUrl: "not a url", model: "m" },
+      { baseUrl: "ftp://h/v1", model: "m" },
+      { baseUrl: "http://h/v1", model: "m", timeoutMs: -1 },
+    ]) {
+      const res = await fetch(`${rig.base}/models/private`, {
+        method: "PUT",
+        headers: rig.json,
+        body: JSON.stringify(body),
+      });
+      assert.equal(res.status, 400, JSON.stringify(body));
+      assert.equal(((await res.json()) as Record<string, unknown>)["code"], "REQUEST_MALFORMED");
+    }
+  } finally {
+    closeRig(rig);
+  }
+});
+
+/**
+ * 部署侧配了就钉死 —— 运维选了哪台推理服务，用户不该绕过去。
+ *
+ * 回的是 `POLICY_DENIED` 而不是 400：**请求本身没毛病，是本机策略不许**。
+ * 混成 400 会让界面显示「你填错了」，而用户什么都没填错。
+ */
+void test("PUT/DELETE /models/private：部署侧配了就钉死，回 POLICY_DENIED 而不是 400", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-pmdep-"));
+  const store = new PrivateModelStore(fakeKeysFor(), dir, {
+    baseUrl: "http://gpu.corp:8000/v1",
+    model: "qwen-72b",
+  });
+  const rig = await startServer({ privateModel: store });
+  try {
+    let res = await fetch(`${rig.base}/models/private`, { headers: rig.headers });
+    const view = (await res.json()) as Record<string, unknown>;
+    assert.equal(view["source"], "deployment");
+    assert.equal(view["editable"], false);
+    // 局域网地址：上下文会离开这台机器，界面据此说另一句话。
+    assert.equal((view["endpoint"] as Record<string, unknown>)["loopback"], false);
+
+    for (const method of ["PUT", "DELETE"]) {
+      res = await fetch(`${rig.base}/models/private`, {
+        method,
+        headers: rig.json,
+        ...(method === "PUT"
+          ? { body: JSON.stringify({ baseUrl: "http://127.0.0.1:1/v1", model: "m" }) }
+          : {}),
+      });
+      assert.equal(res.status, 403, method);
+      const b = (await res.json()) as Record<string, unknown>;
+      assert.equal(b["code"], "POLICY_DENIED");
+      assert.equal(b["retryable"], false);
+    }
+  } finally {
+    closeRig(rig);
+  }
+});
+
+void test("/models/private：装配没接这套时整组回 503，而不是假装没配", async () => {
+  const rig = await startServer({});
+  try {
+    for (const method of ["GET", "PUT", "DELETE"]) {
+      const res = await fetch(`${rig.base}/models/private`, {
+        method,
+        headers: rig.json,
+        ...(method === "PUT" ? { body: "{}" } : {}),
+      });
+      assert.equal(res.status, 503, method);
+      assert.equal(
+        ((await res.json()) as Record<string, unknown>)["code"],
+        "PRIVATE_MODEL_NOT_CONFIGURED",
+      );
+    }
+  } finally {
+    closeRig(rig);
   }
 });

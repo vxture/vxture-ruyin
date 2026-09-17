@@ -45,6 +45,11 @@ function fakeApi(over: Partial<Api> = {}): Api {
     activateConnector: vi.fn().mockResolvedValue({}),
     system: vi.fn().mockResolvedValue(systemInfo()),
     checkUpdate: vi.fn(),
+    /* 私有模型服务那一块挂载即读一次；不 stub 的话每条模型页用例都会撞未定义。
+       缺省给「没配过」—— 那是绝大多数用例关心的背景。 */
+    privateModel: vi.fn().mockResolvedValue({ source: "none", editable: true }),
+    savePrivateModel: vi.fn(),
+    clearPrivateModel: vi.fn(),
     // 缺省当作「守护进程没接这一路」（真实的常见状态：老版本守护进程、或装配
     // 没配）—— 与 server.ts 那一路没配 hardwareInfo 时如实回的 503 一致。
     hardware: vi.fn().mockRejectedValue(new ApiError(503, { error: "HARDWARE_INFO_NOT_CONFIGURED" })),
@@ -2320,7 +2325,7 @@ const MODELS = [
 test("模型平台：列出本工作区被授权的模型 —— 名称、模型码、供应商、能力、启用状态；没有任何调用或配置的按钮", async () => {
   const atlasModels = vi.fn().mockResolvedValue(MODELS);
   renderSection("models", fakeApi({ atlasModels } as Partial<Api>));
-  const list = await screen.findByRole("list", { name: "可用模型" });
+  const list = await screen.findByRole("list", { name: "平台模型服务" });
   const rows = within(list).getAllByRole("listitem");
   expect(rows).toHaveLength(2);
   expect(within(rows[0]!).getByText("DeepSeek V3")).toBeInTheDocument();
@@ -2377,7 +2382,7 @@ test("模型平台：这次没取到（502）把原因说出来，重试重新�
   renderSection("models", fakeApi({ atlasModels } as Partial<Api>));
   expect(await screen.findByText("这次没从平台取到模型：/api/atlas/models failed: HTTP 500")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "重试" }));
-  expect(await screen.findByRole("list", { name: "可用模型" })).toBeInTheDocument();
+  expect(await screen.findByRole("list", { name: "平台模型服务" })).toBeInTheDocument();
   expect(atlasModels).toHaveBeenCalledTimes(2);
 });
 
@@ -2386,7 +2391,7 @@ test("模型平台：守护进程没响应（不是 ApiError）也照样说没�
   expect(await screen.findByText("这次没从平台取到模型：fetch failed")).toBeInTheDocument();
 });
 
-/* ---------------- 本地推理（直连）：企业版特性的三态 ---------------- */
+/* ---------------- 私有模型服务：三态 + 接入（RY-001 §07 #41） ---------------- */
 
 /**
  * 三态里最要紧的是第一态。
@@ -2395,7 +2400,7 @@ test("模型平台：守护进程没响应（不是 ApiError）也照样说没�
  * 商业状态。用户据此以为自己没买、或者去找销售，而事实可能是他买了、只是这一
  * 刻还没读到。与产品卡标「未接通」同一条纪律（TD-033）。
  */
-test("本地推理：/system 还没回来时不说「未开通」，只说在读", async () => {
+test("私有模型服务：/system 还没回来时不说「未开通」，只说在读", async () => {
   const api = fakeApi({
     system: vi.fn().mockReturnValue(new Promise(() => {})),
   } as Partial<Api>);
@@ -2403,62 +2408,124 @@ test("本地推理：/system 还没回来时不说「未开通」，只说在读
 
   expect(await screen.findByText("正在读取运行时状态…")).toBeInTheDocument();
   expect(screen.queryByText("未开通")).not.toBeInTheDocument();
-  expect(screen.queryByText("已开通")).not.toBeInTheDocument();
 });
 
-/**
- * 字段缺席同样是「不知道」—— 老守护进程不带 `localInference`，界面不许替它
- * 断言成没开通。
- */
-test("本地推理：守护进程没给这个字段时也算不知道，不断言成未开通", async () => {
-  const api = fakeApi({
-    system: vi.fn().mockResolvedValue(systemInfo()),
-  } as Partial<Api>);
-  renderSection("models", api);
-
+test("私有模型服务：守护进程没给这个字段时也算不知道", async () => {
+  renderSection("models", fakeApi({ system: vi.fn().mockResolvedValue(systemInfo()) } as Partial<Api>));
   expect(await screen.findByText("正在读取运行时状态…")).toBeInTheDocument();
   expect(screen.queryByText("未开通")).not.toBeInTheDocument();
 });
 
-test("本地推理：未开通时说清它是什么、怎么拿到，而不是假装没有这件事", async () => {
+test("私有模型服务：未开通时说清它是什么、怎么拿到，且不给接入表单", async () => {
   const api = fakeApi({
-    system: vi
-      .fn()
-      .mockResolvedValue(systemInfo({ localInference: { direct: false } })),
+    system: vi.fn().mockResolvedValue(systemInfo({ localInference: { direct: false } })),
   } as Partial<Api>);
   renderSection("models", api);
 
   expect(await screen.findByText("未开通")).toBeInTheDocument();
-  expect(screen.getByText(/本工作区未开通本地推理/)).toBeInTheDocument();
-  expect(screen.getByText(/企业版 \/ 私有化部署提供/)).toBeInTheDocument();
-  // 这一屏只展示不配置：开通与否的权威在控制面，本机不自行开启。
-  expect(screen.queryByRole("button", { name: /开通|启用|配置/ })).not.toBeInTheDocument();
+  expect(screen.getByText(/本工作区未开通私有模型服务/)).toBeInTheDocument();
+  // 未开通就不给表单：开通的权威在控制面，本机不自行开启。
+  expect(screen.queryByRole("button", { name: /接入|更改/ })).not.toBeInTheDocument();
 });
 
-test("本地推理：已开通时显示模型名，并说明推理上下文不出本机", async () => {
+/**
+ * 边界那一句**按事实说**。回环与非回环是两种部署：前者上下文确实不出这台机器，
+ * 后者会到局域网另一台服务上去。一句话盖过去，就是替用户做了一个他没做过的承诺。
+ */
+test("私有模型服务：回环地址说「不出这台机器」", async () => {
   const api = fakeApi({
-    system: vi.fn().mockResolvedValue(
-      systemInfo({ localInference: { direct: true, model: "qwen2.5:14b" } }),
-    ),
+    system: vi.fn().mockResolvedValue(systemInfo({ localInference: { direct: true, model: "qwen2.5:14b" } })),
+    privateModel: vi.fn().mockResolvedValue({
+      endpoint: { baseUrl: "http://127.0.0.1:11434/v1", model: "qwen2.5:14b", hasKey: false, loopback: true },
+      source: "local",
+      editable: true,
+    }),
   } as Partial<Api>);
   renderSection("models", api);
 
-  expect(await screen.findByText("已开通")).toBeInTheDocument();
-  expect(screen.getByText("qwen2.5:14b")).toBeInTheDocument();
-  expect(screen.getByText(/推理上下文不出本机/)).toBeInTheDocument();
+  expect(await screen.findByText("已接入")).toBeInTheDocument();
+  expect(screen.getByText(/不出这台机器/)).toBeInTheDocument();
+  expect(screen.queryByText(/会离开这台机器/)).not.toBeInTheDocument();
 });
 
-/** 开通了但守护进程没报模型名：仍说已开通，不编一个名字出来。 */
-test("本地推理：已开通但没有模型名时不编一个", async () => {
+test("私有模型服务：局域网地址如实说「会离开这台机器」", async () => {
   const api = fakeApi({
-    system: vi
+    system: vi.fn().mockResolvedValue(systemInfo({ localInference: { direct: true, model: "qwen-72b" } })),
+    privateModel: vi.fn().mockResolvedValue({
+      endpoint: { baseUrl: "http://192.168.1.50:8000/v1", model: "qwen-72b", hasKey: false, loopback: false },
+      source: "local",
+      editable: true,
+    }),
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  expect(await screen.findByText(/会离开这台机器/)).toBeInTheDocument();
+  expect(screen.queryByText(/不出这台机器/)).not.toBeInTheDocument();
+});
+
+/**
+ * 部署侧配了就钉死 —— 运维选了哪台推理服务，用户不该绕过去。与「预置连接器
+ * 卸不掉、只能停用」同一条模式。
+ */
+test("私有模型服务：由部署配置时不给编辑入口，并说明为什么", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ localInference: { direct: true, model: "qwen-72b" } })),
+    privateModel: vi.fn().mockResolvedValue({
+      endpoint: { baseUrl: "http://gpu.corp:8000/v1", model: "qwen-72b", hasKey: true, loopback: false },
+      source: "deployment",
+      editable: false,
+    }),
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  expect(await screen.findByText("由部署配置，本机不可更改。")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /更改|断开/ })).not.toBeInTheDocument();
+});
+
+test("私有模型服务：已开通未配时引导去接入，填完调 savePrivateModel", async () => {
+  const savePrivateModel = vi.fn().mockResolvedValue({
+    endpoint: { baseUrl: "http://127.0.0.1:11434/v1", model: "qwen2.5:14b", hasKey: false, loopback: true },
+    source: "local",
+    editable: true,
+  });
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ localInference: { direct: true } })),
+    privateModel: vi.fn().mockResolvedValue({ source: "local", editable: true }),
+    savePrivateModel,
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "接入…" }));
+  await user.type(screen.getByLabelText("服务地址"), "http://127.0.0.1:11434/v1");
+  await user.type(screen.getByLabelText("模型名"), "qwen2.5:14b");
+  await user.click(screen.getByRole("button", { name: "保存" }));
+
+  expect(savePrivateModel).toHaveBeenCalledWith({
+    baseUrl: "http://127.0.0.1:11434/v1",
+    model: "qwen2.5:14b",
+  });
+  expect(await screen.findByText("已接入")).toBeInTheDocument();
+});
+
+/** 守护进程拒绝时把原因说出来，不静默吞掉 —— 否则用户按了保存什么都没发生。 */
+test("私有模型服务：保存被拒时把原因显示出来", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ localInference: { direct: true } })),
+    privateModel: vi.fn().mockResolvedValue({ source: "local", editable: true }),
+    savePrivateModel: vi
       .fn()
-      .mockResolvedValue(systemInfo({ localInference: { direct: true } })),
+      .mockRejectedValue(new ApiError(403, { message: "这台的私有模型由部署配置，本机改不了" })),
   } as Partial<Api>);
   renderSection("models", api);
 
-  expect(await screen.findByText("已接入本地模型")).toBeInTheDocument();
-  expect(await screen.findByText("已开通")).toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "接入…" }));
+  await user.type(screen.getByLabelText("服务地址"), "http://127.0.0.1:1/v1");
+  await user.type(screen.getByLabelText("模型名"), "m");
+  await user.click(screen.getByRole("button", { name: "保存" }));
+
+  expect(await screen.findByText("这台的私有模型由部署配置，本机改不了")).toBeInTheDocument();
 });
 
 /* ---------------- 运行日志（TD-066） ---------------- */
@@ -2514,4 +2581,76 @@ void test("Settings/运行日志: 壳里给「打开目录」并发请求，浏�
   expect(await screen.findByText(/按天滚动，保留 7 天/)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "打开日志目录" })).not.toBeInTheDocument();
   Object.defineProperty(navigator, "userAgent", { value: ua, configurable: true });
+});
+
+/** 断开：把本机那份撤掉，回到「待接入」。撤不掉时同样要把原因说出来。 */
+test("私有模型服务：断开撤掉本机配置", async () => {
+  const clearPrivateModel = vi.fn().mockResolvedValue({ source: "none", editable: true });
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ localInference: { direct: true, model: "m" } })),
+    privateModel: vi.fn().mockResolvedValue({
+      endpoint: { baseUrl: "http://127.0.0.1:11434/v1", model: "m", hasKey: false, loopback: true },
+      source: "local",
+      editable: true,
+    }),
+    clearPrivateModel,
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "断开" }));
+  expect(clearPrivateModel).toHaveBeenCalled();
+});
+
+test("私有模型服务：断开被拒时把原因显示出来", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ localInference: { direct: true, model: "m" } })),
+    privateModel: vi.fn().mockResolvedValue({
+      endpoint: { baseUrl: "http://127.0.0.1:11434/v1", model: "m", hasKey: false, loopback: true },
+      source: "local",
+      editable: true,
+    }),
+    clearPrivateModel: vi.fn().mockRejectedValue(new ApiError(403, { message: "改不了" })),
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "断开" }));
+  expect(await screen.findByText("改不了")).toBeInTheDocument();
+});
+
+/** 已配好时按钮是「更改…」，点「取消」退出编辑而不写任何东西。 */
+test("私有模型服务：已配好时是「更改…」，取消不写任何东西", async () => {
+  const savePrivateModel = vi.fn();
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ localInference: { direct: true, model: "m" } })),
+    privateModel: vi.fn().mockResolvedValue({
+      endpoint: { baseUrl: "http://127.0.0.1:11434/v1", model: "m", hasKey: false, loopback: true },
+      source: "local",
+      editable: true,
+    }),
+    savePrivateModel,
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "更改…" }));
+  await user.type(screen.getByLabelText("口令（可选）"), "k");
+  await user.click(screen.getByRole("button", { name: "取消" }));
+
+  expect(savePrivateModel).not.toHaveBeenCalled();
+  expect(screen.queryByLabelText("服务地址")).not.toBeInTheDocument();
+});
+
+/** 这套装配不提供私有模型服务（503）：保持「不知道」，不把它说成未开通。 */
+test("私有模型服务：读不到配置时不下断言", async () => {
+  const api = fakeApi({
+    system: vi.fn().mockResolvedValue(systemInfo({ localInference: { direct: true, model: "m" } })),
+    privateModel: vi.fn().mockRejectedValue(new ApiError(503, { message: "不提供" })),
+  } as Partial<Api>);
+  renderSection("models", api);
+
+  // 已开通，但配置读不到 —— 显示「尚未填写」，不显示「未开通」。
+  expect(await screen.findByText(/已开通，尚未填写服务地址/)).toBeInTheDocument();
+  expect(screen.queryByText("未开通")).not.toBeInTheDocument();
 });
