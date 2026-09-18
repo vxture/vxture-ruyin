@@ -154,8 +154,8 @@ vxture-ruyin/
 
 | tag | 渠道 | 门控 | 更新 feed |
 |---|---|---|---|
-| `beta-YYYYMMDD.N` | beta 渠道 | 无审批 | `dl.vxture.com/ruyin/beta/latest.yml` |
-| `vX.Y.Z` | stable 渠道 | **production Environment 必审人门** | `dl.vxture.com/ruyin/stable/latest.yml` |
+| `beta-YYYYMMDD.N` | beta 渠道 | 无审批 | `oss.ruyin.work/beta/latest.yml` |
+| `vX.Y.Z` | stable 渠道 | **production Environment 必审人门** | `oss.ruyin.work/stable/latest.yml` |
 
 与模板同规：合并不发布，**只有推 tag 才发布**；tag 不重跑质量门（发的是 main 上已验证的提交）。
 
@@ -189,22 +189,48 @@ tailnet-ssh-connect → rsync 到下载主机 staging 目录 → 原子切换
 manifest.json 里的 url 也指向滚动 release。静态产品库 `products/` 是目录树，release
 资产是平铺的，仍只随 run 暂存（TD-037）。登记 TD-038。
 
-**MVP 形态**：境内既有 worker 上加 nginx 静态站点，边缘 vhost `dl.vxture.com`
-（照 vxture-template `configs/edge/` 的 vhost 模式向平台线申请，走 80-liaison）：
+**落地形态（2026-09-18，owner 定）：阿里云 OSS，公开域名 `oss.ruyin.work`。**
+
+原计划是「境内既有 worker 上加 nginx 静态站点 + 向平台线申请 `dl.vxture.com` 的边缘
+vhost」。两处都改了，各有实测的理由：
+
+- **不放 worker-01**：那台机器的出口是**固定 3 Mbps**。一个 156 MB 的安装包要走七分钟，
+  而那七分钟里 console / atlas / accounts 跟它抢同一条管子 —— 两个人同时下就是平台卡住。
+- **域名换成 `ruyin.work` 自己的**：它不在 `vxture.com` 底下，于是**不需要平台的共享
+  edge**，`docs/80-liaison/20-2607241440` 那封函件与平台侧 issue #273 求的那件事随之作废。
+  worker-01 上现有的 Let's Encrypt 证书带 `*.ruyin.work`，覆盖得住这个名字。
+
+目录布局（键就是地址，不做映射花样）：
 
 ```text
-dl.vxture.com/ruyin/
+oss.ruyin.work/                      # 桶 ruyin-download（华北2 · 北京），公共读、私有写
 ├── stable/
-│   ├── Ruyin-Setup-1.0.0.exe（+ .blockmap）
-│   ├── latest.yml                 # electron-updater generic provider feed
-│   └── manifest.json              # 网站消费的下载清单（见下）
-├── beta/…（同构）
+│   ├── Ruyin-Setup-1.0.0.exe（+ .blockmap）   # 带版本号，内容不变，长缓存
+│   ├── Ruyin-Setup-latest.exe                 # **固定地址**，给人点的那一个，no-cache
+│   ├── latest.yml                 # electron-updater generic provider feed，no-cache
+│   ├── manifest.json              # 网站消费的下载清单（见下），no-cache
+│   └── SHA256SUMS
+├── beta/…（同构，独立）
 └── products/
     ├── index.json                 # MVP 版产品包清单（= 静态 Registry）
     └── bidproposal/bidproposal-1.0.0.ruyinpkg
 ```
 
-**下载地址就是发布地址**（dl 主机的渠道目录，见上面的目录树）：
+三件要害写在 `scripts/release/upload-oss.mjs` 里，都是踩出来的：**上传顺序**（带版本号的
+先传、固定名再换、三个指针最后 —— 对象存储没有目录原子改名，自洽只能靠顺序）、**缓存头**
+（指针必须 `no-cache`，错了的症状是「发布成功但所有人还在下上一版」且无人报错）、**清理时
+的版本序**（按数字段比：字符串序里 `0.0.10 < 0.0.9`，照字符串删会删掉回滚要用的那一版）。
+
+静态产品库只有 stable 渠道上传：客户端的 `DEFAULT_REGISTRY_BASE` 是**一条不分渠道的地址**，
+beta 传上去会盖掉稳定用户的那一份。
+
+**两个渠道都在这台主机上，且都公开可读**（owner 2026-09-18 定）。客户端的更新检查按渠道
+拼地址 —— 检查哪个渠道就下哪个渠道，两者不可能不一致；把 beta 留在别处就成了两套地址、
+两套可达性、两种失败模式，而内测用户同样在境内。代价照实记：**任何知道 `…/beta/Ruyin-Setup-latest.exe` 的人
+都能下到测试版**，这不是漏洞，是「公开下载主机」的定义。要让测试版只给受邀的人，公共读
+做不到半公开，得另开私有桶配签名 URL（而签名 URL 有时效，当不了固定地址）—— 那是另一个决定。
+
+**下载地址就是发布地址**（下载主机的渠道目录，见上面的目录树）：
 
 > 更正（2026-09-02，owner 定）：此处原本写着由 `vxture.com/appcenter` 消费，
 > **那是错的**。appcenter 是智能体广场（列平台上的业务产品），不是桌面运行时的
@@ -230,7 +256,7 @@ dl.vxture.com/ruyin/
   "version": "1.0.0",
   "platforms": {
     "win32-x64": {
-      "url": "https://dl.vxture.com/ruyin/stable/Ruyin-Setup-1.0.0.exe",
+      "url": "https://oss.ruyin.work/stable/Ruyin-Setup-1.0.0.exe",
       "sha256": "…",
       "size": 134217728
     }
@@ -355,7 +381,9 @@ Runtime 拉 index.json → 验平台签名 → 下载 .ruyinpkg → 验双签（
 
 1. **桌面分发剖面**：本仓以 tag→渠道替换 tag→环境，请求平台确认过渡态可接受，
    并建议平台侧沉淀一份"桌面分发型仓库 profile"标准（模板家族的空缺）
-2. **边缘 vhost 申请**：`dl.vxture.com` 指向下载主机（照 vxtpl edge-vhost-request 函件格式）
+2. ~~**边缘 vhost 申请**：`dl.vxture.com` 指向下载主机~~ —— **2026-09-18 作废**：下载主机
+   改成阿里云 OSS + 自有域名 `oss.ruyin.work`，不在 `vxture.com` 底下，也就不需要平台的
+   共享 edge。这一项与 `docs/80-liaison/20-2607241440` 那封函件一并不再需要平台侧动作
 3. **原生客户端对接**：桌面端 PKCE 客户端注册 + entitlement 原生客户端凭证 + AI Gateway
    服务端计量口径（§2.1）——这三项是 Phase B 的平台侧前置
 
