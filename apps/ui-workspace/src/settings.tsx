@@ -40,6 +40,7 @@ import {
   SectionHeader,
   SegmentedControl,
   StatusBadge,
+  Switch,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -55,6 +56,7 @@ import {
   type SkillListing,
   type SkillView,
   type ComponentState,
+  type UpdateCheck,
   type PythonRuntimeStatus,
   type PythonRuntimeState,
   type PythonStepCode,
@@ -470,6 +472,45 @@ function AccountSection({ session, api }: { session: SessionInfo | null; api: Ap
 function PreferencesBlock({ api }: { api: Api }) {
   const { mode, setMode, density, setDensity, fontSize, setFontSize } = useTheme();
   const t = useT();
+  /*
+   * 「抢先体验新功能」（owner 2026-09-18）。
+   *
+   * **用户选的不是「渠道」** —— 那是发布侧的词。他要做的决定只有一个：想不想早点
+   * 用上新功能，代价是更可能遇到问题。所以开关在这一块（它的定义正是「只影响这台
+   * 电脑、不随账号同步」），而「你现在装着哪个渠道」是另一件事，留在软件更新那一块
+   * 的只读行里。
+   *
+   * null = 守护进程没接这一路（老版本或这套装配不管渠道）：**整行不显示**，而不是
+   * 摆一个点了没反应的开关。
+   */
+  const [prerelease, setPrerelease] = useState<boolean | null>(null);
+  // 只有「已是最新」那一路会落进来（本机版本比正式版还高 = 还装着抢先版），
+  // 所以类型就收到那一支上，别在下面到处判 status。
+  const [leaving, setLeaving] = useState<Extract<UpdateCheck, { status: "current" }> | null>(null);
+  useEffect(() => {
+    void api
+      .updateChannel()
+      .then((r) => setPrerelease(r.channel === "beta"))
+      .catch(() => setPrerelease(null));
+  }, [api]);
+  const switchChannel = async (on: boolean) => {
+    const next = on ? "beta" : "stable";
+    setLeaving(null);
+    try {
+      const r = await api.setUpdateChannel(next);
+      setPrerelease(r.channel === "beta");
+      // **关掉开关时要当场说清一件事**：本机装着的可能是个测试版，而正式版的版本号
+      // 更低 —— 那时检查更新会说「已是最新」，用户会以为自己回到了正式版。所以关掉
+      // 之后立刻查一次，查到的结果原样交给下面那段提示（地址也来自这次结果，界面
+      // 不写死任何下载地址）。
+      if (!on) {
+        const check = await api.checkUpdate();
+        if (check.status === "current") setLeaving(check);
+      }
+    } catch {
+      // 写不进去就别改开关的样子：一个「看起来开了、其实没开」的开关最糟。
+    }
+  };
   // 语言不再由这一格自己存：它是**整棵树**的状态（换一门语言，屏幕上每一句话
   // 都要跟着变），所以持有者是 `LocaleProvider`，这里只读当前值、只发出切换。
   const locale = useLocale();
@@ -541,6 +582,35 @@ function PreferencesBlock({ api }: { api: Api }) {
           onChange={setFontSize}
         />
       </Row>
+      {prerelease !== null && (
+        <>
+          <Row label={t("set.prefs.prerelease")}>
+            <Switch
+              checked={prerelease}
+              onCheckedChange={(on) => void switchChannel(on)}
+              aria-label={t("set.prefs.prerelease")}
+            />
+          </Row>
+          {/* 这一句是代价，不是说明书：更早拿到新功能，也更可能遇到问题。 */}
+          <p className="set-note">{t("set.prefs.prereleaseNote")}</p>
+          {leaving && (
+            <p className="set-callout set-callout--warning">
+              <Icon name="warning" size="sm" />
+              <span>
+                {t("set.prefs.stillOnPrerelease", {
+                  current: leaving.current,
+                  latest: leaving.latest ?? leaving.current,
+                })}{" "}
+                {leaving.downloadUrl && (
+                  <a href={leaving.downloadUrl} target="_blank" rel="noreferrer">
+                    {t("set.prefs.downloadStable")}
+                  </a>
+                )}
+              </span>
+            </p>
+          )}
+        </>
+      )}
     </SettingsBlock>
   );
 }

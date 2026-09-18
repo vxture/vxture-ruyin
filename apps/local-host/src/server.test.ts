@@ -3743,3 +3743,55 @@ test("python-runtime: 状态 / 安装 / 取消 / 移除；安装那一次连着�
     closeRig(rig);
   }
 });
+
+// ───────────── 更新渠道（RY-001 §07 任务 49）：/updates/channel ─────────────
+
+test("updates/channel: 没接这一路时如实 503 —— 界面据此整行不显示，而不是摆一个点了没反应的开关", async () => {
+  const rig = await startServer();
+  try {
+    const res = await fetch(`${rig.base}/updates/channel`, { headers: rig.headers });
+    assert.equal(res.status, 503);
+    assert.equal(((await res.json()) as { code: string }).code, "UPDATE_CHANNEL_NOT_CONFIGURED");
+  } finally {
+    closeRig(rig);
+  }
+});
+
+test("updates/channel: 读 / 写 / 认不出来的值原样拒绝（不悄悄落回正式版）", async () => {
+  let channel: "stable" | "beta" = "stable";
+  const rig = await startServer({
+    updateChannel: {
+      get: () => channel,
+      set: (c) => {
+        channel = c;
+        return c;
+      },
+    },
+  });
+  try {
+    assert.deepEqual(await (await fetch(`${rig.base}/updates/channel`, { headers: rig.headers })).json(), {
+      channel: "stable",
+    });
+
+    const set = await fetch(`${rig.base}/updates/channel`, {
+      method: "PUT",
+      headers: rig.json,
+      body: JSON.stringify({ channel: "beta" }),
+    });
+    assert.equal(set.status, 200);
+    assert.deepEqual(await set.json(), { channel: "beta" });
+    assert.equal(channel, "beta", "真写下去了，不只是回一句");
+
+    // 悄悄落回正式版会让「开了开关却没有变化」看起来像个随机 bug。
+    const bad = await fetch(`${rig.base}/updates/channel`, {
+      method: "PUT",
+      headers: rig.json,
+      body: JSON.stringify({ channel: "nightly" }),
+    });
+    assert.equal(bad.status, 400);
+    assert.equal(((await bad.json()) as { code: string }).code, "REQUEST_MALFORMED");
+    assert.equal(channel, "beta", "拒绝之后不许把已有的偏好改掉");
+  } finally {
+    closeRig(rig);
+  }
+});

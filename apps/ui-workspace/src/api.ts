@@ -101,6 +101,8 @@ export type UpdateCheck =
       status: "current";
       current: string;
       latest: string;
+      /** 这个渠道此刻那份安装包的地址 —— 关掉「抢先体验新功能」的人需要它（手动装一次才真的回到正式版）。 */
+      downloadUrl?: string;
       channel: string;
       checkedAt: string;
     }
@@ -895,6 +897,13 @@ export class Api {
     })();
     return () => abort.abort();
   };
+  /**
+   * 更新渠道的偏好。**界面上这不叫「渠道」** —— 它是偏好设置里那个「抢先体验新
+   * 功能」的开关，而渠道是它落到发布侧的样子。503 = 这套装配不管渠道，整行不显示。
+   */
+  updateChannel = () => this.call<{ channel: string }>("/updates/channel");
+  setUpdateChannel = (channel: "stable" | "beta") =>
+    this.call<{ channel: string }>("/updates/channel", "PUT", { channel });
   checkUpdate = () => this.call<UpdateCheck>("/updates/check");
   products = () => this.list<ProductInfo>("/products");
   projects = () => this.call<ProjectList>("/projects");

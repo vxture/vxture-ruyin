@@ -56,6 +56,9 @@ jobs:
         run: |
           set -euo pipefail
           PKG_VERSION="$(node -p "require('./apps/shell/package.json').version")"
+          # 版本号的形状与 tag 的关系（owner 2026-09-18）：beta tag 要求带
+          # -beta.N，v tag 要求不带且与 tag 相等；顺带钉住三处版本号一致。
+          node scripts/guardrails/check-app-version.mjs --tag "${GITHUB_REF_NAME}"
           if [[ "${GITHUB_REF_NAME}" == v* ]]; then
             CHANNEL=stable
             # A v-tag names the version, so the two must agree. Without this

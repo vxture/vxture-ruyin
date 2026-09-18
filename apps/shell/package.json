@@ -1,6 +1,6 @@
 {
   "name": "@vxture/ruyin-shell",
-  "version": "0.1.0",
+  "version": "0.2.0-beta.1",
   "private": true,
   "description": "Ruyin Desktop Shell (Electron): launches the Runtime daemon and opens the workspace surface. Shell is the host, Runtime is the core, Web is the access mode (RY-101 s.02).",
   "type": "module",

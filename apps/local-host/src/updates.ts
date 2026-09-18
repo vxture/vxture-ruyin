@@ -20,14 +20,34 @@ import { parse as parseYaml } from "yaml";
 import { compareVersions } from "./installer.js";
 
 /**
- * 渠道目录基址。**过渡（2026-09-03）**：dl 主机未落地（liaison L2）前，发布流水线
- * 把每个渠道的最新构建放在 GitHub 的滚动 release 上（tag 就叫 stable / beta），
- * 于是 `<base>/latest.yml` 与 `<base>/<安装包>` 有固定地址；末段仍是渠道名，
- * 界面显示的渠道不用另猜。L2 落地后改回 dl 主机的渠道目录（TD-038）。
- * `RUYIN_UPDATE_FEED` 可覆盖。
+ * 渠道。**用户那一侧不叫这个名字**（界面上是「抢先体验新功能」，owner 2026-09-18）——
+ * 「渠道」是发布侧的词，用户要做的决定只是想不想早点用上新功能。这里保留技术叫法，
+ * 因为它要和发布目录、feed 地址逐字对上。
  */
-export const DEFAULT_FEED_BASE =
-  "https://github.com/vxture/vxture-ruyin/releases/download/stable";
+export type UpdateChannel = "stable" | "beta";
+
+export const UPDATE_CHANNELS: UpdateChannel[] = ["stable", "beta"];
+
+/**
+ * 下载主机（owner 2026-09-18 定：阿里云 OSS）。
+ *
+ * 这里写的是**桶自己的域名**而不是好看的那个 `oss.ruyin.work`：后者的证书还没就位，
+ * 而这条地址客户端自己用、用户看不见。好看的那条是给人点的（下载页、发布说明），
+ * 两者指向同一个桶，换过去也不会让已经装出去的客户端断掉。
+ */
+export const DOWNLOAD_HOST = "https://ruyin-download.oss-cn-beijing.aliyuncs.com";
+
+/**
+ * 渠道目录基址：`<主机>/<渠道>`。**渠道就是目录名** —— 检查哪个渠道就下哪个渠道，
+ * 两者不可能不一致（`checkForUpdate` 从这个地址的末段反推渠道名显示给用户）。
+ * `RUYIN_UPDATE_FEED` 可覆盖（开发与测试用）。
+ */
+export function feedBaseFor(channel: UpdateChannel): string {
+  return `${DOWNLOAD_HOST}/${channel}`;
+}
+
+/** 没有偏好时就是正式版（owner 2026-09-18：默认正式版，不主动推测试版）。 */
+export const DEFAULT_FEED_BASE = feedBaseFor("stable");
 
 export type UpdateCheck =
   /** 已是最新——**只有真拉到 feed 并比对过才会返回它**。 */
@@ -35,6 +55,13 @@ export type UpdateCheck =
       status: "current";
       current: string;
       latest: string;
+      /**
+       * 这个渠道此刻那份安装包的地址。**「已是最新」也要带着它**（2026-09-18）：
+       * 关掉「抢先体验新功能」的用户本机装着测试版，而正式版的版本号更低 ——
+       * 这一路返回的正是 `current`，而他需要的恰恰是那条地址（手动装一次才能
+       * 真的回到正式版）。地址仍然只从刚校验过的那份 feed 拼出，界面不写死。
+       */
+      downloadUrl?: string;
       channel: string;
       checkedAt: string;
     }
@@ -199,6 +226,7 @@ export async function checkForUpdate(
     status: "current",
     current: opts.currentVersion,
     latest,
+    ...(downloadUrl ? { downloadUrl } : {}),
     channel,
     checkedAt: at,
   };
