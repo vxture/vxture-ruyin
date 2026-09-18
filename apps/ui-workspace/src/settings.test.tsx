@@ -2976,7 +2976,7 @@ test("偏好设置：打开「抢先体验新功能」= 换到测试版，而且
     updateChannel: vi.fn().mockResolvedValue({ channel: "stable" }),
     setUpdateChannel,
   });
-  renderSection("preferences", api);
+  renderSection("account", api);
   const toggle = await screen.findByRole("switch", { name: "抢先体验新功能" });
   expect((toggle as HTMLButtonElement).getAttribute("aria-checked")).toBe("false");
   // 代价与好处在同一句里：更早拿到新功能，也更可能遇到问题。
@@ -3000,7 +3000,7 @@ test("偏好设置：关掉开关时说清「不会自动换回去」—— 否�
       checkedAt: "2026-09-18T00:00:00Z",
     }),
   });
-  renderSection("preferences", api);
+  renderSection("account", api);
   await userEvent.click(await screen.findByRole("switch", { name: "抢先体验新功能" }));
   expect(await screen.findByText(/还是抢先版 0\.2\.0-beta\.1/)).toBeTruthy();
   expect(screen.getByText(/正式版目前是 0\.1\.0/)).toBeTruthy();
@@ -3014,7 +3014,7 @@ test("偏好设置：写不进去时开关不许自己变样 —— 看起来开
     updateChannel: vi.fn().mockResolvedValue({ channel: "stable" }),
     setUpdateChannel: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
   });
-  renderSection("preferences", api);
+  renderSection("account", api);
   const toggle = await screen.findByRole("switch", { name: "抢先体验新功能" });
   await userEvent.click(toggle);
   expect((await screen.findByRole("switch", { name: "抢先体验新功能" })).getAttribute("aria-checked")).toBe("false");
