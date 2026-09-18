@@ -13,7 +13,7 @@
 | 函件 | 事项 | 状态 | 阻塞 |
 |---|---|---|---|
 | `10-2607241430-ruyin-desktop-distribution-profile.md` | L1 桌面分发剖面报备 + 模板 pnpm 11 反馈 | open | 无（纪律性） |
-| `20-2607241440-ruyin-dl-vhost-request.md` | L2 下载主机选址 + `dl.vxture.com` vhost。**已开 issue：`vxture-platform/vxture-platform#273`** | open | W4 |
+| `20-2607241440-ruyin-dl-vhost-request.md` | L2 下载主机选址 + `dl.vxture.com` vhost。**2026-09-18 作废**：下载主机改成阿里云 OSS + 自有域名 `oss.ruyin.work`（不在 vxture.com 底下，不需要平台的共享 edge）。平台侧 issue `vxture-platform/vxture-platform#273` 无需再动 —— 关不关由 owner 定，本仓不擅自动平台仓 | moot | W4 |
 | `30-2607241450-ruyin-native-client-integration.md` | L3 原生客户端三件（PKCE / entitlement / AI Gateway） | (a) met · (b) partial · (c) withdrawn（ADR-009） | (b) 剩余 → 产品自动拉取 |
 | `40-2608301530-ruyin-l3-client-registration-blockers.md` | L3 补充：回调登记 / ruyin-beta / 权益基址（附实测） | (1)(2) met · **(3) 已开 issue `#272`** | C2 公网基址 |
 | `50-2609101850-ruyin-native-session-management.md` | accounts 补齐原生客户端会话管理三件同源：`prompt` 兑现 / `post_logout_redirect_uri` 兑现 / 设备列表与远程吊销（附四组实测回应）。**已开 issue：`vxture-platform/vxture-platform#271`** | open | 「退出登录」在用户那里成立（不阻塞开发） |
