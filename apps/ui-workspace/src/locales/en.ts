@@ -683,7 +683,6 @@ export const en: Catalog = {
   "set.update.versionPref": "Version preference",
   "set.update.pref.stable": "Stable (recommended)",
   "set.update.pref.beta": "Early access (new features sooner)",
-  "set.update.channelRow": "Current channel",
   "set.update.howCheck": "Checking",
   "set.update.howCheckValue":
     "Press “Check for updates”, or leave “Check automatically” on and it checks at each start",
@@ -797,9 +796,9 @@ export const en: Catalog = {
 
   /* Settings: Python runtime */
   "set.env.title": "Runtimes",
-  "set.env.desc": "What agents run on. What ships with the app is ready to use; the rest installs on demand",
+  "set.env.desc": "What agents need in order to run. What the installer provides is ready to use; the rest installs on demand",
   "set.env.installed": "Installed",
-  "set.env.nodeNote": "Ships with the app — nothing to do",
+  "set.env.nodeNote": "Provided by the installer; no separate setup required",
   "set.env.waiting_one": "# capability needs it.",
   "set.env.waiting_other": "# capabilities need it.",
   "set.python.title": "Python runtime",

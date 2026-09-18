@@ -645,7 +645,6 @@ export const zhCN = {
   "set.update.versionPref": "版本偏好",
   "set.update.pref.stable": "正式版（推荐）",
   "set.update.pref.beta": "抢先版（更早拿到新功能）",
-  "set.update.channelRow": "当前渠道",
   "set.update.howCheck": "检查",
   "set.update.howCheckValue": "手动点「检查更新」，或开着「自动检查」时每次启动查一次",
   "set.update.howDownload": "下载",
@@ -749,9 +748,9 @@ export const zhCN = {
 
   /* ── 设置：Python 运行环境 ───────────────────────────────────────── */
   "set.env.title": "运行环境",
-  "set.env.desc": "智能体要用到的运行环境。随应用装好的直接可用，其余按需安装",
+  "set.env.desc": "智能体运行所需的环境。随安装包提供的可直接使用，其余按需安装",
   "set.env.installed": "已安装",
-  "set.env.nodeNote": "随应用一起装好，不必管它",
+  "set.env.nodeNote": "随安装包提供，无需单独安装",
   "set.env.waiting_one": "有 # 项能力要用它。",
   "set.env.waiting_other": "有 # 项能力要用它。",
   "set.python.title": "Python 运行环境",

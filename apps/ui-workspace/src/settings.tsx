@@ -1543,9 +1543,10 @@ function UpdatesSection({
          * 同一个样式（下拉），名字叫「版本偏好」，就放在软件更新这一块里 —— 它本来
          * 就和更新是同一件事。
          *
-         * 下面那行「当前」说的是**刚查过的那份结果**，不是写死的字面量：写死的话，
-         * 用户正装着测试包而界面一口咬定「正式版」（TD-021）。两行合起来是「你要
-         * 什么」与「你现在装着什么」——它们可以不一致，而那正是要显示出来的事。
+         * 原来这下面还有一行只读的「当前渠道」，2026-09-18 删了（owner）：**它与这个
+         * 下拉说的是同一件事** —— 检查更新问的就是这里选的那个渠道，两者不可能不一致，
+         * 于是那一行只是把同一个词再说一遍。渠道仍然写在明面上（TD-021）：有新版本时
+         * 那条提示里带着它，而那正是它真正管用的地方 —— 紧挨着下载动作。
          */}
         {prerelease !== null && (
           <Row label={t("set.update.versionPref")}>
@@ -1559,7 +1560,6 @@ function UpdatesSection({
             </NativeSelect>
           </Row>
         )}
-        <FactRow label={t("set.update.channelRow")} value={channelLabel(t, updateCheck.result?.channel)} />
         {leaving && (
           <p className="set-callout set-callout--warning">
             <Icon name="warning" size="sm" />

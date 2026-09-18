@@ -1563,14 +1563,14 @@ void test("Settings/软件更新: 两块（检查更新收进「当前版本」�
   // 「自动检查」默认开着，挂载时会自己问一次——等它问完，按钮才落回「检查更新」。
   expect(await screen.findByRole("button", { name: "检查更新" })).toBeInTheDocument();
   expect(screen.getByRole("checkbox", { name: "自动检查" })).toBeInTheDocument();
-  // 2026-09-18：这一屏上现在有一个真能用的下拉（版本偏好，owner 第 1 条），
-  // 而「当前渠道」仍是一行事实 —— 「你要什么」与「你现在装着什么」是两件事，
-  // 它们可以不一致，而那正是要显示出来的。
+  // 2026-09-18：渠道从一行只读事实变成一个真能用的下拉（版本偏好，owner 第 1 条），
+  // 原来那行「当前渠道」删了 —— 检查更新问的就是这里选的那个渠道，两者不可能不一致，
+  // 那一行只是把同一个词再说一遍。
   expect(screen.getByRole("combobox", { name: "版本偏好" })).toBeInTheDocument();
-  expect(screen.getByText("当前渠道")).toBeInTheDocument();
-  // **渠道仍然写在明面上**（TD-021）——改的只是措辞：`stable` 是发布侧的词，
-  // 「正式版」是同一件事的人话。取的是刚查过的那份结果，不是写死的字面量。
-  expect(await screen.findByText("正式版")).toBeInTheDocument();
+  expect(screen.queryByText("当前渠道")).not.toBeInTheDocument();
+  // **渠道仍然写在明面上**（TD-021）：下拉里那一档就是用户的词 —— `stable` 是
+  // 发布侧的说法，「正式版（推荐）」是同一件事的人话。
+  expect(await screen.findByText("正式版（推荐）")).toBeInTheDocument();
   expect(document.body.textContent).not.toContain("stable");
   expect(document.body.textContent).toContain("不会自动下载或安装");
 });
