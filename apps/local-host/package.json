@@ -1,6 +1,6 @@
 {
   "name": "@vxture/ruyin-local-host",
-  "version": "0.1.0",
+  "version": "0.2.0-beta.1",
   "private": true,
   "description": "Ruyin Local Runtime daemon: SQLite storage host + loopback Local API (design authority: RY-101 processes and kernel, RY-301 storage, RY-102 local API). Ships inside the installer, never published.",
   "type": "module",

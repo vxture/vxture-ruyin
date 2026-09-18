@@ -124,6 +124,12 @@ jobs:
       - name: Update policy guardrail (TD-021, owner decisions)
         run: node scripts/guardrails/check-update-policy.mjs
 
+      # 版本号写在三处（安装包、守护进程包、main.ts 里手写的那个常量）。漂开的
+      # 后果是安静的：安装包 0.2.0 而守护进程自报 0.1.0，于是每一次检查更新都说
+      # 「有新版本」，装上还是有 —— 每一处单看都自洽，没有一处会报错。
+      - name: App version guardrail (three copies agree; beta carries -beta.N)
+        run: node scripts/guardrails/check-app-version.mjs
+
       - name: Package publish order guardrail
         run: node scripts/guardrails/check-publish-order.mjs
 

@@ -59,6 +59,9 @@ function fakeApi(over: Partial<Api> = {}): Api {
     // Python 半边（TD-042 ②）：缺省当作「这一版不带」—— 绝大多数用例不关心它，
     // 而不 stub 的话每条能力平台的用例都会撞未定义。
     pythonRuntime: vi.fn().mockRejectedValue(new ApiError(503, { error: "PYTHON_RUNTIME_NOT_AVAILABLE" })),
+    // 更新渠道（任务 49）：缺省当作「这套装配不管渠道」—— 那一行整行不显示，
+    // 于是偏好设置那几条只数四行的用例照旧成立。
+    updateChannel: vi.fn().mockRejectedValue(new ApiError(503, { error: "UPDATE_CHANNEL_NOT_CONFIGURED" })),
     ...over,
   } as unknown as Api;
 }
@@ -2960,4 +2963,59 @@ test("Python 运行环境：清单里整段没有（component 为 null）时同�
   renderSection("skills", api);
   await screen.findByText("本机技能");
   expect(screen.queryByText("Python 运行环境")).toBeNull();
+});
+
+/* ── 抢先体验新功能（任务 49）───────────────────────────────────────────────
+ *
+ * 用户选的不是「渠道」，是「想不想早点用上新功能」（owner 2026-09-18）。所以这几条
+ * 用例断言的都是**用户那一侧看见什么**，而不是 stable/beta 这两个词。
+ */
+test("偏好设置：打开「抢先体验新功能」= 换到测试版，而且那句代价就在旁边", async () => {
+  const setUpdateChannel = vi.fn().mockResolvedValue({ channel: "beta" });
+  const api = fakeApi({
+    updateChannel: vi.fn().mockResolvedValue({ channel: "stable" }),
+    setUpdateChannel,
+  });
+  renderSection("preferences", api);
+  const toggle = await screen.findByRole("switch", { name: "抢先体验新功能" });
+  expect((toggle as HTMLButtonElement).getAttribute("aria-checked")).toBe("false");
+  // 代价与好处在同一句里：更早拿到新功能，也更可能遇到问题。
+  expect(screen.getByText(/更早拿到新功能，也更可能遇到问题/)).toBeTruthy();
+  await userEvent.click(toggle);
+  expect(setUpdateChannel).toHaveBeenCalledWith("beta");
+});
+
+test("偏好设置：关掉开关时说清「不会自动换回去」—— 否则「已是最新版本」就是一句谎", async () => {
+  // 本机装着抢先版 0.2.0-beta.1，正式版是 0.1.0：检查更新回的是 current
+  // （本机版本号更高），而用户以为自己已经回到正式版了。
+  const api = fakeApi({
+    updateChannel: vi.fn().mockResolvedValue({ channel: "beta" }),
+    setUpdateChannel: vi.fn().mockResolvedValue({ channel: "stable" }),
+    checkUpdate: vi.fn().mockResolvedValue({
+      status: "current",
+      current: "0.2.0-beta.1",
+      latest: "0.1.0",
+      downloadUrl: "https://example.test/stable/Ruyin-Setup-0.1.0.exe",
+      channel: "stable",
+      checkedAt: "2026-09-18T00:00:00Z",
+    }),
+  });
+  renderSection("preferences", api);
+  await userEvent.click(await screen.findByRole("switch", { name: "抢先体验新功能" }));
+  expect(await screen.findByText(/还是抢先版 0\.2\.0-beta\.1/)).toBeTruthy();
+  expect(screen.getByText(/正式版目前是 0\.1\.0/)).toBeTruthy();
+  // 地址来自守护进程刚校验过的那份 feed，界面不写死任何下载地址。
+  const link = screen.getByRole("link", { name: "下载正式版" });
+  expect(link.getAttribute("href")).toBe("https://example.test/stable/Ruyin-Setup-0.1.0.exe");
+});
+
+test("偏好设置：写不进去时开关不许自己变样 —— 看起来开了、其实没开是最糟的那种", async () => {
+  const api = fakeApi({
+    updateChannel: vi.fn().mockResolvedValue({ channel: "stable" }),
+    setUpdateChannel: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
+  });
+  renderSection("preferences", api);
+  const toggle = await screen.findByRole("switch", { name: "抢先体验新功能" });
+  await userEvent.click(toggle);
+  expect((await screen.findByRole("switch", { name: "抢先体验新功能" })).getAttribute("aria-checked")).toBe("false");
 });

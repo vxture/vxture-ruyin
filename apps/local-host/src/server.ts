@@ -54,7 +54,7 @@ import {
 import { RegistryError, downloadPackage, fetchRegistryIndex } from "./registry-client.js";
 import { join as joinPath } from "node:path";
 import type { EventBus } from "./events.js";
-import { checkForUpdate } from "./updates.js";
+import { UPDATE_CHANNELS, checkForUpdate, feedBaseFor, type UpdateChannel } from "./updates.js";
 import {
   NotSignedInError,
   PlatformNotConfiguredError,
@@ -265,6 +265,16 @@ export interface LocalApiDeps {
   registryFetch?: typeof fetch;
   /** 更新 feed 基址覆盖（dl 主机未落地前可指向测试 feed）；缺省见 updates.ts。 */
   updateFeedBase?: string;
+  /**
+   * 更新渠道的偏好（RY-001 §07 任务 49）。没接就是这套装配不管渠道 —— 那时按
+   * 正式版查，`PUT /updates/channel` 如实 503。
+   *
+   * **界面上这不叫「渠道」**，叫「抢先体验新功能」（偏好设置里的一个开关）。
+   */
+  updateChannel?: {
+    get(): UpdateChannel;
+    set(channel: UpdateChannel): UpdateChannel;
+  };
   /** 运行时事件总线（TD-027）。不接就没有 /events，消费方回到轮询。 */
   events?: EventBus;
   /**
@@ -1453,11 +1463,46 @@ async function handle(
   // 后者。原先的 POST /updates/install 与 GET /updates/intent 随之整段拆掉：
   // **没有安装动作，就没有要闸的东西**，留着一个判不到任何事的闸门只是噪音。
   if (method === "GET" && path === "/updates/check") {
+    // 查的是**用户选的那个渠道**。环境变量的覆盖优先级更高（开发与测试用），
+    // 否则由偏好拼出渠道目录 —— 检查哪个渠道就下哪个渠道，两者不可能不一致。
+    const base = deps.updateFeedBase ?? (deps.updateChannel ? feedBaseFor(deps.updateChannel.get()) : undefined);
     const check = await checkForUpdate({
       currentVersion: deps.version,
-      ...(deps.updateFeedBase ? { feedBase: deps.updateFeedBase } : {}),
+      ...(base ? { feedBase: base } : {}),
     });
     send(res, 200, check);
+    return;
+  }
+
+  /*
+   * GET / PUT /updates/channel —— 用户的「抢先体验新功能」开关落到哪个渠道。
+   *
+   * 分成自己的一条而不是塞进 /system：渠道**决定了 /updates/check 去问谁**，
+   * 与更新是同一件事；放在 /system 下面会让「系统信息」变成一个什么都往里塞的口袋。
+   *
+   * 值只认 stable / beta，不认识的**原样拒绝**，不悄悄落回正式版 —— 悄悄落回会让
+   * 「开了开关却没有变化」看起来像个随机 bug。
+   */
+  if (path === "/updates/channel" && (method === "GET" || method === "PUT")) {
+    if (!deps.updateChannel) {
+      send(res, 503, apiError("UPDATE_CHANNEL_NOT_CONFIGURED", "当前版本暂不提供渠道设置"));
+      return;
+    }
+    if (method === "GET") {
+      send(res, 200, { channel: deps.updateChannel.get() });
+      return;
+    }
+    const body = (await readJson(req)) as { channel?: unknown };
+    const channel = typeof body.channel === "string" ? body.channel : "";
+    if (!(UPDATE_CHANNELS as string[]).includes(channel)) {
+      send(
+        res,
+        400,
+        apiError("REQUEST_MALFORMED", `channel 只能是 ${UPDATE_CHANNELS.join(" / ")}`, { field: "channel" }),
+      );
+      return;
+    }
+    send(res, 200, { channel: deps.updateChannel.set(channel as UpdateChannel) });
     return;
   }
 

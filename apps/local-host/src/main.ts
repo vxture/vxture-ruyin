@@ -83,6 +83,7 @@ import { refreshDistributedSkills } from "./skill-distribution.js";
 import { ToolRegistryView } from "./tool-registry.js";
 import { ComponentStore, readComponentSpecs } from "./component-store.js";
 import { PythonRuntime } from "./python-runtime.js";
+import { readUpdateChannel, writeUpdateChannel } from "./update-channel.js";
 import { BundledToolServers } from "./tool-servers.js";
 import { fetchContract } from "./contract-fetch.js";
 import { fetchUiAfterContract } from "./ui-fetch.js";
@@ -106,7 +107,7 @@ import {
   writeLocation,
 } from "./data-location.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0-beta.1";
 
 /**
  * 指针文件：**数据目录搬到哪儿了，权威在这里**（TD-039）。它必须待在一个不会
@@ -640,6 +641,12 @@ const server = createLocalApi({
   ...(process.env["RUYIN_UPDATE_FEED"]
     ? { updateFeedBase: process.env["RUYIN_UPDATE_FEED"] }
     : {}),
+  // 用户的「抢先体验新功能」开关落在这里（RY-001 §07 任务 49）。读写都只碰
+  // <dataDir>/updates.json，没有秘密。
+  updateChannel: {
+    get: () => readUpdateChannel(dataDir),
+    set: (channel) => writeUpdateChannel(dataDir, channel),
+  },
   // 流 C 静态产品库（70-repo-organization §7.4）；不设就是 dl 主机的 products 目录。
   ...(process.env["RUYIN_REGISTRY_BASE"]
     ? { registryBase: process.env["RUYIN_REGISTRY_BASE"] }
