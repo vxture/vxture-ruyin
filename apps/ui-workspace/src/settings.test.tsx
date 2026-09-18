@@ -458,21 +458,27 @@ void test("通用设置: 明文保护时那条「不可用于真实数据」的�
   expect(screen.queryByText("主密钥由 Windows DPAPI 保护")).not.toBeInTheDocument();
 });
 
-void test("通用设置: the transmission policy defaults to 'sensitivity', persists the pick to localStorage", async () => {
+void test("通用设置: 默认授权策略是下拉、三档，选了记在这台电脑上", async () => {
   renderSection("general");
-  const user = userEvent.setup();
-  await user.click(await screen.findByText("全部需确认"));
+  const select = await screen.findByRole("combobox", { name: "默认授权策略" });
+  // 三档都在，措辞是用户的词（owner 2026-09-18 第 3 条）。
+  expect(Array.from(select.querySelectorAll("option")).map((o) => o.textContent)).toEqual([
+    "自动按敏感度（推荐）",
+    "全部要我确认（适合敏感任务）",
+    "授权全部任务（自动流程任务）",
+  ]);
+  await userEvent.selectOptions(select, "always");
   expect(localStorage.getItem("ruyin-transmission-policy")).toBe("always");
+  // **这是全局参数，落地在产品智能体侧**（owner 当天的口径）——不说清生效的位置，
+  // 用户会以为它当场改变了本机行为。
+  expect(screen.getByText(/这是全局设置，由智能体在自己的流程里落实/)).toBeTruthy();
 });
 
-void test("通用设置: an already-stored policy is read back on mount, not reset to the default", async () => {
+void test("通用设置: 存过的那一档在挂载时读回来，不被默认值盖掉", async () => {
   localStorage.setItem("ruyin-transmission-policy", "always");
   renderSection("general");
-  const group = await screen.findByRole("radiogroup", { name: "推理传输策略" });
-  expect(within(group).getByRole("radio", { name: "全部需确认" })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
+  const select = (await screen.findByRole("combobox", { name: "默认授权策略" })) as HTMLSelectElement;
+  expect(select.value).toBe("always");
 });
 
 // --- UpdatesSection ---------------------------------------------------------
@@ -1543,6 +1549,8 @@ void test("Settings/软件更新: 两块（检查更新收进「当前版本」�
   const api = fakeApi({
     system: vi.fn().mockResolvedValue(systemInfo({ version: "0.1.0" })),
     checkUpdate: vi.fn().mockResolvedValue(currentResult({ latest: "0.1.0" })),
+    // 接了渠道那一路的装配（真实的那一种）：版本偏好那一行才会出现。
+    updateChannel: vi.fn().mockResolvedValue({ channel: "stable" }),
   });
   renderSection("updates", api);
   const titles = Array.from(document.querySelectorAll(".set-block-title")).map((e) => e.textContent);
@@ -1555,9 +1563,11 @@ void test("Settings/软件更新: 两块（检查更新收进「当前版本」�
   // 「自动检查」默认开着，挂载时会自己问一次——等它问完，按钮才落回「检查更新」。
   expect(await screen.findByRole("button", { name: "检查更新" })).toBeInTheDocument();
   expect(screen.getByRole("checkbox", { name: "自动检查" })).toBeInTheDocument();
-  // 渠道不再是一个控件，是一行事实；页面上也不该再出现停用的下拉框。
-  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-  expect(screen.getByText("更新渠道")).toBeInTheDocument();
+  // 2026-09-18：这一屏上现在有一个真能用的下拉（版本偏好，owner 第 1 条），
+  // 而「当前渠道」仍是一行事实 —— 「你要什么」与「你现在装着什么」是两件事，
+  // 它们可以不一致，而那正是要显示出来的。
+  expect(screen.getByRole("combobox", { name: "版本偏好" })).toBeInTheDocument();
+  expect(screen.getByText("当前渠道")).toBeInTheDocument();
   // **渠道仍然写在明面上**（TD-021）——改的只是措辞：`stable` 是发布侧的词，
   // 「正式版」是同一件事的人话。取的是刚查过的那份结果，不是写死的字面量。
   expect(await screen.findByText("正式版")).toBeInTheDocument();
@@ -2970,22 +2980,27 @@ test("Python 运行环境：清单里整段没有（component 为 null）时同�
  * 用户选的不是「渠道」，是「想不想早点用上新功能」（owner 2026-09-18）。所以这几条
  * 用例断言的都是**用户那一侧看见什么**，而不是 stable/beta 这两个词。
  */
-test("偏好设置：打开「抢先体验新功能」= 换到测试版，而且那句代价就在旁边", async () => {
+test("软件更新：版本偏好是下拉，选「抢先版」= 换到测试版渠道", async () => {
+  // owner 2026-09-18 第 1 条：从偏好设置搬到软件更新这一块，改成下拉，名字收短成
+  // 「版本偏好」——用户选的不是「渠道」，是要稳的还是要早的。
   const setUpdateChannel = vi.fn().mockResolvedValue({ channel: "beta" });
   const api = fakeApi({
     updateChannel: vi.fn().mockResolvedValue({ channel: "stable" }),
     setUpdateChannel,
+    checkUpdate: vi.fn().mockResolvedValue(currentResult({ latest: "0.1.0" })),
   });
-  renderSection("account", api);
-  const toggle = await screen.findByRole("switch", { name: "抢先体验新功能" });
-  expect((toggle as HTMLButtonElement).getAttribute("aria-checked")).toBe("false");
-  // 代价与好处在同一句里：更早拿到新功能，也更可能遇到问题。
-  expect(screen.getByText(/更早拿到新功能，也更可能遇到问题/)).toBeTruthy();
-  await userEvent.click(toggle);
+  renderSection("updates", api);
+  const select = (await screen.findByRole("combobox", { name: "版本偏好" })) as HTMLSelectElement;
+  expect(select.value).toBe("stable");
+  expect(Array.from(select.querySelectorAll("option")).map((o) => o.textContent)).toEqual([
+    "正式版（推荐）",
+    "抢先版（更早拿到新功能）",
+  ]);
+  await userEvent.selectOptions(select, "beta");
   expect(setUpdateChannel).toHaveBeenCalledWith("beta");
 });
 
-test("偏好设置：关掉开关时说清「不会自动换回去」—— 否则「已是最新版本」就是一句谎", async () => {
+test("软件更新：换回正式版时说清「不会自动换回去」—— 否则「已是最新版本」就是一句谎", async () => {
   // 本机装着抢先版 0.2.0-beta.1，正式版是 0.1.0：检查更新回的是 current
   // （本机版本号更高），而用户以为自己已经回到正式版了。
   const api = fakeApi({
@@ -3000,8 +3015,8 @@ test("偏好设置：关掉开关时说清「不会自动换回去」—— 否�
       checkedAt: "2026-09-18T00:00:00Z",
     }),
   });
-  renderSection("account", api);
-  await userEvent.click(await screen.findByRole("switch", { name: "抢先体验新功能" }));
+  renderSection("updates", api);
+  await userEvent.selectOptions(await screen.findByRole("combobox", { name: "版本偏好" }), "stable");
   expect(await screen.findByText(/还是抢先版 0\.2\.0-beta\.1/)).toBeTruthy();
   expect(screen.getByText(/正式版目前是 0\.1\.0/)).toBeTruthy();
   // 地址来自守护进程刚校验过的那份 feed，界面不写死任何下载地址。
@@ -3009,13 +3024,13 @@ test("偏好设置：关掉开关时说清「不会自动换回去」—— 否�
   expect(link.getAttribute("href")).toBe("https://example.test/stable/Ruyin-Setup-0.1.0.exe");
 });
 
-test("偏好设置：写不进去时开关不许自己变样 —— 看起来开了、其实没开是最糟的那种", async () => {
+test("软件更新：写不进去时下拉不许自己变样 —— 看起来开了、其实没开是最糟的那种", async () => {
   const api = fakeApi({
     updateChannel: vi.fn().mockResolvedValue({ channel: "stable" }),
     setUpdateChannel: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
   });
-  renderSection("account", api);
-  const toggle = await screen.findByRole("switch", { name: "抢先体验新功能" });
-  await userEvent.click(toggle);
-  expect((await screen.findByRole("switch", { name: "抢先体验新功能" })).getAttribute("aria-checked")).toBe("false");
+  renderSection("updates", api);
+  const select = (await screen.findByRole("combobox", { name: "版本偏好" })) as HTMLSelectElement;
+  await userEvent.selectOptions(select, "beta");
+  expect(((await screen.findByRole("combobox", { name: "版本偏好" })) as HTMLSelectElement).value).toBe("stable");
 });

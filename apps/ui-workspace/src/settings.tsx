@@ -153,7 +153,7 @@ export function SettingsView({
       {view === "models" && <ModelsSection api={api} system={system} />}
       {view === "skills" && <SkillsSection api={api} />}
       {view === "database" && <DatabaseSection />}
-      {view === "updates" && <UpdatesSection system={system} updateCheck={updateCheck} />}
+      {view === "updates" && <UpdatesSection api={api} system={system} updateCheck={updateCheck} />}
       {view === "about" && <AboutSection system={system} session={session} api={api} />}
     </div>
   );
@@ -472,45 +472,6 @@ function AccountSection({ session, api }: { session: SessionInfo | null; api: Ap
 function PreferencesBlock({ api }: { api: Api }) {
   const { mode, setMode, density, setDensity, fontSize, setFontSize } = useTheme();
   const t = useT();
-  /*
-   * 「抢先体验新功能」（owner 2026-09-18）。
-   *
-   * **用户选的不是「渠道」** —— 那是发布侧的词。他要做的决定只有一个：想不想早点
-   * 用上新功能，代价是更可能遇到问题。所以开关在这一块（它的定义正是「只影响这台
-   * 电脑、不随账号同步」），而「你现在装着哪个渠道」是另一件事，留在软件更新那一块
-   * 的只读行里。
-   *
-   * null = 守护进程没接这一路（老版本或这套装配不管渠道）：**整行不显示**，而不是
-   * 摆一个点了没反应的开关。
-   */
-  const [prerelease, setPrerelease] = useState<boolean | null>(null);
-  // 只有「已是最新」那一路会落进来（本机版本比正式版还高 = 还装着抢先版），
-  // 所以类型就收到那一支上，别在下面到处判 status。
-  const [leaving, setLeaving] = useState<Extract<UpdateCheck, { status: "current" }> | null>(null);
-  useEffect(() => {
-    void api
-      .updateChannel()
-      .then((r) => setPrerelease(r.channel === "beta"))
-      .catch(() => setPrerelease(null));
-  }, [api]);
-  const switchChannel = async (on: boolean) => {
-    const next = on ? "beta" : "stable";
-    setLeaving(null);
-    try {
-      const r = await api.setUpdateChannel(next);
-      setPrerelease(r.channel === "beta");
-      // **关掉开关时要当场说清一件事**：本机装着的可能是个测试版，而正式版的版本号
-      // 更低 —— 那时检查更新会说「已是最新」，用户会以为自己回到了正式版。所以关掉
-      // 之后立刻查一次，查到的结果原样交给下面那段提示（地址也来自这次结果，界面
-      // 不写死任何下载地址）。
-      if (!on) {
-        const check = await api.checkUpdate();
-        if (check.status === "current") setLeaving(check);
-      }
-    } catch {
-      // 写不进去就别改开关的样子：一个「看起来开了、其实没开」的开关最糟。
-    }
-  };
   // 语言不再由这一格自己存：它是**整棵树**的状态（换一门语言，屏幕上每一句话
   // 都要跟着变），所以持有者是 `LocaleProvider`，这里只读当前值、只发出切换。
   const locale = useLocale();
@@ -527,6 +488,8 @@ function PreferencesBlock({ api }: { api: Api }) {
         {/* 每门语言用**它自己**写名字（简体中文 / English）—— 要换语言的人，
             多半正读不懂当前这一门。 */}
         <NativeSelect
+          // Row 的标签是个 span，读屏软件念不到它 —— 控件自己要有名字。
+          aria-label={t("prefs.language")}
           value={locale}
           onChange={(e) => {
             const next = e.target.value as Locale;
@@ -582,35 +545,6 @@ function PreferencesBlock({ api }: { api: Api }) {
           onChange={setFontSize}
         />
       </Row>
-      {prerelease !== null && (
-        <>
-          <Row label={t("set.prefs.prerelease")}>
-            <Switch
-              checked={prerelease}
-              onCheckedChange={(on) => void switchChannel(on)}
-              aria-label={t("set.prefs.prerelease")}
-            />
-          </Row>
-          {/* 这一句是代价，不是说明书：更早拿到新功能，也更可能遇到问题。 */}
-          <p className="set-note">{t("set.prefs.prereleaseNote")}</p>
-          {leaving && (
-            <p className="set-callout set-callout--warning">
-              <Icon name="warning" size="sm" />
-              <span>
-                {t("set.prefs.stillOnPrerelease", {
-                  current: leaving.current,
-                  latest: leaving.latest ?? leaving.current,
-                })}{" "}
-                {leaving.downloadUrl && (
-                  <a href={leaving.downloadUrl} target="_blank" rel="noreferrer">
-                    {t("set.prefs.downloadStable")}
-                  </a>
-                )}
-              </span>
-            </p>
-          )}
-        </>
-      )}
     </SettingsBlock>
   );
 }
@@ -757,19 +691,24 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
         title={t("set.inference.title")}
         desc={t("set.inference.desc")}
       >
-        <Row
-          label={t("set.inference.grain")}
-          note={t("set.inference.note")}
-        >
-          <SegmentedControl
-            ariaLabel={t("set.inference.aria")}
-            items={[
-              { value: "sensitivity", label: t("set.inference.bySensitivity") },
-              { value: "always", label: t("set.inference.always") },
-            ]}
-            value={policy}
-            onChange={pickPolicy}
-          />
+        {/*
+         * 默认授权策略（owner 2026-09-18 第 3 条）。三档，下拉，与语言那一格同一个样式。
+         *
+         * **这是一个全局参数，落地在产品智能体那一侧**（owner 当天确认的口径）：这里
+         * 设的是「我希望被问到什么程度」，真正在每一步上决定问不问的是产品自己的流程。
+         * 所以副文里把这句话说出来 —— 一个不说明「在哪儿生效」的开关，用户会以为它
+         * 当场改变了本机行为。
+         *
+         * 照实记着两件没做的（TD-073）：① 今天它只写 localStorage，还没有任何产品读得到
+         * 它 —— 接通时要挪到守护进程并经能力面暴露；② 工具授权（tool-policy.ts，TD-050）
+         * 仍然按项目存，与这个全局默认怎么合成，要在接通那一轮想清楚。
+         */}
+        <Row label={t("set.inference.grain")} note={t("set.inference.note")}>
+          <NativeSelect aria-label={t("set.inference.aria")} value={policy} onChange={(e) => pickPolicy(e.target.value)}>
+            <option value="sensitivity">{t("set.inference.bySensitivity")}</option>
+            <option value="always">{t("set.inference.always")}</option>
+            <option value="auto">{t("set.inference.autoAll")}</option>
+          </NativeSelect>
         </Row>
       </SettingsBlock>
 
@@ -1512,14 +1451,49 @@ function describePlatform(system: SystemInfo | null, t: TFn): string | undefined
 }
 
 function UpdatesSection({
+  api,
   system,
   updateCheck,
 }: {
+  api: Api;
   system: SystemInfo | null;
   updateCheck: UpdateCheckState;
 }) {
   const t = useT();
   const { autoCheck, setAutoCheck, busy, check } = updateCheck;
+  /*
+   * 版本偏好（owner 2026-09-18 第 1 条：从偏好设置搬到这里，改成下拉，名字收短）。
+   *
+   * **用户选的不是「渠道」** —— 那是发布侧的词。他要做的决定只有一个：要稳的，
+   * 还是要早的。
+   *
+   * null = 守护进程没接这一路（老版本，或这套装配不管渠道）：整行不显示，而不是
+   * 摆一个点了没反应的控件。
+   */
+  const [prerelease, setPrerelease] = useState<boolean | null>(null);
+  // 只有「已是最新」那一路会落进来（本机版本比正式版还高 = 还装着抢先版）。
+  const [leaving, setLeaving] = useState<Extract<UpdateCheck, { status: "current" }> | null>(null);
+  useEffect(() => {
+    void api
+      .updateChannel()
+      .then((r) => setPrerelease(r.channel === "beta"))
+      .catch(() => setPrerelease(null));
+  }, [api]);
+  const switchChannel = async (on: boolean) => {
+    setLeaving(null);
+    try {
+      const r = await api.setUpdateChannel(on ? "beta" : "stable");
+      setPrerelease(r.channel === "beta");
+      // **换回正式版时要当场说清一件事**：本机装着的可能是抢先版，而正式版的版本号
+      // 更低 —— 那时检查更新会说「已是最新」，用户会以为自己已经换回去了。
+      if (!on) {
+        const check = await api.checkUpdate();
+        if (check.status === "current") setLeaving(check);
+      }
+    } catch {
+      // 写不进去就别改控件的样子：一个「看起来切了、其实没切」的下拉最糟。
+    }
+  };
 
   return (
     <>
@@ -1563,9 +1537,45 @@ function UpdatesSection({
         title={t("set.update.installTitle")}
         desc={t("set.update.installDesc")}
       >
-        {/* 渠道来自**刚查过的那份结果**，不是写死的字面量：写死的话，将来出了
-            测试版渠道，界面会一口咬定「正式版」而用户正装着测试包（TD-021）。 */}
+        {/*
+         * 版本偏好（owner 2026-09-18 第 1 条）。**用户选的不是「渠道」** —— 那是发布侧
+         * 的词；他要做的决定只有一个：要稳的，还是要早的。所以这一格与语言那一格
+         * 同一个样式（下拉），名字叫「版本偏好」，就放在软件更新这一块里 —— 它本来
+         * 就和更新是同一件事。
+         *
+         * 下面那行「当前」说的是**刚查过的那份结果**，不是写死的字面量：写死的话，
+         * 用户正装着测试包而界面一口咬定「正式版」（TD-021）。两行合起来是「你要
+         * 什么」与「你现在装着什么」——它们可以不一致，而那正是要显示出来的事。
+         */}
+        {prerelease !== null && (
+          <Row label={t("set.update.versionPref")}>
+            <NativeSelect
+              aria-label={t("set.update.versionPref")}
+              value={prerelease ? "beta" : "stable"}
+              onChange={(e) => void switchChannel(e.target.value === "beta")}
+            >
+              <option value="stable">{t("set.update.pref.stable")}</option>
+              <option value="beta">{t("set.update.pref.beta")}</option>
+            </NativeSelect>
+          </Row>
+        )}
         <FactRow label={t("set.update.channelRow")} value={channelLabel(t, updateCheck.result?.channel)} />
+        {leaving && (
+          <p className="set-callout set-callout--warning">
+            <Icon name="warning" size="sm" />
+            <span>
+              {t("set.prefs.stillOnPrerelease", {
+                current: leaving.current,
+                latest: leaving.latest ?? leaving.current,
+              })}{" "}
+              {leaving.downloadUrl && (
+                <a href={leaving.downloadUrl} target="_blank" rel="noreferrer">
+                  {t("set.prefs.downloadStable")}
+                </a>
+              )}
+            </span>
+          </p>
+        )}
         <FactRow label={t("set.update.howCheck")} value={t("set.update.howCheckValue")} />
         <FactRow label={t("set.update.howDownload")} value={t("set.update.howDownloadValue")} />
         <FactRow label={t("set.update.howInstall")} value={t("set.update.howInstallValue")} />
@@ -2270,6 +2280,12 @@ function SkillsSection({ api }: { api: Api }) {
   const skillGroups = groupCapabilities(items, (s) => ({ name: s.name, description: s.description }));
   // 分组看的是关键词，而那半句话现在是按语言给的 —— 用它分组会让**分组随语言
   // 漂**。只按 id 分（关键词表本来就是按 id 与工具名建的）。
+  // 需要 Python 的那几项能力。**装好之后也要算得上** —— 那时它们报的是 running /
+  // launchable（带 runtime=uvx），而不是 needs-python；只认后者的话，装完计数就归零，
+  // 「有几项在等它」这句话会在装好的那一刻变成假的。
+  const needsPython = (tool: ToolView) =>
+    tool.detailCode === "needs-python" || tool.detailVars?.["runtime"] === "uvx";
+  const pythonNeeded = (tools ?? []).filter(needsPython).length;
   const toolGroups = groupCapabilities(toolItems, (tool) => ({ id: tool.id, name: tool.id }));
 
   return (
@@ -2305,6 +2321,62 @@ function SkillsSection({ api }: { api: Api }) {
           </span>
         )}
       </p>
+      {/*
+        运行环境（owner 2026-09-18 第 4 条）。**常态显示**，不是只在缺的时候冒出来 ——
+        目的是让用户自己判断值不值得装：Node.js 随应用装好、直接可用；Python 要装，
+        而旁边就写着有多少项能力在等它。等他点到某个工具起不来才发现，那是最差的顺序。
+
+        位置在第一行说明之下、技能与工具之上：它是那两块的前提。
+      */}
+      {(python?.component || pythonNeeded > 0) && (
+        <SettingsBlock icon="terminal" title={t("set.env.title")} desc={t("set.env.desc")}>
+          {/* Node.js 随安装包走：这一行永远是「已装好」，写出来是为了让「运行环境」
+              这一块有个参照 —— 只列缺的那一个，用户不知道齐了是什么样。 */}
+          <div className="env-row">
+            <span className="env-name">Node.js</span>
+            <StatusBadge tone="success">{t("set.env.installed")}</StatusBadge>
+            <span className="env-note">{t("set.env.nodeNote")}</span>
+          </div>
+          {python && python.component && (
+            <>
+              <div className="env-row">
+                <span className="env-name">Python</span>
+                <StatusBadge tone={PYTHON_TONE[python.state]}>{t(PYTHON_STATE_KEY[python.state])}</StatusBadge>
+                {/* 体积、许可证、来源主机在按钮左边 —— 点之前就看得见要下多少。 */}
+                <span className="env-note">{pythonLine(t, python)}</span>
+                {/* 按钮靠右（owner 第 4.4 条）：一行里「说明」与「动作」分站两头，
+                    扫一眼就知道哪边是要点的。 */}
+                <span className="env-actions">
+                  {python.state === "provisioning" ? (
+                    <Button variant="ghost" size="sm" onClick={() => void cancelPython()}>
+                      {t("set.cancel")}
+                    </Button>
+                  ) : (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => void provisionPython()}>
+                        {t(PYTHON_ACTION_KEY[python.state])}
+                      </Button>
+                      {(python.state === "ready" || python.state === "stale") && (
+                        <Button variant="ghost" size="sm" onClick={() => void removePython()}>
+                          {t("set.python.remove")}
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </span>
+              </div>
+              {/* 有多少项能力在等它 —— 这句话是用户判断「值不值得装」的依据。 */}
+              {pythonNeeded > 0 && (
+                <p className="set-note">{t("set.env.waiting", { count: pythonNeeded })}</p>
+              )}
+              {/* 安装会再取 Python 本身与依赖：按流量计费的网络上这句话是有用的。 */}
+              {python.state !== "ready" && python.state !== "provisioning" && (
+                <p className="set-note">{t("set.python.alsoFetches")}</p>
+              )}
+            </>
+          )}
+        </SettingsBlock>
+      )}
       <SettingsBlock
         icon="sparkles"
         collapsible
@@ -2471,6 +2543,14 @@ function SkillsSection({ api }: { api: Api }) {
                       {tool.component.reason ? ` —— ${tool.component.reason}` : ""}
                     </span>
                   )}
+                  {/* 这一行要不要 Python、这台机器上有没有（owner 2026-09-18 第 4.3 条）。
+                      放在状态徽标之前：它是「能不能起」的前提，不是起没起的结果。 */}
+                  {needsPython(tool) && (
+                    <StatusBadge tone={python?.state === "ready" ? "success" : "danger"}>
+                      <Icon name={python?.state === "ready" ? "check" : "prohibit"} size="xs" />
+                      Python
+                    </StatusBadge>
+                  )}
                   <StatusBadge tone={TOOL_STATUS[tool.status].tone}>
                     {t(TOOL_STATUS[tool.status].key)}
                   </StatusBadge>
@@ -2521,43 +2601,6 @@ function SkillsSection({ api }: { api: Api }) {
           </>
         )}
       </SettingsBlock>
-      {/*
-        Python 运行环境（TD-042 ②）：uv 与 CPython **不随安装包**（owner 2026-09-17
-        定性「安装包小一些，租户按照需求，安装必要环境」）。
-
-        为什么它自己一块、而不是挂在用到它的那两行工具旁边：那是**一次安装**，
-        不是两次。挂在工具行上，同一件事会在几行里各摆一个按钮，读起来像几笔
-        各自独立的下载 —— 与载荷单列而不挂在服务器上是同一条理由。
-      */}
-      {python && python.component && (
-        <SettingsBlock icon="terminal" title={t("set.python.title")} desc={t("set.python.desc")}>
-          <div className="row-line">
-            {/* 体积、许可证、来源主机都在按钮**左边** —— 点之前就看得见要下多少。 */}
-            <span className="text-body-sm text-muted-foreground">{pythonLine(t, python)}</span>
-            <StatusBadge tone={PYTHON_TONE[python.state]}>{t(PYTHON_STATE_KEY[python.state])}</StatusBadge>
-            {python.state === "provisioning" ? (
-              <Button variant="ghost" size="sm" onClick={() => void cancelPython()}>
-                {t("set.cancel")}
-              </Button>
-            ) : (
-              <>
-                <Button variant="outline" size="sm" onClick={() => void provisionPython()}>
-                  {t(PYTHON_ACTION_KEY[python.state])}
-                </Button>
-                {(python.state === "ready" || python.state === "stale") && (
-                  <Button variant="ghost" size="sm" onClick={() => void removePython()}>
-                    {t("set.python.remove")}
-                  </Button>
-                )}
-              </>
-            )}
-          </div>
-          {/* 安装会再取 Python 本身与依赖：**按流量计费的网络上这句话是有用的**。 */}
-          {python.state !== "ready" && python.state !== "provisioning" && (
-            <p className="set-note">{t("set.python.alsoFetches")}</p>
-          )}
-        </SettingsBlock>
-      )}
       {catalog && (
         /* Runos 清单（ADR-020 §6.2，RY-204 D2）：平台目录的投影，与上面「本机装着的」
            两块不是一回事 —— 所以它自己一块，且第一句话就说它不是安装。 */

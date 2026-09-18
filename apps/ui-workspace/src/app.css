@@ -2071,3 +2071,40 @@ html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-aut
   outline: 2px solid var(--ring);
   outline-offset: 1px;
 }
+
+/*
+ * 运行环境那一块的行（owner 2026-09-18 第 4 条）。
+ *
+ * 一行里「是什么 · 什么状态 · 一句说明」靠左，「要点的按钮」靠右 —— 扫一眼就知道
+ * 哪边是动作。此前这一行没有任何样式（就是个 div），于是按钮跟在文字后面挤在左边。
+ */
+.env-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-block: var(--space-sm);
+}
+
+.env-row + .env-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.env-name {
+  font-weight: 600;
+  min-width: 5rem;
+}
+
+/* 说明占满中间那段，把按钮推到最右边；窄屏下它自己换行，按钮不会被挤出去。 */
+.env-note {
+  flex: 1 1 12rem;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+}
+
+.env-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-inline-start: auto;
+}

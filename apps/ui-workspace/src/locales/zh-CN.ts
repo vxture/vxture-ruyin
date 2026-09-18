@@ -50,17 +50,19 @@ export const zhCN = {
 
   /* ── 标题栏的运行环境下拉 ─────────────────────────────────────────── */
   "runtime.ready": "已就绪",
-  "runtime.readyWith": "已就绪 · {version}",
+  /* 标识**中英文都写 Runtime**（owner 2026-09-18）：那是这个运行环境的名字，不是
+     一句可翻译的描述 —— 与 Runos 同一条口径。 */
+  "runtime.readyWith": "已就绪 · Runtime {version}",
   "runtime.connectedWith": "已连接 · {workspace}",
   "runtime.offline": "未连接",
   "runtime.encrypted": "已加密",
   "runtime.devKey": "开发用途 · 密钥未受保护",
   "runtime.platform.connected": "已连接",
   "runtime.platform.signedOut": "未登录",
-  "runtime.badge": "运行环境 {version}",
+  "runtime.badge": "Runtime {version}",
   "runtime.aria.online": "运行时 · {version}",
   "runtime.aria.offline": "运行时 · 未连接",
-  "runtime.row.env": "运行环境",
+  "runtime.row.env": "Runtime",
   "runtime.row.encryption": "数据加密",
   "runtime.row.platform": "平台连接",
   "runtime.offlineBody":
@@ -498,8 +500,6 @@ export const zhCN = {
   "set.prefs.density.default": "默认",
   "set.prefs.density.comfortable": "宽松",
   "set.prefs.fontSize": "字号",
-  "set.prefs.prerelease": "抢先体验新功能",
-  "set.prefs.prereleaseNote": "打开后会更早拿到新功能，也更可能遇到问题。随时可以关掉。",
   "set.prefs.stillOnPrerelease": "这台电脑上装的还是抢先版 {current}，正式版目前是 {latest} —— 关掉开关不会自动换回去，要手动装一次。",
   "set.prefs.downloadStable": "下载正式版",
   "set.prefs.fontSize.small": "减小",
@@ -556,11 +556,12 @@ export const zhCN = {
   /* ── 设置：推理策略与审计 ────────────────────────────────────────── */
   "set.inference.title": "推理策略",
   "set.inference.desc": "资料送去云端 AI 之前，什么情况下先问你一句",
-  "set.inference.grain": "确认粒度",
-  "set.inference.note": "无论选哪一档，高敏感内容都会先问过你。送去推理的资料用完即弃，不会被保存。",
-  "set.inference.aria": "推理传输策略",
-  "set.inference.bySensitivity": "按敏感度（推荐）",
-  "set.inference.always": "全部需确认",
+  "set.inference.grain": "默认授权策略",
+  "set.inference.note": "这是全局设置，由智能体在自己的流程里落实。无论选哪一档，高敏感内容都会先问过你；送去推理的资料用完即弃，不会被保存。",
+  "set.inference.aria": "默认授权策略",
+  "set.inference.bySensitivity": "自动按敏感度（推荐）",
+  "set.inference.always": "全部要我确认（适合敏感任务）",
+  "set.inference.autoAll": "授权全部任务（自动流程任务）",
   "set.audit.title": "安全审计",
   "set.audit.desc": "每一次传输与执行都留下记录，记录本身也能验真。这一块没有开关",
   "set.audit.scope": "记录范围",
@@ -641,7 +642,10 @@ export const zhCN = {
   "set.update.platformValue": "{os} · {arch}",
   "set.update.installTitle": "安装方式",
   "set.update.installDesc": "不会自动下载或安装，什么时候更新由你决定",
-  "set.update.channelRow": "更新渠道",
+  "set.update.versionPref": "版本偏好",
+  "set.update.pref.stable": "正式版（推荐）",
+  "set.update.pref.beta": "抢先版（更早拿到新功能）",
+  "set.update.channelRow": "当前渠道",
   "set.update.howCheck": "检查",
   "set.update.howCheckValue": "手动点「检查更新」，或开着「自动检查」时每次启动查一次",
   "set.update.howDownload": "下载",
@@ -653,7 +657,7 @@ export const zhCN = {
 
   /* ── 设置：本机配置 ──────────────────────────────────────────────── */
   "set.hw.title": "本机配置",
-  "set.hw.desc": "只在这台电脑上显示，不会上传",
+  "set.hw.desc": "只在这台电脑上显示，不会上传，用于评估本地沙箱资源配置策略",
   "set.hw.unavailable": "暂时读不到本机配置，不影响其它功能。",
   "set.hw.cpu": "处理器",
   "set.hw.cores": "{n} 核",
@@ -744,6 +748,12 @@ export const zhCN = {
   "set.tools.detail.needsPython": "要先装 Python 运行环境",
 
   /* ── 设置：Python 运行环境 ───────────────────────────────────────── */
+  "set.env.title": "运行环境",
+  "set.env.desc": "智能体要用到的运行环境。随应用装好的直接可用，其余按需安装",
+  "set.env.installed": "已安装",
+  "set.env.nodeNote": "随应用一起装好，不必管它",
+  "set.env.waiting_one": "有 # 项能力要用它。",
+  "set.env.waiting_other": "有 # 项能力要用它。",
   "set.python.title": "Python 运行环境",
   "set.python.desc": "少数工具要 Python 才能跑。它不随安装包，要用的时候装一次",
   "set.python.ready": "已就绪 · uv {uv} · Python {python}",
