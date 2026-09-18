@@ -101,11 +101,17 @@ jobs:
       # Flow C, MVP form (70-repo-organization s7.4): the static product
       # registry - one .ruyinpkg per product under products/ plus index.json.
       # Unsigned until the Registry root exists (TD-012 / TD-037); the index
-      # says so per entry. Staged with the installer; published with it once
-      # L2 lands (dl.vxture.com/ruyin/products/).
+      # says so per entry.
+      #
+      # **产物只留在 run 上，不发到下载主机**（owner 2026-09-18）。仓里现在唯一的
+      # 产品是 `products/bidproposal` 这个**测试夹具**（TD-006 / TD-033：它随安装包
+      # 走只是为了首页不空，界面上也标着「测试夹具」）。把它发到一个公开的产品
+      # 登记册上，等于对外说「这里有一个可以装的产品」—— 那不是真的。
+      # 有真产品要分发时，把下面那行的 `--out` 目录交给 upload-oss.mjs 即可
+      # （上传那一段已经写好并测过，只是现在没有东西给它传）。
       - name: Build static product registry
         shell: bash
-        run: node packages/cli/dist/main.js registry products --out apps/shell/release/products --base-url https://dl.vxture.com/ruyin/products
+        run: node packages/cli/dist/main.js registry products --out apps/shell/release/products --base-url "${{ vars.OSS_PUBLIC_BASE || format('https://{0}.{1}', vars.OSS_BUCKET, vars.OSS_ENDPOINT) }}/products"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7

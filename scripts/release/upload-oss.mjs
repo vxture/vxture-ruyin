@@ -270,9 +270,14 @@ async function main(argv) {
     console.log(`[upload-oss] ${item.key} (${body.length} B, no-cache)`);
   }
 
-  // 4. 静态产品库（TD-037 的那一半）。**只有 stable 传** —— 产品库的地址不分渠道
-  //    （客户端的 DEFAULT_REGISTRY_BASE 是一条），beta 传上去就会盖掉稳定用户的那一份。
-  if (channel === "stable") {
+  // 4. 静态产品库（TD-037 的那一半）。两道门：
+  //
+  //    - **只有 stable 传**：产品库的地址不分渠道（客户端的 DEFAULT_REGISTRY_BASE
+  //      是一条），beta 传上去会盖掉稳定用户的那一份；
+  //    - **要显式开**（RUYIN_PUBLISH_REGISTRY=1）：仓里现在唯一的产品是那个测试
+  //      夹具（TD-006 / TD-033），把它发到公开的产品登记册上等于对外说「这里有一个
+  //      可以装的产品」，而那不是真的（owner 2026-09-18）。有真产品要分发时打开它。
+  if (channel === "stable" && process.env["RUYIN_PUBLISH_REGISTRY"] === "1") {
     const productsDir = join(dir, "products");
     const uploads = [];
     const walk = (d, prefix) => {
