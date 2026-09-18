@@ -35,6 +35,7 @@
     "test:guardrails": "node --test \"scripts/guardrails/*.test.mjs\" \"scripts/release/*.test.mjs\" \"scripts/dev/*.test.mjs\"",
     "test:ui-harness": "node --test scripts/dev/ui-harness.test.mjs",
     "components:verify": "node scripts/release/verify-components.mjs",
-    "lint:app-version": "node scripts/guardrails/check-app-version.mjs"
+    "lint:app-version": "node scripts/guardrails/check-app-version.mjs",
+    "lint:graduation": "node scripts/guardrails/check-graduation.mjs"
   }
 }

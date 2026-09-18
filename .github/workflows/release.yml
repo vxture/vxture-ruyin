@@ -59,6 +59,14 @@ jobs:
           # 版本号的形状与 tag 的关系（owner 2026-09-18）：beta tag 要求带
           # -beta.N，v tag 要求不带且与 tag 相等；顺带钉住三处版本号一致。
           node scripts/guardrails/check-app-version.mjs --tag "${GITHUB_REF_NAME}"
+          # **正式版只能从测试版毕业**（owner 2026-09-18：「不能引起 stable 不稳定就发了」）。
+          # 人工审批门已经在了（production Environment 的必审人），但批了只证明有人点过头，
+          # 不证明这一版在测试渠道上跑过 —— 这一条查的是线上那份 feed。
+          # 排在构建之前：不该让人去批一个注定发不出去的东西。
+          BETA_BASE="${{ vars.OSS_PUBLIC_BASE }}"
+          if [ -z "$BETA_BASE" ]; then BETA_BASE="https://${{ vars.OSS_BUCKET }}.${{ vars.OSS_ENDPOINT }}"; fi
+          ALLOW_UNPROVEN_STABLE="${{ vars.ALLOW_UNPROVEN_STABLE }}" \
+            node scripts/guardrails/check-graduation.mjs --tag "${GITHUB_REF_NAME}" --beta-feed "$BETA_BASE/beta/latest.yml"
           if [[ "${GITHUB_REF_NAME}" == v* ]]; then
             CHANNEL=stable
             # A v-tag names the version, so the two must agree. Without this
