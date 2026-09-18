@@ -181,6 +181,18 @@ stable                                    ↓ 毕业
 `scripts/guardrails/check-app-version.mjs` 钉住这两件事（CI 的 static-checks 每次跑；
 发布时再带 `--tag` 跑一次，验 tag 与版本号的关系）。
 
+**正式版只能从测试版毕业**（owner 2026-09-18：「不能引起 stable 不稳定就发了」）。两道门
+叠着：① `production` Environment 的**必审人**（`publish` job 整个挂在它下面，v tag 一来
+GitHub 在跑任何一步之前就停住，包括传下载主机那一步 —— 2026-09-18 用 API 核过，必审人是
+owner 本人）；② `check-graduation.mjs`：发 `vX.Y.Z` 之前，**线上测试渠道当前必须就是
+`X.Y.Z-beta.N`**。批了只证明有人点过头，不证明那一版在 beta 上跑过 —— 第二道门补的是后面
+那半句，而且它排在构建之前（不该让人去批一个注定发不出去的东西）。真要绕过，把仓库变量
+`ALLOW_UNPROVEN_STABLE` 设成 `1`：那是**一个有人做过的决定**，日志里会把它喊出来。
+
+**渠道是目录，不是文件名**：electron-builder 看见预发布版本号会自作主张把 feed 写成
+`beta.yml`（它想从版本号推断渠道），于是那个渠道目录里就没有 `latest.yml` 了 ——
+2026-09-18 第一个带后缀的版本一发就栽在这儿。`detectUpdateChannel: false` 关掉那个推断。
+
 **毕业是重新构建，不是搬字节**：理想是把测试版验过的那一份直接搬到 stable，但那份 exe
 内部的版本资源写着 `-beta.N`，改名不改内容就是撒谎；而我们**不是可复现构建**，重新构建
 必然是另一份字节。所以 stable 重新构建同一个 commit（版本号去掉后缀），发布说明里写明它

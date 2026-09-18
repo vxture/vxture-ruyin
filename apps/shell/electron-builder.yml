@@ -92,6 +92,12 @@ nsis:
 # Generic provider => electron-updater feed (latest.yml) is emitted alongside
 # the installer. Channel URL is finalized when L2 (dl host) lands; release.yml
 # rewrites it per channel at publish time.
+# **渠道是目录，不是文件名。** electron-builder 看见预发布版本号（0.2.0-beta.1）
+# 会自作主张把更新 feed 写成 beta.yml —— 它想从版本号里推断渠道。而我们的渠道是
+# 发布目录（<主机>/stable/ 与 /beta/），feed 文件名一直是 latest.yml：守护进程按
+# 「基址 + /latest.yml」取，检查哪个渠道就下哪个渠道。关掉这个推断，否则第一个带
+# 后缀的版本一发，beta 渠道里就没有 latest.yml 了（2026-09-18 实测栽过一次）。
+detectUpdateChannel: false
 publish:
   provider: generic
-  url: https://dl.vxture.com/ruyin/stable
+  url: https://oss.ruyin.work/stable
