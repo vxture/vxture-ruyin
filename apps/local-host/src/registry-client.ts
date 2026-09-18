@@ -22,7 +22,7 @@
 
 import { createHash } from "node:crypto";
 
-export const DEFAULT_REGISTRY_BASE = "https://dl.vxture.com/ruyin/products";
+export const DEFAULT_REGISTRY_BASE = "https://oss.ruyin.work/products";
 export const INDEX_SCHEMA = "ruyin-registry/1";
 /** Hard cap on one package download; the reader's own caps apply after. */
 const MAX_PACKAGE_BYTES = 256 * 1024 * 1024;

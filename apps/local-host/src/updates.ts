@@ -31,11 +31,11 @@ export const UPDATE_CHANNELS: UpdateChannel[] = ["stable", "beta"];
 /**
  * 下载主机（owner 2026-09-18 定：阿里云 OSS）。
  *
- * 这里写的是**桶自己的域名**而不是好看的那个 `oss.ruyin.work`：后者的证书还没就位，
- * 而这条地址客户端自己用、用户看不见。好看的那条是给人点的（下载页、发布说明），
- * 两者指向同一个桶，换过去也不会让已经装出去的客户端断掉。
+ * 2026-09-18 证书就位后换成了这条好看的域名（此前写的是桶自己的那个长域名）。
+ * 两者指向同一个桶，所以已经装出去的那些客户端不会断 —— 它们继续走桶域名，
+ * 一样取得到。
  */
-export const DOWNLOAD_HOST = "https://ruyin-download.oss-cn-beijing.aliyuncs.com";
+export const DOWNLOAD_HOST = "https://oss.ruyin.work";
 
 /**
  * 渠道目录基址：`<主机>/<渠道>`。**渠道就是目录名** —— 检查哪个渠道就下哪个渠道，
