@@ -56,8 +56,10 @@ test("RuntimeMenu: 徽标只写运行环境与版本；详情要点开才看得�
       session={signedIn()}
     />,
   );
-  expect(screen.getByText("运行环境 0.1.0")).toBeInTheDocument();
-  expect(screen.queryByText("运行环境")).not.toBeInTheDocument();
+  // 徽标中英文都写 Runtime（owner 2026-09-18 第 5 条）。
+  expect(screen.getByText("Runtime 0.1.0")).toBeInTheDocument();
+  // 详情要点开才看得到：面板里那一行（只有 "Runtime"）此刻不该在页面上。
+  expect(screen.queryByText("Runtime", { selector: ".shell-panel-row *" })).not.toBeInTheDocument();
 });
 
 /**
@@ -72,8 +74,10 @@ test("RuntimeMenu: 三行环境事实与首页逐字一致", async () => {
     />,
   );
   await open();
-  expect(await screen.findByText("运行环境")).toBeInTheDocument();
-  expect(screen.getByText("已就绪 · 0.1.0")).toBeInTheDocument();
+  // 这一行的名字中英文都写 Runtime（owner 2026-09-18 第 5 条）。
+  expect(await screen.findByText("Runtime")).toBeInTheDocument();
+  // 标识中英文都写 Runtime（owner 2026-09-18 第 5 条）。
+  expect(screen.getByText("已就绪 · Runtime 0.1.0")).toBeInTheDocument();
   expect(screen.getByText("数据加密")).toBeInTheDocument();
   expect(await screen.findByText("已加密")).toBeInTheDocument();
   expect(screen.getByText("平台连接")).toBeInTheDocument();
@@ -148,6 +152,6 @@ test("RuntimeMenu: 连得上时不出现连不上的说明", async () => {
     />,
   );
   await open();
-  await screen.findByText("运行环境");
+  await screen.findByText("Runtime");
   expect(screen.queryByText(/连不上本机的运行环境/)).not.toBeInTheDocument();
 });

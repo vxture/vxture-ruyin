@@ -517,7 +517,9 @@ export function HomePage({
             icon: "cpu",
             label: t("home.card.runtime"),
             value: t(health.ok ? "home.card.runtime.ok" : "home.card.runtime.off"),
-            detail: health.ok ? (health.version ?? "") : "",
+            // 版本号前加 Runtime（owner 2026-09-18）：孤零零一个 0.2.0-beta.1 不说明它是
+            // **谁**的版本 —— 这台机器上还有产品、技能、工具各自的版本。
+            detail: health.ok && health.version ? `Runtime ${health.version}` : "",
             hint: health.ok
               ? t("home.card.runtime.hintOk")
               : t("home.card.runtime.hintOff"),

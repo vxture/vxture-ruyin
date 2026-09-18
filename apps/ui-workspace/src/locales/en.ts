@@ -49,7 +49,7 @@ export const en: Catalog = {
 
   /* ── Runtime menu in the title bar ────────────────────────────────── */
   "runtime.ready": "Ready",
-  "runtime.readyWith": "Ready · {version}",
+  "runtime.readyWith": "Ready · Runtime {version}",
   "runtime.connectedWith": "Connected · {workspace}",
   "runtime.offline": "Not connected",
   "runtime.encrypted": "Encrypted",
@@ -522,8 +522,6 @@ export const en: Catalog = {
   "set.prefs.density.default": "Default",
   "set.prefs.density.comfortable": "Comfortable",
   "set.prefs.fontSize": "Text size",
-  "set.prefs.prerelease": "Get new features early",
-  "set.prefs.prereleaseNote": "You'll get new features sooner, and run into problems more often. You can turn this off any time.",
   "set.prefs.stillOnPrerelease": "This machine is still on the early build {current}; the stable release is {latest} — turning this off doesn't switch back on its own, you'll need to install it once.",
   "set.prefs.downloadStable": "Download the stable release",
   "set.prefs.fontSize.small": "Smaller",
@@ -587,12 +585,13 @@ export const en: Catalog = {
   /* ── Settings: inference policy and audit ─────────────────────────── */
   "set.inference.title": "Before sending to AI",
   "set.inference.desc": "When you want to be asked before material goes to cloud AI",
-  "set.inference.grain": "Ask me",
+  "set.inference.grain": "Default authorization",
   "set.inference.note":
     "Whichever you choose, highly sensitive content is always confirmed with you first. Material sent for inference is used and discarded, never stored.",
-  "set.inference.aria": "When to confirm before sending",
+  "set.inference.aria": "Default authorization",
   "set.inference.bySensitivity": "By sensitivity (recommended)",
-  "set.inference.always": "Every time",
+  "set.inference.always": "Ask me every time (for sensitive work)",
+  "set.inference.autoAll": "Approve everything (for automated runs)",
   "set.audit.title": "Audit",
   "set.audit.desc":
     "Every transfer and every execution is recorded, and the record itself can be verified. There is no switch here",
@@ -681,7 +680,9 @@ export const en: Catalog = {
   "set.update.platformValue": "{os} · {arch}",
   "set.update.installTitle": "How updating works",
   "set.update.installDesc": "Nothing downloads or installs on its own; when to update is up to you",
-  "set.update.channelRow": "Channel",
+  "set.update.versionPref": "Version preference",
+  "set.update.pref.stable": "Stable (recommended)",
+  "set.update.pref.beta": "Early access (new features sooner)",
   "set.update.howCheck": "Checking",
   "set.update.howCheckValue":
     "Press “Check for updates”, or leave “Check automatically” on and it checks at each start",
@@ -695,7 +696,7 @@ export const en: Catalog = {
 
   /* ── Settings: this machine ───────────────────────────────────────── */
   "set.hw.title": "This machine",
-  "set.hw.desc": "Shown on this computer only; never uploaded",
+  "set.hw.desc": "Shown on this computer only, never uploaded — it is what sizes the local sandbox",
   "set.hw.unavailable": "Machine details are unavailable right now; nothing else is affected.",
   "set.hw.cpu": "Processor",
   "set.hw.cores": "{n} cores",
@@ -794,6 +795,12 @@ export const en: Catalog = {
   "set.tools.detail.needsPython": "Needs the Python runtime first",
 
   /* Settings: Python runtime */
+  "set.env.title": "Runtimes",
+  "set.env.desc": "What agents need in order to run. What the installer provides is ready to use; the rest installs on demand",
+  "set.env.installed": "Installed",
+  "set.env.nodeNote": "Provided by the installer; no separate setup required",
+  "set.env.waiting_one": "# capability needs it.",
+  "set.env.waiting_other": "# capabilities need it.",
   "set.python.title": "Python runtime",
   "set.python.desc": "A few tools need Python. It doesn't ship with the app — install it once, when you need it",
   "set.python.ready": "Ready · uv {uv} · Python {python}",

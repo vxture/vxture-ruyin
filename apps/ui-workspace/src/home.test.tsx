@@ -192,7 +192,8 @@ void test("HomePage: the metric row is the three framework facts - runtime, encr
   );
   expect(screen.getByText("运行环境")).toBeInTheDocument();
   expect(screen.getByText("已就绪")).toBeInTheDocument();
-  expect(screen.getByText("0.2.0")).toBeInTheDocument();
+  // 版本号前带 Runtime（owner 2026-09-18 第 6 条）：孤零零一个版本号不说明它是谁的。
+  expect(screen.getByText("Runtime 0.2.0")).toBeInTheDocument();
 
   expect(screen.getByText("数据加密")).toBeInTheDocument();
   expect(await screen.findByText("已加密")).toBeInTheDocument();

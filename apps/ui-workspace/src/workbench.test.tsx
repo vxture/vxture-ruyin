@@ -779,7 +779,7 @@ void test("Header workspace control: icon + name only (no 工作区 label); open
     (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   // 2026-09-04: Runtime sits right after the brand (leading); the tenant menu is on the right,
   // before pending and settings. Document order: brand < Runtime < tenant menu < 设置.
-  const runtime = within(document.querySelector(".app-header-context") as HTMLElement).getByText(/运行环境/);
+  const runtime = within(document.querySelector(".app-header-context") as HTMLElement).getByText(/^Runtime/);
   const trailing = document.querySelector(".app-header-trailing") as HTMLElement;
   expect(trailing.contains(trigger)).toBe(true);
   const settings = within(trailing).getByRole("button", { name: "设置" });
