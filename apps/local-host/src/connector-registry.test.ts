@@ -271,9 +271,10 @@ test("bundled: listed as stashed until enabled; activate really starts it, lists
   assert.equal(fake.state, "stashed");
   assert.equal(fake.health.detail, "未启用");
   assert.equal(fake.bundled?.runtime, "node");
-  // uvx 的在这台机器上起不了：原因写在 blocked 里，不是「未启用」。
+  // uvx 的在这台机器上起不了：原因写在 blocked 里，不是「未启用」。这份夹具造的是
+  // 一套**没有随包 uv** 的装配（真机上装完就有），所以它说的是「这一版包里没有」。
   const py = list.find((c) => c.id === "py.only");
-  assert.match(py?.bundled?.blocked ?? "", /还没装 Python 运行环境/);
+  assert.match(py?.bundled?.blocked ?? "", /没有随包的 uv/);
   assert.match(py?.health.detail ?? "", /uv/);
 
   const view = await registry.activate("fake.server");
@@ -292,7 +293,7 @@ test("bundled: listed as stashed until enabled; activate really starts it, lists
   assert.equal(bundled.isEnabled("fake.server"), false);
 
   await assert.rejects(registry.remove("fake.server"), (e: unknown) => e instanceof ConnectorBundledError);
-  await assert.rejects(registry.activate("py.only"), /还没装 Python 运行环境/);
+  await assert.rejects(registry.activate("py.only"), /没有随包的 uv/);
   await registry.stopAll();
   rmSync(dataDir, { recursive: true, force: true });
 });

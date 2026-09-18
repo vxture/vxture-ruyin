@@ -58,10 +58,6 @@ import {
   type ComponentState,
   type UpdateCheck,
   type EnvProbeRow,
-  type PythonRuntimeStatus,
-  type PythonRuntimeState,
-  type PythonStepCode,
-  type PythonFailureCode,
   type ToolView,
   type CapabilityRouting,
   type CapabilityCatalogPage,
@@ -1805,6 +1801,37 @@ function mb(n: number): string {
 }
 
 /**
+ * 起不来是因为什么。**只有认得的码才分组**，其余归「原因未明」单列 —— 把说不出
+ * 原因的那些混进「要先配置」里，用户会照着一条做不到的指引去做。
+ */
+const BLOCKED_REASON_KEY: Record<string, MessageKey> = {
+  "needs-env": "set.cap.blockedReason.needsEnv",
+  "needs-python": "set.cap.blockedReason.needsPython",
+  "no-launch-spec": "set.cap.blockedReason.noLaunchSpec",
+  blocked: "set.cap.blockedReason.blocked",
+  other: "set.cap.blockedReason.other",
+};
+
+/**
+ * 「技能」块顶上那句（owner 2026-09-19：这一层也要说清有几条用不上、缺什么）。
+ *
+ * 技能不需要运行环境 —— 它们是写给智能体看的指令，读得懂就用得上。真正用不上的
+ * 只有两种：**带脚本的**（TD-005：OS 级执行沙箱就位之前，脚本一律不在本机跑），
+ * 和**被更近一层同名技能盖住的**（那一条生效，这一条不生效）。两种都没有时这半
+ * 句话不出现。
+ */
+function skillsSummary(items: SkillView[], t: TFn): string {
+  const scripted = items.filter((x) => x.hasScripts).length;
+  const shadowed = items.filter((x) => x.shadowedBy).length;
+  const parts: string[] = [];
+  if (scripted > 0) parts.push(t("set.skills.blockedScripts", { n: scripted }));
+  if (shadowed > 0) parts.push(t("set.skills.blockedShadowed", { n: shadowed }));
+  const base = t("set.skills.desc");
+  if (parts.length === 0) return base;
+  return base + t("set.skills.blocked", { n: scripted + shadowed, reasons: parts.join(t("common.listSep")) });
+}
+
+/**
  * 「工具」块顶上那句常驻事实。数的是**能不能起**，不是清单上有多少条 ——
  * 「预置 10 个」而其中 7 个在干净机器上起不来，是上一版清单犯过的错。
  */
@@ -1814,11 +1841,22 @@ function bundledSummary(tools: ToolView[], t: TFn): string {
   // `launchable` 只说「有启动规格」，不说「此刻起得来」——差一个环境变量、差一个
   // 外部程序的也在里面。把它们算进「不下载就能起」，就是上一版「预置 10 个」那个
   // 错的小一号版本：数字对不上用户点下去看到的东西。
-  const blocked = bundled.filter((t) => t.status !== "available" && t.status !== "registered").length;
-  const needs = servers.filter((t) => t.component && t.component.state !== "acquired").length;
+  const blocked = bundled.filter((x) => x.status !== "available" && x.status !== "registered");
+  // 起不来的**按原因分组说**（owner 2026-09-19）：一个「3 个起不来」的数字说不出
+  // 该做什么，「2 个要先配置、1 个缺运行环境」是能动手的。装完之后这一句本该是
+  // 空的 —— 它的用处正是在**不是空的那天**说出来。
+  const byReason = new Map<string, number>();
+  for (const x of blocked) {
+    const key = x.detailCode && x.detailCode in BLOCKED_REASON_KEY ? x.detailCode : "other";
+    byReason.set(key, (byReason.get(key) ?? 0) + 1);
+  }
+  const reasons = [...byReason.entries()]
+    .map(([key, n]) => t(BLOCKED_REASON_KEY[key] ?? "set.cap.blockedReason.other", { n }))
+    .join(t("common.listSep"));
+  const needs = servers.filter((x) => x.component && x.component.state !== "acquired").length;
   return (
     t("set.cap.bundledSummary", { n: bundled.length }) +
-    (blocked > 0 ? t("set.cap.bundledBlocked", { n: blocked }) : "") +
+    (blocked.length > 0 ? t("set.cap.bundledBlocked", { n: blocked.length, reasons }) : "") +
     (needs > 0 ? t("set.cap.bundledNeeds", { n: needs }) : t("set.cap.bundledEnd"))
   );
 }
@@ -1852,83 +1890,12 @@ const TOOL_DETAIL_KEY: Record<string, MessageKey> = {
   blocked: "set.tools.detail.blocked",
 };
 
-/** 正在做哪一步（守护进程只给码）。 */
-const PYTHON_STEP_KEY: Record<PythonStepCode, MessageKey> = {
-  "acquire-uv": "set.python.step.acquireUv",
-  "install-python": "set.python.step.installPython",
-  "warm-cache": "set.python.step.warmCache",
-  "verify-offline": "set.python.step.verifyOffline",
-};
-
 /**
- * 没装成是因为什么。**「没下载成功」与「试跑没通过」不能是同一句话** —— 前者
- * 再点一次多半就好了，后者再点一百次也是同一个结果。守护进程那句原文（uv 自己
- * 说的话）一个字都不上屏。
+ * 随包的运行环境。**名字是专名，不翻译**（与 Runos / Runtime 同一条口径）；顺序固定，
+ * 免得两次进来看到的排列不一样。
  */
-/** 徽章上那两三个字。 */
-const PYTHON_STATE_KEY: Record<PythonRuntimeState, MessageKey> = {
-  "not-acquired": "set.python.badge.notInstalled",
-  "not-provisioned": "set.python.badge.partial",
-  stale: "set.python.badge.stale",
-  provisioning: "set.python.badge.installing",
-  ready: "set.python.badge.ready",
-  failed: "set.python.badge.failed",
-};
-
-const PYTHON_TONE: Record<PythonRuntimeState, "success" | "warning" | "danger" | "neutral"> = {
-  "not-acquired": "neutral",
-  "not-provisioned": "warning",
-  stale: "warning",
-  provisioning: "neutral",
-  ready: "success",
-  failed: "danger",
-};
-
-/** 按钮上那两个字。**「安装」与「重新安装」不是同一句话** —— 装过的人要知道他没记错。 */
-const PYTHON_ACTION_KEY: Record<PythonRuntimeState, MessageKey> = {
-  "not-acquired": "set.python.install",
-  "not-provisioned": "set.python.resume",
-  stale: "set.python.reinstall",
-  provisioning: "set.python.install",
-  ready: "set.python.reinstall",
-  failed: "set.python.retry",
-};
-
-const PYTHON_FAIL_KEY: Record<PythonFailureCode, MessageKey> = {
-  "no-config": "set.python.fail.noConfig",
-  "uv-missing": "set.python.fail.download",
-  "acquire-failed": "set.python.fail.download",
-  "install-python-failed": "set.python.fail.installPython",
-  "warm-failed": "set.python.fail.warm",
-  "verify-failed": "set.python.fail.verify",
-  cancelled: "set.python.fail.cancelled",
-};
-
-/**
- * Python 那一行说什么。每种状态各说各的 —— 装好了报版本，没装报要下多少，
- * 装到一半报卡在哪，没装成报是哪一种没装成（**不是守护进程那句原文**）。
- */
-function pythonLine(t: TFn, python: PythonRuntimeStatus): string {
-  if (python.state === "provisioning") return t(PYTHON_STEP_KEY[python.stepCode ?? "acquire-uv"]);
-  if (python.state === "failed") return t(PYTHON_FAIL_KEY[python.code ?? "acquire-failed"]);
-  if (python.state === "ready") {
-    return `${t("set.python.ready", { uv: python.uvVersion ?? "", python: python.pythonVersion ?? "" })} · ${t(
-      "set.python.readyPackages",
-      { count: python.packages.length },
-    )}`;
-  }
-  if (python.state === "not-provisioned") return t("set.python.notProvisioned");
-  if (python.state === "stale") return t("set.python.stale");
-  const p = python.payload;
-  // 载荷读不出来（这一版清单里没有它）时不编一个体积：**宁可少说一句**。
-  if (!p) return t("set.python.badge.notInstalled");
-  return t("set.python.notAcquired", {
-    download: mb(p.downloadBytes),
-    disk: mb(p.diskBytes),
-    license: p.license,
-    origin: p.origin,
-  });
-}
+const RUNTIME_ROWS = ["node", "python"] as const;
+const RUNTIME_NAMES: Record<(typeof RUNTIME_ROWS)[number], string> = { node: "Node.js", python: "Python" };
 
 /**
  * 环境检查之后，那一行说什么。**查过才说** —— 没查过回 undefined，界面照旧显示
@@ -2082,8 +2049,6 @@ function SkillsSection({ api }: { api: Api }) {
   const locale = useLocale();
   const [listing, setListing] = useState<SkillListing | null>(null);
   const [tools, setTools] = useState<ToolView[] | null>(null);
-  // Python 半边（TD-042 ②）：null = 这一版不带它，整块不显示。
-  const [python, setPython] = useState<PythonRuntimeStatus | null>(null);
   /** 能力调用路径（ADR-025）。null = 没问到 —— 那时不显示那一行，不猜一个档位。 */
   const [routing, setRouting] = useState<CapabilityRouting | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
@@ -2156,15 +2121,6 @@ function SkillsSection({ api }: { api: Api }) {
       setRouting(await api.capabilityRouting());
     } catch {
       setRouting(null);
-    }
-    await reloadPython();
-  };
-  /** Python 半边此刻的样子。503 = 这一版不带它 —— 那就整块不显示。 */
-  const reloadPython = async () => {
-    try {
-      setPython(await api.pythonRuntime());
-    } catch {
-      setPython(null);
     }
   };
   useEffect(() => {
@@ -2254,52 +2210,6 @@ function SkillsSection({ api }: { api: Api }) {
     if (!picked.path) return;
     await acquire(componentId, picked.path);
   };
-  /**
-   * 装 Python 半边。守护进程那一头**不等它装完就回**（要几分钟），所以这里也不等：
-   * 点完就重问一次，之后靠下面那个轮询跟着走。
-   */
-  const provisionPython = async () => {
-    setFailed(null);
-    let message: string | null = null;
-    try {
-      setPython(await api.provisionPython());
-    } catch (e) {
-      message = String((e as Error).message);
-    }
-    if (message) setFailed(message);
-  };
-  const cancelPython = async () => {
-    try {
-      await api.cancelPython();
-    } catch {
-      // 取消本来就可能已经晚了一步；下一次轮询会说出它真正的样子。
-    }
-    await reloadPython();
-  };
-  const removePython = async () => {
-    let message: string | null = null;
-    try {
-      await api.removePython();
-    } catch (e) {
-      message = String((e as Error).message);
-    }
-    await reloadPython();
-    await reload();
-    // **在 reload 之后再放这句话**（同 acquire 那一处）：reload 成功会清掉 failed，
-    // 先设就会被它抹掉 —— 一次失败的移除于是变得无声无息。
-    if (message) setFailed(message);
-  };
-  /**
-   * 装的时候**盯着它**：这一块的进度不走事件（守护进程只发「有东西变了」，而这里
-   * 变的是步骤名），所以装的过程中每两秒问一次。装完就停 —— 一个永远在轮询的
-   * 设置页，在用不到 Python 的机器上是纯粹的浪费。
-   */
-  useEffect(() => {
-    if (python?.state !== "provisioning") return;
-    const timer = setInterval(() => void reloadPython(), 2000);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [python?.state]);
 
   const skillGroups = groupCapabilities(items, (s) => ({ name: s.name, description: s.description }));
   // 分组看的是关键词，而那半句话现在是按语言给的 —— 用它分组会让**分组随语言
@@ -2363,82 +2273,38 @@ function SkillsSection({ api }: { api: Api }) {
         )}
       </p>
       {/*
-        运行环境（owner 2026-09-18 第 4 条）。**常态显示**，不是只在缺的时候冒出来 ——
-        目的是让用户自己判断值不值得装：Node.js 随应用装好、直接可用；Python 要装，
-        而旁边就写着有多少项能力在等它。等他点到某个工具起不来才发现，那是最差的顺序。
+        运行环境（owner 2026-09-18 第 4 条起，2026-09-19 改口径）。
 
-        位置在第一行说明之下、技能与工具之上：它是那两块的前提。
+        **装完就该都在。** owner 2026-09-19 定：差异只在能力启用与否，不该有「装完
+        也起不来」的能力 —— 安装包大一些可以接受。所以这一块不再有「安装」按钮：
+        Node.js 与 Python 都随安装包走，这里只回答「它们此刻在不在、是哪个版本」。
+
+        「检查」是这一块唯一的动作：徽标说的是「应该有」，按钮回答的是「**此刻真有**」。
+        两者可以不一致 —— 目录被杀毒清了、或者用户自己装了个更新的（那一份也报出来）。
       */}
-      {(python?.component || pythonNeeded > 0) && (
-        <SettingsBlock icon="terminal" title={t("set.env.title")} desc={t("set.env.desc")}>
-          {/* Node.js 随安装包走：这一行永远是「已装好」，写出来是为了让「运行环境」
-              这一块有个参照 —— 只列缺的那一个，用户不知道齐了是什么样。 */}
-          {/*
-            「检查」是这一块唯一的动作按钮（owner 2026-09-19）：**它回答的是另一个问题**。
-            徽标说的是「我们记得装过没有」（一份回执），而用户想知道的是「此刻这台机器上
-            到底有没有、是哪个版本」—— owner 原话：「我不能确认最终是不是成功还是失败」。
-            两者可以不一致：回执没了、目录被杀毒清了、或者他自己早装了个更新的。
-          */}
-          <div className="env-row">
-            <span className="env-name">Node.js</span>
+      <SettingsBlock icon="terminal" title={t("set.env.title")} desc={t("set.env.desc")}>
+        {RUNTIME_ROWS.map((id) => (
+          <div className="env-row" key={id}>
+            <span className="env-name">{RUNTIME_NAMES[id]}</span>
             <StatusBadge tone="success">{t("set.env.installed")}</StatusBadge>
-            <span className="env-note">{envLine(t, envRows, "node") ?? t("set.env.nodeNote")}</span>
+            <span className="env-note">{envLine(t, envRows, id) ?? t("set.env.bundledNote")}</span>
           </div>
-          {python && python.component && (
-            <>
-              <div className="env-row">
-                <span className="env-name">Python</span>
-                <StatusBadge tone={PYTHON_TONE[python.state]}>{t(PYTHON_STATE_KEY[python.state])}</StatusBadge>
-                {/* 体积、许可证、来源主机在按钮左边 —— 点之前就看得见要下多少。
-                    检查过之后，这一行换成**现场探到的版本** —— 那才是用户要的答案。 */}
-                <span className="env-note">{envLine(t, envRows, "python") ?? pythonLine(t, python)}</span>
-                {/* 按钮靠右（owner 第 4.4 条）：一行里「说明」与「动作」分站两头，
-                    扫一眼就知道哪边是要点的。 */}
-                <span className="env-actions">
-                  {python.state === "provisioning" ? (
-                    <Button variant="ghost" size="sm" onClick={() => void cancelPython()}>
-                      {t("set.cancel")}
-                    </Button>
-                  ) : (
-                    <>
-                      <Button variant="outline" size="sm" onClick={() => void provisionPython()}>
-                        {t(PYTHON_ACTION_KEY[python.state])}
-                      </Button>
-                      {(python.state === "ready" || python.state === "stale") && (
-                        <Button variant="ghost" size="sm" onClick={() => void removePython()}>
-                          {t("set.python.remove")}
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </span>
-              </div>
-              <div className="env-row">
-            <span className="env-note">{t("set.env.checkNote")}</span>
-            <span className="env-actions">
-              <Button variant="outline" size="sm" disabled={envBusy} onClick={() => void checkEnv()}>
-                {t(envBusy ? "set.env.checking" : "set.env.check")}
-              </Button>
-            </span>
-          </div>
-          {/* 有多少项能力在等它 —— 这句话是用户判断「值不值得装」的依据。 */}
-              {pythonNeeded > 0 && (
-                <p className="set-note">{t("set.env.waiting", { count: pythonNeeded })}</p>
-              )}
-              {/* 安装会再取 Python 本身与依赖：按流量计费的网络上这句话是有用的。 */}
-              {python.state !== "ready" && python.state !== "provisioning" && (
-                <p className="set-note">{t("set.python.alsoFetches")}</p>
-              )}
-            </>
-          )}
-        </SettingsBlock>
-      )}
+        ))}
+        <div className="env-row">
+          <span className="env-note">{t("set.env.checkNote")}</span>
+          <span className="env-actions">
+            <Button variant="outline" size="sm" disabled={envBusy} onClick={() => void checkEnv()}>
+              {t(envBusy ? "set.env.checking" : "set.env.check")}
+            </Button>
+          </span>
+        </div>
+      </SettingsBlock>
       <SettingsBlock
         icon="sparkles"
         collapsible
         count={items.length}
         title={t("set.skills.title")}
-        desc={t("set.skills.desc")}
+        desc={skillsSummary(items, t)}
         aside={
           unavailable ? undefined : (
             // 筛选紧挨着刷新按钮、一起右对齐（owner 2026-09-15）：原来这个筛选是
@@ -2598,14 +2464,6 @@ function SkillsSection({ api }: { api: Api }) {
                           })}
                       {tool.component.reason ? ` —— ${tool.component.reason}` : ""}
                     </span>
-                  )}
-                  {/* 这一行要不要 Python、这台机器上有没有（owner 2026-09-18 第 4.3 条）。
-                      放在状态徽标之前：它是「能不能起」的前提，不是起没起的结果。 */}
-                  {needsPython(tool) && (
-                    <StatusBadge tone={python?.state === "ready" ? "success" : "danger"}>
-                      <Icon name={python?.state === "ready" ? "check" : "prohibit"} size="xs" />
-                      Python
-                    </StatusBadge>
                   )}
                   <StatusBadge tone={TOOL_STATUS[tool.status].tone}>
                     {t(TOOL_STATUS[tool.status].key)}

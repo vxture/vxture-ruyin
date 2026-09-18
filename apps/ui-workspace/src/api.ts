@@ -494,48 +494,6 @@ export interface ComponentStatus {
 }
 
 /**
- * Python 半边此刻的样子。源头：apps/local-host/src/python-runtime.ts。
- *
- * uv 与 CPython **不随安装包**（owner 2026-09-17 定性），所以它有自己的一块和
- * 自己的按钮 —— uvx 形态的工具行只说「还没装 Python 运行环境」，不各自摆一个
- * 下载按钮（同一次安装摆三个按钮，读起来像三笔下载）。
- */
-export type PythonRuntimeState =
-  | "not-acquired"
-  | "not-provisioned"
-  | "stale"
-  | "provisioning"
-  | "ready"
-  | "failed";
-
-export type PythonStepCode = "acquire-uv" | "install-python" | "warm-cache" | "verify-offline";
-
-export type PythonFailureCode =
-  | "no-config"
-  | "uv-missing"
-  | "acquire-failed"
-  | "install-python-failed"
-  | "warm-failed"
-  | "verify-failed"
-  | "cancelled";
-
-export interface PythonRuntimeStatus {
-  state: PythonRuntimeState;
-  component: string | null;
-  uvVersion: string | null;
-  pythonVersion: string | null;
-  packages: string[];
-  wanted: string[];
-  provisionedAt?: string;
-  /** uv 那条载荷（体积 / 许可证 / 来源 / 进度）—— 点之前就看得见要下多少。 */
-  payload?: ComponentStatus;
-  stepCode?: PythonStepCode;
-  code?: PythonFailureCode;
-  /** 诊断原文（uv 自己那句）。**界面一个字不渲染**，面向用户的话按 `code` 出。 */
-  reason?: string;
-}
-
-/**
  * 一个运行环境此刻的样子。源头：apps/local-host/src/env-probe.ts。
  * 两个来源分开报：随包 / 装好的那一份，与本机 PATH 上已有的那一份。
  */
@@ -1083,15 +1041,6 @@ export class Api {
    * 纯粹是读，不装任何东西。
    */
   environments = () => this.call<{ items: EnvProbeRow[] }>("/environments");
-  /** Python 半边（TD-042 ②）：uv 不随包，这一条问它装好了没有。 */
-  pythonRuntime = () => this.call<PythonRuntimeStatus>("/python-runtime");
-  /**
-   * 装 Python 半边：取 uv 的字节，再用它装 CPython、预热 wheel。**一次请求只答
-   * 「开始了」** —— 要几分钟，进度按事件重问 `pythonRuntime()`。
-   */
-  provisionPython = () => this.call<PythonRuntimeStatus>("/python-runtime/provision", "POST");
-  cancelPython = () => this.call<{ cancelled: boolean }>("/python-runtime/cancel", "POST");
-  removePython = () => this.call<{ removed: boolean }>("/python-runtime", "DELETE");
   installConnector = (
     input: (
       | { transport?: "stdio"; command: string; args: string[] }

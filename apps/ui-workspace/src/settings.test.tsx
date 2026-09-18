@@ -56,9 +56,6 @@ function fakeApi(over: Partial<Api> = {}): Api {
     // 缺省当作「守护进程没接这一路」（真实的常见状态：老版本守护进程、或装配
     // 没配）—— 与 server.ts 那一路没配 hardwareInfo 时如实回的 503 一致。
     hardware: vi.fn().mockRejectedValue(new ApiError(503, { error: "HARDWARE_INFO_NOT_CONFIGURED" })),
-    // Python 半边（TD-042 ②）：缺省当作「这一版不带」—— 绝大多数用例不关心它，
-    // 而不 stub 的话每条能力平台的用例都会撞未定义。
-    pythonRuntime: vi.fn().mockRejectedValue(new ApiError(503, { error: "PYTHON_RUNTIME_NOT_AVAILABLE" })),
     // 更新渠道（任务 49）：缺省当作「这套装配不管渠道」—— 那一行整行不显示，
     // 于是偏好设置那几条只数四行的用例照旧成立。
     updateChannel: vi.fn().mockRejectedValue(new ApiError(503, { error: "UPDATE_CHANNEL_NOT_CONFIGURED" })),
@@ -2054,6 +2051,58 @@ test("能力平台：未获取的行有自己的徽标，体积 / 许可证 / �
   expect(screen.getByText(/预置 1 个，随安装包而来、不下载任何字节；另有 1 个需要获取/)).toBeTruthy();
 });
 
+/* ── 有几项跑不起来、缺的是什么（owner 2026-09-19）────────────────────────
+ *
+ * 运行环境随安装包走之后，这两句话平时应当是空的。它们的用处正是**在不是空的
+ * 那天说出来** —— 而不是让用户一行行点开去数。所以用例造的是「不是空的那天」。
+ */
+test("能力平台：起不来的工具按原因分组说，认不得的码归「原因未明」", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      tools: vi.fn().mockResolvedValue({
+        items: [
+          { id: "a", kind: "mcp-server", source: "a", status: "unavailable", launchable: true, detailCode: "needs-env", detailVars: { name: "SEARXNG_URL" } },
+          { id: "b", kind: "mcp-server", source: "b", status: "unavailable", launchable: true, detailCode: "needs-env", detailVars: { name: "TAVILY_API_KEY" } },
+          { id: "c", kind: "mcp-server", source: "c", status: "unavailable", launchable: true, detailCode: "needs-python" },
+          // 守护进程给了一个界面不认得的码：**单列**，不混进「要先填配置」——
+          // 混进去就等于让用户照着一条做不到的指引去做。
+          { id: "d", kind: "mcp-server", source: "d", status: "unavailable", launchable: true, detailCode: "sun-spots" },
+          { id: "e", kind: "mcp-server", source: "e", status: "available", launchable: true },
+        ],
+      }),
+    }),
+  );
+  expect(
+    await screen.findByText(
+      "预置 5 个，随安装包而来、不下载任何字节（其中 4 个起不来：2 个要先填配置、1 个缺 Python 运行环境、1 个原因未明）。",
+    ),
+  ).toBeTruthy();
+});
+
+test("能力平台：本机技能那一层说清有几条用不上、为什么", async () => {
+  renderSection("skills", skillsApi());
+  // 夹具里 3 条：1 条带脚本（TD-005 本机不跑）、1 条被用户层同名技能盖住。
+  expect(await screen.findByText(/其中 2 条用不上：1 条带脚本，脚本在本机不执行、1 条被更近一层的同名技能盖住/)).toBeTruthy();
+});
+
+test("能力平台：技能都能用时不说这半句 —— 没有问题就不要造一句话出来", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      skills: vi.fn().mockResolvedValue({
+        scannedAt: "2026-09-19T00:00:00Z",
+        layers: [{ layer: "bundled", present: true, count: 1, dir: "C:/app/resources/skills" }],
+        items: [
+          { name: "ok", description: "好的", layer: "bundled", source: "s", enabled: true, hasScripts: false, dir: "C:/app/resources/skills/s/ok" },
+        ],
+      }),
+    }),
+  );
+  await screen.findByText("预置 1");
+  expect(screen.queryByText(/条用不上/)).toBeNull();
+});
+
 test("能力平台：点「获取」只带 id —— 地址不在界面手上", async () => {
   const api = acquisitionApi();
   renderSection("skills", api);
@@ -2804,175 +2853,24 @@ test("私有模型服务：读不到配置时不下断言", async () => {
   expect(screen.queryByText("未开通")).not.toBeInTheDocument();
 });
 
-/* ── Python 运行环境（TD-042 ②）────────────────────────────────────────────
+/* ── 运行环境（owner 2026-09-19：装完就该都在）─────────────────────────────
  *
- * uv 与 CPython 不随安装包，所以这一块要回答的是「装没装、要下多少、装到哪一步、
- * 没装成是哪一种没装成」。**四种状态各说各的**：把它们折叠成「未就绪」，用户就
- * 分不清该等一会儿、该重试，还是该换台机器。
+ * 这一组 2026-09-18 写的是「按需安装」那一路（未安装 / 安装中 / 装了一半 / 没装成）。
+ * owner 改了方向：运行环境随安装包走，差异只在能力启用与否。于是这里剩下两件事 ——
+ * **列出来**，以及**现场检查**。
  */
-function pythonStatus(over: Record<string, unknown> = {}) {
-  return {
-    state: "not-acquired",
-    component: "python.uv",
-    uvVersion: null,
-    pythonVersion: null,
-    packages: [],
-    wanted: ["excel-mcp-server==0.1.8"],
-    payload: {
-      id: "python.uv",
-      kind: "program",
-      version: "0.12.10",
-      state: "not-acquired",
-      downloadBytes: 16989876,
-      diskBytes: 42103296,
-      license: "MIT OR Apache-2.0",
-      origin: "https://github.com",
-      redistribution: "download-only",
-      unlocks: ["haris-musa.excel-mcp-server"],
-    },
-    ...over,
-  };
-}
-
-test("Python 运行环境：没装时点之前就看得见要下多少、许可证与来源，点「安装」走的是那一条", async () => {
-  const provisionPython = vi.fn().mockResolvedValue(pythonStatus({ state: "provisioning", stepCode: "acquire-uv" }));
-  const api = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()), provisionPython });
-  renderSection("skills", api);
-  const line = await screen.findByText(/还没装 · 需下载 16\.2 MB/);
-  expect(line.textContent).toContain("MIT OR Apache-2.0");
-  expect(line.textContent).toContain("github.com");
-  // 安装还会再取 Python 本身与依赖：按流量计费的网络上这句话是有用的。
-  expect(screen.getByText(/安装时还会取 Python 本身/)).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "安装" }));
-  expect(provisionPython).toHaveBeenCalled();
+test("能力平台：运行环境两行都在，且没有任何「安装」按钮 —— 随包就该是装好的", async () => {
+  renderSection("skills", skillsApi());
+  const block = (await screen.findByText("运行环境")).closest("section") as HTMLElement;
+  expect(within(block).getByText("Node.js")).toBeTruthy();
+  expect(within(block).getByText("Python")).toBeTruthy();
+  expect(within(block).getAllByText("已安装").length).toBe(2);
+  // 没有可点的安装 —— 一个「装完还要再装一次」的按钮本身就是自相矛盾。
+  expect(within(block).queryByRole("button", { name: "安装" })).toBeNull();
+  expect(within(block).getByRole("button", { name: "检查" })).toBeTruthy();
 });
 
-test("Python 运行环境：装的时候说在做哪一步，且能取消", async () => {
-  const cancelPython = vi.fn().mockResolvedValue({ cancelled: true });
-  const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "provisioning", stepCode: "install-python" })),
-    cancelPython,
-  });
-  renderSection("skills", api);
-  expect(await screen.findByText("正在安装 Python…")).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "取消" }));
-  expect(cancelPython).toHaveBeenCalled();
-});
 
-test("Python 运行环境：装好了报版本与备好了几个工具包，并且可以移除", async () => {
-  const removePython = vi.fn().mockResolvedValue({ removed: true });
-  const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(
-      pythonStatus({ state: "ready", uvVersion: "0.12.10", pythonVersion: "3.13.15", packages: ["excel-mcp-server==0.1.8"] }),
-    ),
-    removePython,
-  });
-  renderSection("skills", api);
-  expect(await screen.findByText("已就绪 · uv 0.12.10 · Python 3.13.15 · 已备好 1 个工具包")).toBeTruthy();
-  // 装好了就不再念叨还要下什么。
-  expect(screen.queryByText(/安装时还会取 Python 本身/)).toBeNull();
-  await userEvent.click(screen.getByRole("button", { name: "移除" }));
-  expect(removePython).toHaveBeenCalled();
-});
-
-test("Python 运行环境：没装成时说的是**哪一种**没装成，守护进程那句原文一个字不上屏", async () => {
-  const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(
-      pythonStatus({ state: "failed", code: "verify-failed", reason: "error: distribution not found in cache" }),
-    ),
-  });
-  renderSection("skills", api);
-  expect(await screen.findByText("装好了，但试跑没通过 —— 这些工具现在还起不来。")).toBeTruthy();
-  expect(screen.queryByText(/distribution not found/)).toBeNull();
-  expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
-});
-
-test("Python 运行环境：装了一半、或清单换了包，说的都不是「没装过」", async () => {
-  const half = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "not-provisioned" })) });
-  const { unmount } = renderSection("skills", half);
-  expect(await screen.findByText("装了一半 —— Python 本身还没装上。")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "继续安装" })).toBeTruthy();
-  unmount();
-
-  const stale = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "stale" })) });
-  renderSection("skills", stale);
-  expect(await screen.findByText("这一版要的工具包变了，重装一次就好。")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "重新安装" })).toBeTruthy();
-});
-
-test("Python 运行环境：这一版不带它（守护进程回 503）时整块不显示 —— 不摆一个点不动的按钮", async () => {
-  const api = skillsApi({ pythonRuntime: vi.fn().mockRejectedValue(new ApiError(503, { error: "PYTHON_RUNTIME_NOT_AVAILABLE" })) });
-  renderSection("skills", api);
-  await screen.findByText("本机技能");
-  expect(screen.queryByText("Python 运行环境")).toBeNull();
-});
-
-test("能力平台：uvx 形态的工具在 Python 装好之前说「要先装」—— 不在自己那一行摆第二个下载按钮", async () => {
-  const api = skillsApi({
-    tools: vi.fn().mockResolvedValue({
-      items: [
-        { id: "haris-musa.excel-mcp-server", kind: "mcp-server", source: "haris-musa.excel-mcp-server", status: "unavailable", launchable: true, detailCode: "needs-python", license: "MIT", tier: "acquire-on-demand" },
-      ],
-    }),
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
-  });
-  renderSection("skills", api);
-  const rows = await capabilityRows("工具");
-  const row = rowWith(rows, "haris-musa.excel-mcp-server");
-  expect(within(row).getByText("要先装 Python 运行环境")).toBeTruthy();
-  expect(within(row).queryByRole("button", { name: "获取" })).toBeNull();
-});
-
-test("Python 运行环境：点下去没成 / 移除没成，都要说出来 —— 悄悄没反应是这条路最不该有的失败方式", async () => {
-  const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
-    provisionPython: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
-  });
-  renderSection("skills", api);
-  await userEvent.click(await screen.findByRole("button", { name: "安装" }));
-  expect(await screen.findByText(/daemon unreachable/)).toBeTruthy();
-
-  const removeFails = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "ready", uvVersion: "0.12.10", pythonVersion: "3.13.15" })),
-    removePython: vi.fn().mockRejectedValue(new Error("在跑，删不掉")),
-  });
-  const { unmount } = renderSection("skills", removeFails);
-  await userEvent.click(await screen.findByRole("button", { name: "移除" }));
-  expect(await screen.findByText(/在跑，删不掉/)).toBeTruthy();
-  unmount();
-});
-
-test("Python 运行环境：守护进程少给了几样（没有载荷、没有步骤码、没有失败码）时也不编 —— 宁可少说一句", async () => {
-  // 清单里没有这条载荷：不编一个体积出来。
-  const noPayload = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue({ ...pythonStatus(), payload: undefined }) });
-  const a = renderSection("skills", noPayload);
-  expect((await screen.findAllByText("未安装")).length).toBeGreaterThan(0);
-  a.unmount();
-
-  // 在装，但没说到哪一步：按第一步说，不空着。
-  const noStep = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "provisioning" })) });
-  const b = renderSection("skills", noStep);
-  expect(await screen.findByText("正在下载…")).toBeTruthy();
-  b.unmount();
-
-  // 没成，但没给码：也要说一句人话，而不是一片空白。
-  const noCode = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "failed" })) });
-  const c = renderSection("skills", noCode);
-  expect(await screen.findByText("没下载成功，请稍后再试。")).toBeTruthy();
-  c.unmount();
-
-  // 装好了但版本没报上来：句子照样成立（版本是补充，不是主语）。
-  const noVersions = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "ready" })) });
-  renderSection("skills", noVersions);
-  expect(await screen.findByText(/已备好 0 个工具包/)).toBeTruthy();
-});
-
-test("Python 运行环境：清单里整段没有（component 为 null）时同样不显示", async () => {
-  const api = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue({ ...pythonStatus(), component: null, payload: undefined }) });
-  renderSection("skills", api);
-  await screen.findByText("本机技能");
-  expect(screen.queryByText("Python 运行环境")).toBeNull();
-});
 
 /* ── 抢先体验新功能（任务 49）───────────────────────────────────────────────
  *
@@ -3041,7 +2939,6 @@ test("软件更新：写不进去时下拉不许自己变样 —— 看起来开
  */
 test("能力平台：点「检查」后，每一行换成现场探到的版本；随包与本机分开报", async () => {
   const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
     environments: vi.fn().mockResolvedValue({
       items: [
         { id: "node", bundled: { path: "C:/app/node.exe", version: "22.20.0" }, system: { version: "20.11.0" } },
@@ -3059,12 +2956,11 @@ test("能力平台：点「检查」后，每一行换成现场探到的版本�
 
 test("能力平台：这套装配不提供环境检查时，点了也不假装查过", async () => {
   const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
     environments: vi.fn().mockRejectedValue(new ApiError(503, { error: "ENV_PROBE_NOT_AVAILABLE" })),
   });
   renderSection("skills", api);
   await userEvent.click(await screen.findByRole("button", { name: "检查" }));
-  // 还是「还没装 · 需下载 …」那一路，没有任何一行冒出版本号。
-  expect(await screen.findByText(/还没装 · 需下载/)).toBeTruthy();
+  // 还是「随安装包提供」那一句，没有任何一行冒出版本号 —— 查不到就别装作查过。
+  expect((await screen.findAllByText(/随安装包提供/)).length).toBeGreaterThan(0);
   expect(screen.queryByText(/随包 /)).toBeNull();
 });

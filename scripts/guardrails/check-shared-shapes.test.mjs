@@ -33,20 +33,9 @@ const SHARED = [
   ["SkillListing", "SkillListing", "apps/local-host/src/skill-registry.ts"],
   ["ToolView", "ToolView", "apps/local-host/src/tool-registry.ts"],
   ["ComponentStatus", "ComponentStatus", "apps/local-host/src/component-store.ts"],
-  ["PythonRuntimeStatus", "PythonRuntimeStatus", "apps/local-host/src/python-runtime.ts"],
 ];
 
 const STATES = ["idle", "acquiring", "ready", "unreachable"];
-/** Python 半边那三张码表（TD-042 ②）：守护进程给码、界面出话，两边成员要一样。 */
-const PY_UNIONS = {
-  PythonRuntimeState: ["not-acquired", "ready"],
-  PythonStepCode: ["acquire-uv", "warm-cache"],
-  PythonFailureCode: ["uv-missing", "warm-failed"],
-};
-const pyUnions = () =>
-  Object.entries(PY_UNIONS)
-    .map(([name, members]) => `export type ${name} = ${members.map((m) => `"${m}"`).join(" | ")};\n`)
-    .join("");
 const EVENT_KINDS = ["task", "pending", "component"];
 
 /** 事件词表在三处各写一遍（守护进程发、界面收、壳收），三份必须一致。 */
@@ -71,12 +60,10 @@ function baseline(over = {}) {
   // 源头那一侧还要有 ComponentState 这个联合。
   files["apps/local-host/src/component-store.ts"] +=
     `\nexport type ComponentState = ${STATES.map((s) => `"${s}"`).join(" | ")};\n`;
-  files["apps/local-host/src/python-runtime.ts"] += `\n${pyUnions()}`;
 
   files["apps/ui-workspace/src/api.ts"] =
     SHARED.map(([uiName]) => `export interface ${uiName} {\n  id: string;\n}\n`).join("\n") +
     `\nexport type ComponentState = ${STATES.map((s) => `"${s}"`).join(" | ")};\n` +
-    pyUnions() +
     eventUnion(EVENT_KINDS);
 
   files["apps/local-host/src/events.ts"] = eventUnion(EVENT_KINDS);
