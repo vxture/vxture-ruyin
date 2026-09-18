@@ -84,6 +84,7 @@ import { ToolRegistryView } from "./tool-registry.js";
 import { ComponentStore, readComponentSpecs } from "./component-store.js";
 import { PythonRuntime } from "./python-runtime.js";
 import { readUpdateChannel, writeUpdateChannel } from "./update-channel.js";
+import { probeEnvironments } from "./env-probe.js";
 import { auditListeners, describeAudit } from "./listener-audit.js";
 import { BundledToolServers } from "./tool-servers.js";
 import { fetchContract } from "./contract-fetch.js";
@@ -630,6 +631,13 @@ const server = createLocalApi({
   }),
   components: componentStore,
   python: pythonRuntime,
+  // 现场探一遍运行环境（任务 52）：随包 / 装好的那一份，以及本机 PATH 上已有的。
+  probeEnvironments: () =>
+    probeEnvironments({
+      nodeExe: bundledTools.bundledNodeExe(),
+      uvExe: pythonRuntime.uvExe(),
+      pythonExe: pythonRuntime.interpreter(),
+    }),
   ...(capabilityBase ? { refreshDistributedSkills: refreshAllDistributed } : {}),
   uiDir,
   platform,

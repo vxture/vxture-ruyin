@@ -204,7 +204,7 @@ test("其余 4xx 照实报状态码，不谎称可以重试", async () => {
   );
 });
 
-test("重定向一律不跟 —— 白名单是发请求之前查的，跟着跳等于让上游选目的地", async () => {
+test("跳到白名单外的主机：拒，而且那一跳不发", async () => {
   const zip = payload();
   const s = spec(zip);
   const hits: string[] = [];
@@ -218,7 +218,75 @@ test("重定向一律不跟 —— 白名单是发请求之前查的，跟着跳
     () => store.acquire(s.id),
     (e: ComponentError) => e.state === "refused-origin" && /evil\.example\.net/.test(e.message),
   );
-  assert.deepEqual(hits, [`${ORIGIN}/builds/test-shell.zip`], "只该发出清单里那一条直链，跳转的那一跳不许发");
+  assert.deepEqual(hits, [`${ORIGIN}/builds/test-shell.zip`], "白名单外的那一跳不许发出去");
+});
+
+/**
+ * 2026-09-19：**跟跳，但只跟到白名单里的主机。**
+ *
+ * 原来是「任何 3xx 一律拒」，而 GitHub 的发布资产本来就是「入口域名 302 到 CDN」，
+ * 且那个 CDN 地址带签名、会过期（钉不住）。于是 uv 那条组件的获取按钮**从发出去
+ * 那天起就点不动**，直到 owner 2026-09-19 在真机上第一次点它才现形。
+ */
+test("跳到白名单里的主机：跟，并且真的从第二跳取字节", async () => {
+  const zip = payload();
+  const s = spec(zip);
+  const hits: string[] = [];
+  const dataDir = mkdtempSync(join(tmpdir(), "ruyin-components-"));
+  const store = new ComponentStore({
+    dataDir,
+    components: () => [s],
+    allowedOrigins: () => [ORIGIN, "https://cdn.allowed.example"],
+    fetchImpl: ((url: URL) => {
+      hits.push(url.href);
+      if (url.origin === ORIGIN) {
+        return Promise.resolve(
+          new Response(null, { status: 302, headers: { location: "https://cdn.allowed.example/blob?sig=abc" } }),
+        );
+      }
+      return Promise.resolve(ok(zip));
+    }) as unknown as typeof fetch,
+  });
+  const out = await store.acquire(s.id);
+  assert.equal((out as { state: string }).state, "acquired");
+  assert.deepEqual(hits, [`${ORIGIN}/builds/test-shell.zip`, "https://cdn.allowed.example/blob?sig=abc"]);
+});
+
+test("跳去明文 http：拒 —— 白名单里有没有它都一样", async () => {
+  const zip = payload();
+  const s = spec(zip);
+  const { store } = harness(s, () =>
+    new Response(null, { status: 302, headers: { location: "http://cdn.allowed.example/x.zip" } }),
+  );
+  await assert.rejects(
+    () => store.acquire(s.id),
+    (e: ComponentError) => e.state === "refused-origin" && /明文/.test(e.message),
+  );
+});
+
+test("上游绕圈：跳到第四次就停，说清是绕圈不是白名单拒了它", async () => {
+  const zip = payload();
+  const s = spec(zip);
+  let n = 0;
+  const { store } = harness(s, () => {
+    n++;
+    return new Response(null, { status: 302, headers: { location: `${ORIGIN}/hop-${n}` } });
+  });
+  await assert.rejects(
+    () => store.acquire(s.id),
+    (e: ComponentError) => e.state === "refused-origin" && /超过 3 跳/.test(e.message),
+  );
+  assert.equal(n, 4, "第一跳加三跳，就停");
+});
+
+test("回了重定向却没有 Location：照实说看不见目的地，不说成白名单拒了它", async () => {
+  const zip = payload();
+  const s = spec(zip);
+  const { store } = harness(s, () => new Response(null, { status: 302 }));
+  await assert.rejects(
+    () => store.acquire(s.id),
+    (e: ComponentError) => e.state === "refused-origin" && /读不到 Location/.test(e.message),
+  );
 });
 
 test("fetch 用的是 redirect: manual —— 不把跳转交给运行时去跟", async () => {

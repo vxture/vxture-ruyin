@@ -218,6 +218,8 @@ export interface LocalApiDeps {
    * Python 半边（TD-042 ②）。缺省 = 这套装配没有，`/python-runtime` 如实回答 503。
    */
   python?: PythonRuntimeLike;
+  /** 现场探一遍运行环境（任务 52）。缺省 = 这套装配不提供，路由如实 503。 */
+  probeEnvironments?: () => unknown[];
   /**
    * 刷新产品分发层：逐个已装产品问它的能力面要技能目录。要能力面，未配置时
    * 缺省 —— `POST /skills/refresh` 那时只重扫本机，并说清没有分发来源。
@@ -1958,6 +1960,25 @@ async function handle(
       send(res, 200, { removed: segments[1] });
       return;
     }
+  }
+
+  /*
+   * GET /environments —— **现场**探一遍运行环境（RY-001 §07 任务 52）。
+   *
+   * 与 /python-runtime 的状态不同：那个说的是「我们记得装过没有」（一份回执），
+   * 这个说的是「此刻这台机器上到底有没有、是哪个版本」。两者可以不一致 —— 回执
+   * 没了、目录被杀毒清了、或者用户自己装了个更新的。owner 2026-09-19：「我不能
+   * 确认最终是不是成功还是失败」，缺的正是这一条。
+   *
+   * **纯粹是读**：不装任何东西、不改任何状态。
+   */
+  if (method === "GET" && path === "/environments") {
+    if (!deps.probeEnvironments) {
+      send(res, 503, apiError("ENV_PROBE_NOT_AVAILABLE", "当前版本暂不提供环境检查"));
+      return;
+    }
+    send(res, 200, { items: deps.probeEnvironments() });
+    return;
   }
 
   // --- Python 半边（ADR-018 §7.2；TD-042 ②）---------------------------------

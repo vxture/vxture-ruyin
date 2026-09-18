@@ -689,10 +689,7 @@ export const en: Catalog = {
   "set.update.howDownload": "Downloading",
   "set.update.howDownloadValue": "In your browser; the installer lands in your Downloads folder",
   "set.update.howInstall": "Installing",
-  "set.update.howInstallValue": "Run the installer over the top; your data is untouched",
-  "set.update.unsignedTitle": "This build is not digitally signed yet.",
-  "set.update.unsignedBody":
-    "Windows may show a warning when you install it; choose “More info” → “Run anyway” to continue. On the few computers with Smart App Control enabled it is blocked outright and double-clicking does nothing — in that case, please wait for a signed build. Only download the installer from the official Vxture download page.",
+  "set.update.howInstallValue": "Run the installer over the current version; your data is untouched. If Windows stops it once, choose More info → Run anyway",
 
   /* ── Settings: this machine ───────────────────────────────────────── */
   "set.hw.title": "This machine",
@@ -798,6 +795,13 @@ export const en: Catalog = {
   "set.env.title": "Runtimes",
   "set.env.desc": "What agents need in order to run. What the installer provides is ready to use; the rest installs on demand",
   "set.env.installed": "Installed",
+  "set.env.check": "Check",
+  "set.env.checking": "Checking…",
+  "set.env.checkNote": "Ask this computer what it actually has, and which version",
+  "set.env.probeBundled": "bundled {version}",
+  "set.env.probeBundledFailed": "the bundled copy will not run",
+  "set.env.probeSystem": "on this machine {version}",
+  "set.env.probeSystemMissing": "not on this machine",
   "set.env.nodeNote": "Provided by the installer; no separate setup required",
   "set.env.waiting_one": "# capability needs it.",
   "set.env.waiting_other": "# capabilities need it.",

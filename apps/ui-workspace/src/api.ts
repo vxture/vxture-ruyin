@@ -535,6 +535,16 @@ export interface PythonRuntimeStatus {
   reason?: string;
 }
 
+/**
+ * 一个运行环境此刻的样子。源头：apps/local-host/src/env-probe.ts。
+ * 两个来源分开报：随包 / 装好的那一份，与本机 PATH 上已有的那一份。
+ */
+export interface EnvProbeRow {
+  id: string;
+  bundled?: { path: string; version?: string; error?: string };
+  system?: { version?: string; error?: string };
+}
+
 export interface Binding {
   type: string;
   /** 契约的来源种类（local / lan / private …）。 */
@@ -1067,6 +1077,12 @@ export class Api {
   cancelComponent = (id: string) =>
     this.call<{ cancelled: boolean }>(`/components/${encodeURIComponent(id)}/cancel`, "POST");
   removeComponent = (id: string) => this.call<{ removed: string }>(`/components/${encodeURIComponent(id)}`, "DELETE");
+  /**
+   * **现场**探一遍运行环境（任务 52）。与 pythonRuntime() 的状态不同：那个说的是
+   * 「我们记得装过没有」，这个说的是「此刻这台机器上到底有没有、是哪个版本」。
+   * 纯粹是读，不装任何东西。
+   */
+  environments = () => this.call<{ items: EnvProbeRow[] }>("/environments");
   /** Python 半边（TD-042 ②）：uv 不随包，这一条问它装好了没有。 */
   pythonRuntime = () => this.call<PythonRuntimeStatus>("/python-runtime");
   /**

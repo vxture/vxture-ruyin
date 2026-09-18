@@ -62,6 +62,8 @@ function fakeApi(over: Partial<Api> = {}): Api {
     // 更新渠道（任务 49）：缺省当作「这套装配不管渠道」—— 那一行整行不显示，
     // 于是偏好设置那几条只数四行的用例照旧成立。
     updateChannel: vi.fn().mockRejectedValue(new ApiError(503, { error: "UPDATE_CHANNEL_NOT_CONFIGURED" })),
+    // 环境检查（任务 52）：缺省当作这套装配不提供 —— 点了也不该假装查过。
+    environments: vi.fn().mockRejectedValue(new ApiError(503, { error: "ENV_PROBE_NOT_AVAILABLE" })),
     ...over,
   } as unknown as Api;
 }
@@ -1576,38 +1578,35 @@ void test("Settings/软件更新: 两块（检查更新收进「当前版本」�
 });
 
 /**
- * 未签名提醒挪到「安装方式」这一块了（owner 2026-09-16，从「关于」页搬回来）：
- * 用户正要点下载的这一刻，才是这句话真正管用的地方。判断式：签了就自己没了。
+ * 2026-09-19（owner）：那块常驻的「这个版本还没有数字签名」删了。两个理由：
  *
- * 三种状态各钉一条，**中间那条最要紧**：`unpackaged` 绝不能当成「未签名」——
- * 从仓里直接跑时根本没有安装包可谈，那时挂一条讲安装提示的提醒是错的。
- * 缺失 ≠ 否定，同 `capabilitySurface` 的纪律。
+ *   ① **看到它的人已经装完了** —— 一句写给「安装那一刻」的话，出现在装好之后的
+ *      设置页里，本身就是错位；
+ *   ② 我们不把升级方式说成缺陷。**下载 + 运行**是当前的产品策略（不做自动更新，
+ *      TD-021），那就按策略写在「怎么安装」那一行里。
  *
- * 措辞（owner 2026-09-17）：**不教用户去「解除锁定」**。那是逐台机器的绕行，
- * 不是产品解法（TD-001 补记：SAC 那一层只有签名做得到）；写进界面等于让用户
- * 自己去掉系统给的保护。开着智能应用控制时就照实说装不上，等签名版本。
+ * 真正有用的那半句（Windows 可能拦一次）留着，但并进那一行事实 —— 它只在用户
+ * 即将去下载、运行安装包时才用得上，而那正是那一行在说的事。
+ *
+ * 这条用例现在守的是**它别回来**：三种签名状态下都不该出现那块声明。
  */
-void test("Settings/软件更新: 未签名才提醒；已签名与开发态都不提醒", async () => {
+void test("Settings/软件更新: 不再有常驻的签名声明；升级方式按产品策略写成一行事实", async () => {
   const withSigning = (v: SystemInfo["codeSigning"]) =>
     fakeApi({ system: vi.fn().mockResolvedValue(systemInfo({ codeSigning: v })) });
 
-  const unsignedRender = renderSection("updates", withSigning("unsigned"));
-  expect(await screen.findByText(/还没有数字签名/)).toBeInTheDocument();
-  // 只讲「点仍要运行」会误导开着智能应用控制的用户：那里是封锁，不是警告
-  // （TD-001 补记）。两种情形都要说到。
-  expect(screen.getByText(/智能应用控制/)).toBeInTheDocument();
-  // **不教「解除锁定」**：那是让用户自己去掉系统给的保护。
+  for (const state of ["unsigned", "signed", "unpackaged"] as const) {
+    renderSection("updates", withSigning(state));
+    await screen.findByText("检查更新");
+    expect(screen.queryByText(/数字签名/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/智能应用控制/)).not.toBeInTheDocument();
+    cleanup();
+  }
+
+  renderSection("updates", withSigning("unsigned"));
+  // 那半句仍在，但它现在是「怎么安装」这一行事实的一部分，不是一块警告。
+  expect(await screen.findByText(/仍要运行/)).toBeInTheDocument();
+  // **不教「解除锁定」**：那是让用户自己去掉系统给的保护（TD-001 补记）。
   expect(document.body.textContent).not.toContain("解除锁定");
-  cleanup();
-
-  renderSection("updates", withSigning("signed"));
-  await screen.findByText("检查更新");
-  expect(screen.queryByText(/还没有数字签名/)).not.toBeInTheDocument();
-  cleanup();
-
-  renderSection("updates", withSigning("unpackaged"));
-  await screen.findByText("检查更新");
-  expect(screen.queryByText(/还没有数字签名/)).not.toBeInTheDocument();
 });
 
 /**
@@ -3033,4 +3032,39 @@ test("软件更新：写不进去时下拉不许自己变样 —— 看起来开
   const select = (await screen.findByRole("combobox", { name: "版本偏好" })) as HTMLSelectElement;
   await userEvent.selectOptions(select, "beta");
   expect(((await screen.findByRole("combobox", { name: "版本偏好" })) as HTMLSelectElement).value).toBe("stable");
+});
+
+/* ── 环境检查（任务 52）──────────────────────────────────────────────────
+ *
+ * owner 2026-09-19：「我不能确认最终是不是成功还是失败」。徽标说的是「我们记得装过
+ * 没有」，这个按钮回答的是「此刻这台机器上到底有什么、是哪个版本」。
+ */
+test("能力平台：点「检查」后，每一行换成现场探到的版本；随包与本机分开报", async () => {
+  const api = skillsApi({
+    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
+    environments: vi.fn().mockResolvedValue({
+      items: [
+        { id: "node", bundled: { path: "C:/app/node.exe", version: "22.20.0" }, system: { version: "20.11.0" } },
+        { id: "python", system: { error: "spawn python ENOENT" } },
+      ],
+    }),
+  });
+  renderSection("skills", api);
+  await userEvent.click(await screen.findByRole("button", { name: "检查" }));
+  // 随包那一份与本机那一份是两件事，分开说。
+  expect(await screen.findByText(/随包 22\.20\.0 · 本机 20\.11\.0/)).toBeTruthy();
+  // 没探到就说没探到 —— **不拿回执冒充**。
+  expect(screen.getByText(/本机未装/)).toBeTruthy();
+});
+
+test("能力平台：这套装配不提供环境检查时，点了也不假装查过", async () => {
+  const api = skillsApi({
+    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
+    environments: vi.fn().mockRejectedValue(new ApiError(503, { error: "ENV_PROBE_NOT_AVAILABLE" })),
+  });
+  renderSection("skills", api);
+  await userEvent.click(await screen.findByRole("button", { name: "检查" }));
+  // 还是「还没装 · 需下载 …」那一路，没有任何一行冒出版本号。
+  expect(await screen.findByText(/还没装 · 需下载/)).toBeTruthy();
+  expect(screen.queryByText(/随包 /)).toBeNull();
 });

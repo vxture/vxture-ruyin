@@ -142,6 +142,15 @@ if (existsSync(componentStore)) {
         "    每一跳都可以是白名单外的主机：那份闭合白名单于是只挡住了第一跳。",
     );
   }
+  // 2026-09-19：跟重定向是允许的（GitHub 的发布资产本来就是「入口域名 302 到 CDN」，
+  // 而那个 CDN 地址带签名、会过期，钉不住），**但每一跳都要重新查那份闭合名单**。
+  // 只有 manual 而没有这一句，等于跟着上游走。
+  if (!/allowed\.has\(next\.origin\)/.test(store)) {
+    problems.push(
+      "component-store.ts 跟重定向时没有对**每一跳**重查 allowedOrigins —— \n" +
+        "    那样白名单就只挡住了第一跳，后面去哪台主机取字节由上游说了算。",
+    );
+  }
   if (!/if\s*\([^)]*protocol\s*!==\s*"https:"/.test(store)) {
     problems.push(
       'component-store.ts 没有检查 `url.protocol !== "https:"` —— `new URL("http://…").origin`\n' +

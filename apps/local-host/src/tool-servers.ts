@@ -412,6 +412,11 @@ export class BundledToolServers {
    * 随包的真 node.exe 在哪（`<resources>/node`，与 `uv` 兄弟）。没有就是这一版
    * 没装进来（开发态：没跑过 `pack.mjs`）——那时退回借 Ruyin.exe 自己跑的旧路子。
    */
+  /** 随包那个真 node.exe 在哪（环境检查要用；没有就是这一版没装进来）。 */
+  bundledNodeExe(): string | undefined {
+    return this.nodeExe();
+  }
+
   private nodeExe(): string | undefined {
     const dir = this.options.toolsDir;
     if (!dir || process.platform !== "win32") return undefined;

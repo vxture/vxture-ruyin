@@ -57,6 +57,7 @@ import {
   type SkillView,
   type ComponentState,
   type UpdateCheck,
+  type EnvProbeRow,
   type PythonRuntimeStatus,
   type PythonRuntimeState,
   type PythonStepCode,
@@ -1579,15 +1580,15 @@ function UpdatesSection({
         <FactRow label={t("set.update.howCheck")} value={t("set.update.howCheckValue")} />
         <FactRow label={t("set.update.howDownload")} value={t("set.update.howDownloadValue")} />
         <FactRow label={t("set.update.howInstall")} value={t("set.update.howInstallValue")} />
-        {system?.codeSigning === "unsigned" && (
-          <p className="set-callout set-callout--warning">
-            <Icon name="warning" size="sm" />
-            <span>
-              <strong>{t("set.update.unsignedTitle")}</strong>{" "}
-              {t("set.update.unsignedBody")}
-            </span>
-          </p>
-        )}
+        {/*
+          2026-09-19（owner）：这里原来常驻一块「这个版本还没有数字签名」的警告。删了，
+          两个理由：① **看到它的人已经装完了** —— 一句写给「安装那一刻」的话出现在装好
+          之后的设置页里，本身就是错位；② 我们不把升级方式说成缺陷。**下载 + 运行**是
+          当前的产品策略（不做自动更新，TD-021），那就按策略来写，写在上面那三行事实里。
+
+          真正有用的那一句 —— Windows 可能拦一次 —— 挪进「怎么安装」那一行：它只在
+          用户即将去下载、运行安装包时才需要，而那正是那一行在说的事。
+        */}
       </SettingsBlock>
     </>
   );
@@ -1927,6 +1928,29 @@ function pythonLine(t: TFn, python: PythonRuntimeStatus): string {
     license: p.license,
     origin: p.origin,
   });
+}
+
+/**
+ * 环境检查之后，那一行说什么。**查过才说** —— 没查过回 undefined，界面照旧显示
+ * 「装没装」那一路。查到什么写什么：随包那一份与本机那一份分开报，问不到就说问不到。
+ */
+function envLine(t: TFn, rows: EnvProbeRow[] | null, id: string): string | undefined {
+  const row = rows?.find((r) => r.id === id);
+  if (!row) return undefined;
+  const parts: string[] = [];
+  if (row.bundled) {
+    parts.push(
+      row.bundled.version
+        ? t("set.env.probeBundled", { version: row.bundled.version })
+        : t("set.env.probeBundledFailed"),
+    );
+  }
+  parts.push(
+    row.system?.version
+      ? t("set.env.probeSystem", { version: row.system.version })
+      : t("set.env.probeSystemMissing"),
+  );
+  return parts.join(" · ");
 }
 
 /** 那半句话：认得的码按语言说，没有码就不说 —— **不拿守护进程的原话凑一句**。 */
@@ -2283,6 +2307,23 @@ function SkillsSection({ api }: { api: Api }) {
   // 需要 Python 的那几项能力。**装好之后也要算得上** —— 那时它们报的是 running /
   // launchable（带 runtime=uvx），而不是 needs-python；只认后者的话，装完计数就归零，
   // 「有几项在等它」这句话会在装好的那一刻变成假的。
+  /*
+   * 环境检查（任务 52）。**按需**，不在挂载时自动跑：每一条都要真起一次子进程问版本，
+   * 而这一屏很多人只是路过。null = 还没查过，界面照旧显示「装没装」那一路。
+   */
+  const [envRows, setEnvRows] = useState<EnvProbeRow[] | null>(null);
+  const [envBusy, setEnvBusy] = useState(false);
+  const checkEnv = async () => {
+    setEnvBusy(true);
+    try {
+      setEnvRows((await api.environments()).items);
+    } catch {
+      // 这套装配不提供（503）或守护进程没应：什么都不显示，比显示一个假答案强。
+      setEnvRows(null);
+    } finally {
+      setEnvBusy(false);
+    }
+  };
   const needsPython = (tool: ToolView) =>
     tool.detailCode === "needs-python" || tool.detailVars?.["runtime"] === "uvx";
   const pythonNeeded = (tools ?? []).filter(needsPython).length;
@@ -2332,18 +2373,25 @@ function SkillsSection({ api }: { api: Api }) {
         <SettingsBlock icon="terminal" title={t("set.env.title")} desc={t("set.env.desc")}>
           {/* Node.js 随安装包走：这一行永远是「已装好」，写出来是为了让「运行环境」
               这一块有个参照 —— 只列缺的那一个，用户不知道齐了是什么样。 */}
+          {/*
+            「检查」是这一块唯一的动作按钮（owner 2026-09-19）：**它回答的是另一个问题**。
+            徽标说的是「我们记得装过没有」（一份回执），而用户想知道的是「此刻这台机器上
+            到底有没有、是哪个版本」—— owner 原话：「我不能确认最终是不是成功还是失败」。
+            两者可以不一致：回执没了、目录被杀毒清了、或者他自己早装了个更新的。
+          */}
           <div className="env-row">
             <span className="env-name">Node.js</span>
             <StatusBadge tone="success">{t("set.env.installed")}</StatusBadge>
-            <span className="env-note">{t("set.env.nodeNote")}</span>
+            <span className="env-note">{envLine(t, envRows, "node") ?? t("set.env.nodeNote")}</span>
           </div>
           {python && python.component && (
             <>
               <div className="env-row">
                 <span className="env-name">Python</span>
                 <StatusBadge tone={PYTHON_TONE[python.state]}>{t(PYTHON_STATE_KEY[python.state])}</StatusBadge>
-                {/* 体积、许可证、来源主机在按钮左边 —— 点之前就看得见要下多少。 */}
-                <span className="env-note">{pythonLine(t, python)}</span>
+                {/* 体积、许可证、来源主机在按钮左边 —— 点之前就看得见要下多少。
+                    检查过之后，这一行换成**现场探到的版本** —— 那才是用户要的答案。 */}
+                <span className="env-note">{envLine(t, envRows, "python") ?? pythonLine(t, python)}</span>
                 {/* 按钮靠右（owner 第 4.4 条）：一行里「说明」与「动作」分站两头，
                     扫一眼就知道哪边是要点的。 */}
                 <span className="env-actions">
@@ -2365,7 +2413,15 @@ function SkillsSection({ api }: { api: Api }) {
                   )}
                 </span>
               </div>
-              {/* 有多少项能力在等它 —— 这句话是用户判断「值不值得装」的依据。 */}
+              <div className="env-row">
+            <span className="env-note">{t("set.env.checkNote")}</span>
+            <span className="env-actions">
+              <Button variant="outline" size="sm" disabled={envBusy} onClick={() => void checkEnv()}>
+                {t(envBusy ? "set.env.checking" : "set.env.check")}
+              </Button>
+            </span>
+          </div>
+          {/* 有多少项能力在等它 —— 这句话是用户判断「值不值得装」的依据。 */}
               {pythonNeeded > 0 && (
                 <p className="set-note">{t("set.env.waiting", { count: pythonNeeded })}</p>
               )}
