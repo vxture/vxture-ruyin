@@ -257,7 +257,7 @@ vhost」。两处都改了，各有实测的理由：
 目录布局（键就是地址，不做映射花样）：
 
 ```text
-oss.ruyin.work/                      # 桶 ruyin-download（华北2 · 北京），公共读、私有写
+oss.ruyin.work/                      # 桶 ruyin-download（华北2 · 北京），公共读、私有写，HTTPS 已启用（2026-09-18）
 ├── stable/
 │   ├── Ruyin-Setup-1.0.0.exe（+ .blockmap）   # 带版本号，内容不变，长缓存
 │   ├── Ruyin-Setup-latest.exe                 # **固定地址**，给人点的那一个，no-cache

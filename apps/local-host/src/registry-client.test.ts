@@ -40,7 +40,7 @@ function respond(body: string | Buffer, status = 200, headers: Record<string, st
   return (async () => new Response(body, { status, headers })) as unknown as typeof fetch;
 }
 
-test("index: a good index is ok with its items; the default base is the dl host layout", async () => {
+test("index: a good index is ok with its items; the default base is the download host", async () => {
   const index = { schema: INDEX_SCHEMA, generatedAt: "2026-09-03T00:00:00Z", items: [entry()] };
   const out = await fetchRegistryIndex({ base: BASE, fetchImpl: respond(JSON.stringify(index)), now: () => "t" });
   assert.equal(out.status, "ok");
@@ -49,7 +49,8 @@ test("index: a good index is ok with its items; the default base is the dl host 
   assert.equal(out.items[0]?.id, "bidproposal");
   assert.equal(out.checkedAt, "t");
   const dflt = await fetchRegistryIndex({ fetchImpl: respond("", 404) });
-  assert.equal(dflt.base, "https://dl.vxture.com/ruyin/products");
+  // 2026-09-18：下载主机换成阿里云 OSS + oss.ruyin.work（TD-038），缺省基址跟着换。
+  assert.equal(dflt.base, "https://oss.ruyin.work/products");
 });
 
 test("index: every bad index is unreachable with the reason - HTTP error, not JSON, wrong schema, malformed entry, duplicate, thrown fetch", async () => {
