@@ -392,6 +392,32 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
   console.log(`[pack] bundled tool server self-check: ${line[1]}`);
 }
 
+// 预置服务器**不许在非回环地址上监听**（RY-001 §07 任务 50）。
+//
+// 真机上实测到的那一次：aas-ee.open-websearch 默认在 0.0.0.0:3000 上开 HTTP 服务器，
+// 于是 Windows 弹「是否允许 Node.js JavaScript Runtime 通信」—— 弹窗只是症状，真正的
+// 问题是同一个局域网里的任何人都能访问它，而它是随包**默认启用**的工具。
+//
+// **这一条静态检查看不见**（第三方包某个版本的默认行为，藏在它自己的配置分支里），
+// 只有真起一次、再去数一遍端口才看得见 —— 而它已经随包发出去过一次了。
+{
+  const line = /\[ruyin\] listener audit: ([^\r\n]*)/.exec(smokeOut);
+  if (!line) {
+    console.error("[pack] FAILED: 守护进程没有报端口审计（缺 \"[ruyin] listener audit\" 这一行）");
+    process.exit(1);
+  }
+  if (!line[1].startsWith("ok")) {
+    console.error(
+      `[pack] FAILED: 预置服务器在非回环地址上监听 —— ${line[1]}。\n` +
+        "  同一个局域网里的任何人都能访问它，而这是随包默认启用的工具。\n" +
+        "  修法：在 resources/skill-manifest.json 里给那个服务器的 launch.env 加上关掉网络监听的开关\n" +
+        "  （例如 open-websearch 的 MODE=stdio）；stdio 才是 MCP 该用的传输。",
+    );
+    process.exit(1);
+  }
+  console.log(`[pack] listener audit: ${line[1]}`);
+}
+
 // uvx 自检**这一轮必须是「还没装」**（2026-09-18，TD-042 ②）。
 //
 // 判据翻了个面：以前它必须 `ok`（Python 半边随包，起不来就是包坏了），现在包里

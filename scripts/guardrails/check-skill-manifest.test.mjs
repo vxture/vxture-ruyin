@@ -118,6 +118,18 @@ test("默认档的 node 服务器没随包 —— 干净机器上它根本不在
   assert.match(out, /vendored\.bundled/);
 });
 
+test("launch.env 形状不对要拦 —— 它是我方固定的环境变量，写错了会静默失效", () => {
+  // 这个字段是为了关掉 open-websearch 的 0.0.0.0:3000（RY-001 §07 任务 50）。
+  const ok = baseline();
+  ok.servers[0].launch.env = { MODE: "stdio" };
+  assert.equal(run(ok).code, 0, run(ok).out);
+  for (const bad of [{ mode: "stdio" }, { MODE: 3000 }, ["MODE=stdio"]]) {
+    const m = baseline();
+    m.servers[0].launch.env = bad;
+    assert.match(run(m).out, /launch.env 要是/, JSON.stringify(bad));
+  }
+});
+
 test("uvx 形态挂默认档 —— uv 不随包了，干净机器上一个字节都没有它", () => {
   const m = baseline();
   m.servers[1].tier = "default";

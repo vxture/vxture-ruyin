@@ -61,6 +61,16 @@ for (const e of m.servers ?? []) {
     if (l.runtime === "node" && !l.bin) errors.push(`${where}: node 形态要给包内入口 bin`);
     if (l.args !== undefined && !Array.isArray(l.args)) errors.push(`${where}: launch.args 要是数组`);
     if (l.requiresEnv !== undefined && !(Array.isArray(l.requiresEnv) && l.requiresEnv.every((k) => /^[A-Z][A-Z0-9_]*$/.test(k)))) errors.push(`${where}: requiresEnv 要是大写变量名数组`);
+    // launch.env 是**我方固定的**环境变量（与 requiresEnv 那种「用户要填的」分开）。
+    // 它存在的理由是实测出来的：open-websearch 不给 MODE 就会在 0.0.0.0:3000 上开
+    // 一个 HTTP 服务器（RY-001 §07 任务 50）。值必须是字符串 —— 一个写成数字的端口
+    // 传到 spawn 那里会静默变成 undefined。
+    if (l.env !== undefined) {
+      const ok =
+        l.env && typeof l.env === "object" && !Array.isArray(l.env) &&
+        Object.entries(l.env).every(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && typeof v === "string");
+      if (!ok) errors.push(`${where}: launch.env 要是「大写变量名 → 字符串」的对象`);
+    }
     if (l.requiresComponent !== undefined && !(Array.isArray(l.requiresComponent) && l.requiresComponent.length > 0)) {
       errors.push(`${where}: requiresComponent 要是非空数组`);
     }

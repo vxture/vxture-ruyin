@@ -77,6 +77,11 @@ export class McpConnector implements ConnectorPort {
   private readonly client: McpClient;
   private toolNames: string[] = [];
 
+  /** 子进程号（端口审计用，见 listener-audit.ts）。HTTP 形态没有子进程。 */
+  pid(): number | undefined {
+    return (this.client as { pid?: () => number | undefined }).pid?.();
+  }
+
   constructor(
     spec: McpConnectorSpec,
     private readonly options: { timeoutMs?: number; limits?: ResourceLimits } = {},

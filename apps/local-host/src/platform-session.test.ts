@@ -467,7 +467,9 @@ describe("platform-session", () => {
       const ok = path === "/auth/native/claim";
       return {
         ok,
-        status: ok ? 200 : path === "/api/me" ? 200 : 401,
+        // **连身份那条也 401 才算会话真被拒**（任务 50）：一次 401 不再等于登出，
+        // 守护进程会向 /api/me 再确认一次。
+        status: ok ? 200 : 401,
         json: async () => (ok ? { rpsid: "sess-401", expiresInSec: 3600 } : { id: "u1" }),
         headers: { get: () => null } as unknown as Headers,
       } as Response;
@@ -481,6 +483,34 @@ describe("platform-session", () => {
     assert.equal(s.signedIn(), false);
   });
 
+  /**
+   * bug 2（owner 2026-09-18 真机报的）：约十分钟后自己登出，回到登录页。
+   *
+   * 根因是这里原来一行代码 —— 平台**任何一个接口**回一次 401，就 signOutLocal()。
+   * 而 syncEntitlements 每 5 分钟问一次，第二次那一下撞上就把人踢了。
+   */
+  it("一个接口回 401、而身份那条仍认 —— **不登出**，并且把这件事写进日志", async () => {
+    const lines: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: URL | string) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/auth/native/claim") {
+        return { ok: true, status: 200, json: async () => ({ rpsid: "sess-blip", expiresInSec: 3600 }), headers: { get: () => null } as unknown as Headers } as Response;
+      }
+      // 身份那条照常，权益那条抽风回 401 —— 真机上就是这个形状。
+      const ok = path === "/api/me";
+      return { ok, status: ok ? 200 : 401, json: async () => ({ id: "u1" }), headers: { get: () => null } as unknown as Headers } as Response;
+    }) as typeof fetch;
+    restores.push(() => void (globalThis.fetch = original));
+
+    const s = new PlatformSession({ ...CONFIG, log: (l) => lines.push(l) }, fakeKeys(), makeDir());
+    s.beginLogin();
+    await s.completeLogin();
+    const res = await s.fetch("/api/subscription/subscribed-products");
+    assert.equal(res.status, 401, "那一个接口的 401 原样交回去，由调用方自己处理");
+    assert.equal(s.signedIn(), true, "**不许因为一次 401 就把人登出**");
+    assert.ok(lines.some((l) => /仍认这条会话/.test(l)), "这条判断要留下痕迹，否则下次又是零证据");
+  });
   it("quotaUsage 走 console-bff 的配额读", async () => {
     const f = stubFetch([
       { status: 200, body: { rpsid: "sess-q", expiresInSec: 3600 } },
