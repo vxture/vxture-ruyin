@@ -687,7 +687,8 @@ export const en: Catalog = {
   "set.update.howCheckValue":
     "Press “Check for updates”, or leave “Check automatically” on and it checks at each start",
   "set.update.howDownload": "Downloading",
-  "set.update.howDownloadValue": "In your browser; the installer lands in your Downloads folder",
+  "set.update.howDownloadValue":
+    "In your browser; the installer lands in your Downloads folder. It is large because it carries the Node.js and Python runtimes",
   "set.update.howInstall": "Installing",
   "set.update.howInstallValue": "Run the installer over the current version; your data is untouched. If Windows stops it once, choose More info → Run anyway",
 
@@ -736,7 +737,12 @@ export const en: Catalog = {
   "set.cap.component.cancelled": "Cancelled",
   "set.cap.component.failed": "Could not fetch it",
   "set.cap.bundledSummary": "{n} built in, shipped with the installer and downloading nothing",
-  "set.cap.bundledBlocked": " ({n} of them need configuring before they start)",
+  "set.cap.bundledBlocked": " ({n} of them cannot start: {reasons})",
+  "set.cap.blockedReason.needsEnv": "{n} awaiting configuration",
+  "set.cap.blockedReason.needsPython": "{n} missing the Python runtime",
+  "set.cap.blockedReason.noLaunchSpec": "{n} with no way to start",
+  "set.cap.blockedReason.blocked": "{n} held back by policy",
+  "set.cap.blockedReason.other": "{n} for reasons not yet named",
   "set.cap.bundledNeeds":
     "; {n} more need fetching (online, or imported from a local file).",
   "set.cap.bundledEnd": ".",
@@ -771,6 +777,9 @@ export const en: Catalog = {
   "set.skills.emptyLayer": "No skills in this layer.",
   "set.skills.groupAria": "Skills · {group}",
   "set.skills.hasScripts": "Includes scripts (not run locally)",
+  "set.skills.blocked": ". {n} of them are unusable: {reasons}",
+  "set.skills.blockedScripts": "{n} carry scripts, which are not executed on this machine",
+  "set.skills.blockedShadowed": "{n} are shadowed by a nearer skill of the same name",
   "set.skills.shadowed": "Shadowed by the {layer} layer",
   "set.skills.enabled": "Enabled",
   "set.skills.disabled": "Disabled",
@@ -793,7 +802,7 @@ export const en: Catalog = {
 
   /* Settings: Python runtime */
   "set.env.title": "Runtimes",
-  "set.env.desc": "What agents need in order to run. What the installer provides is ready to use; the rest installs on demand",
+  "set.env.desc": "What agents run on. Everything here ships with the installer and works out of the box",
   "set.env.installed": "Installed",
   "set.env.check": "Check",
   "set.env.checking": "Checking…",
@@ -802,7 +811,7 @@ export const en: Catalog = {
   "set.env.probeBundledFailed": "the bundled copy will not run",
   "set.env.probeSystem": "on this machine {version}",
   "set.env.probeSystemMissing": "not on this machine",
-  "set.env.nodeNote": "Provided by the installer; no separate setup required",
+  "set.env.bundledNote": "Provided by the installer; no separate setup required",
   "set.env.waiting_one": "# capability needs it.",
   "set.env.waiting_other": "# capabilities need it.",
   "set.python.title": "Python runtime",

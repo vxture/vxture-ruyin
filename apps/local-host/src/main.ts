@@ -82,7 +82,6 @@ import { SkillRegistry } from "./skill-registry.js";
 import { refreshDistributedSkills } from "./skill-distribution.js";
 import { ToolRegistryView } from "./tool-registry.js";
 import { ComponentStore, readComponentSpecs } from "./component-store.js";
-import { PythonRuntime } from "./python-runtime.js";
 import { readUpdateChannel, writeUpdateChannel } from "./update-channel.js";
 import { probeEnvironments } from "./env-probe.js";
 import { auditListeners, describeAudit } from "./listener-audit.js";
@@ -316,20 +315,6 @@ const bundledTools = new BundledToolServers({
   components: componentStore,
   log: (line) => console.error(line),
 });
-/**
- * Python 半边（TD-042 ②）：uv 与 CPython **不随安装包**（owner 2026-09-17 定性
- * 「安装包小一些，租户按照需求，安装必要环境」）。这里只构造它 —— 读盘、算状态，
- * **一个字节都不取**；真的装发生在用户点下那一次（`POST /python-runtime/provision`）。
- */
-const pythonRuntime = new PythonRuntime({
-  dataDir,
-  components: componentStore,
-  config: () => bundledTools.pythonConfig(),
-  seeds: () => bundledTools.pythonSeeds(),
-  onChanged: () => events.publish({ kind: "component" }),
-  log: (line) => console.error(line),
-});
-bundledTools.setPython(pythonRuntime);
 const resourceLimits = resourceLimitsFromEnv();
 
 const connectorRegistry = new ConnectorRegistry(dataDir, connectors, {
@@ -630,14 +615,8 @@ const server = createLocalApi({
     },
   }),
   components: componentStore,
-  python: pythonRuntime,
   // 现场探一遍运行环境（任务 52）：随包 / 装好的那一份，以及本机 PATH 上已有的。
-  probeEnvironments: () =>
-    probeEnvironments({
-      nodeExe: bundledTools.bundledNodeExe(),
-      uvExe: pythonRuntime.uvExe(),
-      pythonExe: pythonRuntime.interpreter(),
-    }),
+  probeEnvironments: () => probeEnvironments(bundledTools.bundledRuntimePaths()),
   ...(capabilityBase ? { refreshDistributedSkills: refreshAllDistributed } : {}),
   uiDir,
   platform,
@@ -933,10 +912,6 @@ function listenerAudit(): void {
 }
 
 async function uvxSelfCheck(): Promise<void> {
-  if (!pythonRuntime.isReady()) {
-    console.log(`[ruyin] uvx self-check: python runtime not installed (${pythonRuntime.status().state})`);
-    return;
-  }
   const candidate = bundledTools
     .launchable()
     .find((s) => s.launch?.runtime === "uvx" && !(s.launch.requiresEnv?.length) && !s.launch.requiresBin);

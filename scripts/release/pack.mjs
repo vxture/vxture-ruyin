@@ -107,10 +107,10 @@ if (skillPull) {
   run("node", [join(repoRoot, "scripts", "release", "pull-skills.mjs")], repoRoot);
   // 预置的 MCP 服务器（node 形态 vendored 进 resources/tools；TD-042）。
   run("node", [join(repoRoot, "scripts", "release", "pull-tools.mjs")], repoRoot);
-  // **Python 半边不在这里了**（2026-09-18，TD-042 ②）：uv + CPython + 预取缓存
-  // 那 219 MB 从安装包里整个拿掉，改成用户点一次才落到本机（owner 2026-09-17 定性
-  // 「安装包小一些，租户按照需求，安装必要环境」）。装它的那段代码搬进了守护进程的
-  // apps/local-host/src/python-runtime.ts，seed-uv-cache.mjs 随之退出构建。
+  // Python 运行环境（owner 2026-09-19：装完就不该有起不来的能力）：uv + CPython +
+  // 预取缓存。它自己核 uv 的 sha256，并在最后用一个空的 UV_TOOL_DIR 断网真起一次
+  // —— 那一跑才是「随包这棵树自己够」的凭据。
+  run("node", [join(repoRoot, "scripts", "release", "seed-uv-cache.mjs")], repoRoot);
   // 随包真 node.exe：node 形态的服务器借它起，避免 ELECTRON_RUN_AS_NODE 重执行
   // 在 Windows 上弹出空白 cmd 窗口。它自己核 node.exe 的 sha256。
   run("node", [join(repoRoot, "scripts", "release", "seed-node-runtime.mjs")], repoRoot);
@@ -418,39 +418,25 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
   console.log(`[pack] listener audit: ${line[1]}`);
 }
 
-// uvx 自检**这一轮必须是「还没装」**（2026-09-18，TD-042 ②）。
+// uvx 形态也真起了一次。node 形态过了不代表 Python 半边过了：随包的 uv.exe、预取的
+// CPython、缓存够不够解析，是另一条完全不同的链。
 //
-// 判据翻了个面：以前它必须 `ok`（Python 半边随包，起不来就是包坏了），现在包里
-// 一个字节都没有它，所以刚装完的机器上它**只能**是 not installed —— 要是它报了
-// `ok`，那说明有什么东西又把 uv 塞回了安装包，或者冒烟捡到了这台构建机上别处的
-// uv。两种都是要当场知道的事，而不出错时它们什么都不会说。
+// **2026-09-19 判据翻回来了**：前一天它是「必须是还没装」（那时 Python 不随包），
+// 而 owner 定了新方向 —— 装完就不该有起不来的能力。于是这里回到「必须 ok」。
 {
   const line = /\[ruyin\] uvx self-check: ([^\r\n]*)/.exec(smokeOut);
   if (!line) {
-    console.error("[pack] FAILED: 守护进程没有报 uvx 自检（缺 \"[ruyin] uvx self-check\" 这一行）");
+    console.error('[pack] FAILED: 守护进程没有报 uvx 自检（缺 "[ruyin] uvx self-check" 这一行）');
     process.exit(1);
   }
-  if (!line[1].startsWith("python runtime not installed")) {
+  if (skillPull && !line[1].startsWith("ok")) {
     console.error(
-      `[pack] FAILED: 刚装完的机器上 uvx 自检不该是「${line[1]}」—— Python 半边不随安装包（TD-042 ②），` +
-        "这一行只能是 python runtime not installed。报了别的，就是 uv 又进包了，或者捡到了本机别处的 uv。",
+      `[pack] FAILED: uvx 自检没过（${line[1]}）—— Python 运行环境随安装包走（owner 2026-09-19），` +
+        "装完之后它必须真起得来。看 electron-builder.yml 的 resources/uv 与清单的 pythonRuntime.seed。",
     );
     process.exit(1);
   }
-  console.log(`[pack] uvx self-check: ${line[1]}（Python 半边不随包，这正是预期）`);
-}
-
-// 安装包里**不许再有 uv**（同上）。上面那条查的是行为，这条查的是字节：
-// 一次误提交的 extraResources 会让安装包又胖 219 MB，而冒烟照样全绿。
-{
-  const stray = join(resourcesDir, "uv");
-  if (existsSync(stray)) {
-    console.error(
-      `[pack] FAILED: 安装目录里出现了 ${stray} —— Python 半边不随安装包（TD-042 ②，owner 2026-09-17 定性）。` +
-        "看 electron-builder.yml 的 extraResources。",
-    );
-    process.exit(1);
-  }
+  console.log(`[pack] uvx self-check: ${line[1]}`);
 }
 
 // 工作台界面真的被守护进程端出来了（TD-061）—— 装进包不等于端得出来。
@@ -548,7 +534,7 @@ if (process.platform === "win32") {
       console.error(`[pack] FAILED: 只读演练里应用没能被执行：${ro.error.message}`);
       process.exit(1);
     }
-    const verdict = judgeReadOnlySmoke({ smokeOut: roOut, dataDir: roDataDir });
+    const verdict = judgeReadOnlySmoke({ smokeOut: roOut, dataDir: roDataDir, expectUvx: skillPull });
     if (!verdict.ok) {
       console.error(verdict.message);
       process.exit(1);

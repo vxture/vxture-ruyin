@@ -116,18 +116,6 @@ export interface ComponentStoreLike {
   remove(id: string): boolean;
 }
 
-/**
- * Python 半边（TD-042 ②）；实现见 python-runtime.ts。uv 不随安装包，所以它有
- * 两步：取 uv 的字节（走上面那条获取通道），再用它在本机装出 CPython 与 wheel。
- * 界面上是一个按钮，所以 `provision` 把两步都做了。
- */
-export interface PythonRuntimeLike {
-  status(): { state: string; component: string | null };
-  provision(opts?: { acquire?: () => Promise<unknown> }): Promise<unknown>;
-  cancel(): boolean;
-  remove(): boolean;
-}
-
 /** 服务端只用登记册的这几个口；完整类型在 skill-registry.ts。 */
 export interface SkillRegistryLike {
   list(projectId?: string): SkillListing;
@@ -214,10 +202,6 @@ export interface LocalApiDeps {
    * 空列表会被读成「一件可获取的都没有」，那是另一回事。
    */
   components?: ComponentStoreLike;
-  /**
-   * Python 半边（TD-042 ②）。缺省 = 这套装配没有，`/python-runtime` 如实回答 503。
-   */
-  python?: PythonRuntimeLike;
   /** 现场探一遍运行环境（任务 52）。缺省 = 这套装配不提供，路由如实 503。 */
   probeEnvironments?: () => unknown[];
   /**
@@ -1965,10 +1949,10 @@ async function handle(
   /*
    * GET /environments —— **现场**探一遍运行环境（RY-001 §07 任务 52）。
    *
-   * 与 /python-runtime 的状态不同：那个说的是「我们记得装过没有」（一份回执），
-   * 这个说的是「此刻这台机器上到底有没有、是哪个版本」。两者可以不一致 —— 回执
-   * 没了、目录被杀毒清了、或者用户自己装了个更新的。owner 2026-09-19：「我不能
-   * 确认最终是不是成功还是失败」，缺的正是这一条。
+   * 运行环境随安装包走（TD-042 ②，2026-09-19 改判），所以「装没装」这个问题的答案
+   * 恒是「装了」——**这个接口问的不是那个**：它问「此刻这台机器上到底有没有、是哪个
+   * 版本」。两者可以不一致：目录被杀毒清了、或者用户自己装了个更新的（那一份也照实
+   * 报出来）。owner 2026-09-19：「我不能确认最终是不是成功还是失败」，缺的正是这一条。
    *
    * **纯粹是读**：不装任何东西、不改任何状态。
    */
@@ -1979,40 +1963,6 @@ async function handle(
     }
     send(res, 200, { items: deps.probeEnvironments() });
     return;
-  }
-
-  // --- Python 半边（ADR-018 §7.2；TD-042 ②）---------------------------------
-  //
-  // uv、CPython 与 wheel **不随安装包**（owner 2026-09-17 定性）。用户点一次，
-  // 这里把两步连起来：取 uv 的字节（获取通道），再用它在本机装出环境。
-  // **下载只在这一条路上发生** —— 启动、刷新、任务要工具时一律不下载。
-  if (segments[0] === "python-runtime") {
-    if (!deps.python) {
-      send(res, 503, apiError("PYTHON_RUNTIME_NOT_AVAILABLE", "当前版本暂不提供 Python 运行环境"));
-      return;
-    }
-    if (method === "GET" && segments.length === 1) {
-      send(res, 200, deps.python.status());
-      return;
-    }
-    if (method === "POST" && segments.length === 2 && segments[1] === "provision") {
-      const component = deps.python.status().component;
-      // **不等它装完**：装 CPython 加预热要几分钟，而这一次请求的答案只是「开始了」。
-      // 界面按 GET /python-runtime 看进度（与获取通道那条一样，事件来了就重新问）。
-      void deps.python.provision(
-        component && deps.components ? { acquire: () => deps.components!.acquire(component) } : {},
-      );
-      send(res, 200, deps.python.status());
-      return;
-    }
-    if (method === "POST" && segments.length === 2 && segments[1] === "cancel") {
-      send(res, 200, { cancelled: deps.python.cancel() });
-      return;
-    }
-    if (method === "DELETE" && segments.length === 1) {
-      send(res, 200, { removed: deps.python.remove() });
-      return;
-    }
   }
 
   // GET /products - 受管资产视图：已装 + 启用态 + 订阅可用性（§18.5）
