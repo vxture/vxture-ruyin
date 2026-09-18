@@ -56,6 +56,14 @@ export interface BeginLoginOptions {
 export interface PlatformSessionConfig {
   /** console-bff 的公网基址，例如 https://console.vxture.com */
   consoleBase: string;
+  /**
+   * 会话状态迁移写到哪儿（RY-001 §07 任务 50）。
+   *
+   * 2026-09-18 之前这条迁移**一行都不写**：用户在真机上被弹回登录页，而我们手上
+   * 零证据 —— 连「哪个接口回的 401」都不知道。登出是用户能感知到的最粗暴的一件事，
+   * 它不该是无声的。
+   */
+  log?: (line: string) => void;
 }
 
 /** 封存在磁盘上的东西。**只有会话号**——没有任何令牌。 */
@@ -501,6 +509,23 @@ export class PlatformSession {
       },
     });
     if (res.status === 401) {
+      // **一次 401 不算数**（2026-09-18，真机上实测到的 bug）。
+      //
+      // 原来这里直接 signOutLocal()：平台任何一个接口偶尔回一次 401，整个登录态
+      // 当场清空、界面弹回登录页。而 `syncEntitlements` 每 5 分钟问一次 —— owner
+      // 装完之后约十分钟被登出，正是第二次那一下。
+      //
+      // 但也不能反过来「永不登出」：会话真被吊销时必须登出，那是安全属性。所以
+      // 多问一句 —— 向**身份那条最权威的读**再确认一次；它也说不认了，才真登出。
+      // 一次额外的请求，只发生在这条很少走的路上。
+      const confirmed = await this.confirmRejected(rpsid);
+      if (!confirmed) {
+        this.config.log?.(
+          `[ruyin] platform: ${path} 回了 401，但 ${PLATFORM_READS.me} 仍认这条会话 —— 不登出（把 401 当成那一个接口的事）`,
+        );
+        return res;
+      }
+      this.config.log?.(`[ruyin] platform: 会话被平台拒绝（${path} 与 ${PLATFORM_READS.me} 都回 401）—— 本机登出`);
       this.signOutLocal();
       throw new NotSignedInError("session rejected by platform");
     }
@@ -658,6 +683,26 @@ export class PlatformSession {
       method: "POST",
       headers: { "x-vxture-session": rpsid },
     }).catch(() => undefined);
+  }
+
+  /**
+   * 那条会话是真的不认了，还是刚才那个接口自己的事？
+   *
+   * 拿**身份**那条读去问（`/api/me`）：它是「这条会话还成不成立」最直接的回答，
+   * 而且不牵扯任何权益或订阅 —— 一个「你没有这项权益」的接口不该把整个会话判死。
+   *
+   * **问不到就当没被拒**（网络断了、平台正在重启）：把一次网络故障说成「你被登出了」，
+   * 比晚一会儿登出糟得多 —— 用户会以为自己的账号出了事。
+   */
+  private async confirmRejected(rpsid: string): Promise<boolean> {
+    try {
+      const res = await fetch(new URL(PLATFORM_READS.me, this.config.consoleBase), {
+        headers: { "x-vxture-session": rpsid },
+      });
+      return res.status === 401;
+    } catch {
+      return false;
+    }
   }
 
   private signOutLocal(): void {

@@ -44,6 +44,20 @@ export interface LaunchSpec {
   /** 启动前必须给的环境变量（例如 SEARXNG_URL）；值由用户在启用时给，不是密钥。 */
   requiresEnv?: string[];
   /**
+   * **我方固定的环境变量** —— 与 `requiresEnv`（用户填的）是两件事：那一条是「这台
+   * 机器上还缺什么」，这一条是「这个服务器必须怎么跑」。
+   *
+   * 它存在的理由是实测出来的（2026-09-18，真机装完之后）：`aas-ee.open-websearch`
+   * 默认会在 **`0.0.0.0:3000`** 上开一个 HTTP 服务器 —— 不是回环，是这台电脑的每一个
+   * 网络接口。Windows 于是弹「是否允许 Node.js JavaScript Runtime 通信」，而那个弹窗
+   * 只是症状：真正的问题是同一个局域网里的任何人都能访问它，**而这是随包默认启用的
+   * 工具，没有任何人被问过**。上游的开关是 `MODE=stdio`。
+   *
+   * 用户给的值优先级更高（`plan()` 里 userEnv 后并），因为要配的那几条（SEARXNG_URL
+   * 之类）本来就该由用户说了算；但没人会去配 `MODE`，它属于「这个服务器怎么跑」。
+   */
+  env?: Record<string, string>;
+  /**
    * 还要本机有的外部程序（例如 pandoc）。**PATH 探测**：本机自己装了就不必获取。
    * 与 requiresComponent 并存，探测优先。
    */
@@ -311,12 +325,14 @@ export class BundledToolServers {
       // cmd 窗口——Electron 的已知限制，与 spawn 的 windowsHide 无关，`spawn()`
       // 那边已经开着它了也没用。开发态没有随包这一份（没跑过打包），退回旧路子。
       const nodeExe = this.nodeExe();
+      // 清单里那段固定环境变量先放，用户填的后放（后者赢）—— 见 LaunchSpec.env。
+      const fixed = launch.env ?? {};
       if (nodeExe) {
         return {
           ok: true,
           command: nodeExe,
           args: [entry, ...(launch.args ?? []), ...extra.args],
-          env: { ...userEnv },
+          env: { ...fixed, ...userEnv },
         };
       }
       return {
@@ -324,7 +340,7 @@ export class BundledToolServers {
         command: this.options.execPath ?? process.execPath,
         args: [entry, ...(launch.args ?? []), ...extra.args],
         // Electron 的可执行文件带这个变量就是一个纯 Node；真 Node 下它没有作用。
-        env: { ELECTRON_RUN_AS_NODE: "1", ...userEnv },
+        env: { ELECTRON_RUN_AS_NODE: "1", ...fixed, ...userEnv },
       };
     }
     if (launch.runtime === "uvx") return this.uvxPlan(launch, userEnv);
@@ -386,6 +402,7 @@ export class BundledToolServers {
         // 缺什么就失败，绝不自己去下一个 Python 解释器。
         UV_PYTHON_DOWNLOADS: "never",
         UV_NO_PROGRESS: "1",
+        ...(launch.env ?? {}),
         ...userEnv,
       },
     };

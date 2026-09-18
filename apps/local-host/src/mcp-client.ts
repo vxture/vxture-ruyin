@@ -168,6 +168,14 @@ export class McpStdioClient implements McpClient {
     return this.child !== undefined && this.exited === undefined;
   }
 
+  /**
+   * 子进程号。**只给端口审计用**（listener-audit.ts）：预置服务器在不在非回环地址
+   * 上监听，只有真起一次再去数一遍才看得见。
+   */
+  pid(): number | undefined {
+    return this.child?.pid;
+  }
+
   /** Spawn the server and complete the initialize handshake. */
   async start(): Promise<McpServerInfo> {
     if (this.child) throw new McpError("start", "already started");

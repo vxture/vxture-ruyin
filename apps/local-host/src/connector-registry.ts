@@ -151,6 +151,14 @@ export class ConnectorRegistry implements ConnectorToolSource {
   private readonly manifestPath: string;
   private readonly workRoot: string;
   private readonly live = new Map<string, McpConnector>();
+
+  /**
+   * 此刻起着的那些子进程号。**只给端口审计用**（listener-audit.ts）：预置服务器
+   * 在不在非回环地址上监听，静态检查看不见，只有真起一次再数一遍端口才看得见。
+   */
+  childPids(): number[] {
+    return [...this.live.values()].map((c) => c.pid()).filter((p): p is number => typeof p === "number");
+  }
   private specs: InstalledConnector[] = [];
 
   constructor(

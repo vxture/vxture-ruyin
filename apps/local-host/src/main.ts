@@ -84,6 +84,7 @@ import { ToolRegistryView } from "./tool-registry.js";
 import { ComponentStore, readComponentSpecs } from "./component-store.js";
 import { PythonRuntime } from "./python-runtime.js";
 import { readUpdateChannel, writeUpdateChannel } from "./update-channel.js";
+import { auditListeners, describeAudit } from "./listener-audit.js";
 import { BundledToolServers } from "./tool-servers.js";
 import { fetchContract } from "./contract-fetch.js";
 import { fetchUiAfterContract } from "./ui-fetch.js";
@@ -456,6 +457,8 @@ const platformSession = new PlatformSession(
      */
     consoleBase:
       process.env["RUYIN_CONSOLE_API_BASE"] ?? "https://console.vxture.com",
+    // 登出是用户能感知到的最粗暴的一件事，它不该是无声的（任务 50）。
+    log: (line) => console.error(line),
   },
   keys,
   dataDir,
@@ -905,6 +908,22 @@ async function toolsSelfCheck(): Promise<void> {
  * 已经在一个空的 UV_TOOL_DIR 里 `--offline` 起过一次，但那是**装的那一刻**；
  * 这一跑证明的是重启之后它还成立。
  */
+/**
+ * 预置服务器开了什么端口（RY-001 §07 任务 50）。
+ *
+ * 真机上实测到的那一次：`aas-ee.open-websearch` 默认在 `0.0.0.0:3000` 上开了一个
+ * HTTP 服务器，于是 Windows 弹「是否允许 Node.js JavaScript Runtime 通信」—— 而弹窗
+ * 只是症状，真正的问题是同一个局域网里的任何人都能访问它，**而它是随包默认启用的
+ * 工具，没有任何人被问过**。
+ *
+ * **静态检查看不见这一条**（那是第三方包某个版本的默认行为，藏在它自己的配置分支
+ * 里），只有真起一次、再去数一遍端口才看得见。打包冒烟按这一行断言。
+ */
+function listenerAudit(): void {
+  const found = auditListeners(connectorRegistry.childPids());
+  console.log(`[ruyin] listener audit: ${describeAudit(found)}`);
+}
+
 async function uvxSelfCheck(): Promise<void> {
   if (!pythonRuntime.isReady()) {
     console.log(`[ruyin] uvx self-check: python runtime not installed (${pythonRuntime.status().state})`);
@@ -1066,6 +1085,7 @@ server.listen(port, "127.0.0.1", () => {
       try {
         await uiSelfCheck(`http://127.0.0.1:${workspacePort}`);
         await toolsSelfCheck();
+        listenerAudit();
         await uvxSelfCheck();
         await pdfSelfCheck();
       } catch (cause) {
