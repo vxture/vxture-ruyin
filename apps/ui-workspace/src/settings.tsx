@@ -1580,15 +1580,15 @@ function UpdatesSection({
         <FactRow label={t("set.update.howCheck")} value={t("set.update.howCheckValue")} />
         <FactRow label={t("set.update.howDownload")} value={t("set.update.howDownloadValue")} />
         <FactRow label={t("set.update.howInstall")} value={t("set.update.howInstallValue")} />
-        {system?.codeSigning === "unsigned" && (
-          <p className="set-callout set-callout--warning">
-            <Icon name="warning" size="sm" />
-            <span>
-              <strong>{t("set.update.unsignedTitle")}</strong>{" "}
-              {t("set.update.unsignedBody")}
-            </span>
-          </p>
-        )}
+        {/*
+          2026-09-19（owner）：这里原来常驻一块「这个版本还没有数字签名」的警告。删了，
+          两个理由：① **看到它的人已经装完了** —— 一句写给「安装那一刻」的话出现在装好
+          之后的设置页里，本身就是错位；② 我们不把升级方式说成缺陷。**下载 + 运行**是
+          当前的产品策略（不做自动更新，TD-021），那就按策略来写，写在上面那三行事实里。
+
+          真正有用的那一句 —— Windows 可能拦一次 —— 挪进「怎么安装」那一行：它只在
+          用户即将去下载、运行安装包时才需要，而那正是那一行在说的事。
+        */}
       </SettingsBlock>
     </>
   );

@@ -650,9 +650,7 @@ export const zhCN = {
   "set.update.howDownload": "下载",
   "set.update.howDownloadValue": "在浏览器里下载，安装包保存到你的下载文件夹",
   "set.update.howInstall": "安装",
-  "set.update.howInstallValue": "双击安装包覆盖安装，你的数据不受影响",
-  "set.update.unsignedTitle": "这个版本还没有数字签名。",
-  "set.update.unsignedBody": "安装时 Windows 可能拦一次：点「更多信息」→「仍要运行」。开了「智能应用控制」的电脑会直接拦住，那种只能等签名版本。",
+  "set.update.howInstallValue": "双击安装包覆盖安装，你的数据不受影响；Windows 若拦一次，点「更多信息」→「仍要运行」",
 
   /* ── 设置：本机配置 ──────────────────────────────────────────────── */
   "set.hw.title": "本机配置",
