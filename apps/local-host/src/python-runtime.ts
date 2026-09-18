@@ -35,7 +35,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -234,6 +234,20 @@ export class PythonRuntime {
   /** uvx 起的临时环境的落脚点。钉在数据目录下：行为可预期，卸载也带得走。 */
   toolDir(): string {
     return join(this.toolsDir, "uv-tools");
+  }
+
+  /**
+   * 装好的那个解释器（环境检查要用）。uv 把 CPython 装成 <python 目录>/<版本标签>/，
+   * 所以这里要真去找一层 —— 找不到就是还没装。
+   */
+  interpreter(): string | undefined {
+    const root = this.pythonDir();
+    if (!existsSync(root)) return undefined;
+    for (const name of readdirSync(root)) {
+      const exe = join(root, name, process.platform === "win32" ? "python.exe" : "bin/python3");
+      if (existsSync(exe)) return exe;
+    }
+    return undefined;
   }
 
   /** 这一版清单要预热的那几个 `包==版本`。 */

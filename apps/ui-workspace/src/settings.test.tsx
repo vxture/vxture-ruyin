@@ -62,6 +62,8 @@ function fakeApi(over: Partial<Api> = {}): Api {
     // 更新渠道（任务 49）：缺省当作「这套装配不管渠道」—— 那一行整行不显示，
     // 于是偏好设置那几条只数四行的用例照旧成立。
     updateChannel: vi.fn().mockRejectedValue(new ApiError(503, { error: "UPDATE_CHANNEL_NOT_CONFIGURED" })),
+    // 环境检查（任务 52）：缺省当作这套装配不提供 —— 点了也不该假装查过。
+    environments: vi.fn().mockRejectedValue(new ApiError(503, { error: "ENV_PROBE_NOT_AVAILABLE" })),
     ...over,
   } as unknown as Api;
 }
@@ -3033,4 +3035,39 @@ test("软件更新：写不进去时下拉不许自己变样 —— 看起来开
   const select = (await screen.findByRole("combobox", { name: "版本偏好" })) as HTMLSelectElement;
   await userEvent.selectOptions(select, "beta");
   expect(((await screen.findByRole("combobox", { name: "版本偏好" })) as HTMLSelectElement).value).toBe("stable");
+});
+
+/* ── 环境检查（任务 52）──────────────────────────────────────────────────
+ *
+ * owner 2026-09-19：「我不能确认最终是不是成功还是失败」。徽标说的是「我们记得装过
+ * 没有」，这个按钮回答的是「此刻这台机器上到底有什么、是哪个版本」。
+ */
+test("能力平台：点「检查」后，每一行换成现场探到的版本；随包与本机分开报", async () => {
+  const api = skillsApi({
+    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
+    environments: vi.fn().mockResolvedValue({
+      items: [
+        { id: "node", bundled: { path: "C:/app/node.exe", version: "22.20.0" }, system: { version: "20.11.0" } },
+        { id: "python", system: { error: "spawn python ENOENT" } },
+      ],
+    }),
+  });
+  renderSection("skills", api);
+  await userEvent.click(await screen.findByRole("button", { name: "检查" }));
+  // 随包那一份与本机那一份是两件事，分开说。
+  expect(await screen.findByText(/随包 22\.20\.0 · 本机 20\.11\.0/)).toBeTruthy();
+  // 没探到就说没探到 —— **不拿回执冒充**。
+  expect(screen.getByText(/本机未装/)).toBeTruthy();
+});
+
+test("能力平台：这套装配不提供环境检查时，点了也不假装查过", async () => {
+  const api = skillsApi({
+    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
+    environments: vi.fn().mockRejectedValue(new ApiError(503, { error: "ENV_PROBE_NOT_AVAILABLE" })),
+  });
+  renderSection("skills", api);
+  await userEvent.click(await screen.findByRole("button", { name: "检查" }));
+  // 还是「还没装 · 需下载 …」那一路，没有任何一行冒出版本号。
+  expect(await screen.findByText(/还没装 · 需下载/)).toBeTruthy();
+  expect(screen.queryByText(/随包 /)).toBeNull();
 });

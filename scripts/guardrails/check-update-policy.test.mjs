@@ -45,8 +45,10 @@ function baseline(over = {}) {
       const STATE_LABEL = { ${STATES.map((s) => `"${s}": "…"`).join(", ")} };
     `,
     "apps/local-host/src/component-store.ts": `
-      const res = await doFetch(url, { redirect: "manual" });
+      const res = await doFetch(at, { signal, redirect: "manual" });
       if (url.protocol !== "https:") throw new ComponentError("refused-origin", "…");
+      // 跟跳，但每一跳都重查那份闭合名单（2026-09-19）。
+      if (!allowed.has(next.origin)) throw new ComponentError("refused-origin", "…");
       const STATES = [${states}];
     `,
     ...over,
@@ -227,4 +229,19 @@ void test("没有 component-store.ts 时第四段整段跳过 —— 前三段�
 void test("拒绝时要说清这是 owner 的决定，不是实现细节", () => {
   const r = check(baseline({ "apps/shell/src/main.ts": `autoUpdater.checkForUpdates();` }));
   assert.match(r.out, /这些是 owner 的决定（TD-021），不是实现细节。要改先改决定。/);
+});
+
+// 2026-09-19：跟跳是允许的，但**每一跳都要重查白名单**。少了那一句，白名单就只挡住
+// 了第一跳 —— 而这条守卫存在的全部意义就是拦住这种「看起来还在守着」的写法。
+void test("跟重定向时没有逐跳重查白名单 —— 那等于跟着上游走", () => {
+  const base = baseline();
+  const r = check({
+    ...base,
+    "apps/local-host/src/component-store.ts": base["apps/local-host/src/component-store.ts"].replace(
+      'if (!allowed.has(next.origin)) throw new ComponentError("refused-origin", "…");',
+      "// 这里原本有逐跳的白名单检查",
+    ),
+  });
+  assert.equal(r.code, 1);
+  assert.match(r.out, /每一跳/);
 });

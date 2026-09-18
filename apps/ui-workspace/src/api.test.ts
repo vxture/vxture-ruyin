@@ -366,6 +366,7 @@ const WRAPPER_CASES: WrapperCase[] = [
     path: "/updates/channel",
     body: { channel: "beta" },
   },
+  { name: "environments", call: (api) => api.environments(), method: "GET", path: "/environments" },
   { name: "pythonRuntime", call: (api) => api.pythonRuntime(), method: "GET", path: "/python-runtime" },
   { name: "provisionPython", call: (api) => api.provisionPython(), method: "POST", path: "/python-runtime/provision" },
   { name: "cancelPython", call: (api) => api.cancelPython(), method: "POST", path: "/python-runtime/cancel" },

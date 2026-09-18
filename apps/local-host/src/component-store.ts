@@ -31,9 +31,11 @@
  * ## 四道校验一条不减，加第五道
  *
  *   1. **协议必须是 https**，且 origin ∈ 清单的 `allowedOrigins`（发请求**之前**
- *      就查），**并且不跟任何重定向**（`redirect: "manual"`）—— 白名单是在发请求
- *      之前查的一份闭合名单，跟着 302 跳等于把「去哪台主机取」的决定权交给上游，
- *      默认的 `follow` 还允许跳 20 次。清单里那几条是直链，一次都不需要跳。
+ *      就查）。重定向**跟**，但 `redirect: "manual"` 一步一步跟：**每一跳都重新查
+ *      那份闭合名单**，不是白名单式的一次性放行，也不是缺省 `follow` 那种「跳 20 次
+ *      到任意主机」。限三跳。2026-09-19 改的：原来一律不跟跳，而 GitHub 的发布资产
+ *      本来就是「入口域名 302 到 CDN」的形状（且那个 CDN 地址带签名、会过期，钉不住），
+ *      于是 uv 那条组件的获取按钮从发出去那天起就点不动。
  *   2. 字节数不超过 `size`（超一个字节立即 abort，不等下完）
  *   3. 字节数等于 `size` 且 sha256 等于清单值
  *   4. 解压走 pkg.ts 那套护栏（穿越 / 反斜杠 / 绝对路径 / 控制字符 / 加密条目 /
@@ -239,6 +241,11 @@ const UNPACK_SLACK = 1.25;
  * `<dataDir>\components\<id>\<version>\payload\`。
  */
 const MAX_TARGET_ROOT = 120;
+/**
+ * 最多跟几跳。GitHub 的发布资产是一跳（入口 → CDN）；留三跳是给上游偶尔多加一层
+ * 的余量，而不是给它绕圈的自由。
+ */
+const MAX_REDIRECTS = 3;
 
 const SIG_EOCD = 0x06054b50;
 const SIG_CENTRAL = 0x02014b50;
@@ -594,23 +601,56 @@ export class ComponentStore {
     }
     const doFetch = this.options.fetchImpl ?? fetch;
     let res: Response;
-    try {
-      // **`redirect: "manual"` 不能省。** 缺省的 `follow` 允许跳 20 次，而每一次
-      // 都可以跳到白名单外的任意主机 —— 那道「发请求之前查的闭合白名单」就只挡住
-      // 了第一跳。清单里那几条是直链，一次都不需要跳。
-      res = await doFetch(url, { signal, redirect: "manual" });
-    } catch (cause) {
-      if (signal.aborted) throw new ComponentError("cancelled", "已取消");
-      throw new ComponentError("unreachable", `取不到 ${url.origin}：${cause instanceof Error ? cause.message : String(cause)}`);
-    }
-    // 3xx（以及 fetch 规范里那个 status 为 0 的 opaqueredirect）一律拒：跟着跳等于
-    // 让上游选目的地。要换地址就改清单里那条 pin，那一行有人评审过。
-    if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
-      const to = res.headers.get("location") ?? "（未给 Location）";
-      throw new ComponentError(
-        "refused-origin",
-        `${url.origin} 要把请求重定向到 ${to} —— 白名单是发请求之前查的一份闭合名单，这里不跟跳；要换地址就改清单里那条 pin`,
-      );
+    let at = url;
+    /*
+     * **`redirect: "manual"` 不能省，但「一律不跟跳」是错的**（2026-09-19 实测）。
+     *
+     * 原来这里对任何 3xx 直接拒，理由是「跟着跳等于把去哪台主机取的决定权交给上游」。
+     * 那个担心是对的，但结论过头了：GitHub 的发布资产**本来就是**「入口域名 302 到
+     * CDN」的形状，而且它 2026 年把 CDN 从 `objects.githubusercontent.com` 换成了
+     * `release-assets.githubusercontent.com`，给的还是一个带签名、会过期的地址 ——
+     * 钉死那条地址是不可能的。于是 uv 那条组件的「安装」按钮**从发出去那天起就点不动**，
+     * 而没有人点过它（owner 2026-09-19 真机上第一次点，才现形）。
+     *
+     * 改成：**跟跳，但每一跳都重新查那份闭合白名单**，且限三跳。保证一个字没松 ——
+     * 「我们真正连过的每一台主机都在名单上」仍然成立，只是这句话现在对每一跳都验一次，
+     * 而不是只验第一跳就把后面全拒掉。真正认字节的仍然是清单里那条 sha256。
+     */
+    for (let hop = 0; ; hop++) {
+      try {
+        res = await doFetch(at, { signal, redirect: "manual" });
+      } catch (cause) {
+        if (signal.aborted) throw new ComponentError("cancelled", "已取消");
+        throw new ComponentError("unreachable", `取不到 ${at.origin}：${cause instanceof Error ? cause.message : String(cause)}`);
+      }
+      const redirected = res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400);
+      if (!redirected) break;
+      // 跳三次还没到，多半是上游在绕圈：与其跟下去，不如当场说清。
+      if (hop >= MAX_REDIRECTS) {
+        throw new ComponentError("refused-origin", `${url.origin} 的重定向超过 ${MAX_REDIRECTS} 跳，停下`);
+      }
+      const location = res.headers.get("location");
+      if (!location) {
+        // `opaqueredirect` 读不到 Location（fetch 规范如此）。这不是「拒绝」，是
+        // 「这套 fetch 实现下看不见目的地」—— 照实说，不要说成白名单拒了它。
+        throw new ComponentError("refused-origin", `${at.origin} 回了重定向却读不到 Location，无法确认目的地`);
+      }
+      let next: URL;
+      try {
+        next = new URL(location, at);
+      } catch {
+        throw new ComponentError("refused-origin", `${at.origin} 给的 Location 不是合法地址：${location}`);
+      }
+      if (next.protocol !== "https:") {
+        throw new ComponentError("refused-origin", `重定向到 ${next.protocol}//… —— 明文取字节这条路不存在`);
+      }
+      if (!allowed.has(next.origin)) {
+        throw new ComponentError(
+          "refused-origin",
+          `${at.origin} 要把请求重定向到 ${next.origin}，而它不在清单的 allowedOrigins 里 —— 把它加进清单（有人评审那一行），或换一条直链`,
+        );
+      }
+      at = next;
     }
     if (!res.ok) throw this.httpFailure(spec, url, res.status);
     const declared = Number(res.headers.get("content-length") ?? "0");
