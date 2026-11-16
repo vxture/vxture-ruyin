@@ -781,7 +781,7 @@ app.whenReady().then(async () => {
       if (screenshotPath) {
         const preview = new BrowserWindow({
           width: 1366, height: 768, useContentSize: true, show: false,
-          webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+          webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
         });
         try {
           await preview.loadURL(`http://127.0.0.1:${PORT}/?token=${TOKEN}`);

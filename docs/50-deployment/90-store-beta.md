@@ -10,8 +10,11 @@ Pricing/availability, properties and submission options are complete. The draft
 uses a zero Store acquisition price, direct-link-only discoverability, and a
 manual publishing hold. Chinese and English descriptions have been saved;
 both listings still need actual application screenshots. Age ratings remain
-incomplete pending explicit consent to share the publisher name and developer
-email with IARC. Do not treat general task delegation as that specific consent.
+in progress: consent to share the publisher name and developer email with IARC
+was explicitly granted. The questionnaire draft is saved but has not been
+submitted; online AI content declarations still require a verified product
+content policy. Broad theoretical AI capabilities alone are not sufficient
+evidence for declaring the product's permitted content categories.
 The runFullTrust justification is saved; Microsoft approval is still pending.
 
 ## Identity
