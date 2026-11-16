@@ -40,6 +40,7 @@ const CODE_KEY: Record<string, MessageKey> = {
   PLATFORM_SESSION_NOT_CONFIGURED: "err.notConfigured.platform",
   LANGUAGE_NOT_CONFIGURED: "err.notConfigured.language",
   AUTH_REQUIRED: "err.authRequired",
+  ACCOUNT_DELETING: "err.accountDeleting",
   UNAUTHORIZED: "err.authRequired",
   MIGRATING: "err.migrating",
 };

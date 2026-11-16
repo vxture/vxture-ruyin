@@ -14,6 +14,7 @@
  *   RUYIN_SMOKE=1       run the smoke self-checks after listen (ui -> tools ->
  *                       uvx -> pdf; pdf last, the shell exits on its marker)
  *   RUYIN_ACCOUNTS_ISSUER    OIDC issuer (default https://accounts.vxture.com)
+ *   RUYIN_ACCOUNTS_BASE      account management links (default https://accounts.vxture.com)
  *   RUYIN_OIDC_CLIENT_ID     public client id (default ruyin; beta: ruyin-beta)
  *   RUYIN_PLATFORM_API_BASE  旧 C2 基址（tailnet-only，用户设备够不着）——
  *                            登录改走平台会话之后已不再需要，留着只为回滚
@@ -621,6 +622,7 @@ const server = createLocalApi({
   uiDir,
   platform,
   platformSession,
+  ...(process.env["RUYIN_ACCOUNTS_BASE"] ? { accountsBase: process.env["RUYIN_ACCOUNTS_BASE"] } : {}),
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
   requireSignedPackages: process.env["RUYIN_ALLOW_UNSIGNED_PACKAGES"] !== "1",
   events,

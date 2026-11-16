@@ -62,6 +62,7 @@ function stubFetch(
       ok: step.status >= 200 && step.status < 300,
       status: step.status,
       json: async () => step.body ?? {},
+      clone: () => ({ json: async () => step.body ?? {} }),
       /* 真 Response 有 headers；`cachedGet` 要读 Cache-Control 定 TTL。
          桩缺了它，失败的是桩不是实现——第一版就漏了这个。 */
       headers: { get: () => null } as unknown as Headers,
@@ -279,7 +280,21 @@ describe("platform-session", () => {
 
     assert.equal(s.signedIn(), false);
     assert.equal(existsSync(join(dir, "platform", "session.bin")), false);
-    assert.match(f.calls.at(-1)!.url, /\/auth\/logout$/);
+    assert.match(f.calls.at(-1)!.url, /\/auth\/native\/logout$/);
+  });
+
+  it("distinguishes pending account deletion from an invalid session", async () => {
+    const f = stubFetch([
+      { status: 200, body: { rpsid: "session", expiresInSec: 3600 } },
+      { status: 403, body: { code: "ACCOUNT_DELETING" } },
+    ]);
+    restores.push(f.restore);
+    const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    s.beginLogin();
+    await s.completeLogin();
+    await assert.rejects(s.subscribedProducts(), { status: 403, code: "ACCOUNT_DELETING" });
+    assert.equal(s.signedIn(), true);
+    assert.equal(f.calls.length, 2);
   });
 
   it("status() 给 UI 的东西里没有 rpsid——这是 browser-zero-token 的底线", async () => {

@@ -23,8 +23,8 @@ import {
   StatusBadge,
 } from "@vxture/design-system";
 import { Api, type SessionInfo } from "./api";
-import { consoleAppBaseOf } from "./platform-base";
-import { useT } from "./i18n";
+import { accountsUrl, consoleAppBaseOf } from "./platform-base";
+import { useLocale, useT } from "./i18n";
 
 /** Poll /auth/session until signedIn flips (login completes in the browser). */
 const LOGIN_POLL_MS = 2000;
@@ -54,6 +54,7 @@ export function UserSlot({
   onSignedOut: () => void;
 }) {
   const t = useT();
+  const locale = useLocale();
   const [online, setOnline] = useState(false);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [busy, setBusy] = useState(false);
@@ -260,7 +261,7 @@ export function UserSlot({
               className="user-panel-row"
               icon="user-circle"
               label={t("user.row.profile")}
-              href={`${consoleAppBaseOf(session)}/profile`}
+              href={accountsUrl(session, locale)}
               newTab
               trailingIcon="external-link"
             />

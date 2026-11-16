@@ -77,6 +77,29 @@ void test("SessionGate: shows a loading splash before the first session() resolv
   expect(screen.getByText("正在连接运行时…")).toBeInTheDocument();
 });
 
+void test("SessionGate: pending deletion shows recovery, then refresh restores the workbench", async () => {
+  const session = vi.fn().mockResolvedValueOnce(signedIn({
+    accountStatus: "deleting",
+    accountsBase: "https://accounts.staging.vxture.com",
+  })).mockResolvedValue(signedIn());
+  render(<SessionGate api={fakeApi({ session })} />);
+  expect(await screen.findByRole("link", { name: "前往账号中心" })).toHaveAttribute(
+    "href", "https://accounts.staging.vxture.com/account?section=deletion&vx_locale=zh-CN",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "刷新账号状态" }));
+  await screen.findByTestId("workbench-stub");
+});
+
+void test("SessionGate: pending deletion can sign out even when remote logout fails", async () => {
+  const session = vi.fn().mockResolvedValueOnce(signedIn({ accountStatus: "deleting" }))
+    .mockResolvedValue(signedOut());
+  const logout = vi.fn().mockRejectedValue(new Error("remote logout unavailable"));
+  render(<SessionGate api={fakeApi({ session, logout })} />);
+  fireEvent.click(await screen.findByRole("button", { name: "退出登录" }));
+  expect(await screen.findByText("登录 Vxture 账号")).toBeInTheDocument();
+  expect(logout).toHaveBeenCalledTimes(1);
+});
+
 void test("SessionGate: signed out shows the login screen", async () => {
   const api = fakeApi({ session: vi.fn().mockResolvedValue(signedOut()) });
   render(<SessionGate api={api} />);

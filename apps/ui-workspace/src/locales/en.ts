@@ -22,6 +22,9 @@ export const en: Catalog = {
   /* ── Sign-in ──────────────────────────────────────────────────────── */
   "login.connecting": "Connecting to the runtime…",
   "login.loading": "Loading…",
+  "login.manageAccount": "Open account center",
+  "login.refreshAccount": "Refresh account status",
+  "login.accountSignOut": "Sign out",
   "login.tagline": "Intelligent Workbench · Your data stays on this computer",
   "login.button.idle": "Sign in with Vxture",
   "login.button.opening": "Opening your browser…",
@@ -901,6 +904,7 @@ export const en: Catalog = {
   /* ── Generic daemon errors → what the interface says (api-message.ts) ─ */
   "err.unreachable": "The runtime on this computer is not reachable right now — try again later",
   "err.authRequired": "Your session has expired; please reopen the app",
+  "err.accountDeleting": "Account deletion is pending. Visit the account center to manage it.",
   "err.migrating": "Moving your data; please wait",
   "err.notConfigured.catalog": "This build does not offer the cloud capability listing",
   "err.notConfigured.routing": "This build does not offer cloud capability calls",

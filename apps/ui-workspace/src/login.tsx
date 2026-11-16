@@ -12,7 +12,8 @@ import { Button } from "@vxture/design-system";
 import { Api, type SessionInfo } from "./api";
 import { syncChromeTheme } from "./chrome-theme";
 import { useHostChrome } from "./host-chrome";
-import { useT, type MessageKey } from "./i18n";
+import { useLocale, useT, type MessageKey } from "./i18n";
+import { accountsUrl } from "./platform-base";
 import { LanguageMenu } from "./language-menu";
 
 // Workbench (~570 lines, plus its own lazy-loaded home/settings/workspace
@@ -45,6 +46,7 @@ const LOGIN_POLL_MAX_MS = 5 * 60 * 1000;
 /** Decides the first surface once the daemon is reachable: login vs product. */
 export function SessionGate({ api }: { api: Api }) {
   const t = useT();
+  const locale = useLocale();
   const [session, setSession] = useState<SessionInfo | "loading">("loading");
 
   const refresh = useCallback(async () => {
@@ -66,6 +68,9 @@ export function SessionGate({ api }: { api: Api }) {
 
   useEffect(() => {
     void refresh();
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
   // 窗口按钮的颜色跟着界面主题走（chrome-theme.ts）。放在这里而不是工作台里：
@@ -91,6 +96,21 @@ export function SessionGate({ api }: { api: Api }) {
         consoleBase={session.consoleBase}
         onSignedIn={refresh}
       />
+    );
+  }
+  if (session.accountStatus === "deleting") {
+    return (
+      <div className="splash">
+        <DragStrip />
+        <p role="status">{t("err.accountDeleting")}</p>
+        <a href={accountsUrl(session, locale, "deletion")} target="_blank" rel="noreferrer">
+          {t("login.manageAccount")}
+        </a>
+        <Button onClick={() => void refresh()}>{t("login.refreshAccount")}</Button>
+        <Button variant="outline" onClick={() => void api.logout().catch(() => undefined).then(refresh)}>
+          {t("login.accountSignOut")}
+        </Button>
+      </div>
     );
   }
   return (

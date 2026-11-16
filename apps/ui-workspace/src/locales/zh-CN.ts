@@ -23,6 +23,9 @@ export const zhCN = {
   /* ── 登录页 ───────────────────────────────────────────────────────── */
   "login.connecting": "正在连接运行时…",
   "login.loading": "正在加载…",
+  "login.manageAccount": "前往账号中心",
+  "login.refreshAccount": "刷新账号状态",
+  "login.accountSignOut": "退出登录",
   "login.tagline": "智能工作台 · 你的数据留在这台电脑上",
   "login.button.idle": "登录 Vxture 账号",
   "login.button.opening": "正在打开浏览器…",
@@ -841,6 +844,7 @@ export const zhCN = {
   /* ── 守护进程的通用错误 → 界面说什么（api-message.ts） ──────────────── */
   "err.unreachable": "暂时连不上本机的运行环境，请稍后再试",
   "err.authRequired": "登录状态已失效，请重新打开应用",
+  "err.accountDeleting": "账号正在注销。请前往账号中心处理。",
   "err.migrating": "正在搬移数据，请稍候",
   "err.notConfigured.catalog": "当前版本暂不提供云端能力清单",
   "err.notConfigured.routing": "当前版本暂不提供云端能力调用",

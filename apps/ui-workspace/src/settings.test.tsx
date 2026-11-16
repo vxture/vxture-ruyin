@@ -1003,11 +1003,11 @@ void test("Settings/账户: signed in shows the identity - name, email, tenant, 
   // 「租户管理 → 平台」，两处都能切是同一件事写了两遍。
   expect(within(tenantRow).queryByRole("button")).not.toBeInTheDocument();
   // 「账户中心」那一行链接去掉了（owner 2026-09-04）：右上角的「在线修改」已经是同一个去处。
-  expect(screen.queryByRole("link", { name: "https://console.vxture.com/profile" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "https://accounts.vxture.com/account?vx_locale=zh-CN" })).not.toBeInTheDocument();
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "在线修改" }));
-  expect(open).toHaveBeenCalledWith("https://console.vxture.com/profile", "_blank", "noopener");
+  expect(open).toHaveBeenCalledWith("https://accounts.vxture.com/account?vx_locale=zh-CN", "_blank", "noopener");
   open.mockRestore();
   expect(screen.queryByText("请先登录")).not.toBeInTheDocument();
 });
@@ -1024,7 +1024,7 @@ void test("Settings/账户: 「在线修改」跟着 consoleAppBase 走，不是
       profile: { sub: "u1", name: "郭彦豪" },
       issuer: "",
       consoleBase: "https://vxture.com",
-      consoleAppBase: "https://console.staging.vxture.com",
+      accountsBase: "https://accounts.staging.vxture.com",
       entitlementsConfigured: false,
     }),
   });
@@ -1033,7 +1033,7 @@ void test("Settings/账户: 「在线修改」跟着 consoleAppBase 走，不是
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "在线修改" }));
-  expect(open).toHaveBeenCalledWith("https://console.staging.vxture.com/profile", "_blank", "noopener");
+  expect(open).toHaveBeenCalledWith("https://accounts.staging.vxture.com/account?vx_locale=zh-CN", "_blank", "noopener");
   open.mockRestore();
 });
 

@@ -682,6 +682,32 @@ void test("当前工作区：会话登着只认会话；会话说不出就是没
   }
 });
 
+void test("/auth/session exposes Accounts recovery state without exposing the RP session", async () => {
+  const rig = await startServer({
+    accountsBase: "https://accounts.example",
+    platform: signedInTo("wsp_x"),
+    platformSession: {
+      signedIn: () => true,
+      status: () => ({ signedIn: true, expiresAt: null }),
+      identity: async () => ({ accountStatus: "deleting", deletionRequestedAt: "2026-11-01T00:00:00Z" }),
+      baseUrl: "https://console.example",
+    } as unknown as PlatformSession,
+  });
+  try {
+    const response = await fetch(`${rig.base}/auth/session`, { headers: rig.headers });
+    assert.equal(response.status, 200);
+    const body = await response.json() as Record<string, unknown>;
+    assert.equal(body["accountsBase"], "https://accounts.example");
+    assert.equal(body["consoleAppBase"], "https://console.example");
+    assert.equal(body["accountStatus"], "deleting");
+    assert.equal(body["deletionRequestedAt"], "2026-11-01T00:00:00Z");
+    assert.equal(body["signedIn"], true);
+    assert.equal(body["rpsid"], undefined);
+  } finally {
+    closeRig(rig);
+  }
+});
+
 void test("未配置 platformSession 时 /auth/session 回未登录，不拿旧 claims 冒充身份", async () => {
   const rig = await startServer({ platform: signedInTo("wsp_x") });
   try {
@@ -3439,6 +3465,15 @@ void test("GET /platform/atlas/models：只投影展示字段；403 是角色事
         assert.equal(body["code"], "POLICY_DENIED");
         assert.equal(body["retryable"], false);
         assert.match(String(body["message"]), /只有租户所有者/);
+      },
+    },
+    {
+      name: "account deletion pending",
+      deps: { platform: signedInTo("wsp_x"), platformSession: session(async () => { throw new PlatformReadError("/api/atlas/models", 403, "ACCOUNT_DELETING"); }) },
+      status: 403,
+      check: (body) => {
+        assert.equal(body["code"], "ACCOUNT_DELETING");
+        assert.equal(body["retryable"], false);
       },
     },
     {

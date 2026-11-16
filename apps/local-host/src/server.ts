@@ -156,6 +156,7 @@ function withRunState(
 export const UI_LANGUAGES = ["zh-CN", "en"];
 
 export interface LocalApiDeps {
+  accountsBase?: string;
   runtime: ProjectRuntime;
   /** 受管产品资产（安装 / 启用 / 订阅可用性，30-contract-schema §18）。 */
   registry: ProductRegistry;
@@ -522,6 +523,7 @@ async function sendPlatformRead(
     send(res, 200, await read());
   } catch (cause) {
     if (!(cause instanceof PlatformReadError)) throw cause;
+    if (cause.code === "ACCOUNT_DELETING") throw cause;
     if (cause.status === 403) {
       send(res, 403, apiError(REJECTION.POLICY_DENIED, deniedMessage));
     } else {
@@ -556,6 +558,9 @@ function connectorInputFrom(body: Record<string, unknown>): ConnectorProbeInput 
 }
 
 function errorStatus(cause: unknown): { status: number; body: unknown } {
+  if (cause instanceof PlatformReadError && cause.code === "ACCOUNT_DELETING") {
+    return { status: 403, body: apiError("ACCOUNT_DELETING", "Account deletion is pending", { retryable: false }) };
+  }
   if (cause instanceof ContractInvalidError) {
     return {
       status: 400,
@@ -1268,10 +1273,12 @@ async function handle(
          `{signedIn, expiresAt}`，界面于是一律显示「Vxture 用户 / 未命名租户 /
          未选定工作区」—— 登录是通的，看起来却像没登上。 */
       const summary = deps.platform.session();
+      const accountsBase = deps.accountsBase ?? "https://accounts.vxture.com";
       if (!deps.platformSession) {
         send(res, 200, {
           signedIn: false,
           issuer: summary.issuer,
+          accountsBase,
           consoleBase: summary.consoleBase,
           entitlementsConfigured: false,
         });
@@ -1288,11 +1295,10 @@ async function handle(
         issuer: summary.issuer,
         consoleBase: summary.consoleBase,
         // console-bff 本体（真正的 console.vxture.com），与上面 consoleBase
-        // 不是同一个主机（owner 2026-09-16 现场纠错）：consoleBase 是「去订阅」
-        // 深链落点，指向官网；这一个才是「用户中心」「配额用量」这类深链
-        // 真正要落的地方。此前界面误拿 consoleBase 拼这两条链接，结果落到了
-        // 官网而不是 console 应用本体。
+        // 不是同一个主机：订阅与配额使用 consoleAppBase，
+        // 用户中心与账号恢复使用独立的 accountsBase。
         consoleAppBase: deps.platformSession.baseUrl,
+        accountsBase,
         entitlementsConfigured: status.signedIn,
       });
       return;

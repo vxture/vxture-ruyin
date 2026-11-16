@@ -114,7 +114,7 @@ export const CLAIM_TIMEOUT_MS = 300_000;
 export const PLATFORM_PATHS = {
   login: "/auth/login",
   claim: "/auth/native/claim",
-  logout: "/auth/logout",
+  logout: "/auth/native/logout",
 } as const;
 
 /**
@@ -152,6 +152,7 @@ export class PlatformReadError extends Error {
   constructor(
     readonly path: string,
     readonly status: number,
+    readonly code?: string,
   ) {
     super(`${path} failed: HTTP ${status}`);
     this.name = "PlatformReadError";
@@ -190,6 +191,8 @@ export function projectAtlasModels(raw: unknown): AtlasModelView[] {
 
 /** 给 UI 与宿主的身份投射。字段缺失 = 平台这次没给，**不补、不猜**。 */
 export interface SessionIdentity {
+  accountStatus?: string;
+  deletionRequestedAt?: string | null;
   profile?: {
     sub: string;
     name?: string;
@@ -235,6 +238,10 @@ export function projectIdentity(
 
   if (me && typeof me === "object") {
     const m = me as Record<string, unknown>;
+    const accountStatus = str(m["accountStatus"]);
+    if (accountStatus) out.accountStatus = accountStatus;
+    const deletion = m["deletionRequestedAt"];
+    if (typeof deletion === "string" || deletion === null) out.deletionRequestedAt = deletion;
     const sub = str(m["id"]);
     if (sub) {
       const email = str(m["email"]);
@@ -508,6 +515,13 @@ export class PlatformSession {
         "x-vxture-session": rpsid,
       },
     });
+    if (res.status === 403) {
+      const body = await res.clone().json().catch(() => undefined);
+      if (body?.code === "ACCOUNT_DELETING") {
+        this.readCache.delete(PLATFORM_READS.me);
+        throw new PlatformReadError(path, 403, "ACCOUNT_DELETING");
+      }
+    }
     if (res.status === 401) {
       // **一次 401 不算数**（2026-09-18，真机上实测到的 bug）。
       //
@@ -646,10 +660,12 @@ export class PlatformSession {
     if (!res.ok) throw new PlatformReadError(path, res.status);
     const body = (await res.json()) as unknown;
     const maxAge = /max-age=(\d+)/.exec(res.headers.get("cache-control") ?? "")?.[1];
-    this.readCache.set(path, {
-      body,
-      expiresAt: Date.now() + (maxAge ? Number(maxAge) : 45) * 1000,
-    });
+    if (path !== PLATFORM_READS.me || (body as { accountStatus?: string } | null)?.accountStatus !== "deleting") {
+      this.readCache.set(path, {
+        body,
+        expiresAt: Date.now() + (maxAge ? Number(maxAge) : 45) * 1000,
+      });
+    }
     return body;
   }
 
@@ -672,17 +688,15 @@ export class PlatformSession {
     const rpsid = this.rpsid();
     this.signOutLocal();
     if (!rpsid) return;
-    /* 通知服务端销毁那条会话。收不掉也不该让登出失败——本地已经清了，
-       服务端那份到 TTL 自己会走。
-
-       **如实说：今天这一下销毁不了服务端会话。** console-bff 的 `/auth/logout`
-       只从 cookie 读 rpsid，不认 `X-Vxture-Session`（oidc-auth.router.ts），而平台
-       还没有给头部会话的登出端点——已向平台提出。留着这一下，是为了平台补上
-       之后这里不必再改调用点；在那之前，本机清掉就是全部。 */
-    await fetch(new URL(PLATFORM_PATHS.logout, this.config.consoleBase), {
+    const result = await fetch(new URL(PLATFORM_PATHS.logout, this.config.consoleBase), {
       method: "POST",
       headers: { "x-vxture-session": rpsid },
+      redirect: "error",
+      signal: AbortSignal.timeout(5000),
     }).catch(() => undefined);
+    if (result?.status !== 204) {
+      this.config.log?.(`[ruyin] platform: native logout failed (${result ? `HTTP ${result.status}` : "network error"})`);
+    }
   }
 
   /**

@@ -69,7 +69,7 @@ import {
   type SystemInfo,
   type PrivateModelView,
 } from "./api";
-import { consoleAppBaseOf } from "./platform-base";
+import { accountsUrl } from "./platform-base";
 // SectionId/SETTINGS_SECTIONS live in their own module (settings-sections.ts)
 // so the sidebar can know the section list without pulling in this file's
 // DS-heavy SettingsView - see that file's header comment (TD-011②).
@@ -362,6 +362,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
  */
 function AccountSection({ session, api }: { session: SessionInfo | null; api: Api }) {
   const t = useT();
+  const locale = useLocale();
   if (!session?.signedIn) {
     return (
       <>
@@ -377,9 +378,7 @@ function AccountSection({ session, api }: { session: SessionInfo | null; api: Ap
     );
   }
   const p = session.profile;
-  // 「个人信息」页落在 console-bff 本体上，不是官网 consoleBase（owner 2026-09-16
-  // audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明）。
-  const profileUrl = `${consoleAppBaseOf(session)}/profile`;
+  const profileUrl = accountsUrl(session, locale);
   const name = p?.name ?? p?.email ?? t("user.defaultName");
   const verified = (ok?: boolean) =>
     ok === undefined ? undefined : ok ? (

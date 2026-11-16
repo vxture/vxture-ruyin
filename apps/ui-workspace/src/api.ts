@@ -584,6 +584,9 @@ export function auditView(event: StoredAuditEvent): {
 }
 
 export interface SessionInfo {
+  accountsBase?: string;
+  accountStatus?: string;
+  deletionRequestedAt?: string | null;
   signedIn: boolean;
   /** 身份投射（daemon `session()`）。字段缺失 = 平台没在 token 里给。 */
   profile?: {
