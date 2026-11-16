@@ -424,13 +424,13 @@ jobs:
         run: node scripts/release/pack.mjs --store
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
-            RUYIN_SMOKE_SCREENSHOT: ${{ github.workspace }}\store-login.png
-        - uses: actions/upload-artifact@v7
-          with:
-            name: ruyin-store-screenshots-${{ github.run_number }}
-            retention-days: 14
-            if-no-files-found: error
-            path: store-login.png
+          RUYIN_SMOKE_SCREENSHOT: ${{ github.workspace }}\store-login.png
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ruyin-store-screenshots-${{ github.run_number }}
+          retention-days: 14
+          if-no-files-found: error
+          path: store-login.png
       - name: Validate Store identity in the actual package
         shell: pwsh
         run: |
