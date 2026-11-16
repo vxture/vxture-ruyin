@@ -35,14 +35,6 @@ function baseline() {
     version: 1,
     tiers: { default: "", "installed-disabled": "", "acquire-on-demand": "", "runos-registered": "" },
     allowedOrigins: ["https://cdn.example.com"],
-    // uv 2026-09-18 起是一条**按需获取的组件**，不再是随包的引导件（TD-042 ②）。
-    // pythonRuntime 只说「哪条组件、装成什么版本、要预热谁」。钉死与校验那一套
-    // 在 components 段，与别的载荷同一条路。
-    pythonRuntime: {
-      component: "python.uv",
-      cpython: { version: "3.13.15" },
-      seed: ["x.uvx-server"],
-    },
     skills: [],
     components: [
       {
@@ -130,29 +122,54 @@ test("launch.env 形状不对要拦 —— 它是我方固定的环境变量，�
   }
 });
 
-test("uvx 形态挂默认档 —— uv 不随包了，干净机器上一个字节都没有它", () => {
+function bundledUvx() {
   const m = baseline();
+  m.components.pop();
   m.servers[1].tier = "default";
-  assert.match(run(m).out, /uvx 形态不能是 default 档/);
-});
-
-test("uvx 形态少写 requiresComponent —— 起不来时用户看不到那个「获取」按钮", () => {
-  const m = baseline();
   delete m.servers[1].launch.requiresComponent;
-  m.servers[1].tier = "installed-disabled";
-  assert.match(run(m).out, /requiresComponent 里写上 python\.uv/);
+  m.servers[1].launch.offline = { cacheSeeded: true };
+  m.pythonRuntime = {
+    uv: {
+      version: "0.12.10",
+      upstream: "https://cdn.example.com/uv.zip",
+      sha256: "d".repeat(64),
+      size: 10,
+      license: "MIT OR Apache-2.0",
+      licenseSource: "上游仓库",
+      licenseFiles: ["LICENSE-MIT", "LICENSE-APACHE"],
+    },
+    cpython: { version: "3.13.15" },
+    seed: ["x.uvx-server"],
+  };
+  return m;
+}
+
+test("默认档 uvx 随包，并且必须有离线缓存", () => {
+  const m = bundledUvx();
+  const good = run(m);
+  assert.equal(good.code, 0, good.out);
+  delete m.servers[1].launch.offline;
+  assert.match(run(m).out, /launch\.offline\.cacheSeeded = true/);
 });
 
-test("uvx 形态又长回 launch.offline —— 那是「构建时预取进随包缓存」的形状", () => {
-  const m = baseline();
-  m.servers[1].launch.offline = { cacheSeeded: true };
-  assert.match(run(m).out, /launch\.offline 是/);
+test("默认档 uvx 必须有随包 uv", () => {
+  const m = bundledUvx();
+  delete m.pythonRuntime.uv;
+  assert.match(run(m).out, /default 档要求 pythonRuntime\.uv 存在/);
+});
+
+test("默认档 uvx 必须列入缓存预热清单", () => {
+  const m = bundledUvx();
+  m.pythonRuntime.seed = [];
+  assert.match(run(m).out, /default 档必须列进 pythonRuntime\.seed/);
 });
 
 test("pythonRuntime.seed 里列了一个不是 uvx 形态的服务器", () => {
-  const m = baseline();
-  m.pythonRuntime.seed = ["x.node-server"];
-  assert.match(run(m).out, /pythonRuntime\.seed/);
+  const m = bundledUvx();
+  m.pythonRuntime.seed.push("x.node-server");
+  const r = run(m);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /pythonRuntime\.seed: x\.node-server 不是 uvx 形态/);
 });
 
 test("默认档不许有 requiresComponent —— 要先下载才能起的不叫「零字节就能起」", () => {
@@ -339,25 +356,22 @@ test("干净的 refused 段不该拦住任何东西", () => {
 // 这一条守的是守卫自己的结构：汇报必须在**所有**规则之后。它此前夹在组件段与
 // pythonRuntime 段之间，于是 pythonRuntime 的每一条校验都是死信 —— 检查在跑，
 // 结论没人读。把汇报挪到末尾之后，这条用例才第一次能失败（2026-09-09）。
-test("pythonRuntime.component 指向一个不存在的组件 —— 这一段的结论必须真的被报出来", () => {
-  const m = baseline();
-  m.pythonRuntime.component = "nope";
+test("随包 uv 的预热清单不能引用未注册的服务器", () => {
+  const m = bundledUvx();
+  m.pythonRuntime.seed.push("x.missing");
   const r = run(m);
   assert.equal(r.code, 1);
-  assert.match(r.out, /不在 components\[\] 里/);
+  assert.match(r.out, /pythonRuntime\.seed: 清单里没有 x\.missing/);
 });
 
-// uv 曾经是随包的引导件（2026-09-06 进 extraResources，219 MB）。owner 2026-09-17
-// 定性「安装包小一些，租户按照需求，安装必要环境」之后它改走获取通道 —— 这条用例
-// 守的是**它别长回来**：一份重新写出 uv 段的清单必须当场被拒，而不是两种形状并存。
-test("pythonRuntime 又长出随包 uv 段", () => {
-  const m = baseline();
-  m.pythonRuntime.uv = { version: "0.12.10", sha256: "d".repeat(64) };
-  assert.match(run(m).out, /不许再有 uv 段/);
+test("随包 uv 必须钉死哈希", () => {
+  const m = bundledUvx();
+  delete m.pythonRuntime.uv.sha256;
+  assert.match(run(m).out, /pythonRuntime\.uv: sha256 不是 64 位/);
 });
 
 test("cpython 版本没钉到补丁号", () => {
-  const m = baseline();
+  const m = bundledUvx();
   m.pythonRuntime.cpython = { version: "3.13" };
   assert.match(run(m).out, /cpython\.version 要钉死到补丁号/);
 });
