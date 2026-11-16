@@ -3,6 +3,10 @@
 The Store product is a draft, not a published or certified release.
 Partner Center: https://partner.microsoft.com/en-US/dashboard/products/9PC52HV8RJ4N/overview
 
+Submission 1 has been created as a draft (ID `1152921505702421794`).
+No package has been uploaded and no certification or publication has started.
+Pricing/availability, properties, age ratings and Store listings remain incomplete.
+
 ## Identity
 
 | Field | Value |
@@ -22,6 +26,15 @@ daemon deployment, bundled runtimes and read-only payload smoke checks.
 The Store configuration generates AppX, a format accepted on the Store's
 MSIX/AppX submission path. The CI `store-package` job checks the identity
 inside the generated archive and retains it as an artifact.
+
+The seed step materializes uv's Python directory aliases before its offline
+verification. MakeAppx rejects directory junctions in its file mapping; retaining
+each alias as a real directory preserves uv's lookup paths.
+
+Validated build: commit `19a9db7`, CI run `43955125124`, artifact
+`ruyin-store-753`. Store AppX construction, archive identity checks and payload
+smoke passed, as did the separate NSIS packaged smoke. This is build validation,
+not a Store-installed test or certification result.
 
 This unsigned submission package is not an installer users can trust or
 install directly. Microsoft signs the certified package for Store distribution.

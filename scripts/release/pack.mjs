@@ -268,20 +268,17 @@ process.stdout.write(smokeOut);
 // 拿到，是被某条策略挡在门外，而不是应用自己崩了。把它报成「应用起不来」会把
 // 人送去查依赖树和原生绑定，那里什么问题都没有。
 //
-// **但别把原因写死成「未签名所以被拦」** —— 那是 TD-025 原本的判断，2026-09-02
-// 实测推翻了：本机 Smart App Control 开着强制，打出来的 exe 确认未签名，照样
-// 正常启动。SAC 拦的是**带 Mark-of-the-Web（下载来源标记）**的文件，本地构建
-// 产物没有这个标记。所以这里只说「被策略挡住了」，并把该看的东西列出来，不替
-// 用户断定是哪一条 —— 一句听起来笃定的错诊断，比不诊断更费时间。
+// UNKNOWN 本身不足以判断具体策略。Smart App Control 也会阻止没有下载来源标记的
+// 未受信任文件；应以 CodeIntegrity 日志中的策略与状态码确认，不能只看 MOTW。
 if (smoke.error) {
   const blocked = smoke.error.code === "UNKNOWN";
   console.error(
     blocked
       ? "[pack] FAILED: 这个 exe 没能被执行（spawn errno UNKNOWN）—— 它是被某条\n" +
           "       策略挡在门外的，不是应用崩了。打包产物本身因此没被验证过。\n" +
-          "       该查：① 文件有没有 Mark-of-the-Web（`Get-Item <exe> -Stream\n" +
-          "       Zone.Identifier`）—— Smart App Control 拦的是带下载标记的文件，\n" +
-          "       本地构建产物通常没有；② 杀毒/EDR 的隔离记录；③ 企业 WDAC 策略。\n" +
+          "       该查：① CodeIntegrity/Operational 日志中的策略名与状态码；\n" +
+          "       ② 杀毒/EDR 的隔离记录；③ 文件签名及下载来源标记。\n" +
+          "       没有 Zone.Identifier 也不能排除 Smart App Control。\n" +
           "       打包形态由 CI 的 packaged-smoke 兜底验证。"
       : `[pack] FAILED: could not launch the packaged app: ${smoke.error.message}`,
   );
