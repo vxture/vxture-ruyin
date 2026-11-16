@@ -1,0 +1,19 @@
+# Public identifiers assigned by Partner Center, Store ID 9PC52HV8RJ4N.
+# AppX is accepted on the Store's MSIX/AppX submission path. Microsoft signs
+# the certified package; this build is not a trusted standalone installer.
+extends: ./electron-builder.yml
+win:
+  target:
+    - target: appx
+      arch: [x64]
+appx:
+  identityName: VxtureStudio.RUYIN
+  publisher: CN=9B432893-508A-4CA0-927B-271209E9FE0F
+  publisherDisplayName: Vxture Studio
+  applicationId: Ruyin
+  displayName: RUYIN
+  languages: [zh-CN, en-US]
+  minVersion: 10.0.19041.0
+  setBuildNumber: false
+  artifactName: Ruyin-Store-${version}-${arch}.${ext}
+publish: null

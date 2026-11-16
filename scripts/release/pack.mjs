@@ -10,7 +10,7 @@
  *     -> electron-builder (nsis, or --dir for an unpacked smoke build)
  *     -> launch the packaged app with --smoke: it must actually start
  *
- * Usage: node scripts/release/pack.mjs [--dir]
+ * Usage: node scripts/release/pack.mjs [--dir] [--store]
  *   --dir  build the unpacked win-unpacked/ tree only (fast) instead of the
  *          NSIS installer. The packaged smoke check runs either way.
  *
@@ -39,6 +39,10 @@ const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const shellDir = join(repoRoot, "apps", "shell");
 const daemonOut = join(shellDir, "out", "daemon");
 const dirOnly = process.argv.includes("--dir");
+const storePackage = process.argv.includes("--store");
+if (dirOnly && storePackage) {
+  throw new Error("--store must produce an AppX package; do not combine it with --dir");
+}
 
 function run(cmd, args, cwd) {
   console.log(`[pack] ${cmd} ${args.join(" ")}`);
@@ -225,9 +229,15 @@ run(
   console.log("[pack] installer template: #19 known-folder patch present");
 }
 
+if (storePackage) {
+  run("powershell.exe", ["-NoProfile", "-File", join(repoRoot, "scripts", "release", "store-assets.ps1")], repoRoot);
+}
+
 run(
   "pnpm",
-  ["exec", "electron-builder", "--win", ...(dirOnly ? ["--dir"] : [])],
+  ["exec", "electron-builder", "--win",
+    ...(storePackage ? ["--config", "electron-builder.store.yml"] : []),
+    ...(dirOnly ? ["--dir"] : [])],
   shellDir,
 );
 

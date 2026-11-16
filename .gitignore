@@ -75,3 +75,6 @@ resources/node/
 # this line is the second net, not the fix - an ignored stray directory is
 # still a stray directory.
 .playwright-mcp/
+
+# Generated Store tiles (source: apps/shell/icons/icon.ico).
+apps/shell/installer/appx/
