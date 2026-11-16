@@ -9,12 +9,14 @@ The `ruyin-store-753` package has been uploaded and Partner Center reports
 Pricing/availability, properties and submission options are complete. The draft
 uses a zero Store acquisition price, direct-link-only discoverability, and a
 manual publishing hold. Chinese and English descriptions have been saved;
-both listings still need actual application screenshots. Age ratings remain
-in progress: consent to share the publisher name and developer email with IARC
-was explicitly granted. The questionnaire draft is saved but has not been
-submitted; online AI content declarations still require a verified product
-content policy. Broad theoretical AI capabilities alone are not sufficient
-evidence for declaring the product's permitted content categories.
+both listings now include an actual packaged login screenshot and are Complete.
+Age ratings are at the preview step: consent to share the publisher name and
+developer email with IARC was explicitly granted. The owner confirmed that
+pornographic, gory and discriminatory content is prohibited and restrictions
+are enforced by the model services. The revised questionnaire generates
+Microsoft 12+ / ESRB Teen (regional ratings vary). Saving the rating still
+requires acceptance of IARC Terms of Use and confirmation of legal adulthood;
+an explicit at-action confirmation is pending. No agreement has been accepted.
 The runFullTrust justification is saved; Microsoft approval is still pending.
 
 ## Identity
@@ -50,6 +52,12 @@ The following documentation/diagnostic update `746c0e4` also passed all CI jobs
 in run `43956532976`. The uploaded AppX SHA256 is
 `b5e6bc8ad4f250ee39272a149b46ab2b545cff0fc53a73c45f566794f3f32c97`.
 The existing local NSIS installation has not been replaced or uninstalled.
+
+Screenshot capture build `f884202` passed every CI job in run `43962317073`.
+Artifact `ruyin-store-screenshots-758` contains `store-login.png`, captured from
+the packaged UI on a clean runner. Capture is opt-in via
+`RUYIN_SMOKE_SCREENSHOT` during `--smoke`, refuses an authenticated workspace,
+and does not alter the normal application startup path.
 
 This unsigned submission package is not an installer users can trust or
 install directly. Microsoft signs the certified package for Store distribution.
