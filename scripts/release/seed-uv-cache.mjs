@@ -32,6 +32,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { materializePythonAliases } from "./materialize-python-aliases.mjs";
 
 const repoRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const manifest = JSON.parse(readFileSync(join(repoRoot, "resources", "skill-manifest.json"), "utf8"));
@@ -213,6 +214,8 @@ for (const l of seeds) {
   const after = dirSize(uvHome);
   console.log(`[seed-uv-cache] 裁掉 ${((before - after) / 1048576).toFixed(1)} MB（GUI 变体 / 索引元数据 / Tk / IDLE / 自测），剩 ${(after / 1048576).toFixed(1)} MB`);
 }
+
+materializePythonAliases(pythonDir);
 
 // 3. **离线复核**：这一步才是 `launch.offline.cacheSeeded: true` 的凭据。
 //    只把 wheel 放进缓存不算数 —— 断网时真起得来才算，而两者不是同一回事
