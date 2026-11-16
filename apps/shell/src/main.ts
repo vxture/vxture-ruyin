@@ -22,7 +22,7 @@ import {
 import { shellLocaleOf, shellT, type ShellKey } from "./i18n.js";
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -775,6 +775,36 @@ app.whenReady().then(async () => {
       // 时才算验过（ADR-017）。守护进程在 RUYIN_SMOKE=1 下会排一份，标记打在
       // 它的 stdout 上 —— 等它，别在它之前就宣布通过。
       await waitForPdfSelfCheck();
+      // Optional CI evidence of the actual packaged login UI. A clean runner
+      // has no user session; refuse to capture any authenticated workspace.
+      const screenshotPath = process.env["RUYIN_SMOKE_SCREENSHOT"];
+      if (screenshotPath) {
+        const preview = new BrowserWindow({
+          width: 1366, height: 768, useContentSize: true, show: false,
+          webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+        });
+        try {
+          await preview.loadURL(`http://127.0.0.1:${PORT}/?token=${TOKEN}`);
+          const ready = await preview.webContents.executeJavaScript(`(async () => {
+            for (let attempt = 0; attempt < 100; attempt++) {
+              if (document.querySelector('.login-title')) {
+                await document.fonts.ready;
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                return true;
+              }
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            return false;
+          })()`);
+          if (!ready) throw new Error("Packaged login screen did not render; screenshot refused");
+          const image = await preview.webContents.capturePage();
+          if (image.isEmpty()) throw new Error("Empty packaged UI screenshot");
+          writeFileSync(screenshotPath, image.toPNG());
+          console.log("[shell-smoke] packaged login screenshot saved");
+        } finally {
+          preview.destroy();
+        }
+      }
       console.log("[shell-smoke] OK: daemon healthy, shell wiring verified");
       stopDaemon();
       app.exit(0);
