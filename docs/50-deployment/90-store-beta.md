@@ -1,22 +1,26 @@
 # Microsoft Store beta
 
-The Store product is a draft, not a published or certified release.
+The Store product is in certification, not a published or certified release.
 Partner Center: https://partner.microsoft.com/en-US/dashboard/products/9PC52HV8RJ4N/overview
 
-Submission 1 has been created as a draft (ID `1152921505702421794`).
+Submission 1 (ID `1152921505702421794`) was submitted on 2026-11-17
+(Asia/Shanghai). Partner Center reports `In certification`, with submission
+complete and pre-processing in progress. The stated processing time is usually
+a few hours, potentially up to three business days. Publication remains on hold
+until `Publish now` is selected.
 The `ruyin-store-753` package has been uploaded and Partner Center reports
-`Validated` / Packages `Complete`. No certification or publication has started.
+`Validated` / Packages `Complete`. Publication has not started.
 Pricing/availability, properties and submission options are complete. The draft
 uses a zero Store acquisition price, direct-link-only discoverability, and a
 manual publishing hold. Chinese and English descriptions have been saved;
 both listings now include an actual packaged login screenshot and are Complete.
-Age ratings are at the preview step: consent to share the publisher name and
+Age ratings are Complete: consent to share the publisher name and
 developer email with IARC was explicitly granted. The owner confirmed that
 pornographic, gory and discriminatory content is prohibited and restrictions
 are enforced by the model services. The revised questionnaire generates
-Microsoft 12+ / ESRB Teen (regional ratings vary). Saving the rating still
-requires acceptance of IARC Terms of Use and confirmation of legal adulthood;
-an explicit at-action confirmation is pending. No agreement has been accepted.
+Microsoft 12+ / ESRB Teen (regional ratings vary). The owner explicitly confirmed
+legal adulthood and authorized accepting IARC Terms of Use at the save step;
+the terms were accepted and the rating saved.
 The runFullTrust justification is saved; Microsoft approval is still pending.
 
 ## Identity
