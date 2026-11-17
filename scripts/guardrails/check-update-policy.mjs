@@ -119,9 +119,9 @@ if (existsSync(componentStore)) {
     const text = readFileSync(full, "utf8");
     // 声明依赖（`components: componentStore`）不算，调用（`.acquire(`）才算。
     //
-    // `.provision(` 同一条纪律（2026-09-18，TD-042 ②）：装 Python 半边要取 uv 的
-    // 字节，再让 uv 去取 CPython 与 wheel —— 那是一次几百兆的下载，只能由用户点下
-    // 的那一次触发（`POST /python-runtime/provision`）。
+    // `.provision(` 同一条纪律。2026-09-19 起运行环境随包，这条路径上**没有**
+    // provision 了 —— 这条检查照留：它挡的是「下一个人再写一个开机自己装环境的
+    // 入口」，而一条只在被违反时才说话的检查，没有违反者的时候正是它该有的样子。
     const hit = /\.acquire(FromDir)?\s*\(/.test(text) ? "acquire" : /\.provision\s*\(/.test(text) ? "provision" : undefined;
     if (hit) {
       problems.push(

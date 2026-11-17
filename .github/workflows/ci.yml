@@ -408,3 +408,50 @@ jobs:
       # 工具，却没把重生成的文档一起提交」。
       - name: Bundled tool-name table is not stale (pull-tools just rewrote it)
         run: git diff --exit-code -- docs/40-implementation/40-bundled-tool-names.md docs/40-implementation/10-product-integration-guide.md
+
+  store-package:
+    name: store-package
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Build Store package and smoke the payload
+        run: node scripts/release/pack.mjs --store
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+          RUYIN_SMOKE_SCREENSHOT: ${{ github.workspace }}\store-login.png
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ruyin-store-screenshots-${{ github.run_number }}
+          retention-days: 14
+          if-no-files-found: error
+          path: store-login.png
+      - name: Validate Store identity in the actual package
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $package = @(Get-ChildItem apps/shell/release/Ruyin-Store-*.appx)
+          if ($package.Count -ne 1) { throw 'Expected one Store package' }
+          $zip = [IO.Compression.ZipFile]::OpenRead($package[0].FullName)
+          try {
+            $entry = $zip.GetEntry('AppxManifest.xml')
+            if (-not $entry) { throw 'Missing AppxManifest.xml' }
+            $reader = [IO.StreamReader]::new($entry.Open())
+            try { [xml]$manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            if ($manifest.Package.Identity.Name -cne 'VxtureStudio.RUYIN') { throw 'Wrong identity' }
+            if ($manifest.Package.Identity.Publisher -cne 'CN=9B432893-508A-4CA0-927B-271209E9FE0F') { throw 'Wrong publisher' }
+            if ($manifest.Package.Properties.PublisherDisplayName -cne 'Vxture Studio') { throw 'Wrong publisher display name' }
+            if ($manifest.Package.Identity.Version -notmatch '^\d+\.\d+\.\d+\.0$') { throw 'Store version must end in zero' }
+            Write-Host "Store identity validated: $($manifest.Package.Identity.Name) $($manifest.Package.Identity.Version)"
+          } finally { $zip.Dispose() }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ruyin-store-${{ github.run_number }}
+          retention-days: 14
+          if-no-files-found: error
+          path: apps/shell/release/Ruyin-Store-*.appx

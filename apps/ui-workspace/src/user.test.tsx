@@ -302,20 +302,14 @@ void test("UserSlot: clicking the settings row calls onOpenSettings", async () =
   expect(onOpenSettings).toHaveBeenCalledTimes(1);
 });
 
-/**
- * 「用户中心」「配额用量」两行（owner 2026-09-16，同日现场纠错一次）：落在
- * `consoleAppBase`（console-bff 本体）上，**不是** `consoleBase`（官网深链
- * 落点，两者是不同的主机）——第一版误用了 consoleBase，两条链接都拼去了
- * vxture.com。未登录 / daemon 未接通 `PlatformSession` 时没有这个字段，落到
- * 与 daemon 侧同一个缺省 `https://console.vxture.com`。
- */
-void test("UserSlot: 「用户中心」「配额用量」两行跟着 consoleAppBase 拼地址，不是 consoleBase", async () => {
+void test("UserSlot: 用户中心打开 Accounts，配额用量打开 Console", async () => {
   const api = fakeApi({
     session: vi.fn().mockResolvedValue(
       session({
         signedIn: true,
         consoleBase: "https://vxture.com",
         consoleAppBase: "https://console.staging.vxture.com",
+        accountsBase: "https://accounts.staging.vxture.com",
       }),
     ),
   });
@@ -324,7 +318,7 @@ void test("UserSlot: 「用户中心」「配额用量」两行跟着 consoleApp
   expect(await screen.findByText("用户中心")).toBeInTheDocument();
   expect(screen.getByText("用户中心").closest("a")).toHaveAttribute(
     "href",
-    "https://console.staging.vxture.com/profile",
+    "https://accounts.staging.vxture.com/account?vx_locale=zh-CN",
   );
   expect(screen.getByText("配额用量").closest("a")).toHaveAttribute(
     "href",
@@ -342,7 +336,7 @@ void test("UserSlot: 没有 consoleAppBase 时「用户中心」落到 https://c
   expect(await screen.findByText("用户中心")).toBeInTheDocument();
   expect(screen.getByText("用户中心").closest("a")).toHaveAttribute(
     "href",
-    "https://console.vxture.com/profile",
+    "https://accounts.vxture.com/account?vx_locale=zh-CN",
   );
 });
 

@@ -16,23 +16,12 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cp } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 
 import type { ComponentStore } from "./component-store.js";
-import type { PythonRuntimeConfig, PythonSeed } from "./python-runtime.js";
-
-/**
- * 起 uvx 形态要的那几条路径。**只声明用到的四件事**，不 import PythonRuntime 本身 ——
- * 那一头要问获取通道（ComponentStore），这一头也要，两个类互相 import 就成了环。
- */
-export interface PythonHalf {
-  uvExe(): string | undefined;
-  pythonDir(): string;
-  cacheDir(): string;
-  toolDir(): string;
-  isReady(): boolean;
-}
 
 export interface LaunchSpec {
   runtime: "node" | "uvx";
@@ -95,8 +84,8 @@ export interface BundledServer {
 export interface ToolsIndex {
   generatedAt?: string;
   servers: BundledServer[];
-  /** 清单里 Python 半边的描述（uv 那条组件、CPython 版本、要预热谁），pull-tools 照抄进来。 */
-  pythonRuntime?: PythonRuntimeConfig;
+  /** 清单里 Python 引导件的描述（uv 的 pin、CPython 版本、要预热谁），pull-tools 照抄进来。 */
+  pythonRuntime?: unknown;
 }
 
 export type LaunchPlan =
@@ -141,11 +130,6 @@ export interface BundledToolServersOptions {
   execPath?: string;
   /** 本机有没有 uv；缺省真的问一次 `uvx --version`。注入是为了测试。 */
   hasUvx?: () => boolean;
-  /**
-   * 已获取并装好的 Python 半边（`python-runtime.ts`）。缺省 = 这套装配没有它，
-   * uvx 形态一律如实报「还没装 Python 运行环境」。
-   */
-  python?: PythonHalf;
   /** 本机有没有某个外部程序；缺省 `<bin> --version`。 */
   hasBin?: (bin: string) => boolean;
   /** 获取通道（ADR-018 §7.2）。缺省 = 这套装配没有，需要载荷的一律如实报「未获取」。 */
@@ -201,14 +185,6 @@ export class BundledToolServers {
     this.stateFile = join(options.dataDir, "tools", "state.json");
   }
 
-  /**
-   * Python 半边在构造之后才接上（它要问获取通道，而获取通道这一头也要问它 ——
-   * 构造期互指的两个对象，只能有一个先存在）。main.ts 造完就接。
-   */
-  setPython(python: PythonHalf): void {
-    this.options.python = python;
-  }
-
   get toolsDir(): string | undefined {
     const dir = this.options.toolsDir;
     return dir && existsSync(join(dir, "index.json")) ? dir : undefined;
@@ -226,27 +202,6 @@ export class BundledToolServers {
 
   get(id: string): BundledServer | undefined {
     return this.list().find((s) => s.id === id);
-  }
-
-  /** 清单里 Python 半边那一段。没有就是这一版不带 Python 形态。 */
-  pythonConfig(): PythonRuntimeConfig | undefined {
-    const py = this.readIndex().pythonRuntime;
-    return py && typeof py.component === "string" ? py : undefined;
-  }
-
-  /**
-   * 获取那一次要预热哪几个包。**版本从清单的 launch 里取** —— 钉死的那一个，不是
-   * 最新的；预热与运行时起它用的必须是同一组 `包==版本`，否则预热的是另一份东西。
-   */
-  pythonSeeds(): PythonSeed[] {
-    const ids = this.pythonConfig()?.seed ?? [];
-    return this.list()
-      .filter((s) => ids.includes(s.id) && s.launch?.runtime === "uvx")
-      .map((s) => ({
-        package: s.launch!.package,
-        version: s.launch!.version,
-        ...(s.launch!.bin ? { bin: s.launch!.bin } : {}),
-      }));
   }
 
   isEnabled(id: string): boolean {
@@ -363,8 +318,14 @@ export class BundledToolServers {
    * 缓存从一开始就写在数据目录，没有第二份，也就没有两份之间的漂移。
    */
   private uvxPlan(launch: LaunchSpec, userEnv: Record<string, string>): LaunchPlan {
-    const python = this.options.python;
-    const uvExe = python?.uvExe();
+    /*
+     * **随包那一份优先**（owner 2026-09-19：装完就不该有起不来的能力）。
+     *
+     * 顺序是：随包的 <resources>/uv → 获取通道装下的那一份（历史上那条路，留着是
+     * 因为老机器上可能已经装过）→ PATH 上的 uv（开发机）。三条都没有才说起不来。
+     */
+    const bundled = this.uvHome();
+    const uvExe = bundled ? join(bundled, process.platform === "win32" ? "uv.exe" : "uv") : undefined;
     // 装好的没有就退回 PATH 上的 uv：那是开发机（以及自己装过 uv 的租户）的情形，
     // **不是**联网回退 —— `--offline` 与钉死的 `包==版本` 两条都还在，缓存冷了照样
     // 干净地失败。
@@ -373,15 +334,10 @@ export class BundledToolServers {
       if (!this.uvxKnown) {
         return {
           ok: false,
-          reason: "还没装 Python 运行环境（uv 与 CPython 不随安装包），PATH 上也没有 uv",
+          reason: "这一版安装包里没有随包的 uv，PATH 上也没有 —— Python 形态的服务器起不来",
           needsPython: true,
         };
       }
-    }
-    // uv 在、但 CPython 与 wheel 还没装好：**这与「没有 uv」不是同一句话**，
-    // 用户在界面上要点的也不是同一个按钮。
-    if (uvExe && python && !python.isReady()) {
-      return { ok: false, reason: "Python 运行环境还没装完（CPython 或 wheel 缺）", needsPython: true };
     }
     return {
       ok: true,
@@ -394,11 +350,18 @@ export class BundledToolServers {
         launch.bin ?? launch.package,
         ...(launch.args ?? []),
       ],
+      // 随包那一份：缓存是只读的，起进程之前先种到数据目录（TD-062）。
+      ...(bundled ? { prepare: () => this.seedUvCache(join(bundled, "cache"), join(this.options.dataDir, "tools", "uv-cache")) } : {}),
       env: {
-        ...(python ? { UV_CACHE_DIR: python.cacheDir(), UV_PYTHON_INSTALL_DIR: python.pythonDir() } : {}),
+        ...(bundled
+          ? {
+              UV_CACHE_DIR: join(this.options.dataDir, "tools", "uv-cache"),
+              UV_PYTHON_INSTALL_DIR: join(bundled, "python"),
+            }
+          : {}),
         // 不写进用户的漫游配置（`%APPDATA%\uv\tools`）。uvx 起的是临时环境，
         // 这个目录只是它的落脚点；钉在数据目录下，行为可预期、卸载也带得走。
-        UV_TOOL_DIR: python?.toolDir() ?? join(this.options.dataDir, "tools", "uv-tools"),
+        UV_TOOL_DIR: join(this.options.dataDir, "tools", "uv-tools"),
         // 缺什么就失败，绝不自己去下一个 Python 解释器。
         UV_PYTHON_DOWNLOADS: "never",
         UV_NO_PROGRESS: "1",
@@ -408,10 +371,122 @@ export class BundledToolServers {
     };
   }
 
+  /** 同一时刻只种一次：两个 uvx 服务器一起启用时，第二个等第一个种完。 */
+  private seeding: Promise<void> | undefined;
+
+  /**
+   * 把随包的 uv 缓存种到数据目录（TD-062）。
+   *
+   * 三条纪律：
+   *   - **跳过软链**：种子里 wheels-v5 下的目录是指向 archive-v0 的链接，指的还是构建机
+   *     的绝对路径。实测 uv 不走它们（按 archive id 从 .http/.msgpack 指针重解析），
+   *     而 Windows 上建符号链接要特权，所以一律不带；
+   *   - **重置权限**：cpSync 会把源文件的只读位一起搬过来，uv 打开缓存里的文件写就会
+   *     被拒（实测栽在 sdists-v9/.git 上），目录也一样 —— 根目录忘了会栽在临时文件上；
+   *   - **先种到临时目录再原子改名**：复制到一半被杀，下次启动看到的是没有这个目录，
+   *     而不是一份缺东西的缓存。
+   *
+   * 种子键：随包的 pythonRuntime + 全部 uvx 形态的「包==版本」。安装包升级换了 uv 或
+   * 加了新的 Python 工具，键就变，整份缓存重种 —— 否则 `--offline` 会对新版本干净地
+   * 失败，而那台机器上没人知道缓存是旧的。
+   */
+  private seedUvCache(seed: string, cache: string): Promise<void> {
+    if (!this.seeding) {
+      this.seeding = this.seedUvCacheOnce(seed, cache).finally(() => {
+        this.seeding = undefined;
+      });
+    }
+    return this.seeding;
+  }
+
+  private uvSeedKey(): string {
+    const index = this.readIndex();
+    const uvx = index.servers
+      .map((s) => s.launch)
+      .filter((l): l is LaunchSpec => !!l && l.runtime === "uvx")
+      .map((l) => `${l.package}==${l.version}`)
+      .sort();
+    return createHash("sha256")
+      .update(JSON.stringify({ pythonRuntime: index.pythonRuntime ?? null, uvx }))
+      .digest("hex");
+  }
+
+  private async seedUvCacheOnce(seed: string, cache: string): Promise<void> {
+    if (!existsSync(seed)) {
+      this.options.log?.(`[ruyin] uv cache: 随包没有种子（${seed}），uvx 形态只能靠已有的 ${cache}`);
+      return;
+    }
+    const key = this.uvSeedKey();
+    const marker = join(cache, ".ruyin-seed.json");
+    try {
+      const have = JSON.parse(readFileSync(marker, "utf8")) as { key?: string };
+      if (have.key === key) return;
+      this.options.log?.(`[ruyin] uv cache: 随包种子变了（安装包升级），重种 ${cache}`);
+    } catch {
+      // 没有标记 = 没种过（或种到一半）：整份重来。
+    }
+    const started = Date.now();
+    const staging = `${cache}.seeding-${process.pid}`;
+    rmSync(staging, { recursive: true, force: true });
+    let files = 0;
+    await cp(seed, staging, {
+      recursive: true,
+      force: true,
+      filter: (src) => {
+        const st = lstatSync(src);
+        if (st.isSymbolicLink()) return false;
+        if (st.isFile()) files++;
+        return true;
+      },
+    });
+    const writable = (dir: string): void => {
+      chmodSync(dir, 0o755);
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) writable(full);
+        else chmodSync(full, 0o644);
+      }
+    };
+    writable(staging);
+    writeFileSync(join(staging, ".ruyin-seed.json"), JSON.stringify({ key, from: seed, seededAt: new Date().toISOString() }));
+    rmSync(cache, { recursive: true, force: true });
+    renameSync(staging, cache);
+    this.options.log?.(`[ruyin] uv cache: seeded ${files} file(s) from ${seed} -> ${cache} (${Date.now() - started} ms)`);
+  }
+
+  /** 随包的 uv 在哪（`<resources>/uv`）。没有就是这一版没装进来。 */
+  private uvHome(): string | undefined {
+    const dir = this.options.toolsDir;
+    if (!dir) return undefined;
+    const home = join(dirname(resolve(dir)), "uv");
+    return existsSync(join(home, process.platform === "win32" ? "uv.exe" : "uv")) ? home : undefined;
+  }
+
   /**
    * 随包的真 node.exe 在哪（`<resources>/node`，与 `uv` 兄弟）。没有就是这一版
    * 没装进来（开发态：没跑过 `pack.mjs`）——那时退回借 Ruyin.exe 自己跑的旧路子。
    */
+  /**
+   * 随包那几个运行环境在哪（环境检查要用）。**装完就该都在** —— owner 2026-09-19：
+   * 差异只在能力启用与否，不该有「装完也起不来」的能力。
+   */
+  bundledRuntimePaths(): { nodeExe?: string | undefined; uvExe?: string | undefined; pythonExe?: string | undefined } {
+    const uv = this.uvHome();
+    const py = uv ? join(uv, "python") : undefined;
+    let pythonExe: string | undefined;
+    if (py && existsSync(py)) {
+      for (const name of readdirSync(py)) {
+        const exe = join(py, name, process.platform === "win32" ? "python.exe" : "bin/python3");
+        if (existsSync(exe)) { pythonExe = exe; break; }
+      }
+    }
+    return {
+      nodeExe: this.nodeExe(),
+      uvExe: uv ? join(uv, process.platform === "win32" ? "uv.exe" : "uv") : undefined,
+      pythonExe,
+    };
+  }
+
   /** 随包那个真 node.exe 在哪（环境检查要用；没有就是这一版没装进来）。 */
   bundledNodeExe(): string | undefined {
     return this.nodeExe();

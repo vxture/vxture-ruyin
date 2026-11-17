@@ -407,7 +407,10 @@ void test("装配线：RUYIN_SMOKE=1 时界面自检真的跑，且排在 PDF �
     );
     // 另外两条如实说「没有可试的」，而不是去起任何服务器。
     assert.match(log, /tools self-check: no vendored node server to try/);
-    assert.match(log, /uvx self-check: python runtime not installed/);
+    // 这一轮的 RUYIN_TOOLS_DIR 是个空目录 —— 没有随包的 uvx 服务器可试，就如实说没有。
+    // **不是**「Python 没装」：运行环境随安装包走（TD-042 ②，2026-09-19），这两句话
+    // 在真机上意味着完全不同的两件事，冒烟里也不许混着说。
+    assert.match(log, /uvx self-check: no seeded uvx server to try/);
   } finally {
     await d?.stop();
     rmSync(dist, { recursive: true, force: true });

@@ -50,67 +50,67 @@ const INDEX = {
 };
 
 /**
- * Python 半边（TD-042 ②）：uv 与 CPython **不随安装包**，装好的那一份在数据目录。
- * 这里钉三件事 —— 没装时说的是哪一句、装了但没装完时说的是另一句、装好之后启动
- * 契约指到哪里。`PythonHalf` 是个窄接口，所以这里直接给一个假的。
+ * Python 运行环境**随安装包**（owner 2026-09-19：装完就不该有起不来的能力）。
+ *
+ * 这一段 2026-09-18 反过来写过一次（那时它按需获取）。两种写法都对过 —— 对的是各自
+ * 那天的事实；用例要跟着事实走。
  */
-//  = 这台机器还没获取过 uv（ 当哨兵会与「没传这个字段」撞上）。
-function fakePython(over: { uvExe?: null; ready?: boolean } = {}) {
-  const home = "/data/c/python.uv/0.12.10/uv";
-  return {
-    uvExe: () => (over.uvExe === null ? undefined : `${home}/uv.exe`),
-    pythonDir: () => "/data/tools/uv-python",
-    cacheDir: () => "/data/tools/uv-cache",
-    toolDir: () => "/data/tools/uv-tools",
-    isReady: () => over.ready !== false,
-  };
+function uvRig() {
+  const r = rig({ ...INDEX, pythonRuntime: { uv: { version: "0.12.10" }, cpython: { version: "3.13.15" } } });
+  // uvHome() 找的是 toolsDir 的兄弟目录 <base>/uv，里面要有 uv 可执行文件才算随包。
+  const uvHome = join(r.base, "uv");
+  mkdirSync(join(uvHome, "cache"), { recursive: true });
+  mkdirSync(join(uvHome, "python"), { recursive: true });
+  writeFileSync(join(uvHome, process.platform === "win32" ? "uv.exe" : "uv"), "");
+  writeFileSync(join(uvHome, "cache", "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55");
+  return { ...r, uvHome };
 }
 
-test("plan(uvx): 装好之后 —— 用装下的那个 uv.exe，--offline 不变，缓存与解释器都在数据目录", () => {
-  const { servers } = rig(INDEX, { python: fakePython() });
+test("plan(uvx)：用随包那个 uv.exe，--offline 不变，缓存指向数据目录的可写副本", () => {
+  const { servers, uvHome, dataDir } = uvRig();
   const plan = servers.plan("py.markitdown");
   assert.ok(plan.ok);
   if (!plan.ok) return;
-  assert.equal(plan.command, "/data/c/python.uv/0.12.10/uv/uv.exe");
-  assert.deepEqual(plan.args, ["tool", "run", "--offline", "--from", "markitdown-mcp==0.0.1a4", "markitdown-mcp"]);
-  assert.equal(plan.env["UV_CACHE_DIR"], "/data/tools/uv-cache");
-  assert.equal(plan.env["UV_PYTHON_INSTALL_DIR"], "/data/tools/uv-python");
-  assert.equal(plan.env["UV_TOOL_DIR"], "/data/tools/uv-tools");
+  assert.equal(plan.command, join(uvHome, process.platform === "win32" ? "uv.exe" : "uv"));
+  assert.deepEqual(plan.args.slice(0, 3), ["tool", "run", "--offline"]);
+  // 缓存不能直接用随包那份：uvx 每次都往里写，而安装目录可能不可写（TD-062）。
+  assert.equal(plan.env["UV_CACHE_DIR"], join(dataDir, "tools", "uv-cache"));
+  assert.equal(plan.env["UV_PYTHON_INSTALL_DIR"], join(uvHome, "python"));
   assert.equal(plan.env["UV_PYTHON_DOWNLOADS"], "never");
-  // 包里再没有只读的那一份要往外种，所以也就不再有 prepare 这一步（TD-062 的缝没了）。
-  assert.equal(plan.prepare, undefined);
+  assert.equal(typeof plan.prepare, "function", "起进程之前要有种缓存这一步");
+  // 只算计划不种：列表页也会算计划，一算就复制两百兆不行。
+  assert.equal(existsSync(join(dataDir, "tools", "uv-cache")), false);
 });
 
-test("plan(uvx): uv 在、但 CPython 与 wheel 还没装完 —— 与「没有 uv」不是同一句话", () => {
-  const { servers } = rig(INDEX, { python: fakePython({ ready: false }) });
+test("prepare()：把随包缓存种到数据目录，第二次不动", async () => {
+  const { servers, dataDir } = uvRig();
+  const plan = servers.plan("py.markitdown");
+  assert.ok(plan.ok && plan.prepare);
+  if (!plan.ok || !plan.prepare) return;
+  await plan.prepare();
+  const cache = join(dataDir, "tools", "uv-cache");
+  assert.ok(existsSync(join(cache, "CACHEDIR.TAG")));
+  const before = statSync(join(cache, ".ruyin-seed.json")).mtimeMs;
+  await plan.prepare();
+  assert.equal(statSync(join(cache, ".ruyin-seed.json")).mtimeMs, before);
+});
+
+test("bundledRuntimePaths()：随包的三样都指得出来 —— 环境检查按它现场问版本", () => {
+  const { servers, uvHome } = uvRig();
+  const paths = servers.bundledRuntimePaths();
+  assert.equal(paths.uvExe, join(uvHome, process.platform === "win32" ? "uv.exe" : "uv"));
+  // 这一份夹具没造出解释器目录，所以它如实是 undefined —— **不猜一个路径出来**。
+  assert.equal(paths.pythonExe, undefined);
+});
+
+test("plan(uvx)：这一版没随包 uv —— 如实说起不来，而不是假装能起", () => {
+  const { servers } = rig(INDEX);
   const plan = servers.plan("py.markitdown");
   assert.equal(plan.ok, false);
   if (!plan.ok) {
-    assert.match(plan.reason, /还没装完/);
+    assert.match(plan.reason, /没有随包的 uv/);
     assert.equal(plan.needsPython, true);
   }
-});
-
-test("plan(uvx): 没装 Python 半边但 PATH 上有 uv —— 开发机照旧能起，且 --offline 一个字没松", () => {
-  const { servers } = rig(INDEX, { python: fakePython({ uvExe: null }), hasUvx: () => true });
-  const plan = servers.plan("py.markitdown");
-  assert.ok(plan.ok);
-  if (!plan.ok) return;
-  assert.equal(plan.command, "uvx");
-  assert.deepEqual(plan.args, ["--offline", "--from", "markitdown-mcp==0.0.1a4", "markitdown-mcp"]);
-  assert.equal(plan.env["UV_PYTHON_DOWNLOADS"], "never");
-});
-
-test("pythonConfig / pythonSeeds: 要预热的包与版本来自清单的 launch —— 钉死的那一个，不是最新的", () => {
-  const { servers } = rig({
-    ...INDEX,
-    pythonRuntime: { component: "python.uv", cpython: { version: "3.13.15" }, seed: ["py.markitdown", "vendor.node-server"] },
-  });
-  assert.equal(servers.pythonConfig()?.component, "python.uv");
-  // node 形态混进 seed 里也不会被当成 wheel 去预热 —— 那是清单写错，不该变成一次
-  // 谁也看不懂的 uv 失败。
-  assert.deepEqual(servers.pythonSeeds(), [{ package: "markitdown-mcp", version: "0.0.1a4", bin: "markitdown-mcp" }]);
-  assert.equal(rig(INDEX).servers.pythonConfig(), undefined, "清单里没有这一段 = 这一版不带 Python 形态");
 });
 
 test("index: list / launchable / get; no index means no bundled layer, never an empty pretence", () => {
@@ -171,7 +171,7 @@ test("plan: uvx servers need uv on this machine; requiresBin needs the external 
   // 2026-09-18（TD-042 ②）：uv 不随安装包了，所以这一句说的是「还没装 Python 运行环境」，
   // 而且**带 needsPython** —— 界面按它给那一块自己的按钮，不是给一个「获取」按钮。
   if (!p.ok) {
-    assert.match(p.reason, /还没装 Python 运行环境/);
+    assert.match(p.reason, /没有随包的 uv/);
     assert.equal(p.needsPython, true);
   }
 

@@ -22,6 +22,7 @@ import {
   diffTree,
   judgeReadOnlySmoke,
   parseUiSelfCheck,
+  parseUvSeed,
   snapshotTree,
 } from "./pack-smoke.mjs";
 
@@ -151,16 +152,63 @@ void test("judgeReadOnlySmoke: 壳没 OK 就红，并说清这就是装到 Progr
   assert.match(r.message, /TD-062/);
 });
 
-// uvx 与种子那几条判据 2026-09-18 一起去掉了（TD-042 ②：uv 不随安装包，包里没有那份
-// 种子，缓存从一开始就写在数据目录）。**这一条守的是它们真的去掉了**：一份连 uvx 自检
-// 都没报、一行种子都没有的只读演练必须照过 —— 留着那两条断言就是两条永远不会失败的
-// 断言，而一条永不失败的断言读起来和一条在守着的一模一样。
-void test("judgeReadOnlySmoke: 没有 uvx 自检、没有种子行也照过 —— Python 半边不随包了", () => {
+void test("parseUvSeed: 数字、种子目录、落点都带出来 —— Windows 路径含括号与空格，行尾 \\r\\n 也不把 \\r 收进落点", () => {
+  const r = parseUvSeed(roTranscript({ eol: "\r\n" }));
+  assert.deepEqual(r, {
+    files: 11678,
+    from: "D:\\a\\Program Files (x86)\\Ruyin\\resources\\uv\\cache",
+    to: `${RO_DATA}\\tools\\uv-cache`,
+    ms: 28745,
+  });
+  assert.equal(parseUvSeed(roTranscript({ seed: null })), undefined, "第二次起没有这一行，要如实说没有");
+});
+
+/* ── uvx 与种子那两条判据（撤于 2026-09-18，搬回于 2026-09-19）───
+ *
+ * 它们守的是「随包的 uv 缓存能不能从只读的包里种到数据目录」。
+ * 09-18 那天 uv 不随包，这条缝不存在，留着就是两条永不失败的断言；
+ * 09-19 owner 改判运行环境随包，缝回来了，判据也跟着回来。
+ * **撤得对、搬回来也对** —— 判据跟着包里到底有什么走，不跟着上一版的代码走。
+ */
+void test("judgeReadOnlySmoke: 壳 OK 但 uvx 没过也红 —— Python 半边正是当初写进包里的那一支", () => {
   const r = judgeReadOnlySmoke({
-    smokeOut: roTranscript({ uvx: "python runtime not installed (not-acquired)", seed: null }),
+    smokeOut: roTranscript({ uvx: "no seeded uvx server to try" }),
     dataDir: RO_DATA,
   });
+  assert.equal(r.ok, false);
+  assert.match(r.message, /no seeded uvx server to try/, "要把守护进程实际报的那句带出来");
+  assert.match(r.message, /tool-servers\.ts/);
+});
+
+void test("judgeReadOnlySmoke: 空数据目录却没有种子行也红 —— 那说明缓存又指回了包里，可写工作区看不出来", () => {
+  const r = judgeReadOnlySmoke({ smokeOut: roTranscript({ seed: null }), dataDir: RO_DATA });
+  assert.equal(r.ok, false);
+  assert.match(r.message, /UV_CACHE_DIR/);
+});
+
+void test("judgeReadOnlySmoke: 种子落在这一轮的数据目录之外也红，并把落点与最可能的原因（钉住了老数据目录）写出来", () => {
+  const elsewhere = SEED_LINE.replace(`${RO_DATA}\\tools\\uv-cache`, "C:\\Users\\x\\AppData\\Roaming\\Ruyin\\data\\tools\\uv-cache");
+  const r = judgeReadOnlySmoke({ smokeOut: roTranscript({ seed: elsewhere }), dataDir: RO_DATA });
+  assert.equal(r.ok, false);
+  assert.match(r.message, /Roaming\\Ruyin\\data\\tools\\uv-cache/);
+  assert.match(r.message, /data-location\.ts/);
+});
+
+void test("judgeReadOnlySmoke: 全对就过，detail 把 uvx 结果、种子数与落点带出来；行尾 \\r\\n 一样", () => {
+  const r = judgeReadOnlySmoke({ smokeOut: roTranscript({ eol: "\r\n" }), dataDir: RO_DATA });
   assert.equal(r.ok, true, r.ok ? "" : r.message);
+  assert.match(r.detail, /11678 个文件/);
+  assert.match(r.detail, /uvx ok \(haris-musa\.excel-mcp-server, 25 tool\(s\)\)/);
+});
+
+void test("judgeReadOnlySmoke: 没拉随包工具（expectUvx=false）时只看壳的 OK，不去要种子", () => {
+  const r = judgeReadOnlySmoke({
+    smokeOut: roTranscript({ uvx: "no seeded uvx server to try", seed: null }),
+    dataDir: RO_DATA,
+    expectUvx: false,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(judgeReadOnlySmoke({ smokeOut: roTranscript({ ok: false }), dataDir: RO_DATA, expectUvx: false }).ok, false);
 });
 
 void test("denyWrites: 锁完 effective 说的是真话（非 root 就锁得住，root 就如实说锁不住），restore 之后树根与子目录都写得回来", () => {

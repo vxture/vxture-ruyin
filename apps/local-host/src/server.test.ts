@@ -682,6 +682,32 @@ void test("当前工作区：会话登着只认会话；会话说不出就是没
   }
 });
 
+void test("/auth/session exposes Accounts recovery state without exposing the RP session", async () => {
+  const rig = await startServer({
+    accountsBase: "https://accounts.example",
+    platform: signedInTo("wsp_x"),
+    platformSession: {
+      signedIn: () => true,
+      status: () => ({ signedIn: true, expiresAt: null }),
+      identity: async () => ({ accountStatus: "deleting", deletionRequestedAt: "2026-11-01T00:00:00Z" }),
+      baseUrl: "https://console.example",
+    } as unknown as PlatformSession,
+  });
+  try {
+    const response = await fetch(`${rig.base}/auth/session`, { headers: rig.headers });
+    assert.equal(response.status, 200);
+    const body = await response.json() as Record<string, unknown>;
+    assert.equal(body["accountsBase"], "https://accounts.example");
+    assert.equal(body["consoleAppBase"], "https://console.example");
+    assert.equal(body["accountStatus"], "deleting");
+    assert.equal(body["deletionRequestedAt"], "2026-11-01T00:00:00Z");
+    assert.equal(body["signedIn"], true);
+    assert.equal(body["rpsid"], undefined);
+  } finally {
+    closeRig(rig);
+  }
+});
+
 void test("未配置 platformSession 时 /auth/session 回未登录，不拿旧 claims 冒充身份", async () => {
   const rig = await startServer({ platform: signedInTo("wsp_x") });
   try {
@@ -3442,6 +3468,15 @@ void test("GET /platform/atlas/models：只投影展示字段；403 是角色事
       },
     },
     {
+      name: "account deletion pending",
+      deps: { platform: signedInTo("wsp_x"), platformSession: session(async () => { throw new PlatformReadError("/api/atlas/models", 403, "ACCOUNT_DELETING"); }) },
+      status: 403,
+      check: (body) => {
+        assert.equal(body["code"], "ACCOUNT_DELETING");
+        assert.equal(body["retryable"], false);
+      },
+    },
+    {
       name: "upstream failed",
       deps: { platform: signedInTo("wsp_x"), platformSession: session(async () => { throw new PlatformReadError("/api/atlas/models", 500); }) },
       status: 502,
@@ -3667,78 +3702,6 @@ void test("/models/private：装配没接这套时整组回 503，而不是假�
         "PRIVATE_MODEL_NOT_CONFIGURED",
       );
     }
-  } finally {
-    closeRig(rig);
-  }
-});
-
-// ───────────── Python 半边（ADR-018 §7.2；TD-042 ②）：/python-runtime ─────────────
-
-test("python-runtime: 这一版不带它时如实回 503 —— 界面据此整块不显示，而不是摆一个点不动的按钮", async () => {
-  const rig = await startServer();
-  try {
-    const res = await fetch(`${rig.base}/python-runtime`, { headers: rig.headers });
-    assert.equal(res.status, 503);
-    assert.equal(((await res.json()) as { code: string }).code, "PYTHON_RUNTIME_NOT_AVAILABLE");
-  } finally {
-    closeRig(rig);
-  }
-});
-
-test("python-runtime: 状态 / 安装 / 取消 / 移除；安装那一次连着把 uv 的字节取下来，且**不等它装完就回**", async () => {
-  const calls: string[] = [];
-  let state = "not-acquired";
-  const rig = await startServer({
-    components: {
-      list: () => [],
-      status: () => undefined,
-      acquire: async (id) => {
-        calls.push(`acquire:${id}`);
-        return {};
-      },
-      acquireFromDir: async () => ({}),
-      cancel: () => false,
-      remove: () => false,
-    },
-    python: {
-      status: () => ({ state, component: "python.uv" }),
-      provision: async (opts) => {
-        calls.push("provision");
-        await opts?.acquire?.();
-        // 真实实现要几分钟；这里只把「路由没有等它」钉住。
-        state = "provisioning";
-        return {};
-      },
-      cancel: () => {
-        calls.push("cancel");
-        return true;
-      },
-      remove: () => {
-        calls.push("remove");
-        return true;
-      },
-    },
-  });
-  try {
-    const before = (await (await fetch(`${rig.base}/python-runtime`, { headers: rig.headers })).json()) as {
-      state: string;
-      component: string;
-    };
-    assert.equal(before.state, "not-acquired");
-    assert.equal(before.component, "python.uv");
-
-    const started = await fetch(`${rig.base}/python-runtime/provision`, { method: "POST", headers: rig.json });
-    assert.equal(started.status, 200);
-    // 这一次请求的答案是「开始了」，不是「装完了」—— 装完要几分钟，界面按状态轮询。
-    assert.equal(((await started.json()) as { state: string }).state, "not-acquired");
-
-    const cancelled = await fetch(`${rig.base}/python-runtime/cancel`, { method: "POST", headers: rig.json });
-    assert.deepEqual(await cancelled.json(), { cancelled: true });
-    const removed = await fetch(`${rig.base}/python-runtime`, { method: "DELETE", headers: rig.headers });
-    assert.deepEqual(await removed.json(), { removed: true });
-
-    // 取 uv 的字节走的是**同一条获取通道**，不在 python-runtime 里另开一条。
-    assert.deepEqual(calls, ["provision", "acquire:python.uv", "cancel", "remove"]);
   } finally {
     closeRig(rig);
   }
