@@ -21,6 +21,8 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -54,6 +56,20 @@ async function loadDpapi(): Promise<DpapiApi | undefined> {
 const DPAPI_FILE = "master.key.dpapi";
 const PLAIN_FILE = "master.key";
 
+function hasStoredData(dataDir: string): boolean {
+  for (const kind of ["projects", "libraries", "workspaces"]) {
+    const root = join(dataDir, kind);
+    if (existsSync(root) && readdirSync(root, { withFileTypes: true }).some(entry => {
+      if (!entry.isDirectory()) return false;
+      const dir = join(root, entry.name);
+      return existsSync(join(dir, "key.enc")) || ["project.db", "workspace.db"].some(name =>
+        existsSync(join(dir, name)) && statSync(join(dir, name)).size > 0);
+    })) return true;
+  }
+  return ["platform/instance-key.bin", "platform/session.bin", "runtime/platform-session.enc", "models/private-model.bin"]
+    .some(name => existsSync(join(dataDir, name)));
+}
+
 export class KeyManager {
   private constructor(
     private readonly masterKey: Buffer,
@@ -62,7 +78,6 @@ export class KeyManager {
 
   static async open(dataDir: string): Promise<KeyManager> {
     const dir = join(dataDir, "runtime");
-    mkdirSync(dir, { recursive: true });
     const dpapi = await loadDpapi();
     const dpapiPath = join(dir, DPAPI_FILE);
     const plainPath = join(dir, PLAIN_FILE);
@@ -87,6 +102,10 @@ export class KeyManager {
       );
     }
 
+    if (hasStoredData(dataDir)) {
+      throw new Error("Original master key is missing for existing RUYIN data; restore the original key from backup. No replacement key was created.");
+    }
+    mkdirSync(dir, { recursive: true });
     const master = randomBytes(32);
     if (dpapi) {
       writeFileSync(
@@ -125,6 +144,9 @@ export class KeyManager {
     const path = join(wsDir, "key.enc");
     if (existsSync(path)) {
       return this.open(readFileSync(path)).toString("hex");
+    }
+    if (["project.db", "workspace.db"].some(name => existsSync(join(wsDir, name)) && statSync(join(wsDir, name)).size > 0)) {
+      throw new Error("Original project key.enc is missing for an existing database; restore its original key from backup. No replacement key was created.");
     }
     const key = randomBytes(32);
     writeFileSync(path, this.seal(key));

@@ -5,6 +5,19 @@
 
 import { extractSseEvents } from "./sse";
 
+export interface MaintenanceRecord {
+ id:string;action:"backup"|"restore";state:"queued"|"running"|"completed"|"failed";
+ source:string;target:string;createdAt:string;updatedAt:string;bytes?:number;
+ result?:{target:string;files:number;bytes?:number;databases:number;integrity?:string};failure?:"interrupted"|"verification";
+}
+export interface DiagnosticReport {
+ schema:"ruyin-diagnostics/1";createdAt:string;version:string;platform:string;arch:string;
+ checks:Array<{id:"runtime"|"encryption"|"agents"|"connectors"|"tools"|"components"|"ui";status:"ok"|"attention"|"unknown";total?:number;available?:number}>;
+}
+
+export interface LibraryResource{id:string;name:string;category:string;updatedAt:string;versions:{version:number;name:string;hash:string;bytes:number;readingId:string;reading?:{state:string;units:number;flags:string[];error?:string}}[]}
+export interface LibrarySelection{revision:number;items:{id:string;version:number;name:string;hash:string;fileId:string;readingId:string;category:string;selectedAt:string}[]}
+
 /**
  * 受管产品资产（daemon /products）。已安装 ≠ 可用：
  * availability = installed ∧ state=active ∧ entitled ≠ false（30-contract-schema §18.5）。
@@ -170,6 +183,7 @@ export interface StateRequest {
 
 export interface TaskDef {
   id: string;
+  name?: string;
   objective: string;
   input_types: string[];
   /**
@@ -177,6 +191,19 @@ export interface TaskDef {
    * 界面据此提前禁用，而不是让人点下去才知道。
    */
   unrunnable: string[];
+}
+
+/** Host-only batch view. Older hosts may omit contextConfirmations at runtime. */
+export interface BackgroundJobSummary {
+  id: string;
+  label: string;
+  state: string;
+  requestHash: string;
+  approved: boolean;
+  approvable: boolean;
+  steps: number;
+  bytes: number;
+  contextConfirmations: Array<{taskInstanceId: string; checkpointId: string}>;
 }
 
 /** 一次导出的结果。`signed` 是要照实说给用户的那一项。 */
@@ -224,6 +251,7 @@ export interface ProjectView {
 }
 
 export interface ContextItemMeta {
+  documentRevision?: number;
   id: string;
   type: string;
   source: string;
@@ -376,6 +404,8 @@ export type SkillLayer = "bundled" | "distributed" | "user" | "project";
 
 /** 技能登记册的一条。源头：apps/local-host/src/skill-registry.ts 的 SkillView（守卫对字段）。 */
 export interface SkillView {
+  /** Display identity only; does not grant local execution or tool permissions. */
+  capabilityId?: string;
   name: string;
   description: string;
   layer: SkillLayer;
@@ -583,7 +613,33 @@ export function auditView(event: StoredAuditEvent): {
   };
 }
 
+export interface DesktopDevice {
+  id: string;
+  name: string;
+  platform: string;
+  lastActiveAt: string;
+  current: boolean;
+}
+export interface DesktopDeviceList {
+  limit: number;
+  devices: DesktopDevice[];
+}
+export type DesktopDevicesView = { supported: false } | ({ supported: true } & DesktopDeviceList);
+export type DesktopLoginState =
+  | ({ state: "device_limit" } & DesktopDeviceList)
+  | { state: "failed" | "timed_out" };
+
+export interface OrganizationOption {
+  tenantId:string;tenantName:string;tenantType:"personal"|"organization";
+  workspaceId:string;workspaceName:string;current:boolean;
+}
+export interface OrganizationSwitchView {
+  requestId:string;state:"pending"|"completed"|"failed"|"cancelled"|"expired";
+  target:OrganizationOption;errorCode?:string;
+}
+
 export interface SessionInfo {
+  desktopLogin?: DesktopLoginState;
   accountsBase?: string;
   accountStatus?: string;
   deletionRequestedAt?: string | null;
@@ -601,7 +657,7 @@ export interface SessionInfo {
     roles?: string[];
     picture?: string;
   };
-  org?: { id?: string; name?: string; type?: string };
+  org?: { id?: string; name?: string; shortName?: string; type?: string };
   workspace?: { id?: string; name?: string };
   issuer: string;
   /** 官网基址（去订阅 / 法律条款深链落点），例如 https://vxture.com。 */
@@ -663,6 +719,7 @@ export interface EntitlementsBatch {
 }
 
 export interface SystemInfo {
+  startupState?: "initializing" | "ready" | "failed";
   version: string;
   platform: string;
   arch: string;
@@ -675,11 +732,12 @@ export interface SystemInfo {
    */
   instanceId?: string;
   /**
+   * `unavailable` fails generation without a provider; `mock` is an explicit test host.
    * 能力面接没接（daemon 判定，界面不重算）。`mock` = 任务只会拿到占位输出，
    * 产品卡据此标「未接通」（TD-033）。**缺失 ≠ mock**：拿不到 /system 时是「不知道」，
    * 不是「没接上」。
    */
-  capabilitySurface: "configured" | "mock" | "local_model";
+  capabilitySurface: "configured" | "mock" | "local_model" | "unavailable";
   /**
    * 直连本地推理（RY-100 A15 / A16 / A18）—— **企业版 / 私有化部署的特性**。
    *
@@ -793,8 +851,13 @@ export class Api {
    * （Local Web 访问模式是从第一天起就成立的约束）。壳里 file input 一样弹
    * 系统选择框，少一条只有壳能走的路。
    */
-  installPackage = async (file: File): Promise<InstalledPackage> => {
-    const res = await fetch("/products/install", {
+  installPackage = (file: File) => this.uploadPackage<InstalledPackage>("install", file);
+  preflightPackage = (file: File) => this.uploadPackage<InstalledPackage & {
+    name: string; publisher: string; runtimeMinimum?: string;
+  }>("preflight", file);
+
+  private async uploadPackage<T>(action: "install" | "preflight", file: File): Promise<T> {
+    const res = await fetch(`/products/${action}`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${this.token}`,
@@ -802,10 +865,10 @@ export class Api {
       },
       body: await file.arrayBuffer(),
     });
-    const data = (await res.json()) as InstalledPackage;
+    const data: unknown = await res.json();
     if (!res.ok) throw new ApiError(res.status, data as ApiError["body"]);
-    return data;
-  };
+    return data as T;
+  }
   pending = () => this.list<PendingConfirmation>("/pending");
   /** 立刻拉一次订阅（D5：用户付完款回到应用的那一刻）。 */
   refreshEntitlements = () =>
@@ -842,8 +905,29 @@ export class Api {
    * **调用方仍要保留一个慢轮询兜底**：流断了的样子是「一直没有事件」，
    * 而那和「一切正常」长得一模一样。
    */
+  private eventListeners = new Set<(event: RuntimeEvent) => void>();
+  private eventAbort?: AbortController;
+
   subscribe = (onEvent: (event: RuntimeEvent) => void): (() => void) => {
+    // Share the stream so two workspaces leave HTTP/1 connections for saves.
+    const listener = (event: RuntimeEvent) => onEvent(event);
+    this.eventListeners.add(listener);
+    if (!this.eventAbort) this.startEventStream();
+    let stopped = false;
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      this.eventListeners.delete(listener);
+      if (this.eventListeners.size === 0) {
+        this.eventAbort?.abort();
+        this.eventAbort = undefined;
+      }
+    };
+  };
+
+  private startEventStream(): void {
     const abort = new AbortController();
+    this.eventAbort = abort;
     void (async () => {
       try {
         const res = await fetch("/events", {
@@ -860,14 +944,17 @@ export class Api {
           const chunk = decoder.decode(value, { stream: true });
           const parsed = extractSseEvents<RuntimeEvent>(buffer, chunk);
           buffer = parsed.buffer;
-          for (const event of parsed.events) onEvent(event);
+          for (const event of parsed.events) {
+            for (const listener of this.eventListeners) {
+              try { listener(event); } catch { /* Keep other consumers connected. */ }
+            }
+          }
         }
       } catch {
         // 断了就断了：兜底轮询还在，界面不会停在旧数据上。
       }
     })();
-    return () => abort.abort();
-  };
+  }
   /**
    * 更新渠道的偏好。**界面上这不叫「渠道」** —— 它是偏好设置里那个「抢先体验新
    * 功能」的开关，而渠道是它落到发布侧的样子。503 = 这套装配不管渠道，整行不显示。
@@ -877,6 +964,10 @@ export class Api {
     this.call<{ channel: string }>("/updates/channel", "PUT", { channel });
   checkUpdate = () => this.call<UpdateCheck>("/updates/check");
   products = () => this.list<ProductInfo>("/products");
+  maintenance = () => this.call<{operation:MaintenanceRecord|null}>("/maintenance");
+  queueMaintenance = (input:{action:"backup"|"restore";target:string;source?:string}) => this.call<{operation:MaintenanceRecord}>("/maintenance","POST",input);
+  cancelMaintenance = () => this.call<{operation:MaintenanceRecord|null}>("/maintenance","DELETE");
+  diagnostics = () => this.call<DiagnosticReport>("/diagnostics");
   projects = () => this.call<ProjectList>("/projects");
   createProject = (product: string, name: string) =>
     this.call<ProjectMeta>("/projects", "POST", { product, name });
@@ -915,6 +1006,8 @@ export class Api {
   workspace = (id: string) => this.call<ProjectView>(`/projects/${id}`);
   taskInstances = (id: string) =>
     this.list<TaskInstance>(`/projects/${id}/tasks`);
+  backgroundJobs = (id:string) => this.list<BackgroundJobSummary>(`/projects/${id}/jobs`);
+  approveJobContext = (id:string,job:string,requestHash:string) => this.call<{approved:boolean}>(`/projects/${id}/jobs/${job}/context-approval`,"POST",{requestHash});
   startTask = (id: string, task: string, inputs?: Record<string, unknown>) =>
     this.call<TaskInstance>(`/projects/${id}/tasks`, "POST", {
       task,
@@ -989,6 +1082,13 @@ export class Api {
     });
   /** 项目收进来的原件（TD-041）。 */
   files = (id: string) => this.call<{ items: ProjectFile[] }>(`/projects/${id}/files`);
+  selectedResourceUnit=async(projectId:string,readingId:string,index:number)=>{const {token}=await this.bridgeToken(projectId);const headers={authorization:'Bearer '+token};const [job,unit]=await Promise.all([fetch('/bridge/readings/'+readingId,{headers}),fetch('/bridge/readings/'+readingId+'/units/'+index,{headers})]);if(!job.ok||!unit.ok)throw Error('Selected source unavailable');const meta=await job.json(),value=await unit.json();return {text:value.text as string,total:meta.units as number};};
+  librarySurface=(product:string)=>this.call<{productId:string;available:boolean;entry?:string;reason?:"not_declared"}>(`/products/${product}/library-surface`);
+  libraryToken=(product:string)=>this.call<{token:string;expiresAt:number}>(`/products/${product}/library-token`,"POST");
+  projectLibrary=(id:string)=>this.call<{items:LibraryResource[]}>(`/projects/${id}/library`);
+  librarySelection=(id:string)=>this.call<LibrarySelection>(`/projects/${id}/library-selection`);
+  selectLibraryResource=(id:string,resource:string,version:number,revision:number)=>this.call<LibrarySelection>(`/projects/${id}/library-selection`,"POST",{id:resource,version,revision});
+  unselectLibraryResource=(id:string,resource:string,revision:number)=>this.call<LibrarySelection>(`/projects/${id}/library-selection/${resource}`,"DELETE",{revision});
   /** 从**已授权目录**里收一份进来；未授权的路径由守护进程拒绝。 */
   addFile = (id: string, path: string) =>
     this.call<ProjectFile>(`/projects/${id}/files`, "POST", { path });
@@ -1077,6 +1177,8 @@ export class Api {
   contextItems = (id: string, type: string) =>
     this.list<ContextItemMeta>(`/projects/${id}/context/${type}`);
   system = () => this.call<SystemInfo>("/system");
+  windowClose = () => this.call<{action:"background"|"exit"}>("/ui/window-close");
+  setWindowClose = (action:"background"|"exit") => this.call<{action:"background"|"exit"}>("/ui/window-close","PUT",{action});
   /**
    * 本机固件信息（关于页）。守护进程没接这一路时答 503（`ApiError`）——
    * 调用方按「拿不到 = 不知道」处理，不是当成「查了，什么都没有」。
@@ -1132,6 +1234,10 @@ export class Api {
   setChromeTheme = (theme: "dark" | "light") =>
     this.call<{ theme: string }>("/ui/theme", "POST", { theme });
   session = () => this.call<SessionInfo>("/auth/session");
+  organizations = () => this.call<{items:OrganizationOption[]}>("/auth/organizations");
+  switchOrganization = (tenantId:string,workspaceId:string) => this.call<{requestId:string;authorizeUrl:string}>("/auth/organization-switch","POST",{tenantId,workspaceId});
+  organizationSwitchStatus = (requestId?:string) => this.call<OrganizationSwitchView|null>("/auth/organization-switch"+(requestId?"?requestId="+encodeURIComponent(requestId):""));
+  cancelOrganizationSwitch = (requestId:string) => this.call<OrganizationSwitchView|null>("/auth/organization-switch","DELETE",{requestId});
   /**
    * 起一次登录。`switchAccount` 只由「换个账号」那个入口传真：它让授权请求带上
    * `prompt=select_account`，平台据此把浏览器里现有的会话当作不可用。普通登录
@@ -1140,6 +1246,9 @@ export class Api {
   login = (opts: { switchAccount?: boolean } = {}) =>
     this.call<{ authorizeUrl: string }>("/auth/login", "POST", opts);
   logout = () => this.call<{ ok: boolean }>("/auth/logout", "POST");
+  desktopDevices = () => this.call<DesktopDevicesView>("/auth/devices");
+  releaseDesktopDevice = (deviceId: string) =>
+    this.call<{ ok: boolean }>("/auth/devices/release", "POST", { deviceId });
   /**
    * 「换个账号」要打开的地址（平台的 RP-initiated logout）。平台没公布这个
    * 端点时 `url` 缺席 —— 那时不给入口，而不是给一个点了没反应的链接。
@@ -1165,6 +1274,14 @@ export class Api {
     });
     if (res.status === 204) return null;
     if (!res.ok) throw new ApiError(res.status, (await res.json()) as ApiError["body"]);
+    return res.blob();
+  };
+  productCatalog=()=>this.list<PublicProduct>("/platform/product-catalog");
+  recommendedProducts=()=>this.list<PublicProduct>("/platform/recommended-products");
+  productIcon=async(code:string,version:string):Promise<Blob|null>=>{
+    const res=await fetch(`/platform/product-icon?code=${encodeURIComponent(code)}&version=${encodeURIComponent(version)}`,{headers:{authorization:`Bearer ${this.token}`}});
+    if(res.status===204)return null;
+    if(!res.ok)throw new ApiError(res.status,(await res.json()) as ApiError["body"]);
     return res.blob();
   };
   /** 能力调用走本机还是云端（ADR-025）：当前档位、档位来源、那句必须带着的说明。 */
@@ -1241,7 +1358,7 @@ export interface CatalogItem {
   category?: string;
   tags: string[];
   summary?: string;
-  local: { runnable: boolean; via?: "preset-skill" | "bundled-server" };
+  local: { runnable: boolean; via?: "preset-skill" | "distributed-skill" | "bundled-server" };
 }
 
 /** 这份清单从哪来、新不新。界面据它说话，不据条数猜。 */
@@ -1271,7 +1388,14 @@ export interface CapabilityCatalogRefresh {
  * 平台上本工作区的一条订阅（console `/api/subscription/subscribed-products`）。
  * 只列界面用得到的字段；平台多给的照收不用。`productCode` 就是契约 id。
  */
+export interface PublicProduct {
+  productCode:string;productName:string;productType:string;productNick:string|null;
+  description:string|null;iconUrl:string|null;iconVersion:string|null;
+  releaseVersion:string|null;releaseStage:string|null;
+}
 export interface SubscribedProduct {
+  /** Product-owned launch address supplied by the platform; never inferred. */
+  homeUrl?: string | null;
   subscriptionId: string;
   productCode: string | null;
   productName: string | null;
@@ -1282,6 +1406,10 @@ export interface SubscribedProduct {
   status: string;
   releaseVersion: string | null;
   endAt: string | null;
+  description?: string | null;
+  iconUrl?: string | null;
+  iconVersion?: string | null;
+  releaseStage?: string | null;
 }
 
 /** 配额用量（console `/api/subscription/quota-usage`）。只读，不门控。 */

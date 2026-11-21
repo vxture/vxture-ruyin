@@ -25,11 +25,12 @@
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const harness = join(repoRoot, "scripts", "dev", "ui-harness.mjs");
@@ -48,6 +49,60 @@ const BOOT_TIMEOUT_MS = 120_000;
 test("语法完好 —— rebase 把两条 import 拼成一条，就是在这里被抓住", () => {
   const res = spawnSync(process.execPath, ["--check", harness], { encoding: "utf8" });
   assert.equal(res.status, 0, `node --check 失败：\n${res.stderr}`);
+});
+
+test("package restart preserves projects and files; changed packages or missing keys stop without replacement", async (t) => {
+  const missing = NEEDS_BUILD.filter(rel => !existsSync(join(repoRoot, rel)));
+  if (missing.length) {
+    if (process.env.RUYIN_REQUIRE_HARNESS_SMOKE === "1") assert.fail(`Missing build: ${missing.join(", ")}`);
+    t.skip(`Missing build: ${missing.join(", ")}`); return;
+  }
+  const { makeTestZip } = await import(pathToFileURL(join(repoRoot,"apps/local-host/dist/pkg-testkit.js")));
+  const { parseContract } = await import(pathToFileURL(join(repoRoot,"packages/contract-schema/dist/index.js")));
+  const hash = bytes => createHash("sha256").update(bytes).digest("hex");
+  const sandbox = mkdtempSync(join(tmpdir(),"ruyin-harness-restart-")), data = join(sandbox,"data");
+  const ui = makeTestZip([{name:"index.html",data:Buffer.from("<html>restart fixture</html>")}]);
+  const contract = parseContract(readFileSync(join(repoRoot,"products/bidproposal/ruyin.product.yaml"),"utf8"));
+  contract.contract="0.2"; contract.product.ui={sha256:hash(ui)};
+  const files=[{name:"ruyin.product.yaml",data:Buffer.from(JSON.stringify(contract))},{name:"ui.zip",data:ui}];
+  const pkg=join(sandbox,"restart.ruyinpkg");
+  writeFileSync(pkg,makeTestZip([...files,{name:"CHECKSUMS",data:Buffer.from(files.map(f=>`${hash(f.data)}  ${f.name}`).join("\n")+"\n")} ]));
+  const env={...process.env,TMP:sandbox,TEMP:sandbox,TMPDIR:sandbox,PORT:"0"};
+  for(const key of Object.keys(env))if(key.startsWith("RUYIN_"))delete env[key];
+  Object.assign(env,{RUYIN_HARNESS_DATA_DIR:data,RUYIN_HARNESS_EMPTY:"1",RUYIN_V0_PACKAGE:pkg});
+  let child;
+  const stop=async()=>{
+    if(child&&child.exitCode===null&&child.signalCode===null){const exited=new Promise(ok=>child.once("exit",ok));child.kill();await exited;}
+  };
+  const start=()=>new Promise((ok,fail)=>{
+    let out="",err="";
+    child=spawn(process.execPath,[harness],{cwd:repoRoot,env,stdio:["ignore","pipe","pipe"]});
+    const timer=setTimeout(()=>{child.kill();fail(Error("Restart boot timeout"));},BOOT_TIMEOUT_MS);
+    child.stdout.on("data",chunk=>{out+=chunk;const match=/\[uiharness\] http:\/\/127\.0\.0\.1:(\d+)\//.exec(out);if(match){clearTimeout(timer);ok(`http://127.0.0.1:${match[1]}`);}});
+    child.stderr.on("data",chunk=>{err+=chunk;});
+    child.once("error",error=>{clearTimeout(timer);fail(error);});
+    child.once("exit",()=>{clearTimeout(timer);fail(Error(`${out}\n${err}`));});
+  });
+  const projectIds=async base=>{
+    const res=await fetch(`${base}/projects`,{headers:{authorization:"Bearer uiharness"}});
+    assert.equal(res.status,200);return (await res.json()).items.map(p=>p.id).sort();
+  };
+  try{
+    const before=await projectIds(await start());assert.equal(before.length,3);await stop();
+    const installed=join(data,"products",contract.product.id,contract.product.version,"ui.zip"),mtime=statSync(installed).mtimeMs;
+    const after=await projectIds(await start());assert.deepEqual(after,before);await stop();
+    assert.equal(statSync(installed).mtimeMs,mtime);assert.deepEqual(readFileSync(installed),ui);
+    writeFileSync(installed,"changed fixture");
+    await assert.rejects(start(),/installed package differs/);assert.equal(readFileSync(installed,"utf8"),"changed fixture");
+    writeFileSync(installed,ui);
+    const projectKey=join(data,"projects",before[0],"key.enc");rmSync(projectKey);
+    await assert.rejects(start(),/have no key.enc/);assert.equal(existsSync(projectKey),false);
+    const master=join(data,"runtime",process.platform==="win32"&&existsSync(join(data,"runtime","master.key.dpapi"))?"master.key.dpapi":"master.key");
+    rmSync(master);await assert.rejects(start(),/has no master key/);assert.equal(existsSync(master),false);
+  }finally{
+    await stop();assert.ok(resolve(sandbox).startsWith(resolve(tmpdir())+sep));
+    rmSync(sandbox,{recursive:true,force:true,maxRetries:20,retryDelay:100});
+  }
 });
 
 test("真起一次：印出地址、应答请求、项目真的建出来了", async (t) => {
@@ -116,7 +171,7 @@ test("真起一次：印出地址、应答请求、项目真的建出来了", as
 
     const health = await fetch(`${base}/health`);
     assert.equal(health.status, 200);
-    assert.deepEqual(await health.json(), { ok: true, version: "0.1.0-uiharness" });
+    assert.deepEqual(await health.json(), { ok: true, version: "0.2.0-uiharness" });
 
     // 界面产物真的被服务出去了 —— uiDir 指错时 /health 照样是 200，而观察台
     // 存在的全部理由（在浏览器里看见界面）已经没了。
@@ -124,6 +179,24 @@ test("真起一次：印出地址、应答请求、项目真的建出来了", as
     assert.equal(page.status, 200);
     assert.match(page.headers.get("content-type") ?? "", /text\/html/);
     assert.match(await page.text(), /<div id="root"|<script/);
+
+    const session = async () => {
+      const response = await fetch(`${base}/auth/session`, { headers: auth });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const initial = await session();
+    assert.equal(initial.signedIn, true);
+    assert.equal(initial.profile.sub, "u_demo");
+    assert.equal(initial.accountsBase, "https://accounts.vxture.com");
+    assert.equal(initial.consoleBase, "https://vxture.com");
+    assert.equal(initial.consoleAppBase, "https://console.vxture.com");
+    assert.equal((await fetch(`${base}/auth/logout`, { method: "POST", headers: auth })).status, 200);
+    assert.equal((await session()).signedIn, false);
+    const login = await fetch(`${base}/auth/login`, { method: "POST", headers: auth });
+    assert.equal(login.status, 200);
+    assert.equal((await login.json()).authorizeUrl, "about:blank");
+    assert.equal((await session()).signedIn, true);
 
     // 真的存储与内核也跑通了：观察台在启动时建了三个项目、跑过一个任务。
     // 只绑上端口的进程，到这一步才和一个能用的观察台分开。

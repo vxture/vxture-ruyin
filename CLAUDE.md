@@ -46,10 +46,9 @@ used in ADR cross-references, and which of those documents were retired).
   planned, not present - workplan W3; do not list it as if it existed.)
 - `apps/` - never published as packages; shipped only inside the installer:
   local-host (runtime daemon), shell (Electron), ui-workspace (React).
-- `products/` - the test fixture (bidproposal), kept in-repo on purpose (TD-006,
-  standing): no product code lives here and none will; it ships inside the
-  installer so the home page is not empty, which is why it must look like
-  what it is (TD-033).
+- `products/` - explicit development/test fixtures only. No business agent is
+  bundled in the installer (owner, 2026-11-21; supersedes TD-006 distribution).
+  Business agents enter the local runtime through validated .ruyinpkg installs.
 
 ## Branch model and release channels
 

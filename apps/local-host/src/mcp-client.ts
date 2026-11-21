@@ -196,6 +196,9 @@ export class McpStdioClient implements McpClient {
     this.exited = undefined;
 
     child.on("error", (cause) => this.teardown(`spawn failed: ${cause.message}`));
+    // A server can exit between an RPC response and our next write. stdin
+    // errors belong to this connector, never to the whole runtime process.
+    child.stdin?.on("error", (cause) => this.teardown(`server exited (stdin: ${cause.message})`));
     child.on("exit", (code, signal) =>
       this.teardown(`server exited (${signal ?? `code ${code}`})`),
     );

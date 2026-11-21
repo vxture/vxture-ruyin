@@ -8,13 +8,16 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { InstallError, installPackage } from "./installer.js";
-import { readPackage, verifyIntegrity } from "./pkg.js";
+import { InstallError, installPackage, preflightPackage } from "./installer.js";
+import { countersignaturePayload, parsePackageTrust } from "./package-signature.js";
+import { makeTestZip } from "./pkg-testkit.js";
+import { CHECKSUMS_ENTRY, SIGNATURE_ENTRY, readPackage, sha256, verifyIntegrity } from "./pkg.js";
 import { downloadPackage, fetchRegistryIndex } from "./registry-client.js";
 
 const CLI = fileURLToPath(new URL("../../../packages/cli/dist/main.js", import.meta.url));
@@ -33,7 +36,7 @@ function serveFrom(dir: string): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
-test("flow C: CLI registry -> index -> download checked against the listing -> installer (refused unsigned in production, installed in development)", () => {
+test("flow C: registry download, unsigned policy, and production installation with dual signatures", async () => {
   const root = mkdtempSync(join(tmpdir(), "ruyin-flowc-"));
   try {
     // A products dir with the real fixture, so what ships is what is tested.
@@ -47,7 +50,7 @@ test("flow C: CLI registry -> index -> download checked against the listing -> i
     );
     assert.equal(built.status, 0, built.stderr);
 
-    return (async () => {
+    await (async () => {
       const fetchImpl = serveFrom(registryDir);
       const index = await fetchRegistryIndex({ base: BASE, fetchImpl });
       assert.equal(index.status, "ok");
@@ -74,13 +77,35 @@ test("flow C: CLI registry -> index -> download checked against the listing -> i
       assert.equal(installed.signed, false);
       assert.ok(existsSync(join(installed.dir, "ruyin.product.yaml")));
 
+      const publisher = installed.contract.product.publisher;
+      const author = generateKeyPairSync("ed25519");
+      const registry = generateKeyPairSync("ed25519");
+      const checksums = contents.get(CHECKSUMS_ENTRY)!;
+      const publisherSignature = sign(null, checksums, author.privateKey).toString("base64");
+      const registrySignature = sign(null, countersignaturePayload(publisher, checksums, publisherSignature), registry.privateKey).toString("base64");
+      const envelope = { version: 1, publisher, publisherSignature, registrySignature };
+      const signedBytes = makeTestZip([
+        ...Array.from(contents, ([name, data]) => ({ name, data })),
+        { name: SIGNATURE_ENTRY, data: Buffer.from(JSON.stringify(envelope)) },
+      ]);
+      const signedFile = join(registryDir, entry.file);
+      writeFileSync(signedFile, signedBytes);
+      const downloaded = await downloadPackage({ ...entry, signed: true, sha256: sha256(signedBytes), size: signedBytes.length }, { base: BASE, fetchImpl });
+      const trust = parsePackageTrust(JSON.stringify({
+        version: 1,
+        registryKey: registry.publicKey.export({ type: "spki", format: "pem" }),
+        publisherKeys: { [publisher]: author.publicKey.export({ type: "spki", format: "pem" }) },
+      }));
+      const policy = { runtimeVersion: "0.1.0", requireSignature: true, trust };
+      assert.equal(preflightPackage(downloaded, policy).signed, true);
+      assert.equal(installPackage(downloaded, { ...policy, storeDir: join(root, "signed-store") }).productId, "bidproposal");
+
       // A tampered package on the host is caught by the listing, before the installer.
       const file = join(registryDir, entry.file);
-      writeFileSync(file, Buffer.concat([readFileSync(file), Buffer.from("x")]));
+      writeFileSync(file, Buffer.concat([bytes, Buffer.from("x")]));
       await assert.rejects(downloadPackage(entry, { base: BASE, fetchImpl }), /bytes, index says/);
     })();
   } finally {
-    // The async body above holds the dir open; cleanup happens on the returned promise.
-    setTimeout(() => rmSync(root, { recursive: true, force: true }), 2000).unref();
+    rmSync(root, { recursive: true, force: true });
   }
 });

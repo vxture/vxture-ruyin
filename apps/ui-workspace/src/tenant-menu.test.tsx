@@ -84,14 +84,14 @@ test("TenantMenu: trigger shows the workspace name only; opening shows tenant, w
     usage({ storage: { used: 1024 ** 3, limit: 10 * 1024 ** 3 } }),
   );
   render(<TenantMenu api={fakeApi({ quotaUsage })} session={session()} />);
-  const trigger = screen.getByRole("button", { name: /某工作区/ });
-  expect(trigger.textContent).toBe("某工作区");
+  const trigger = screen.getByRole("button", { name: /某租户/ });
+  expect(trigger.textContent).toBe("某租户");
   const user = userEvent.setup();
   await user.click(trigger);
-  expect(await screen.findByText("某租户")).toBeInTheDocument();
+  expect(screen.getAllByText("某租户")).toHaveLength(2);
   // 身份卡第二行不再带「工作区：」前缀（owner 2026-09-16）：与触发按钮同一个
   // 裸名字，图标已经说明这是工作区，文字前缀是同一件事说两遍。
-  expect(screen.getAllByText("某工作区")).toHaveLength(2); // 触发按钮 + 身份卡各一次
+  expect(screen.getAllByText("某工作区")).toHaveLength(1); // 触发按钮 + 身份卡各一次
   expect(await screen.findByText("AI Credits")).toBeInTheDocument();
   expect(screen.getByText("750 点")).toBeInTheDocument();
   expect(screen.getByText("已用 750 点，总量 1,000 点")).toBeInTheDocument();
@@ -99,9 +99,7 @@ test("TenantMenu: trigger shows the workspace name only; opening shows tenant, w
   expect(screen.getByText("1.0 GB")).toBeInTheDocument();
   expect(screen.getByText("已用 1.0 GB，总量 10.0 GB")).toBeInTheDocument();
   expect(quotaUsage).toHaveBeenCalledTimes(1);
-  const admin = screen.getByRole("link", { name: /租户管理/ }) as HTMLAnchorElement;
-  expect(admin.href).toBe("https://console.vxture.com/tenant-settings");
-  expect(admin.target).toBe("_blank");
+  expect(screen.queryByRole("link")).toBeNull();
 });
 
 /**
@@ -109,19 +107,14 @@ test("TenantMenu: trigger shows the workspace name only; opening shows tenant, w
  * audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明——
  * 第一版这里也误拼去了官网）。
  */
-test("TenantMenu: 「租户管理」跟着 consoleAppBase 走，不是 consoleBase", async () => {
-  render(
-    <TenantMenu
-      api={fakeApi()}
-      session={session({
-        consoleBase: "https://vxture.com",
-        consoleAppBase: "https://console.staging.vxture.com",
-      })}
-    />,
-  );
-  await userEvent.setup().click(screen.getByRole("button", { name: /某工作区/ }));
-  const admin = (await screen.findByRole("link", { name: /租户管理/ })) as HTMLAnchorElement;
-  expect(admin.href).toBe("https://console.staging.vxture.com/tenant-settings");
+test("TenantMenu: short organization name in header, full name and type in read-only panel", async () => {
+ render(<TenantMenu api={fakeApi()} session={session({org:{id:"o1",name:"某某技术服务有限公司",shortName:"某某科技",type:"organization"}})}/>);
+ const trigger=screen.getByRole("button",{name:/某某科技/});expect(trigger.textContent).toBe("某某科技");
+ await userEvent.click(trigger);expect(screen.getByText("某某技术服务有限公司")).toBeInTheDocument();expect(screen.getByText("组织")).toBeInTheDocument();expect(screen.queryByRole("link")).toBeNull();
+});
+test("TenantMenu: personal tenant label is explicit", async () => {
+ render(<TenantMenu api={fakeApi()} session={session({org:{name:"个人空间",type:"personal"}})}/>);
+ await userEvent.click(screen.getByRole("button",{name:/个人空间/}));expect(screen.getByText("个人")).toBeInTheDocument();
 });
 
 /**
@@ -138,7 +131,7 @@ test("TenantMenu: 配额行与明细行都常驻，哪怕是 0/0", async () => {
   const api = fakeApi({ quotaUsage });
   const user = userEvent.setup();
   const first = render(<TenantMenu api={api} session={session()} />);
-  await user.click(screen.getByRole("button", { name: /某工作区/ }));
+  await user.click(screen.getByRole("button", { name: /某租户/ }));
   expect(await screen.findByText("AI Credits")).toBeInTheDocument();
   expect(screen.getByText("Storage Spaces")).toBeInTheDocument();
   // 两条都是 0/0：标题行是裸数字（AI 额度带「点」这个自己的单位，存储走
@@ -150,7 +143,7 @@ test("TenantMenu: 配额行与明细行都常驻，哪怕是 0/0", async () => {
   first.unmount();
 
   render(<TenantMenu api={api} session={session()} />);
-  await user.click(screen.getByRole("button", { name: /某工作区/ }));
+  await user.click(screen.getByRole("button", { name: /某租户/ }));
   expect(await screen.findByText("42 点")).toBeInTheDocument();
   expect(screen.getByText("已用 42 点，总量 0 点")).toBeInTheDocument();
 });
@@ -161,7 +154,7 @@ test("TenantMenu: entitlements not configured, or a failed fetch, each say why -
   const a = render(
     <TenantMenu api={fakeApi({ quotaUsage })} session={session({ entitlementsConfigured: false })} />,
   );
-  await user.click(screen.getByRole("button", { name: /某工作区/ }));
+  await user.click(screen.getByRole("button", { name: /某租户/ }));
   expect(await screen.findByText("暂时读不到")).toBeInTheDocument();
   expect(quotaUsage).not.toHaveBeenCalled();
   a.unmount();
@@ -169,7 +162,7 @@ test("TenantMenu: entitlements not configured, or a failed fetch, each say why -
   render(
     <TenantMenu api={fakeApi({ quotaUsage: vi.fn().mockRejectedValue(new Error("网关 502")) })} session={session()} />,
   );
-  await user.click(screen.getByRole("button", { name: /某工作区/ }));
+  await user.click(screen.getByRole("button", { name: /某租户/ }));
   expect(await screen.findByText("网关 502")).toBeInTheDocument();
 });
 
@@ -181,11 +174,9 @@ test("TenantMenu: missing tenant / workspace names fall back to explicit placeho
       session={session({ org: undefined, workspace: undefined, consoleAppBase: "" })}
     />,
   );
-  await user.click(screen.getByRole("button", { name: /未选定工作区/ }));
-  expect(await screen.findByText("未命名租户")).toBeInTheDocument();
-  expect((screen.getByRole("link", { name: /租户管理/ }) as HTMLAnchorElement).href).toBe(
-    "https://console.vxture.com/tenant-settings",
-  );
+  await user.click(screen.getByRole("button", { name: /未命名租户/ }));
+  expect(screen.getAllByText("未命名租户")).toHaveLength(2);
+  expect(screen.queryByRole("link")).toBeNull();
 });
 
 /**
@@ -202,7 +193,7 @@ test("TenantMenu: 有租户 logo 时身份卡用它做头像", async () => {
   const { container } = render(
     <TenantMenu api={fakeApi({ orgLogo })} session={session()} />,
   );
-  await userEvent.setup().click(screen.getByRole("button", { name: /某工作区/ }));
+  await userEvent.setup().click(screen.getByRole("button", { name: /某租户/ }));
   await vi.waitFor(() => expect(orgLogo).toHaveBeenCalledTimes(1));
   await vi.waitFor(() => {
     const img = container.querySelector("img");
@@ -215,7 +206,7 @@ test("TenantMenu: 没有租户 logo（null）时身份卡落到首字兜底，�
   const { container } = render(
     <TenantMenu api={fakeApi({ orgLogo })} session={session()} />,
   );
-  await userEvent.setup().click(screen.getByRole("button", { name: /某工作区/ }));
+  await userEvent.setup().click(screen.getByRole("button", { name: /某租户/ }));
   await vi.waitFor(() => expect(orgLogo).toHaveBeenCalledTimes(1));
   expect(container.querySelector("img")).not.toBeInTheDocument();
   // 「某租户」的首字。

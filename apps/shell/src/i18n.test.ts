@@ -25,3 +25,9 @@ void test("shellT：两门语言各取各的，{占位} 按值替换", () => {
   assert.equal(shellT("zh-CN", "waitingFor", { project: "投标 A" }), "投标 A 在等你");
   assert.equal(shellT("en", "waitingFor", { project: "Bid A" }), "Bid A is waiting for you");
 });
+
+test("background exit and recovery wording is present in both shell languages",()=>{
+ for(const locale of ["zh-CN","en"] as const)for(const key of ["openWorkbench","exitApp","restartApp","keepRunning","backgroundTitle","backgroundBody","exitBusy","restartBusy","exitUnknown","restartUnknown","exitDetail"] as const){
+  assert.ok(shellT(locale,key).length>0);assert.doesNotMatch(shellT(locale,key),/[{}]/);
+ }
+});

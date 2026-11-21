@@ -16,10 +16,11 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { cp } from "node:fs/promises";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmod, cp, readdir, rename, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type { ComponentStore } from "./component-store.js";
 
@@ -359,6 +360,10 @@ export class BundledToolServers {
               UV_PYTHON_INSTALL_DIR: join(bundled, "python"),
             }
           : {}),
+        ...(bundled && existsSync(join(bundled,"python-site","sitecustomize.py")) ? {PYTHONPATH:join(bundled,"python-site")} : {}),
+        // uv splits this environment variable on whitespace, even inside quotes.
+        // A file URL preserves Program Files and non-ASCII installation paths.
+        ...(bundled && existsSync(join(bundled,"python-constraints.txt")) ? {UV_CONSTRAINT:pathToFileURL(join(bundled,"python-constraints.txt")).href} : {}),
         // 不写进用户的漫游配置（`%APPDATA%\uv\tools`）。uvx 起的是临时环境，
         // 这个目录只是它的落脚点；钉在数据目录下，行为可预期、卸载也带得走。
         UV_TOOL_DIR: join(this.options.dataDir, "tools", "uv-tools"),
@@ -427,7 +432,7 @@ export class BundledToolServers {
     }
     const started = Date.now();
     const staging = `${cache}.seeding-${process.pid}`;
-    rmSync(staging, { recursive: true, force: true });
+    await rm(staging, { recursive: true, force: true });
     let files = 0;
     await cp(seed, staging, {
       recursive: true,
@@ -439,18 +444,18 @@ export class BundledToolServers {
         return true;
       },
     });
-    const writable = (dir: string): void => {
-      chmodSync(dir, 0o755);
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const writable = async (dir: string): Promise<void> => {
+      await chmod(dir, 0o755);
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
-        if (entry.isDirectory()) writable(full);
-        else chmodSync(full, 0o644);
+        if (entry.isDirectory()) await writable(full);
+        else await chmod(full, 0o644);
       }
     };
-    writable(staging);
+    await writable(staging);
     writeFileSync(join(staging, ".ruyin-seed.json"), JSON.stringify({ key, from: seed, seededAt: new Date().toISOString() }));
-    rmSync(cache, { recursive: true, force: true });
-    renameSync(staging, cache);
+    await rm(cache, { recursive: true, force: true });
+    await rename(staging, cache);
     this.options.log?.(`[ruyin] uv cache: seeded ${files} file(s) from ${seed} -> ${cache} (${Date.now() - started} ms)`);
   }
 

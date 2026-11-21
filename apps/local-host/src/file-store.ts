@@ -161,6 +161,16 @@ export class ProjectFileStore {
     if (!existsSync(source)) {
       throw new FileStoreError(`文件不存在：${source}`);
     }
+    return this.putChunks(createReadStream(source, { highWaterMark: CHUNK_BYTES }));
+  }
+
+  /** Explicit user-selected bytes; never stage plaintext on disk. */
+  async putBytes(bytes: Buffer): Promise<{ hash: string; bytes: number }> {
+    async function* chunks() { for (let at=0;at<bytes.length;at+=CHUNK_BYTES) yield bytes.subarray(at,at+CHUNK_BYTES); }
+    return this.putChunks(chunks());
+  }
+
+  private async putChunks(chunks: AsyncIterable<Buffer>): Promise<{ hash: string; bytes: number }> {
     const key = Buffer.from(this.keyHex, "hex");
     const hasher = createHash("sha256");
     const temp = join(this.root, `.tmp-${randomBytes(8).toString("hex")}`);
@@ -177,7 +187,7 @@ export class ProjectFileStore {
     try {
       await out.write(header);
       let index = 0;
-      for await (const chunk of createReadStream(source, { highWaterMark: CHUNK_BYTES })) {
+      for await (const chunk of chunks) {
         const buf = chunk as Buffer;
         hasher.update(buf);
         plaintextBytes += buf.byteLength;

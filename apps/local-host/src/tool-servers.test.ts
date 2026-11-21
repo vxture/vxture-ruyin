@@ -7,6 +7,7 @@ import { strict as assert } from "node:assert";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { BundledToolServers } from "./tool-servers.js";
 
@@ -81,6 +82,20 @@ test("plan(uvx)：用随包那个 uv.exe，--offline 不变，缓存指向数据
   // 只算计划不种：列表页也会算计划，一算就复制两百兆不行。
   assert.equal(existsSync(join(dataDir, "tools", "uv-cache")), false);
 });
+test('bundled Python path compatibility stays scoped to child processes and preserves user launch overrides',()=>{
+ const r=uvRig();const site=join(r.uvHome,'python-site');mkdirSync(site);writeFileSync(join(site,'sitecustomize.py'),'# shipped bootstrap');
+ const plan=r.servers.plan('py.markitdown');assert.ok(plan.ok);if(!plan.ok)return;assert.equal(plan.env['PYTHONPATH'],site);assert.equal(plan.env['UV_PYTHON_DOWNLOADS'],'never');assert.ok(plan.args.includes('--offline'));
+ r.servers.setEnv('py.markitdown',{PYTHONPATH:'user-explicit-path'});const override=r.servers.plan('py.markitdown');assert.ok(override.ok);if(override.ok)assert.equal(override.env['PYTHONPATH'],'user-explicit-path');
+ rmSync(r.base,{recursive:true,force:true});
+});
+  test('bundled Python dependency constraints follow build pins and preserve explicit overrides',()=>{
+   const r=uvRig();const file=join(r.uvHome,'python-constraints.txt');
+   const legacy=r.servers.plan('py.markitdown');assert.ok(legacy.ok);if(legacy.ok)assert.equal(legacy.env['UV_CONSTRAINT'],undefined);
+   writeFileSync(file,'markitdown==0.1.3');
+   const plan=r.servers.plan('py.markitdown');assert.ok(plan.ok);if(plan.ok){assert.equal(fileURLToPath(plan.env['UV_CONSTRAINT']!),file);assert.doesNotMatch(plan.env['UV_CONSTRAINT']!,/\s/);assert.ok(plan.args.includes('--offline'));assert.equal(plan.env['UV_PYTHON_DOWNLOADS'],'never');}
+   r.servers.setEnv('py.markitdown',{UV_CONSTRAINT:'user-constraints.txt'});const override=r.servers.plan('py.markitdown');assert.ok(override.ok);if(override.ok)assert.equal(override.env['UV_CONSTRAINT'],'user-constraints.txt');
+   rmSync(r.base,{recursive:true,force:true});
+  });
 
 test("prepare()：把随包缓存种到数据目录，第二次不动", async () => {
   const { servers, dataDir } = uvRig();

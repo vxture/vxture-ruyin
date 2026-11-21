@@ -16,7 +16,7 @@ import test from "node:test";
 import type { ContextItemMeta } from "@vxture/ruyin-core";
 import Database from "better-sqlite3-multiple-ciphers";
 import { KeyManager } from "./keys.js";
-import { SqliteStoragePort } from "./storage.js";
+import { resolveNativeBinding, SqliteStoragePort } from "./storage.js";
 import { searchContext } from "./fts.js";
 import { LocalToolExecutor } from "./tool-executor.js";
 
@@ -186,7 +186,8 @@ void test("迁移：老库的 unicode61 索引换成 trigram，行不丢，中�
     first.closeAll();
 
     const dir = join(dataDir, "projects", projectId);
-    const raw = new Database(join(dir, "project.db"));
+    const nativeBinding = resolveNativeBinding();
+    const raw = new Database(join(dir, "project.db"), nativeBinding ? { nativeBinding } : undefined);
     raw.pragma(`cipher='sqlcipher'`);
     raw.pragma(`key="x'${keys.workspaceKeyHex(dir)}'"`);
     raw.exec("DROP TABLE fts_index");

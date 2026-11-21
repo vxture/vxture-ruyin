@@ -32,6 +32,11 @@ function mutate(fn: (c: RuyinContract) => void): ValidationResult {
 function rules(result: ValidationResult): string[] {
   return result.errors.map((e) => e.rule);
 }
+test('optional business task names are bounded and old contracts remain valid',()=>{
+ assert.equal(mutate(c=>{c.tasks[0]!.name='Business outline planning';}).ok,true);
+ for(const name of ['', 'x'.repeat(81),42])assert.equal(mutate(c=>{(c.tasks[0] as unknown as {name:unknown}).name=name;}).ok,false);
+ assert.equal(validateContract(base).ok,true);
+});
 
 function tool(c: RuyinContract, id: string) {
   const found = c.tools.find((t) => t.id === id);

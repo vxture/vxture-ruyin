@@ -44,6 +44,11 @@ function view(over: Partial<ToolRegistrySources> = {}) {
   });
 }
 
+test("local diagnostics propagates the no-probe mode without invoking tool execution",async()=>{
+ const modes:boolean[]=[];const registry=view({connectors:async localOnly=>{modes.push(!!localOnly);return [];}});
+ await registry.list(true);await registry.list();assert.deepEqual(modes,[true,false]);
+});
+
 test("目录来的工具名：停着的服务器也列，未获取的也列 —— 用户在下载之前就看得见会多出哪些工具", async () => {
   const items = await view().list();
   const row = items.find((t) => t.id === NEEDS_PAYLOAD.id)!;

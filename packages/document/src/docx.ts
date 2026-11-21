@@ -250,6 +250,7 @@ function directive(node: {
   // Word 的 TOC 域：页码由 Word 打开文档时自己算。运行时要算页码就得先排版，
   // 而排版是 Word 的事 —— 自己算等于猜。
   return [
+    new Paragraph({alignment:AlignmentType.CENTER,spacing:{after:240},children:[new TextRun({text:title,bold:true,size:32})]}),
     new TableOfContents(title, {
       hyperlink: true,
       headingStyleRange: `1-${clampDepth(attrs["depth"])}`,

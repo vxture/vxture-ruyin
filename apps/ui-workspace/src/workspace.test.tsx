@@ -171,8 +171,57 @@ function fakeApi(over: Partial<Api> = {}): Api {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+test('business review opens only the pending host review; closing never adopts, user confirmation does',async()=>{
+ const instances=[taskInstance({id:'first',state:'waiting_human',checkpoints:[{id:'cp1',kind:'verification_review',subject:{},options:['approve','reject'],raisedAt:'2026-11-20T00:00:00Z'}]}),taskInstance({id:'requested',state:'waiting_human',checkpoints:[{id:'cp2',kind:'verification_review',subject:{},options:['approve','reject'],raisedAt:'2026-11-20T00:00:00Z'}],capabilityOutputs:{generation:JSON.stringify({chapters:[{title:'Backup architecture',purpose:'Daily backup'},{},null]})}})];
+ const api=fakeApi({workspace:vi.fn().mockResolvedValue(projectView({tasks:[taskDef({name:'Business outline'})]})),taskInstances:vi.fn().mockResolvedValue(instances)});
+ render(<ProjectPanel api={api} id="prj_1" tab="product"/>);await screen.findByTestId('product-tab-stub');
+ fireEvent(window,new CustomEvent('ruyin-product-review',{detail:{projectId:'foreign',taskInstanceId:'requested'}}));expect(screen.queryByRole('dialog')).toBeNull();
+ fireEvent(window,new CustomEvent('ruyin-product-review',{detail:{projectId:'prj_1',taskInstanceId:'requested'}}));const dialog=await screen.findByRole('dialog');expect(within(dialog).getByText(/Backup architecture/)).toHaveTextContent('Daily backup');expect(within(dialog).getAllByRole('button',{name:'确认采用'})).toHaveLength(1);expect(api.decide).not.toHaveBeenCalled();
+ expect(dialog.querySelector('details')?.open).toBe(false);await userEvent.click(within(dialog).getByRole('button',{name:/Close|关闭/}));expect(api.decide).not.toHaveBeenCalled();
+ fireEvent(window,new CustomEvent('ruyin-product-review',{detail:{projectId:'prj_1',taskInstanceId:'requested'}}));await screen.findByRole('dialog');await userEvent.click(screen.getAllByRole('button',{name:'确认采用'})[0]!);expect(api.decide).toHaveBeenCalledWith('prj_1','requested',true);
+});
+test.each(['missing','wrong-kind','error','after-unmount'])('review open requests fail closed: %s',async mode=>{
+ let resolve:((v:TaskInstance[])=>void)|undefined;const read=vi.fn().mockResolvedValue([]),api=fakeApi({taskInstances:read});
+ const {unmount}=render(<ProjectPanel api={api} id="prj_1" tab="product"/>);await screen.findByTestId('product-tab-stub');
+ if(mode==='wrong-kind')read.mockResolvedValue([taskInstance({state:'waiting_human',checkpoints:[{id:'cp',kind:'context_confirm',subject:{},options:['approve','reject'],raisedAt:'2026-11-20T00:00:00Z'}]})]);
+ if(mode==='error')read.mockRejectedValue(Error('Offline'));
+ if(mode==='after-unmount')read.mockReturnValue(new Promise<TaskInstance[]>(r=>{resolve=r;}));
+ fireEvent(window,new CustomEvent('ruyin-product-review',{detail:{projectId:'prj_1',taskInstanceId:'ti_1'}}));
+ if(mode==='after-unmount'){unmount();resolve!([]);await Promise.resolve();}else expect(await screen.findByText(/成果状态已变化|This result/)).toBeTruthy();expect(api.decide).not.toHaveBeenCalled();
+});
+test('business names and localized states replace technical launchers, legacy records stay accessible',async()=>{
+ const api=fakeApi({workspace:vi.fn().mockResolvedValue(projectView({tasks:[taskDef({name:'Chapter writing'})]})),taskInstances:vi.fn().mockResolvedValue([taskInstance()])});
+ const {unmount}=render(<ProjectPanel api={api} id="prj_1" tab="tasks" surface={{productId:'bidproposal',available:true}}/>);
+ expect(await screen.findByText('Chapter writing')).toBeTruthy();expect(screen.queryByRole('button',{name:/^启动（自动选择上下文）$/})).toBeNull();expect(screen.queryByText('draft_section')).toBeNull();expect(screen.getByText('已完成')).toBeTruthy();unmount();
+ render(<ProjectPanel api={api} id="prj_1" tab="tasks"/>);expect((await screen.findAllByText('Chapter writing')).length).toBe(2);expect(screen.getByRole('button',{name:/^启动（自动选择上下文）$/})).toBeTruthy();
+});
+test('recent execution overview uses business names and keeps unknown legacy IDs readable',async()=>{
+ const api=fakeApi({workspace:vi.fn().mockResolvedValue(projectView({tasks:[taskDef({name:'Business chapter'})]})),taskInstances:vi.fn().mockResolvedValue([taskInstance(),taskInstance({id:'legacy',taskId:'old_task'})])});
+ render(<ProjectPanel api={api} id="prj_1" tab="overview"/>);expect(await screen.findByText('Business chapter')).toBeTruthy();expect(screen.getByText('old_task')).toBeTruthy();expect(screen.queryByText('draft_section')).toBeNull();
+});
+test.each([true,false])('named material prompts fold technical details (with context=%s)',async withContext=>{
+ const instance=taskInstance({state:'waiting_human',checkpoints:[{id:'cp',kind:'context_confirm',subject:{},options:['approve','reject'],raisedAt:'2026-11-20T00:00:00Z'}],...(withContext?{contextSet:[{id:'c',name:'Synthetic tender',type:'tender',bytes:1024,source:'local',connector:'project-document',ref:'source',modifiedAt:'2026-11-20T00:00:00Z'}]}:{})});
+ const api=fakeApi({workspace:vi.fn().mockResolvedValue(projectView({tasks:[taskDef({name:'Tender analysis'})]})),taskInstances:vi.fn().mockResolvedValue([instance])});
+ const {container}=render(<ProjectPanel api={api} id="prj_1" tab="overview"/>);await screen.findByRole("heading",{name:/Tender analysis/});expect(container.querySelector('details')?.open).toBe(false);expect(api.decide).not.toHaveBeenCalled();
+});
+
+test.each(['Plain draft source',JSON.stringify({note:'Draft source without markdown'})])('human review retains non-markdown results verbatim: %s',async content=>{
+ const api=fakeApi({backgroundJobs:vi.fn().mockRejectedValue(Error('Jobs unavailable')),taskInstances:vi.fn().mockResolvedValue([taskInstance({id:'ti_preview',state:'waiting_human',checkpoints:[],capabilityOutputs:{draft:content}})])});
+ const {container}=render(<ProjectPanel api={api} id="prj_1" tab="overview"/>);
+ await userEvent.click(await screen.findByText('查看成果内容'));
+ expect(container.querySelector('pre')).toHaveTextContent(content);expect(api.decide).not.toHaveBeenCalled();
+ expect(screen.queryByText('Jobs unavailable')).toBeNull();
+});
 
 /* ---------------- Loading / summary / errors ---------------- */
+void test('batch source authorization uses the exact host request and refreshes without a second event subscription',async()=>{
+ const job={id:'job-1',label:'Synthetic tender batches',state:'waiting',requestHash:'fixed-request-hash',approved:false,approvable:true,steps:12,bytes:24000};
+ const backgroundJobs=vi.fn().mockResolvedValue([job]),approveJobContext=vi.fn().mockImplementation(async()=>{backgroundJobs.mockResolvedValue([{...job,approved:true}]);return {approved:true};});
+ const api=fakeApi({backgroundJobs,approveJobContext});render(<ProjectPanel api={api} id="prj_1" tab="overview"/>);
+ const button=await screen.findByRole('button',{name:'授权这些资料并在后台继续'});expect(screen.getByText(/共 12 步/)).toBeInTheDocument();
+ await userEvent.setup().click(button);await waitFor(()=>expect(approveJobContext).toHaveBeenCalledWith('prj_1','job-1','fixed-request-hash'));
+ await waitFor(()=>expect(screen.queryByRole('button',{name:'授权这些资料并在后台继续'})).not.toBeInTheDocument());expect(api.subscribe).toHaveBeenCalledTimes(1);
+});
 
 void test("ProjectPanel: shows a loading placeholder before the first load resolves", () => {
   const api = fakeApi({ workspace: vi.fn(() => new Promise<ProjectView>(() => {})) });
@@ -233,7 +282,8 @@ void test("ProjectPanel: 链坏了时摘要带与审计页都写「记录被改�
   // 摘要带与审计页现在说的是同一句话（owner 2026-09-17：「哈希链」是我们的
   // 行话），所以断言的是两处都在，而不是两句不同的话。
   await screen.findAllByText("记录被改动过");
-  expect(screen.getAllByText("记录被改动过")).toHaveLength(2);
+  expect(screen.getAllByText("记录被改动过")).toHaveLength(1);
+  expect(screen.getByText("项目记录校验异常，请检查审计记录")).toBeInTheDocument();
 });
 
 void test("ProjectPanel: chain verification starts as 校验中 and resolves to 记录完整 in both the summary and audit tab", async () => {
@@ -246,14 +296,13 @@ void test("ProjectPanel: chain verification starts as 校验中 and resolves to 
   );
   const api = fakeApi({ audit: vi.fn().mockResolvedValue([auditEvent()]) });
   render(<ProjectPanel api={api} id="prj_1" tab="audit" />);
-  await screen.findByText("标书编写 1.0.0");
-
-  expect(screen.getAllByText("校验中")).toHaveLength(1);
+  await screen.findByText("校验中…");
+  expect(document.querySelector(".proj-summary")).toBeNull();
   expect(screen.getByText("校验中…")).toBeInTheDocument();
 
   resolveChain(true);
   await screen.findAllByText("记录完整");
-  expect(screen.getAllByText("记录完整")).toHaveLength(2);
+  expect(screen.getAllByText("记录完整")).toHaveLength(1);
 });
 
 void test("ProjectPanel: a load failure surfaces as an error box, not a silent blank panel", async () => {
@@ -330,6 +379,20 @@ void test("ProjectPanel: a waiting_human instance with no checkpoint defaults to
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "拒绝" }));
   expect(api.decide).toHaveBeenCalledWith("prj_1", "ti_verify", false);
+});
+
+void test("ProjectPanel: human review exposes the actual draft as escaped text before approval", async () => {
+  const api = fakeApi({ taskInstances: vi.fn().mockResolvedValue([taskInstance({
+    id: "ti_preview", state: "waiting_human", checkpoints: [],
+    capabilityOutputs: { draft: JSON.stringify({ markdown: "## Backup daily\n<script>alert(1)</script>" }) },
+  })]) });
+  const { container } = render(<ProjectPanel api={api} id="prj_1" tab="overview" />);
+  const summary = await screen.findByText("查看成果内容");
+  await userEvent.setup().click(summary);
+  expect(container.querySelector("pre")?.textContent).toContain("Backup daily");
+  expect(container.querySelector("pre")?.textContent).toContain("<script>");
+  expect(container.querySelector("script")).toBeNull();
+  expect(api.decide).not.toHaveBeenCalled();
 });
 
 void test("ProjectPanel: a tool_ask checkpoint asks the user to judge a proposed tool call", async () => {
@@ -1020,7 +1083,7 @@ void test("ProjectPanel/Context: an installed, ungranted connector can be grante
   await user.click(screen.getByRole("button", { name: "授权连接器" }));
   expect(api.addConnectorGrant).toHaveBeenCalledWith("prj_1", "crm");
   // Folder count stays folder-only in the summary.
-  expect(screen.getByText("0 类 · 1 个授权目录")).toBeInTheDocument();
+  expect(document.querySelector(".proj-summary")).toBeNull();
 });
 
 void test("ProjectPanel/Context: a granted connector is listed, counted apart from folders, and binding 经由 it sends connector+source", async () => {
@@ -1037,7 +1100,7 @@ void test("ProjectPanel/Context: a granted connector is listed, counted apart fr
   expect(within(screen.getByLabelText("已授权的连接器")).getByText("crm")).toBeInTheDocument();
   // Already granted -> nothing left to grant, the control is gone.
   expect(screen.queryByRole("button", { name: "授权连接器" })).not.toBeInTheDocument();
-  expect(screen.getByText(/1 个授权目录 · 1 个连接器/)).toBeInTheDocument();
+  expect(document.querySelector(".proj-summary")).toBeNull();
 
   const user = userEvent.setup();
   await user.selectOptions(screen.getByLabelText("经由"), "crm");
@@ -1127,21 +1190,83 @@ void test("产品界面：只在「产品界面」那一格出现，用上层传
   expect(screen.queryByTestId("product-tab-stub")).not.toBeInTheDocument();
 });
 
-/**
- * **人的决定压过产品界面。** 未决确认钉在所有分区之上 —— 包括产品界面那一格：
- * 产品界面盖不住它，也没法让它从屏幕上消失。
- */
-void test("产品界面：未决确认仍钉在最上面，产品界面在它下面", async () => {
+/** The runtime owns confirmations, while the business canvas stays unobstructed. */
+void test("product confirmations open explicitly without pushing down the business surface", async () => {
   const api = fakeApi({
     taskInstances: vi.fn().mockResolvedValue([
       taskInstance({ id: "ti_verify", state: "waiting_human", checkpoints: [] }),
     ]),
   });
   render(<ProjectPanel api={api} id="prj_1" tab="product" surface={null} />);
-  const card = await screen.findByText('任务「draft_section」的成果等待人工评审');
-  const stub = screen.getByTestId("product-tab-stub");
-  // 文档顺序：确认卡在前（DOCUMENT_POSITION_FOLLOWING = 4 表示 stub 在 card 之后）。
-  expect(card.compareDocumentPosition(stub) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const entry = await screen.findByRole('button', {name:'待你处理 · 1'});
+  expect(screen.queryByText('任务「draft_section」的成果等待人工评审')).toBeNull();
+  expect(screen.getByTestId('product-tab-stub')).toBeInTheDocument();
+  expect(api.decide).not.toHaveBeenCalled();
+  const user=userEvent.setup();await user.click(entry);
+  const dialog=screen.getByRole('dialog',{name:'本项目待办'});
+  expect(within(dialog).getByText('任务「draft_section」的成果等待人工评审')).toBeInTheDocument();
+  expect(dialog.closest('.workbench-page')).toBeNull();
+  await user.keyboard('{Escape}');
+  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+  expect(api.decide).not.toHaveBeenCalled();expect(entry).toHaveFocus();
+});
+
+test('project action panel includes batch and stage confirmations and preserves failed review for retry',async()=>{
+ const pending=taskInstance({id:'ti_review',state:'waiting_human',checkpoints:[]});
+ const taskInstances=vi.fn().mockResolvedValue([pending]),backgroundJobs=vi.fn().mockResolvedValue([{id:'job',label:'Synthetic matching',state:'waiting',requestHash:'exact-hash',approved:false,approvable:true,steps:2,bytes:11000}]);
+ const stateRequest=vi.fn().mockResolvedValue({pending:{to:'reviewing',productId:'bidproposal',requestedAt:'2026-11-20T00:00:00Z'}});
+ const approveJobContext=vi.fn().mockImplementation(async()=>{backgroundJobs.mockResolvedValue([]);return {approved:true};});
+ const decide=vi.fn().mockRejectedValueOnce(Error('Review conflict')).mockImplementation(async()=>{taskInstances.mockResolvedValue([]);stateRequest.mockResolvedValue({pending:null});return {};});
+ const onPending=vi.fn(),api=fakeApi({taskInstances,backgroundJobs,stateRequest,approveJobContext,decide});
+ render(<ProjectPanel api={api} id="prj_1" tab="product" surface={null} onPending={onPending}/>);
+ const user=userEvent.setup();await user.click(await screen.findByRole('button',{name:'待你处理 · 3'}));
+ expect(onPending).toHaveBeenCalledWith(3);
+ const dialog=within(screen.getByRole('dialog',{name:'本项目待办'}));
+ expect(dialog.getByText('「标书编写」请求把项目推进到「reviewing」')).toBeInTheDocument();
+ await user.click(dialog.getByRole('button',{name:'授权这些资料并在后台继续'}));
+ await waitFor(()=>expect(approveJobContext).toHaveBeenCalledWith('prj_1','job','exact-hash'));
+ await user.click(dialog.getByRole('button',{name:'批准'}));
+ expect(await dialog.findByRole('alert')).toHaveTextContent('Review conflict');
+ expect(dialog.getByText('任务「draft_section」的成果等待人工评审')).toBeInTheDocument();
+ await user.click(dialog.getByRole('button',{name:'批准'}));
+ expect(await dialog.findByRole('status')).toHaveTextContent('当前待办已处理');
+ expect(decide).toHaveBeenLastCalledWith('prj_1','ti_review',true);expect(api.decideStateRequest).not.toHaveBeenCalled();
+ await user.keyboard('{Escape}');await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ expect(screen.queryByRole('button',{name:/待你处理/})).toBeNull();
+});
+
+test('one exact batch authorization replaces only its own material checkpoint and still exposes result review',async()=>{
+ const context=taskInstance({id:'context-task',state:'waiting_human',checkpoints:[{id:'cp-material',kind:'context_confirm',subject:null,options:['approve','reject'],raisedAt:'2026-11-20T00:00:00Z'}]});
+ const unrelated=taskInstance({id:'unrelated-task',taskId:'other_task',state:'waiting_human',checkpoints:[{...context.checkpoints[0]!,id:'cp-other'}]});
+ const pair={taskInstanceId:context.id,checkpointId:'cp-material'};
+ const job={id:'batch',label:'Current batch',state:'waiting',requestHash:'exact-hash',approved:false,approvable:true,steps:2,bytes:11000,contextConfirmations:[pair]};
+ const taskInstances=vi.fn().mockResolvedValue([context,unrelated]),backgroundJobs=vi.fn().mockResolvedValue([job]);
+ const approveJobContext=vi.fn().mockImplementation(async()=>{backgroundJobs.mockResolvedValue([{...job,approved:true}]);return {approved:true};});
+ const api=fakeApi({taskInstances,backgroundJobs,approveJobContext}),onPending=vi.fn();
+ render(<ProjectPanel api={api} id="prj_1" tab="product" surface={null} onPending={onPending}/>);const user=userEvent.setup();
+ await user.click(await screen.findByRole('button',{name:'待你处理 · 2'}));
+ const dialog=within(screen.getByRole('dialog',{name:'本项目待办'}));
+ expect(dialog.queryByText('任务「draft_section」请求使用以下上下文')).toBeNull();
+ expect(dialog.getByText('任务「other_task」请求使用以下上下文')).toBeInTheDocument();
+ await user.click(dialog.getByRole('button',{name:'授权这些资料并在后台继续'}));
+ await waitFor(()=>expect(approveJobContext).toHaveBeenCalledWith('prj_1','batch','exact-hash'));
+ await waitFor(()=>expect(onPending).toHaveBeenLastCalledWith(1));
+ expect(api.decide).not.toHaveBeenCalled();
+ taskInstances.mockResolvedValue([{...context,checkpoints:[{...context.checkpoints[0]!,id:'cp-review',kind:'verification_review'}]},unrelated]);
+ await user.click(dialog.getByRole('button',{name:'批准'}));
+ expect(await dialog.findByText('任务「draft_section」的成果等待人工评审')).toBeInTheDocument();
+ expect(onPending).toHaveBeenLastCalledWith(2);
+});
+
+test.each(['jobs-offline','old-host','wrong-pair','terminal-job','tool-review'])('material prompt remains available when batch consolidation cannot be trusted: %s',async mode=>{
+ const checkpoint={id:'cp-current',kind:mode==='tool-review'?'tool_ask':'context_confirm',subject:null,options:['approve','reject'],raisedAt:'2026-11-20T00:00:00Z'};
+ const instance=taskInstance({id:'task',state:'waiting_human',checkpoints:[checkpoint as TaskInstance['checkpoints'][number]]});
+ const job={id:'batch',label:'Batch',state:mode==='terminal-job'?'error':'waiting',requestHash:'hash',approved:false,approvable:true,steps:1,bytes:100,contextConfirmations:[{taskInstanceId:'task',checkpointId:mode==='wrong-pair'?'old-checkpoint':'cp-current'}]};
+ if(mode==='old-host')delete (job as Partial<typeof job>).contextConfirmations;
+ const backgroundJobs=mode==='jobs-offline'?vi.fn().mockRejectedValue(Error('Unavailable')):vi.fn().mockResolvedValue([job]);
+ render(<ProjectPanel api={fakeApi({backgroundJobs,taskInstances:vi.fn().mockResolvedValue([instance])})} id="prj_1" tab="overview"/>);
+ expect(await screen.findByText(mode==='tool-review'?'任务「draft_section」请求执行一个工具':'任务「draft_section」请求使用以下上下文')).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'批准'})).toBeEnabled();
 });
 
 /* ---------------- 产品提出的推进（ADR-022 片四，方案 A） ---------------- */
@@ -1180,12 +1305,14 @@ void test("产品提出的推进：没有请求、或问不到，都不出卡，
 });
 
 /** 在产品界面那一格里，这张卡同样钉在产品界面上方 —— 产品界面盖不住它。 */
-void test("产品提出的推进：在产品界面那一格里，确认卡在产品界面上方", async () => {
+void test("product state request remains host-owned in the project action panel", async () => {
   const api = fakeApi({ stateRequest: vi.fn().mockResolvedValue({ pending: REQUEST }) });
   render(<ProjectPanel api={api} id="prj_1" tab="product" surface={null} />);
-  const card = await screen.findByText("「标书编写」请求把项目推进到「reviewing」");
-  const stub = screen.getByTestId("product-tab-stub");
-  expect(card.compareDocumentPosition(stub) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await userEvent.click(await screen.findByRole('button',{name:'待你处理 · 1'}));
+  const dialog=within(screen.getByRole('dialog',{name:'本项目待办'}));
+  expect(dialog.getByText("「标书编写」请求把项目推进到「reviewing」")).toBeInTheDocument();
+  await userEvent.click(dialog.getByRole('button',{name:'确认推进'}));
+  expect(api.decideStateRequest).toHaveBeenCalledWith('prj_1','reviewing',true);
 });
 
 /* ---------------- 项目的归档与恢复 ---------------- */

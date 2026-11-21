@@ -30,6 +30,103 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("backup, cancellation and diagnostics use the existing local bearer boundary",async()=>{
+ const mock=vi.fn(async()=>jsonResponse({operation:null}));globalThis.fetch=mock;const api=new Api("local-only");
+ await api.maintenance();await api.queueMaintenance({action:"restore",source:"D:/backup",target:"D:/new"});await api.cancelMaintenance();await api.diagnostics();
+ expect(mock.mock.calls.map(([path,init]:unknown[])=>[path,(init as RequestInit).method,(init as RequestInit).body])).toEqual([
+  ["/maintenance","GET",undefined],["/maintenance","POST",JSON.stringify({action:"restore",source:"D:/backup",target:"D:/new"})],["/maintenance","DELETE",undefined],["/diagnostics","GET",undefined],
+ ]);
+ for(const call of mock.mock.calls as unknown as Array<[string,{headers:{authorization:string}}]>)expect(call[1].headers.authorization).toBe("Bearer local-only");
+});
+
+test("window close preference uses the authenticated host read/write contract",async()=>{
+ const mock=vi.fn().mockImplementation(async()=>jsonResponse({action:"exit"}));globalThis.fetch=mock;
+ const api=new Api("test-local");expect(await api.windowClose()).toEqual({action:"exit"});
+ expect(await api.setWindowClose("exit")).toEqual({action:"exit"});
+ expect(mock).toHaveBeenCalledWith("/ui/window-close",expect.objectContaining({method:"PUT",body:JSON.stringify({action:"exit"}),headers:expect.objectContaining({authorization:"Bearer test-local"})}));
+});
+
+test("desktop device actions send only the chosen ID with local authentication",async()=>{
+  const fetchMock=vi.fn().mockImplementation(()=>Promise.resolve(jsonResponse({ok:true})));globalThis.fetch=fetchMock;
+  const api=new Api("local-runtime-only");await api.desktopDevices();await api.releaseDesktopDevice("chosen_pc");
+  expect(fetchMock.mock.calls.map(([url,init])=>[url,init.method,init.body])).toEqual([
+    ["/auth/devices","GET",undefined],["/auth/devices/release","POST",JSON.stringify({deviceId:"chosen_pc"})],
+  ]);
+  for(const [,init] of fetchMock.mock.calls)expect(init.headers.authorization).toBe("Bearer local-runtime-only");
+});
+
+test("organization switch API carries only scope IDs and opaque request IDs with local bearer authentication",async()=>{
+ const fetchMock=vi.fn().mockImplementation(()=>Promise.resolve(jsonResponse({items:[]})));globalThis.fetch=fetchMock;const api=new Api("local-only");
+ await api.organizations();await api.switchOrganization("tenant","workspace");await api.organizationSwitchStatus();await api.organizationSwitchStatus("opaque request");await api.cancelOrganizationSwitch("opaque");
+ expect(fetchMock.mock.calls.map(([path,init])=>[path,init.method,init.body])).toEqual([
+  ["/auth/organizations","GET",undefined],["/auth/organization-switch","POST",JSON.stringify({tenantId:"tenant",workspaceId:"workspace"})],
+  ["/auth/organization-switch","GET",undefined],["/auth/organization-switch?requestId=opaque%20request","GET",undefined],
+  ["/auth/organization-switch","DELETE",JSON.stringify({requestId:"opaque"})],
+ ]);for(const [,init]of fetchMock.mock.calls)expect(init.headers.authorization).toBe("Bearer local-only");
+});
+
+test("library API pins exact versions and revisions with session authentication", async () => {
+  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ revision: 4, items: [] })));
+  globalThis.fetch = fetchMock;
+  const api = new Api("session-only");
+  await api.librarySurface("bidproposal");
+  await api.libraryToken("bidproposal");
+  await api.projectLibrary("p");
+  await api.librarySelection("p");
+  await api.selectLibraryResource("p", "r", 2, 3);
+  await api.unselectLibraryResource("p", "r", 4);
+  expect(fetchMock.mock.calls.map(([path, init]) => [path, init.method, init.body])).toEqual([
+    ["/products/bidproposal/library-surface", "GET", undefined],
+    ["/products/bidproposal/library-token", "POST", undefined],
+    ["/projects/p/library", "GET", undefined],
+    ["/projects/p/library-selection", "GET", undefined],
+    ["/projects/p/library-selection", "POST", JSON.stringify({ id: "r", version: 2, revision: 3 })],
+    ["/projects/p/library-selection/r", "DELETE", JSON.stringify({ revision: 4 })],
+  ]);
+  for (const [, init] of fetchMock.mock.calls) expect(init.headers.authorization).toBe("Bearer session-only");
+});
+
+test.each([200, 403, 404])("selected source uses project credentials and rejects unavailable responses (%s)", async status => {
+  const fetchMock = vi.fn().mockImplementation((path: string) => Promise.resolve(
+    path === "/projects/p/bridge-token" ? jsonResponse({ token: "project-only" }) :
+    path.endsWith("/units/2") ? jsonResponse({ text: "Original source unit" }, status) : jsonResponse({ units: 3 }),
+  ));
+  globalThis.fetch = fetchMock;
+  const result = new Api("session-only").selectedResourceUnit("p", "reading", 2);
+  if (status === 200) expect(await result).toEqual({ text: "Original source unit", total: 3 });
+  else await expect(result).rejects.toThrow("Selected source unavailable");
+  for (const [path, init] of fetchMock.mock.calls.filter(([path]) => path.startsWith("/bridge/"))) {
+    expect(path).toMatch(/^\/bridge\/readings\/reading(?:\/units\/2)?$/);
+    expect(init.headers.authorization).toBe("Bearer project-only");
+  }
+});
+
+test("source metadata failure is rejected even when the unit is still accessible", async () => {
+  globalThis.fetch = vi.fn().mockImplementation((path: string) => Promise.resolve(
+    path.endsWith("bridge-token") ? jsonResponse({ token: "project-only" }) :
+    path.endsWith("/units/0") ? jsonResponse({ text: "Old source" }) : jsonResponse({ code: "NOT_FOUND" }, 404),
+  ));
+  await expect(new Api("tok").selectedResourceUnit("p", "old", 0)).rejects.toThrow("Selected source unavailable");
+});
+
+test("package preflight uploads bytes without activating the package", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ name: "Bid", publisher: "Vxture", version: "1.16.3" }));
+  globalThis.fetch = fetchMock;
+  const file = new File(["package bytes"], "bid.ruyinpkg");
+  expect(await new Api("tok").preflightPackage(file)).toMatchObject({ name: "Bid", version: "1.16.3" });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledWith("/products/preflight", expect.objectContaining({ method: "POST", body: await file.arrayBuffer() }));
+});
+
+test("background job approval carries the exact request hash", async () => {
+  const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ items: [{ id: "job", requestHash: "digest" }] })).mockResolvedValueOnce(jsonResponse({ approved: true }));
+  globalThis.fetch = fetchMock;
+  const api = new Api("tok");
+  expect(await api.backgroundJobs("p")).toEqual([{ id: "job", requestHash: "digest" }]);
+  expect(await api.approveJobContext("p", "job", "digest")).toEqual({ approved: true });
+  expect(fetchMock).toHaveBeenLastCalledWith("/projects/p/jobs/job/context-approval", expect.objectContaining({ method: "POST", body: JSON.stringify({ requestHash: "digest" }) }));
+});
+
 /* ---------------- call() - the core every wrapper method goes through ---------------- */
 
 void test("Api: a GET sends the bearer token and no body", async () => {
@@ -862,4 +959,49 @@ void test("orgLogo: 失败时抛 ApiError，带着守护进程的原话", async 
     status: 503,
     body: { code: "PLATFORM_SESSION_NOT_CONFIGURED" },
   });
+});
+
+test("productCatalog reads the authenticated local display projection",async()=>{
+ const rows=[{productCode:"agent",productName:"Agent",productType:"agent",iconUrl:null}];
+ const mock=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({items:rows})));globalThis.fetch=mock;
+ expect(await new Api("local-only").productCatalog()).toEqual(rows);
+ expect(mock).toHaveBeenCalledWith("/platform/product-catalog",expect.objectContaining({headers:expect.objectContaining({authorization:"Bearer local-only"})}));
+ expect(await new Api("local-only").recommendedProducts()).toEqual(rows);
+ expect(mock).toHaveBeenCalledWith("/platform/recommended-products",expect.objectContaining({headers:expect.objectContaining({authorization:"Bearer local-only"})}));
+});
+
+test("productIcon uses authenticated binary delivery, encodes selectors and distinguishes absent images from failure",async()=>{
+ const mock=vi.fn().mockResolvedValueOnce(new Response("image")).mockResolvedValueOnce(new Response(null,{status:204}))
+  .mockResolvedValueOnce(new Response(JSON.stringify({code:"AUTH_REQUIRED"}),{status:401}));
+ globalThis.fetch=mock;const api=new Api("local-only");
+ expect(await (await api.productIcon("product code","version 1"))!.text()).toBe("image");
+ expect(mock).toHaveBeenNthCalledWith(1,"/platform/product-icon?code=product%20code&version=version%201",{headers:{authorization:"Bearer local-only"}});
+ expect(await api.productIcon("p","v")).toBeNull();await expect(api.productIcon("p","v")).rejects.toMatchObject({status:401});
+});
+
+void test("Api.subscribe: consumers share one stream until the last consumer leaves", async () => {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const fetchMock = vi.fn().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+    start(c) { controller = c; },
+  })));
+  globalThis.fetch = fetchMock;
+  const api = new Api("tok");
+  const first = vi.fn();
+  const second = vi.fn();
+  const stopFirst = api.subscribe(first);
+  const stopSecond = api.subscribe(second);
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  const signal = (fetchMock.mock.calls[0] as [string, RequestInit])[1].signal!;
+  controller.enqueue(new TextEncoder().encode('data: {"kind":"pending"}\n\n'));
+  await vi.waitFor(() => expect(second).toHaveBeenCalledWith({ kind: "pending" }));
+  expect(first).toHaveBeenCalledTimes(1);
+  stopFirst();
+  stopFirst();
+  expect(signal.aborted).toBe(false);
+  controller.enqueue(new TextEncoder().encode('data: {"kind":"pending"}\n\n'));
+  await vi.waitFor(() => expect(second).toHaveBeenCalledTimes(2));
+  expect(first).toHaveBeenCalledTimes(1);
+  stopSecond();
+  expect(signal.aborted).toBe(true);
+  controller.close();
 });

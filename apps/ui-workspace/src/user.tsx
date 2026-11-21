@@ -25,6 +25,7 @@ import {
 import { Api, type SessionInfo } from "./api";
 import { accountsUrl, consoleAppBaseOf } from "./platform-base";
 import { useLocale, useT } from "./i18n";
+import {OrganizationSelector} from "./organization-selector";
 
 /** Poll /auth/session until signedIn flips (login completes in the browser). */
 const LOGIN_POLL_MS = 2000;
@@ -36,6 +37,7 @@ export function UserSlot({
   collapsed,
   onOpenSettings,
   onSignedOut,
+  onSessionChanged=onSignedOut,
 }: {
   api: Api;
   productIds: string[];
@@ -52,6 +54,7 @@ export function UserSlot({
    * `UserSlot` 的人在**编译期**就被拦住，而不是等到有人真去点那个按钮。
    */
   onSignedOut: () => void;
+  onSessionChanged?:()=>void;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -167,7 +170,7 @@ export function UserSlot({
    * 没有可写的就不写，这一行整个不出现。
    */
   const subLine = signedIn
-    ? session?.profile?.email ?? session?.org?.name
+    ? session?.profile?.email
     : online
       ? t("user.relogin")
       : t("user.offline");
@@ -219,7 +222,7 @@ export function UserSlot({
             className="user-panel-head"
             title={displayName}
             {...(signedIn
-              ? {}
+              ? (session?.org?.type ? {titleAside: <StatusBadge tone="neutral">{t(session.org.type === "personal" ? "tenant.type.personalFull" : "tenant.type.organizationFull")}</StatusBadge>} : {})
               : {
                   titleAside: (
                     <StatusBadge tone="warning" dot>
@@ -227,7 +230,14 @@ export function UserSlot({
                     </StatusBadge>
                   ),
                 })}
-            {...(subLine ? { metaRows: [{ key: "line", content: subLine }] } : {})}
+            metaRows={[
+              ...(subLine ? [{ key: "line", content: subLine }] : []),
+              ...(signedIn && session?.org && session.org.type !== "personal" ? [{ key: "organization", content: (
+                <span className="user-panel-organization">
+                  <span>{session.org.name}</span>
+                </span>
+              ) }] : []),
+            ]}
           />
           {!signedIn && (
             <ShellPanelSection>
@@ -265,6 +275,15 @@ export function UserSlot({
               newTab
               trailingIcon="external-link"
             />
+            <ShellPanelRow
+              className="user-panel-row"
+              icon="buildings"
+              label={t("tenant.admin")}
+              href={`${consoleAppBaseOf(session)}/tenant-settings`}
+              newTab
+              trailingIcon="external-link"
+            />
+            {signedIn&&<OrganizationSelector api={api} onChanged={()=>{window.location.hash="#home";onSessionChanged();}}/>}
             <ShellPanelRow
               className="user-panel-row"
               icon="gauge"

@@ -14,6 +14,8 @@ import test from "node:test";
 
 import {
   CapabilityCatalog,
+  CatalogChangedError,
+  DEFAULT_RUNOS_CATALOG_PATH,
   FOCUS_REFRESH_MIN_MS,
   MAX_PAGES,
   catalogPath,
@@ -174,6 +176,21 @@ void test("parsePlatformPage：items / capabilities、nextCursor / next_cursor �
   assert.throws(() => parsePlatformPage({ items: [], total: "3" }), /缺 total/);
 });
 
+void test("verified distributed identities map only enabled, unshadowed skills; user names never impersonate Runos", () => {
+  const skills = [
+    { name: "style", source: "bidproposal", layer: "distributed", enabled: true, verifiedCapabilityId: "verified.style" },
+    { name: "off", source: "bidproposal", layer: "distributed", enabled: false, verifiedCapabilityId: "verified.off" },
+    { name: "shadowed", source: "bidproposal", layer: "distributed", enabled: true, shadowedBy: "user", verifiedCapabilityId: "verified.shadowed" },
+    { name: "fake", source: "user", layer: "user", enabled: true, verifiedCapabilityId: "verified.fake" },
+    { name: "legacy", source: "bidproposal", layer: "distributed", enabled: true },
+  ];
+  const index = localRunnableIndex({ skills });
+  const entry = (capabilityId: string): CatalogEntry => ({ capabilityId, primitiveType: "skill", title: capabilityId, tags: [] });
+  assert.deepEqual(index(entry("verified.style")), { runnable: true, via: "distributed-skill" });
+  for (const id of ["verified.off", "verified.shadowed", "verified.fake", "verified.legacy"]) assert.deepEqual(index(entry(id)), { runnable: false });
+  assert.deepEqual(index({ ...entry("verified.style"), primitiveType: "executor" }), { runnable: false });
+});
+
 void test("platformCatalogSource：没配地址就是不可用，不去打一个不存在的地址", async () => {
   let reads = 0;
   const none = platformCatalogSource({ path: undefined, signedIn: () => true, read: () => { reads++; return Promise.resolve({ body: {} }); } });
@@ -243,7 +260,7 @@ void test("同步：分页取到底、平台给了版本就用版本、整份原
   const dir = tmp();
   try {
     const src = pagedSource([
-      { items: [raw("a"), raw("b")], total: 3, nextCursor: "1" },
+      { items: [raw("a"), raw("b")], total: 3, nextCursor: "1", version: "catalog-v7" },
       { items: [raw("c", { primitive_type: "connector" })], total: 3, version: "catalog-v7" },
     ]);
     const catalog = new CapabilityCatalog(dir, src);
@@ -373,6 +390,43 @@ void test("盘上那份读坏了按从未取到处理，不抛", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+void test('catalog refresh rejects mixed versions and restarts a version conflict at most once',async()=>{
+ const dir=tmp();let calls=0,mode='initial';
+ const source:CatalogSource={available:()=>true,unavailableReason:'',fetchPage:async cursor=>{
+  calls++;if(mode==='initial')return {items:[raw('old')],total:1,version:'v1'};
+  if(mode==='conflict')throw new CatalogChangedError('Synthetic version conflict');
+  if(!cursor)return {items:[raw('a')],total:2,version:'v2',nextCursor:'second'};
+  return {items:[raw('b')],total:mode==='count'?3:2,version:mode==='version'?'v3':'v2'};
+ }};
+ try{
+  const catalog=new CapabilityCatalog(dir,source);await catalog.sync('manual');const saved=readFileSync(catalogPath(dir),'utf8');
+  for(const value of ['conflict','version','count']){mode=value;calls=0;assert.equal((await catalog.sync('manual')).status,'failed');assert.equal(calls,value==='conflict'?2:4);assert.equal(readFileSync(catalogPath(dir),'utf8'),saved);assert.equal(catalog.status().state,'stale');}
+  mode='valid';assert.equal((await catalog.sync('manual')).status,'synced');assert.equal(catalog.status().ref,'v2');assert.equal(catalog.list().total,2);
+  assert.equal(DEFAULT_RUNOS_CATALOG_PATH,'/api/runos/capabilities');
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+void test('catalog cache is scoped to account/workspace and discards an in-flight prior context',async()=>{
+ const dir=tmp();let session:string|undefined='session-a',scope:string|undefined='account-a:workspace-a',release:(()=>void)|undefined,hold=false;
+ const source:CatalogSource={available:()=>true,unavailableReason:'',fetchPage:async()=>{const id=scope!;if(hold)await new Promise<void>(done=>release=done);return {items:[raw(id)],total:1,version:'stable'};}};
+ const catalog=new CapabilityCatalog(dir,source,Date.now,{session:()=>session,resolve:async()=>scope});
+ try{
+  assert.equal((await catalog.sync('manual')).status,'synced');assert.equal(catalog.list().items[0]!.capabilityId,scope);
+  scope='account-b:workspace-b';session='session-b';assert.equal(catalog.list().total,0);await catalog.prepareScope();assert.equal(catalog.list().total,0);
+  await catalog.sync('manual');assert.equal(catalog.list().items[0]!.capabilityId,scope);
+  scope='account-a:workspace-a';session='session-a';await catalog.prepareScope();assert.equal(catalog.list().items[0]!.capabilityId,scope);
+  const saved=readFileSync(catalogPath(dir,scope),'utf8');hold=true;const pending=catalog.sync('manual');while(!release)await new Promise(done=>setImmediate(done));
+  session='session-b';scope='account-b:workspace-b';await catalog.prepareScope();release();assert.equal((await pending).status,'failed');assert.equal(readFileSync(catalogPath(dir,'account-a:workspace-a'),'utf8'),saved);assert.equal(catalog.list().items[0]!.capabilityId,scope);
+  session=undefined;scope=undefined;assert.equal(await catalog.prepareScope(),false);assert.equal(catalog.list().total,0);assert.equal((await catalog.sync('manual')).status,'unavailable');
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+void test('identity lookup failure cannot expose a previously scoped capability list',async()=>{
+ const dir=tmp();let fail=false;
+ const catalog=new CapabilityCatalog(dir,pagedSource([{items:[raw('private-list')],total:1}]),Date.now,{session:()=>'session',resolve:async()=>{if(fail)throw Error('Identity unavailable');return 'account:workspace';}});
+ try{assert.equal((await catalog.sync('manual')).status,'synced');fail=true;assert.equal(await catalog.prepareScope(),false);assert.equal(catalog.list().total,0);assert.equal((await catalog.sync('manual')).status,'unavailable');}finally{rmSync(dir,{recursive:true,force:true});}
 });
 
 void test("list：按原语、分类、关键词筛；按偏移量分页，limit 钳在 1..1000", async () => {

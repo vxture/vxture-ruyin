@@ -15,7 +15,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { PrivateModelStore } from "./private-model.js";
 import { spawnSync } from "node:child_process";
@@ -51,6 +51,31 @@ import {
   type PlatformService,
 } from "./platform.js";
 import { NotSignedInError as SessionNotSignedInError, PlatformReadError, type PlatformSession } from "./platform-session.js";
+import { DesktopDevicesError } from "./desktop-devices.js";
+import {OrganizationSwitchError,type OrganizationSwitchView} from "./organization-switch.js";
+import {MaintenanceError} from "./maintenance.js";
+
+test("maintenance routes retain authorization, readiness and active-work gates; diagnostics exports only an allowlist",async()=>{
+ let operation:unknown=null,fail:string|undefined;
+ const maintenance={view:()=>({operation}),queue:async(input:unknown)=>{if(fail==="io")throw Error("private path");if(fail)throw new MaintenanceError(fail,"Invalid request");operation=input;return {operation};},cancel:()=>{operation=null;return {operation};}} as LocalApiDeps["maintenance"];
+ const info={...testSystemInfo,startupState:"ready" as "ready"|"initializing"};
+ const jobs={activeCount:0,recoverAll:async()=>{},close:()=>{}};
+ const rig=await startServer({maintenance,systemInfo:info,jobs:jobs as unknown as LocalApiDeps["jobs"]});
+ try{
+  for(const path of ["/maintenance","/diagnostics"])assert.equal((await fetch(rig.base+path)).status,401);
+  assert.deepEqual(await (await fetch(rig.base+"/maintenance",{headers:rig.headers})).json(),{operation:null});
+  const post=()=>fetch(rig.base+"/maintenance",{method:"POST",headers:rig.json,body:JSON.stringify({action:"backup",target:"new"})});
+  info.startupState="initializing";assert.equal((await post()).status,503);info.startupState="ready";
+  jobs.activeCount=1;const busy=await post();assert.equal(busy.status,409);assert.equal((await busy.json()).code,"MAINTENANCE_BUSY");assert.equal(operation,null);jobs.activeCount=0;
+  assert.equal((await post()).status,202);assert.deepEqual(operation,{action:"backup",target:"new"});
+  assert.deepEqual(await (await fetch(rig.base+"/maintenance",{method:"DELETE",headers:rig.headers})).json(),{operation:null});
+  fail="BACKUP_INVALID";const invalid=await post();assert.equal(invalid.status,409);assert.equal((await invalid.json()).code,fail);
+  fail="io";const io=await post();assert.equal(io.status,400);assert.ok(!(await io.text()).includes("private path"));
+  const report=await (await fetch(rig.base+"/diagnostics",{headers:rig.headers})).json();
+  assert.deepEqual(Object.keys(report).sort(),["arch","checks","createdAt","platform","schema","version"]);assert.equal(report.schema,"ruyin-diagnostics/1");assert.equal(report.checks.length,7);assert.ok(!JSON.stringify(report).includes(rig.dataDir));
+ }finally{closeRig(rig);}
+ const absent=await startServer();try{assert.equal((await fetch(absent.base+"/maintenance",{headers:absent.headers})).status,503);}finally{closeRig(absent);}
+});
 
 // Compiled test runs from dist/, so ../../../ is the repo root (same
 // convention as integration.test.ts).
@@ -68,6 +93,109 @@ const testSystemInfo = {
   codeSigning: "unpackaged" as const,
   startedAt: new Date().toISOString(),
 };
+
+test("product icon HTTP route keeps the loopback bearer guard, validates selectors and returns image bytes only",async()=>{
+ let missing=false;const calls:string[][]=[];
+ const rig=await startServer({platform:signedInTo("workspace"),platformSession:{productIcon:async(code:string,version:string)=>{
+  calls.push([code,version]);return missing?null:{data:Buffer.from([1,2,3]),contentType:"image/png"};
+ }} as unknown as PlatformSession});
+ try{
+  const path=rig.base+"/platform/product-icon?code=agent&version=v1";
+  assert.equal((await fetch(path)).status,401);
+  assert.equal((await fetch(rig.base+"/platform/product-icon?code=..%2Fsecret&version=v1",{headers:rig.headers})).status,400);
+  const image=await fetch(path,{headers:rig.headers});assert.equal(image.status,200);assert.equal(image.headers.get("content-type"),"image/png");
+  assert.equal(image.headers.get("x-content-type-options"),"nosniff");assert.deepEqual([...new Uint8Array(await image.arrayBuffer())],[1,2,3]);
+  assert.deepEqual(calls,[["agent","v1"]]);missing=true;assert.equal((await fetch(path,{headers:rig.headers})).status,204);
+ }finally{closeRig(rig);}
+ const absent=await startServer({platform:signedInTo("workspace")});
+ try{assert.equal((await fetch(absent.base+"/platform/product-icon?code=agent&version=v1",{headers:absent.headers})).status,503);}finally{closeRig(absent);}
+});
+
+test("public product catalog HTTP route uses the local bearer guard and preserves catalog failure",async()=>{
+ let unavailable=false;const items=[{productCode:"a",productName:"Agent",productType:"agent"}];
+ const rig=await startServer({platform:signedInTo("workspace"),platformSession:{productCatalog:async()=>{
+  if(unavailable)throw new PlatformReadError("/api/products/catalog",502);return items;
+ }} as unknown as PlatformSession});
+ try{
+  const path=rig.base+"/platform/product-catalog";
+  assert.equal((await fetch(path)).status,401);
+  assert.deepEqual(await (await fetch(path,{headers:rig.headers})).json(),{items});
+  unavailable=true;assert.equal((await fetch(path,{headers:rig.headers})).status,502);
+ }finally{closeRig(rig);}
+ const absent=await startServer({platform:signedInTo("workspace")});
+ try{assert.equal((await fetch(absent.base+"/platform/product-catalog",{headers:absent.headers})).status,503);}finally{closeRig(absent);}
+});
+
+test("tenant recommendation HTTP reads retain bearer and role gates instead of falling back to public catalog",async()=>{
+ let status=200;const items=[{productCode:"new-agent"}];
+ const rig=await startServer({platform:signedInTo("workspace"),platformSession:{recommendedProducts:async()=>{if(status!==200)throw new PlatformReadError("/api/subscription/recommended-products",status);return items;}} as unknown as PlatformSession});
+ try{
+  const path=rig.base+"/platform/recommended-products";assert.equal((await fetch(path)).status,401);
+  assert.deepEqual(await (await fetch(path,{headers:rig.headers})).json(),{items});
+  status=403;assert.equal((await fetch(path,{headers:rig.headers})).status,403);
+  status=503;assert.equal((await fetch(path,{headers:rig.headers})).status,502);
+ }finally{closeRig(rig);}
+ const absent=await startServer({platform:signedInTo("workspace")});try{assert.equal((await fetch(absent.base+"/platform/recommended-products",{headers:absent.headers})).status,503);}finally{closeRig(absent);}
+});
+
+test("initializing runtime preserves reads, authentication and cancellation while gating execution and mutations",async()=>{
+ const info={...testSystemInfo,startupState:"initializing" as "initializing"|"ready"|"failed"};
+ let release!:()=>void;const recovery=new Promise<void>(resolve=>{release=resolve;});let recovered=0;
+ const rig=await startServer({systemInfo:info,startupReady:recovery,platform:signedInTo("startup-ws"),jobs:{recoverAll:async()=>{recovered++;},close:()=>{}} as unknown as LocalApiDeps["jobs"]});
+ try{
+  assert.equal(recovered,0);
+  const pid=await projectIn(rig,"startup-ws"),bridge={authorization:`Bearer ${await bridgeTokenFor(rig,pid)}`,"content-type":"application/json"};
+  assert.equal((await fetch(rig.base+"/health")).status,200);
+  assert.equal((await fetch(rig.base+"/system",{headers:rig.headers})).status,200);
+  assert.equal((await fetch(rig.base+"/auth/session",{headers:rig.headers})).status,200);
+  assert.equal((await fetch(rig.base+"/projects/unknown/tasks",{method:"POST"})).status,401);
+  for(const path of ["/connectors","/components/a/acquire","/system/data-dir",`/projects/${pid}/tasks`,`/projects/${pid}/tasks/a/decision`]){
+   const res=await fetch(rig.base+path,{method:"POST",headers:rig.json,body:"{}"});
+   assert.equal(res.status,503,path);assert.equal(res.headers.get("retry-after"),"2");assert.equal((await res.json()).code,"RUNTIME_INITIALIZING");
+  }
+  for(const path of ["/bridge/tasks","/bridge/jobs"]){
+   const res=await fetch(rig.base+path,{method:"POST",headers:bridge,body:"{}"});assert.equal(res.status,503);assert.equal((await res.json()).retryable,true);
+  }
+  assert.deepEqual(await rig.runtime.listTaskInstances(pid),[]);
+  assert.notEqual((await fetch(`${rig.base}/projects/${pid}/tasks/unknown/cancel`,{method:"POST",headers:rig.json,body:"{}"})).status,503);
+  info.startupState="failed";const failed=await fetch(rig.base+"/connectors",{method:"POST",headers:rig.json,body:"{}"});assert.equal((await failed.json()).code,"RUNTIME_START_FAILED");
+  info.startupState="ready";release();await new Promise(resolve=>setImmediate(resolve));assert.equal(recovered,1);
+  assert.notEqual((await fetch(rig.base+"/system/data-dir",{method:"POST",headers:rig.json,body:"{}"})).status,503);
+ }finally{release();closeRig(rig);}
+});
+
+test("runtime activity reports only machine counts behind the local bearer, including non-model work and initialization",async()=>{
+  const info={...testSystemInfo,startupState:"ready" as "ready"|"initializing"};
+  const service=(activeCount:number)=>({activeCount,recoverAll:async()=>{},close:()=>{}});
+  const jobs=service(2),readings=service(1),renders=service(1),libraryReadings=service(3);
+  const components=[{id:"download",state:"acquiring"},{id:"idle",state:"acquired"}];
+  const rig=await startServer({systemInfo:info,jobs:jobs as unknown as LocalApiDeps["jobs"],
+    readings:readings as unknown as LocalApiDeps["readings"],renders:renders as unknown as LocalApiDeps["renders"],
+    library:{readings:libraryReadings,close:()=>{}} as unknown as LocalApiDeps["library"],
+    components:{list:()=>components} as LocalApiDeps["components"]});
+  try{
+    const url=rig.base+"/runtime/activity";assert.equal((await fetch(url)).status,401);
+    const reply=await (await fetch(url,{headers:rig.headers})).json();
+    assert.deepEqual(reply,{tasks:{running:0,queued:0},operations:{batches:2,readings:4,renders:1,downloads:1},initializing:false,busy:true});
+    jobs.activeCount=readings.activeCount=renders.activeCount=libraryReadings.activeCount=0;components.splice(0,1);
+    assert.equal((await (await fetch(url,{headers:rig.headers})).json()).busy,false);
+    info.startupState="initializing";const pending=await (await fetch(url,{headers:rig.headers})).json();assert.equal(pending.busy,true);assert.equal(pending.initializing,true);
+  }finally{closeRig(rig);}
+});
+
+test("window close preference uses authenticated reads/writes and never acknowledges an invalid or failed save",async()=>{
+ let action:"background"|"exit"="background",fail=false;
+ const rig=await startServer({windowClose:{get:()=>action,set:next=>{if(fail)throw Error("read-only profile");action=next;}}});
+ try{
+  const url=rig.base+"/ui/window-close";assert.equal((await fetch(url)).status,401);
+  assert.deepEqual(await (await fetch(url,{headers:rig.headers})).json(),{action:"background"});
+  const put=(body:unknown)=>fetch(url,{method:"PUT",headers:rig.json,body:JSON.stringify(body)});
+  assert.deepEqual(await (await put({action:"exit"})).json(),{action:"exit"});
+  for(const action of [null,"unknown",false])assert.equal((await put({action})).status,400);
+  fail=true;assert.equal((await put({action:"background"})).status,500);assert.equal(action,"exit");
+ }finally{closeRig(rig);}
+ const absent=await startServer();try{assert.equal((await fetch(absent.base+"/ui/window-close",{headers:absent.headers})).status,503);}finally{closeRig(absent);}
+});
 
 interface Rig {
   base: string;
@@ -116,6 +244,11 @@ async function startServer(
     reindex: (pid, b) => reindexBinding(storage, pid, b, lookup.get(b.connector)!),
     // 文件区（TD-041）。测试装配接的是**真的**存储与加密 —— 这一段的价值全在
     // 「磁盘上到底存了什么」，换成桩就什么都没测到。
+    documents: {
+      list: (pid, productId, prefix) => storage.openHostStore(pid)?.listProductDocuments(productId,prefix) ?? [],
+      get: (pid, productId, id) => storage.openHostStore(pid)?.getProductDocument(productId, id),
+      put: (pid, productId, id, markdown, revision) => storage.openHostStore(pid)?.putProductDocument(productId, id, markdown, revision),
+    },
     files: {
       list: (pid: string) => storage.openHostStore(pid)?.listFiles() ?? [],
       get: (pid: string, fileId: string) => storage.openHostStore(pid)?.getFile(fileId),
@@ -405,6 +538,22 @@ test("HTTP POST /registry/install: 503 when the index is unreachable, 404 for an
   }
 });
 
+test("registry package identity must match the selected ID, version and publisher before any package is written",async()=>{
+ const fixture=buildRegistryFixture();
+ const indexFile=join(fixture.dir,"reg","index.json");const original=JSON.parse(readFileSync(indexFile,"utf8"));
+ try{
+  for(const change of [{id:"different.agent"},{version:"1.0.1"},{publisher:"someone.else"}]){
+   const index=structuredClone(original);Object.assign(index.items[0],change);writeFileSync(indexFile,JSON.stringify(index));
+   const rig=await startServer({registryBase:fixture.base,registryFetch:fixture.fetchImpl,requireSignedPackages:false,version:"99.0.0"});
+   try{
+    const response=await fetch(rig.base+"/registry/install",{method:"POST",headers:rig.json,body:JSON.stringify({id:index.items[0].id,version:index.items[0].version})});
+    assert.equal(response.status,422);assert.equal((await response.json()).code,"REGISTRY_PACKAGE_MISMATCH");
+    assert.ok(!existsSync(join(rig.dataDir,"products",index.items[0].id)));
+   }finally{closeRig(rig);}
+  }
+ }finally{rmSync(fixture.dir,{recursive:true,force:true});}
+});
+
 function closeRig(rig: Rig): void {
   // 连同还开着的连接一起断：事件流（SSE）是长连接，server.close() 只停止接新连接、
   // 不断旧的。一条该被收掉却没收掉的流（正是事件流用例要抓的那种坏法），会让整个测试
@@ -470,6 +619,73 @@ void test("HTTP: 页面直接引用的根级资源不经令牌闸门 —— 带 
     closeRig(rig);
     rmSync(uiDir, { recursive: true, force: true });
   }
+});
+
+test("organization switch routes retain the old project during pending/cancel and retire bridge tickets only on completion",async()=>{
+ const target={tenantId:"22222222-2222-4222-8222-222222222222",tenantName:"Synthetic org",tenantType:"organization" as const,workspaceId:"44444444-4444-4444-8444-444444444444",workspaceName:"Synthetic workspace",current:false};
+ const requestId="a".repeat(32);let state:OrganizationSwitchView|null=null,finish:()=>void=()=>{},completed=false,refreshes=0;
+ const session={signedIn:()=>true,activeWorkspaceId:async()=>"wsp_x",organizations:async()=>[target],
+  beginOrganizationSwitch:async(tenant:unknown,workspace:unknown)=>{if(tenant!==target.tenantId||workspace!==target.workspaceId)throw new OrganizationSwitchError(403,"ORG_SWITCH_NOT_ALLOWED","Denied");state={requestId,state:"pending",target};return {requestId,authorizeUrl:"https://console.test/auth/login?surface=native"};},
+  organizationSwitchStatus:()=>state,cancelOrganizationSwitch:()=>{state={requestId,state:"cancelled",target};return state;},
+  completeOrganizationSwitch:()=>new Promise<void>(ok=>{finish=()=>{state={requestId,state:"completed",target};completed=true;ok();};}),
+ }as unknown as PlatformSession;
+ const rig=await startServer({platform:signedInTo("wsp_x"),platformSession:session,refreshEntitlements:async()=>{refreshes++;}});
+ try{
+  const contract=loadProducts(productsDir).loaded.find(p=>p.id==="bidproposal")!.contract,project=await rig.runtime.createProject(contract,"Synthetic retained work","wsp_x");
+  const tokenResponse=await fetch(`${rig.base}/projects/${project.id}/bridge-token`,{method:"POST",headers:rig.headers});assert.equal(tokenResponse.status,200);
+  const ticket=(await tokenResponse.json() as {token:string}).token;
+  const read=()=>fetch(`${rig.base}/bridge/project`,{headers:{authorization:`Bearer ${ticket}`}});
+  assert.equal((await fetch(`${rig.base}/auth/organizations`)).status,401);
+  const options=await fetch(`${rig.base}/auth/organizations`,{headers:rig.headers});assert.deepEqual(await options.json(),{items:[target]});
+  assert.equal((await fetch(`${rig.base}/auth/organization-switch`,{headers:rig.headers})).status,200);
+  const begin=()=>fetch(`${rig.base}/auth/organization-switch`,{method:"POST",headers:rig.json,body:JSON.stringify({tenantId:target.tenantId,workspaceId:target.workspaceId})});
+  assert.equal((await begin()).status,200);assert.equal((await read()).status,200);assert.equal(completed,false);
+  assert.equal((await fetch(`${rig.base}/auth/organization-switch`,{method:"DELETE",headers:rig.json,body:JSON.stringify({requestId})})).status,200);
+  assert.equal((await read()).status,200);assert.equal(refreshes,0);
+  const invalid=await fetch(`${rig.base}/auth/organization-switch`,{method:"DELETE",headers:rig.json,body:'{}'});assert.equal(invalid.status,400);
+  const denied=await fetch(`${rig.base}/auth/organization-switch`,{method:"POST",headers:rig.json,body:'{}'});assert.equal(denied.status,403);
+  assert.equal((await denied.json() as {code:string}).code,"ORG_SWITCH_NOT_ALLOWED");
+  await begin();finish();for(let i=0;i<30&&!refreshes;i++)await new Promise(ok=>setTimeout(ok,5));
+  assert.equal(refreshes,1);assert.equal((await read()).status,401);
+  assert.equal((await rig.runtime.openProject(project.id)).meta.name,"Synthetic retained work");
+ }finally{closeRig(rig);}
+});
+
+test("organization routes distinguish unsupported configuration and missing account session",async()=>{
+ const absent=await startServer({platform:signedInTo("wsp_x")});
+ try{for(const path of ["/auth/organizations","/auth/organization-switch"])assert.equal((await fetch(absent.base+path,{headers:absent.headers})).status,503);}finally{closeRig(absent);}
+ const out=await startServer({platform:signedInTo("wsp_x"),platformSession:{signedIn:()=>false}as unknown as PlatformSession});
+ try{assert.equal((await fetch(out.base+"/auth/organization-switch",{headers:out.headers})).status,401);}finally{closeRig(out);}
+});
+
+void test("desktop device routes use the local bearer, delegate explicit selection and return honest errors", async () => {
+  let chosen: unknown;
+  let mode = "supported";
+  const desktopLogin = {state:"device_limit",limit:3,devices:[{id:"old",name:"Old PC",platform:"win32",lastActiveAt:"2026-11-21T04:00:00.000Z",current:false}]};
+  const session = {
+    signedIn:()=>false, status:()=>({signedIn:false,expiresAt:null,desktopLogin}),
+    desktopDevices:async()=>{
+      if(mode==="denied")throw new PlatformReadError("/api/desktop/devices",403);
+      if(mode==="outage")throw new PlatformReadError("/api/desktop/devices",503);
+      return mode==="legacy"?{supported:false}:{supported:true,limit:3,devices:desktopLogin.devices};
+    },
+    releaseDesktopDevice:async(id:unknown)=>{if(typeof id!=="string")throw new DesktopDevicesError(400,"DESKTOP_DEVICE_INVALID","Invalid desktop device ID");chosen=id;},
+  } as unknown as PlatformSession;
+  const rig=await startServer({platform:signedInTo("wsp_x"),platformSession:session});
+  try {
+    assert.equal((await fetch(`${rig.base}/auth/devices`)).status,401);
+    const status=await(await fetch(`${rig.base}/auth/session`,{headers:rig.headers})).json() as {desktopLogin:unknown};
+    assert.deepEqual(status.desktopLogin,desktopLogin);
+    const list=await(await fetch(`${rig.base}/auth/devices`,{headers:rig.headers})).json() as {limit:number};assert.equal(list.limit,3);
+    const release=await fetch(`${rig.base}/auth/devices/release`,{method:"POST",headers:rig.json,body:JSON.stringify({deviceId:"old"})});
+    assert.equal(release.status,200);assert.equal(chosen,"old");
+    const invalid=await fetch(`${rig.base}/auth/devices/release`,{method:"POST",headers:rig.json,body:"{}"});assert.equal(invalid.status,400);
+    mode="legacy";assert.deepEqual(await(await fetch(`${rig.base}/auth/devices`,{headers:rig.headers})).json(),{supported:false});
+    mode="denied";assert.equal((await fetch(`${rig.base}/auth/devices`,{headers:rig.headers})).status,403);
+    mode="outage";assert.equal((await fetch(`${rig.base}/auth/devices`,{headers:rig.headers})).status,502);
+  } finally {closeRig(rig);}
+  const absent=await startServer({platform:signedInTo("wsp_x")});
+  try {assert.equal((await fetch(`${absent.base}/auth/devices`,{headers:absent.headers})).status,503);} finally {closeRig(absent);}
 });
 
 void test("三个 /auth 端点接的是 PlatformSession（rpsid），不是 PlatformService（令牌）", async () => {
@@ -970,6 +1186,39 @@ void test("HTTP /products/:id/activate|deactivate|pin-version wire through; unkn
   } finally {
     closeRig(rig);
   }
+});
+
+test("disable checks unfinished work across workspaces without disclosing project identity; terminal work allows disabling",async()=>{
+ const rig=await startServer({platform:signedInTo("current-workspace")});
+ try{
+  const project=await projectIn(rig,"another-workspace");
+  assert.equal((await fetch(rig.base+"/products/bidproposal/deactivate",{method:"POST"})).status,401);
+  for(const state of ["waiting_human","executing","suspended"]){
+   await putTask(rig,project,{state});const response=await fetch(rig.base+"/products/bidproposal/deactivate",{method:"POST",headers:rig.headers});
+   assert.equal(response.status,409);const body=await response.json();assert.equal(body.code,"PRODUCT_BUSY");assert.equal(body.retryable,true);
+   assert.ok(!JSON.stringify(body).includes(project));assert.ok(!JSON.stringify(body).includes("another-workspace"));
+  }
+  await putTask(rig,project,{state:"cancelled"});const response=await fetch(rig.base+"/products/bidproposal/deactivate",{method:"POST",headers:rig.headers});
+  assert.equal(response.status,200);assert.equal((await response.json()).state,"inactive");assert.equal((await rig.runtime.listProjects()).length,1);
+  assert.equal((await rig.runtime.listTaskInstances(project))[0]!.state,"cancelled");
+ }finally{closeRig(rig);}
+});
+
+test("disable protects model-free reading/render and runnable batches, while ignoring work of another product",async()=>{
+ const states={batch:"completed",reading:"completed",render:"completed"};
+ const service=(key:keyof typeof states)=>({list:(_pid:string,product:string)=>product==="bidproposal"?[{state:states[key]}]:[],recoverAll:async()=>{},close:()=>{}});
+ const info={...testSystemInfo,startupState:"initializing" as "initializing"|"ready"};
+ const rig=await startServer({systemInfo:info,jobs:service("batch") as unknown as LocalApiDeps["jobs"],readings:service("reading") as unknown as LocalApiDeps["readings"],renders:service("render") as unknown as LocalApiDeps["renders"]});
+ try{
+  await projectIn(rig,"workspace");const post=()=>fetch(rig.base+"/products/bidproposal/deactivate",{method:"POST",headers:rig.headers});
+  const otherContract=structuredClone(loadProducts(productsDir).loaded.find(p=>p.id==="bidproposal")!.contract);otherContract.product.id="other.agent";
+  const other=await rig.runtime.createProject(otherContract,"Other private project","other-workspace");await putTask(rig,other.id);
+  assert.equal((await post()).status,503);info.startupState="ready";
+  for(const [key,state] of [["batch","running"],["batch","cancelling"],["reading","queued"],["reading","running"],["render","queued"],["render","running"]] as const){
+   states[key]=state;assert.equal((await post()).status,409);states[key]="completed";
+  }
+  assert.equal((await post()).status,200);
+ }finally{closeRig(rig);}
 });
 
 void test("HTTP: malformed JSON body is a 400 REQUEST_MALFORMED, not an internal 500", async () => {
@@ -1947,6 +2196,24 @@ test("skills: list / read / disable / refresh, and the tool registry view", asyn
     closeRig(rig);
     rmSync(dataDir, { recursive: true, force: true });
   }
+});
+
+test("skills: list and refresh expose catalog identity only for identified local providers",async()=>{
+  const {dataDir,registry}=skillFixture();
+  const base=registry.list(),bundled={...base.items[0]!,layer:"bundled" as const,source:"vendor.repo"};
+  const rig=await startServer({skills:{
+    list:()=>({...base,items:[...base.items,bundled]}),refresh:()=>{},read:async()=>undefined,
+    setEnabled:()=>bundled,
+  }});
+  try{
+    for(const [path,method] of [["/skills","GET"],["/skills/refresh","POST"]]){
+      const response=await fetch(rig.base+path,{method,headers:rig.headers});
+      assert.equal(response.status,200);
+      const body=await response.json() as {items:Array<{layer:string;capabilityId?:string}>};
+      assert.equal(body.items.find(s=>s.layer==="bundled")?.capabilityId,"vendor.tender-style");
+      assert.equal(body.items.find(s=>s.layer==="user")?.capabilityId,undefined);
+    }
+  }finally{closeRig(rig);rmSync(dataDir,{recursive:true,force:true});}
 });
 
 test("bundled tool servers: /connectors lists them, activate starts, deactivate stops, DELETE is refused as CONNECTOR_BUNDLED, /tools shows launchable status", async () => {
@@ -3065,6 +3332,34 @@ void test("product-surface: 快照钉的那份不在时，不拿产品库里别�
 });
 
 /** 这个端点在主面上 —— 桥凭据走不到这里（片一的第二条断言，换个端点再钉一次）。 */
+void test("readings bridge is scoped, immutable and rejects cross-workspace access",async()=>{
+  const rig=await startServer({platform:signedInTo("wsp_x"),sourceReader:async(_bytes,_format,start,unit)=>{start({engine:{adapter:"synthetic"},total:1});unit({index:0,markdown:"Evidence 19",text:"Evidence 19",location:{page:1},tables:[],images:[],flags:[]});}});
+  try{
+    const pid=await projectIn(rig,"wsp_x"),other=await projectIn(rig,"wsp_x"),wrong=await projectIn(rig,"wsp_other");
+    const mint=async(id:string)=>((await(await fetch(`${rig.base}/projects/${id}/bridge-token`,{method:"POST",headers:rig.headers})).json()) as {token:string}).token;
+    const a=await mint(pid),b=await mint(other);
+    const store=rig.storage.openHostStore(pid)!,bytes=Buffer.from("synthetic"),area=rig.storage.openFileStore(pid)!;
+    const source=join(rig.dataDir,"synthetic-reading.md");writeFileSync(source,bytes);const saved=await area.put(source);store.addFile({id:"file_reading",hash:saved.hash,name:"synthetic.md",bytes:bytes.length,mediaType:"text/markdown",addedAt:new Date().toISOString(),sourceRef:source});
+    const id="1321dd72-3679-47dc-b08f-c1b9e9f78a76",headers={authorization:`Bearer ${a}`,"content-type":"application/json"};
+    assert.equal((await fetch(`${rig.base}/bridge/readings`,{headers:rig.headers})).status,403);
+    assert.equal((await fetch(`${rig.base}/bridge/readings`,{method:"POST",headers,body:JSON.stringify({id,fileId:"file_reading",hash:saved.hash,path:source})})).status,409);
+    const response=await fetch(`${rig.base}/bridge/readings`,{method:"POST",headers,body:JSON.stringify({id,fileId:"file_reading",hash:saved.hash})});assert.equal(response.status,202);
+    const deadline=Date.now()+5000;
+    let job:{state:string};
+    do {
+      job=await(await fetch(`${rig.base}/bridge/readings/${id}`,{headers})).json() as {state:string};
+      if(job.state!=="running" && job.state!=="queued")break;
+      await new Promise(r=>setTimeout(r,20));
+    } while(Date.now()<deadline);
+    assert.equal(job.state,"completed");
+    const unit=await(await fetch(`${rig.base}/bridge/readings/${id}/units/0`,{headers})).json() as {text:string};assert.equal(unit.text,"Evidence 19");assert.equal(JSON.stringify(unit).includes(source),false);
+    assert.equal((await fetch(`${rig.base}/bridge/readings/${id}/units/0`,{headers:{authorization:`Bearer ${b}`}})).status,404);
+    assert.equal((await fetch(`${rig.base}/bridge/documents/runtime_readunit_${id}_0`,{method:"PUT",headers,body:JSON.stringify({markdown:"tamper",revision:1})})).status,409);
+    // The session cannot obtain a product token for another workspace.
+    assert.equal((await fetch(`${rig.base}/projects/${wrong}/bridge-token`,{method:"POST",headers:rig.headers})).status,403);
+  }finally{closeRig(rig);}
+});
+
 void test("product-surface: 产品级凭据问不了（只有会话令牌能问）", async () => {
   const rig = await startServer({ platform: signedInTo("wsp_x") });
   try {
@@ -3284,6 +3579,14 @@ void test("GET /capabilities/catalog：没接回 503；接了原样转交查询�
   }
 });
 
+void test('catalog HTTP read prepares the current account/workspace before looking up cached entries',async()=>{
+ const {catalog}=fakeCatalog({state:'synced'});let ready=false;
+ const original=catalog.list;
+ catalog.list=q=>{assert.equal(ready,true);return original(q);};
+ const rig=await startServer({capabilityCatalog:{catalog:{...catalog,prepareScope:async()=>{await new Promise(done=>setImmediate(done));ready=true;return true;}} as never,localFacts:()=>({skills:[]})}});
+ try{const response=await fetch(rig.base+'/capabilities/catalog',{headers:rig.headers});assert.equal(response.status,200);assert.equal(ready,true);}finally{closeRig(rig);}
+});
+
 void test("POST /capabilities/catalog/refresh：reason 不认识 400；没有来源 503；未登录 401；失败 502 可重试；成功与跳过 200", async () => {
   const post = (rig: Rig, body: unknown) =>
     fetch(`${rig.base}/capabilities/catalog/refresh`, { method: "POST", headers: rig.json, body: JSON.stringify(body) });
@@ -3390,6 +3693,7 @@ void test("登录成功后守护进程自己同步一次清单（D3）", async (
       ...signedInSession(false),
       beginLogin: () => "https://console.vxture.com/auth/login?surface=native&handle=abc",
       completeLogin: () => claimed,
+      signedIn: () => true,
     } as unknown as PlatformSession,
     capabilityCatalog: { catalog: catalog as never, localFacts: () => ({ skills: [] }) },
   });
@@ -3757,4 +4061,98 @@ test("updates/channel: 读 / 写 / 认不出来的值原样拒绝（不悄悄落
   } finally {
     closeRig(rig);
   }
+});
+
+void test("bridge documents: encrypted persistence, version conflicts and project isolation", async () => {
+  const rig = await startServer({ platform: signedInTo("draft-workspace") });
+  try {
+    const a = await projectIn(rig, "draft-workspace");
+    const b = await projectIn(rig, "draft-workspace");
+    const token = await bridgeTokenFor(rig, a);
+    const headers = { authorization: "Bearer " + token, "content-type": "application/json" };
+    const url = rig.base + "/bridge/documents/chapter_1";
+    assert.equal((await fetch(url, { headers: rig.headers })).status, 403);
+    assert.equal((await fetch(url, { headers })).status, 404);
+    const markdown = "# 独立章节\nV0_PRIVATE_DRAFT_8b1ad";
+    const put = (revision: number, text = markdown) => fetch(url, { method: "PUT", headers, body: JSON.stringify({ markdown: text, revision, projectId: b }) });
+    assert.equal((await fetch(url, { method: "PUT", headers, body: "null" })).status, 400);
+    assert.equal((await fetch(url, { method: "PUT", headers, body: "{" })).status, 400);
+    assert.equal((await fetch(url, { method: "PUT", headers, body: "x".repeat(8 * 1024 * 1024 + 1) })).status, 413);
+    assert.equal((await put(0)).status, 200);
+    assert.equal((await put(0, "stale edit")).status, 409);
+    assert.equal((await put(-1)).status, 400);
+    assert.equal((await put(1, "x".repeat(1024 * 1024 + 1))).status, 400);
+    assert.equal((await fetch(url, { headers: { authorization: "Bearer " + await bridgeTokenFor(rig, b) } })).status, 404);
+    // Closing database handles forces the next read to reopen SQLCipher from disk.
+    rig.storage.closeAll();
+    const loaded = await (await fetch(url, { headers })).json();
+    assert.deepEqual(loaded, { id: "chapter_1", markdown, revision: 1 });
+    assert.equal(rig.storage.openHostStore(a)!.getProductDocument("other-product", "chapter_1"), undefined);
+    const scan = (dir: string): void => { for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, e.name); if (e.isDirectory()) scan(path);
+      else assert.equal(readFileSync(path).includes(Buffer.from("V0_PRIVATE_DRAFT_8b1ad")), false, path);
+    }};
+    scan(rig.dataDir);
+  } finally { closeRig(rig); }
+});
+
+void test("bridge files metadata is project scoped and strips original paths",async()=>{const rig=await startServer({platform:signedInTo("wsp_x")});try{const a=await projectIn(rig,"wsp_x"),b=await projectIn(rig,"wsp_x");const store=rig.storage.openHostStore(a)!;store.addFile({id:"file_template",hash:"a".repeat(64),name:"template.docx",bytes:10,mediaType:"application/octet-stream",addedAt:new Date().toISOString(),sourceRef:"C:/secret/template.docx"});const ra=await fetch(`${rig.base}/bridge/files`,{headers:{authorization:`Bearer ${await bridgeTokenFor(rig,a)}`}});assert.equal(ra.status,200);const raw=await ra.text();assert.ok(raw.includes('template.docx'));assert.ok(!raw.includes('secret'));assert.ok(!raw.includes('sourceRef'));const rb=await fetch(`${rig.base}/bridge/files`,{headers:{authorization:`Bearer ${await bridgeTokenFor(rig,b)}`}});assert.deepEqual(await rb.json(),{items:[]});}finally{closeRig(rig);}});
+
+void test('background bridge: idempotent admission, scoped reads, protected records and encrypted reopen',async()=>{
+ const rig=await startServer({platform:signedInTo('job-workspace')});
+ try{
+  const a=await projectIn(rig,'job-workspace'),b=await projectIn(rig,'job-workspace');
+  const headers={authorization:'Bearer '+await bridgeTokenFor(rig,a),'content-type':'application/json'};
+  const input={id:'e7da097b-5ea9-49d7-938b-2268e9b72a39',label:'Background synthetic audit',sources:[],steps:[{id:'analysis',taskId:'analyze_tender'}]};
+  const post=()=>fetch(rig.base+'/bridge/jobs',{method:'POST',headers,body:JSON.stringify(input)});
+  assert.equal((await post()).status,202);assert.equal((await post()).status,202);
+  const get=await fetch(rig.base+'/bridge/jobs/'+input.id,{headers});assert.equal(get.status,200);assert.equal((await get.json()).steps.length,1);
+  const foreign=await fetch(rig.base+'/bridge/jobs/'+input.id,{headers:{authorization:'Bearer '+await bridgeTokenFor(rig,b)}});assert.equal(foreign.status,404);
+  const overwrite=await fetch(rig.base+'/bridge/documents/runtime_job_'+input.id,{method:'PUT',headers,body:JSON.stringify({markdown:'tampered',revision:1})});assert.equal(overwrite.status,409);
+  const direct=await fetch(rig.base+'/bridge/tasks',{method:'POST',headers,body:JSON.stringify({taskId:'analyze_tender'})});assert.equal(direct.status,409);
+  const pause=await fetch(rig.base+'/bridge/jobs/'+input.id+'/control',{method:'POST',headers,body:JSON.stringify({action:'pause'})});assert.equal(pause.status,200);
+  const approvalList=await fetch(rig.base+'/projects/'+a+'/jobs',{headers:rig.headers});assert.equal(approvalList.status,200);const approvalRows=(await approvalList.json()).items;assert.equal(approvalRows.length,1);assert.equal(approvalRows[0].approved,false);assert.equal(approvalRows[0].steps,1);assert.deepEqual(approvalRows[0].contextConfirmations,[]);
+  const bridgeApproval=await fetch(rig.base+'/projects/'+a+'/jobs/'+input.id+'/context-approval',{method:'POST',headers,body:JSON.stringify({requestHash:approvalRows[0].requestHash})});assert.equal(bridgeApproval.status,401);
+  const unsupportedApproval=await fetch(rig.base+'/projects/'+a+'/jobs/'+input.id+'/context-approval',{method:'POST',headers:rig.json,body:JSON.stringify({requestHash:approvalRows[0].requestHash})});assert.equal(unsupportedApproval.status,409);
+  rig.storage.closeAll();const reopened=await fetch(rig.base+'/bridge/jobs/'+input.id,{headers});assert.equal((await reopened.json()).paused,true);
+  assert.equal(rig.storage.openHostStore(a)!.listProductDocuments('other','runtime_job_').length,0);
+ }finally{closeRig(rig);}
+});
+
+void test('document render bridge pins source and scopes retained Markdown even on layout failure',async()=>{
+ let workspaceId='render-workspace';
+ const rig=await startServer({platform:signedInTo(workspaceId,{session:()=>({...signedInTo(workspaceId).session(),workspace:{id:workspaceId,name:'Render workspace'}})})});
+ try{
+  const a=await projectIn(rig,'render-workspace'),b=await projectIn(rig,'render-workspace');
+  const headers={authorization:'Bearer '+await bridgeTokenFor(rig,a),'content-type':'application/json'},source='![unsupported](https://example.com/image.png)';
+  const put=await fetch(rig.base+'/bridge/documents/manuscript',{method:'PUT',headers,body:JSON.stringify({markdown:source,revision:0})});assert.equal(put.status,200);
+  const input={id:'b2e7fd75-cc11-4444-8888-575840675819',title:'Synthetic render',source:{id:'manuscript',revision:1},fields:{projectName:'Synthetic project',documentName:'Bid',documentNumber:''}};
+  const post=()=>fetch(rig.base+'/bridge/renders',{method:'POST',headers,body:JSON.stringify(input)});assert.equal((await post()).status,202);assert.equal((await post()).status,202);
+  const path=rig.base+'/bridge/renders/'+input.id;
+  assert.deepEqual((await(await fetch(path,{headers})).json()).fields,input.fields);
+  const foreign=await fetch(path,{headers:{authorization:'Bearer '+await bridgeTokenFor(rig,b)}});assert.equal(foreign.status,404);
+  const foreignFile=await fetch(path+'/files/md',{headers:{authorization:'Bearer '+await bridgeTokenFor(rig,b)}});assert.equal(foreignFile.status,404);
+  const overwrite=await fetch(rig.base+'/bridge/documents/runtime_render_'+input.id,{method:'PUT',headers,body:JSON.stringify({markdown:'tampered',revision:1})});assert.equal(overwrite.status,409);
+  await fetch(rig.base+'/bridge/documents/manuscript',{method:'PUT',headers,body:JSON.stringify({markdown:'Changed later',revision:1})});
+  rig.storage.closeAll();const saved=await(await fetch(path+'/files/md',{headers})).json();assert.equal(Buffer.from(saved.base64,'base64').toString(),source);
+  assert.equal((await fetch(path+'/files/pdf',{headers})).status,409);assert.equal((await(await fetch(rig.base+'/bridge/renders',{headers})).json()).items.length,1);
+  const ticketPath=path+'/downloads/md';
+  assert.equal((await fetch(ticketPath,{method:'POST',headers:rig.headers})).status,403);
+  assert.equal((await fetch(ticketPath,{method:'POST'})).status,401);
+  assert.equal((await fetch(ticketPath,{method:'POST',headers:{authorization:'Bearer '+await bridgeTokenFor(rig,b)}})).status,404);
+  assert.equal((await fetch(path+'/downloads/pdf',{method:'POST',headers})).status,409);
+  const issued=await fetch(ticketPath,{method:'POST',headers});assert.equal(issued.status,200);const ticket=await issued.json();
+  assert.match(ticket.path,/^\/downloads\/[a-f0-9]{64}$/);assert.equal(ticket.size,Buffer.byteLength(source));assert.equal(ticket.sha256,saved.sha256);assert.equal(ticket.filename,'Synthetic render.md');
+  const attachment=await fetch(rig.base+ticket.path);assert.equal(attachment.status,200);assert.equal(await attachment.text(),source);
+  assert.equal(attachment.headers.get('content-length'),String(Buffer.byteLength(source)));assert.equal(attachment.headers.get('cache-control'),'no-store');assert.equal(attachment.headers.get('x-content-type-options'),'nosniff');assert.match(attachment.headers.get('content-disposition')!,/^attachment;/);
+  assert.equal((await fetch(rig.base+ticket.path)).status,404);
+  const switched=await(await fetch(ticketPath,{method:'POST',headers})).json();
+  workspaceId='other-workspace';
+  assert.equal((await fetch(rig.base+switched.path)).status,404);
+  assert.equal((await fetch(ticketPath,{method:'POST',headers})).status,404);
+  workspaceId='render-workspace';
+  const revoked=await(await fetch(ticketPath,{method:'POST',headers})).json();
+  assert.equal((await fetch(rig.base+'/projects/'+a+'/archive',{method:'POST',headers:rig.headers})).status,200);
+  assert.equal((await fetch(rig.base+revoked.path)).status,404);
+ }finally{closeRig(rig);}
 });

@@ -4,7 +4,7 @@
  *
  *   1. 租户名称 + 工作区名称
  *   2. 配额（只读）
- *   3. 租户管理 → 平台链接
+ *   Tenant administration lives in the avatar menu; this panel is read only.
  *
  * 配额是**只读展示**，不门控、不计量、不执行 limits（ADR-006 及其 2026-09-04
  * 修订）：数字来自平台的配额用量读（console `/api/subscription/quota-usage`，
@@ -27,9 +27,9 @@ import {
   ShellPanelRow,
   ShellPanelSection,
   ShellPanelSectionTitle,
+  StatusBadge,
 } from "@vxture/design-system";
 import { Api, type QuotaUsage, type SessionInfo } from "./api";
-import { consoleAppBaseOf } from "./platform-base";
 import { useLocale, useT, type Locale, type TFn } from "./i18n";
 
 export interface QuotaLine {
@@ -144,8 +144,9 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
 
   // 「租户管理」落在 console-bff 本体上，不是官网 consoleBase（owner 2026-09-16
   // audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明）。
-  const consoleAppBase = consoleAppBaseOf(session);
   const tenantName = session.org?.name ?? t("tenant.unnamed");
+  const shortName = session.org?.shortName ?? tenantName;
+  const type = session.org?.type;
   const workspaceName = session.workspace?.name ?? t("tenant.noWorkspace");
 
   // 打开时才去问，关上不刷新：菜单不是常驻面板，没必要每 45s 拉一次。
@@ -164,7 +165,7 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
     return () => {
       alive = false;
     };
-  }, [open, api, session.entitlementsConfigured]);
+  }, [open, api, session.entitlementsConfigured, session.org?.id, session.workspace?.id, t, locale]);
 
   // 身份卡（ShellPanelHeader）用租户自己的 logo——标题栏那颗触发按钮不用
   // （owner 2026-09-16：头部保持通用图标，logo 只在弹出面板里）。取不到就是
@@ -190,7 +191,7 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
       if (url) URL.revokeObjectURL(url);
       setLogoUrl(null);
     };
-  }, [open, api]);
+  }, [open, api, session.org?.id]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -201,7 +202,7 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
           title={t("tenant.aria", { tenant: tenantName, workspace: workspaceName })}
         >
           <Icon name="buildings" size="xs" />
-          <span className="app-workspace-name">{workspaceName}</span>
+          <span className="app-workspace-name">{shortName}</span>
           <Icon name="caret-up-down" size="xs" className="app-workspace-caret" />
         </button>
       </PopoverTrigger>
@@ -209,9 +210,12 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
         {/* 1. 租户 + 工作区。身份卡用租户自己的 logo（owner 2026-09-16）；
             拿不到就落到首字，不落到通用 icon——那是标题栏那颗触发按钮的事。 */}
         <ShellPanelHeader
+          className="tenant-panel-head"
           {...(logoUrl ? { avatarSrc: logoUrl, avatarAlt: tenantName } : {})}
           avatarFallback={tenantName.slice(0, 1)}
           title={tenantName}
+          titleAside={type === "personal" || type === "organization" ? <StatusBadge tone="neutral"
+            title={t(type === "personal" ? "tenant.type.personalFull" : "tenant.type.organizationFull")}>{t(type === "personal" ? "tenant.type.personal" : "tenant.type.organization")}</StatusBadge> : undefined}
           metaRows={[{ key: "ws", icon: "folder-open" as const, content: workspaceName }]}
         />
         {/* 2. 配额（只读） */}
@@ -230,16 +234,6 @@ export function TenantMenu({ api, session }: { api: Api; session: SessionInfo })
                 line={line}
               />
             ))}
-        </ShellPanelSection>
-        {/* 3. 租户管理 */}
-        <ShellPanelSection>
-          <ShellPanelRow
-            icon="settings"
-            label={t("tenant.admin")}
-            href={`${consoleAppBase}/tenant-settings`}
-            newTab
-            trailingIcon="external-link"
-          />
         </ShellPanelSection>
       </ShellPanelContent>
     </Popover>

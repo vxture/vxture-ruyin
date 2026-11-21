@@ -14,8 +14,11 @@
 import {
   app,
   BrowserWindow,
+  Menu,
   Notification,
+  Tray,
   dialog,
+  nativeImage,
   shell,
   utilityProcess,
 } from "electron";
@@ -38,6 +41,7 @@ import { extractDaemonEvents, type DaemonEventKind } from "./daemon-events.js";
 import { humanBytes, moveWaitMs, progressLine, progressPercent } from "./migration-wait.js";
 import { diffPending } from "./pending-notify.js";
 import { filesToPrune, formatChunk, logFileName } from "./log-file.js";
+import { DesktopLifecycle } from "./desktop-lifecycle.js";
 
 // userData 路径由它决定，而不是 productName。**这里的 "Ruyin" 是路径键，不是
 // 展示名**：展示名是 RUYIN（productName / 窗口标题 / 界面字标）。改了这一行，
@@ -60,24 +64,26 @@ app.setName("Ruyin");
  *
  * 必须在 app ready 之前调用 —— 会话一旦建起来，路径就定了。
  */
-if (!app.isPackaged) {
+if (process.env["RUYIN_CHROMIUM_DIR"]) {
+  app.setPath("userData", process.env["RUYIN_CHROMIUM_DIR"]);
+} else if (!app.isPackaged) {
   app.setPath("userData", join(homedir(), ".ruyin", "dev", "chromium"));
 }
 
 const SMOKE = process.argv.includes("--smoke");
+// A hidden existing window still owns its daemon; launching again restores it.
+if (!SMOKE && !app.requestSingleInstanceLock()) app.exit(0);
 const PORT = Number(process.env["RUYIN_PORT"] ?? (SMOKE ? 17420 : 7420));
 const TOKEN = randomBytes(24).toString("hex");
 
-// Packaged: daemon + products travel in resources/ (electron-builder
+// Packaged: the daemon travels in resources/ (electron-builder
 // extraResources) and data lives under userData. Dev: repo-relative paths
 // (dist/main.js -> repo root is four levels up) and ~/.ruyin/dev.
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const daemonEntry = app.isPackaged
   ? join(process.resourcesPath, "daemon", "dist", "main.js")
   : join(repoRoot, "apps", "local-host", "dist", "main.js");
-const productsDir = app.isPackaged
-  ? join(process.resourcesPath, "products")
-  : join(repoRoot, "products");
+const productsDir = app.isPackaged ? "" : join(repoRoot, "products");
 /**
  * 数据目录搬家（TD-039）：**指针文件是权威，壳只是把它读出来交给守护进程。**
  *
@@ -217,6 +223,72 @@ let daemonOutput = "";
  * 产品形态下同样成立：用户关掉主窗口之后再导出，应用会在导出完成的那一刻退出。
  */
 let userWindowOpened = false;
+let mainWindow: BrowserWindow | undefined;
+let tray: Tray | undefined;
+let daemonEventsStarted = false;
+
+const lifecycle = new DesktopLifecycle({
+  closeAction:async()=>{
+    const response=await fetch(`http://127.0.0.1:${PORT}/ui/window-close`,{headers:{authorization:`Bearer ${TOKEN}`},signal:AbortSignal.timeout(3000)});
+    if(!response.ok)return "background";
+    return (await response.json()).action==="exit"?"exit":"background";
+  },
+  canHide: () => !!tray && !tray.isDestroyed(),
+  hide: () => mainWindow?.hide(),
+  explainBackground: () => {
+    if (process.platform === "win32" && tray && !tray.isDestroyed()) {
+      tray.displayBalloon({title:shellT(shellLocale,"backgroundTitle"),content:shellT(shellLocale,"backgroundBody"),iconType:"info"});
+    }
+  },
+  activity: async () => {
+    const response=await fetch(`http://127.0.0.1:${PORT}/runtime/activity`,{
+      headers:{authorization:`Bearer ${TOKEN}`},signal:AbortSignal.timeout(3000),
+    });
+    if (!response.ok) return;
+    const value:unknown=await response.json();
+    if(value&&typeof value==="object"&&typeof (value as {busy?:unknown}).busy==="boolean")return {busy:(value as {busy:boolean}).busy};
+    return undefined;
+  },
+  confirmExit: async (restart, unknown) => {
+    const options:Electron.MessageBoxOptions={type:"question",title:"RUYIN",
+      message:shellT(shellLocale,restart?(unknown?"restartUnknown":"restartBusy"):(unknown?"exitUnknown":"exitBusy")),
+      detail:shellT(shellLocale,"exitDetail"),
+      buttons:[shellT(shellLocale,"keepRunning"),shellT(shellLocale,restart?"restartApp":"exitApp")],
+      defaultId:0,cancelId:0,noLink:true,
+    };
+    const result=mainWindow?.isVisible()?await dialog.showMessageBox(mainWindow,options):await dialog.showMessageBox(options);
+    return result.response===1;
+  },
+  exit: restart => { if(restart)app.relaunch(); app.quit(); },
+});
+
+function showWorkbench():void {
+  if(!mainWindow||mainWindow.isDestroyed()){if(userWindowOpened)openWindow();return;}
+  if(mainWindow.isMinimized())mainWindow.restore();
+  mainWindow.show();mainWindow.focus();
+}
+
+function createTray():void {
+  try {
+    const icon=nativeImage.createFromPath(join(app.getAppPath(),"icons","icon.ico"));
+    if(icon.isEmpty())throw Error("Tray icon is missing");
+    tray=new Tray(icon.resize({width:20,height:20}));
+    tray.setToolTip("RUYIN");
+    tray.setContextMenu(Menu.buildFromTemplate([
+      {label:shellT(shellLocale,"openWorkbench"),click:showWorkbench},
+      {type:"separator"},
+      {label:shellT(shellLocale,"exitApp"),click:()=>{void lifecycle.requestExit();}},
+    ]));
+    tray.on("double-click",showWorkbench);
+    tray.on("balloon-click",showWorkbench);
+  }catch(cause){
+    tray?.destroy();tray=undefined;
+    console.error("[shell] background tray unavailable; close will use guarded exit:",cause);
+  }
+}
+
+app.on("second-instance",showWorkbench);
+app.on("activate",showWorkbench);
 
 /**
  * 弹系统目录选择框，把用户选的路径送回守护进程。
@@ -367,10 +439,9 @@ function startDaemon(): Electron.UtilityProcess {
     daemon = undefined;
     if (stopping) return; // we asked for it (smoke done / quitting)
     console.error(`[shell] runtime daemon exited unexpectedly (code ${code})`);
-    // A crashed daemon must surface as a non-zero shell exit - the smoke
-    // check (and anyone scripting the shell) relies on it (TD-010).
-    if (code !== 0) app.exit(1);
-    else if (!app.isPackaged) app.quit();
+    // An unexpected exit cannot leave a tray with no runtime behind it, even
+    // when the daemon reports code 0. Deliberate shutdown was handled above.
+    app.exit(1);
   });
   return child;
 }
@@ -451,12 +522,17 @@ async function waitForPdfSelfCheck(timeoutMs = PDF_SELF_CHECK_WAIT_MS): Promise<
  * 要 11.7 秒，也就是超过约 180 MB 就必然超时，而且下一次启动会把那份半成品丢掉
  * 重来，于是**数据越多，应用越是再也起不来**。
  */
-function pendingMove(): { target: string; bytes?: number } | undefined {
+function pendingMove(): { target: string; bytes?: number;action?:"backup"|"restore" } | undefined {
   try {
     const raw = JSON.parse(readFileSync(locationFile, "utf8")) as {
       pending?: string;
       pendingBytes?: number;
+      maintenance?:{state?:string;action?:string;target?:string;bytes?:number};
     };
+    const operation=raw.maintenance;
+    if(operation?.state==="queued"&&(operation.action==="backup"||operation.action==="restore")&&typeof operation.target==="string"){
+      return {target:operation.target,action:operation.action,...(typeof operation.bytes==="number"?{bytes:operation.bytes*4}:{})};
+    }
     if (typeof raw.pending === "string" && raw.pending.trim()) {
       return {
         target: raw.pending,
@@ -474,7 +550,7 @@ function pendingMove(): { target: string; bytes?: number } | undefined {
  * 网络、不依赖界面包。**它必须存在**：否则用户点了「重启并搬移」之后，看到的是
  * 应用消失几分钟，没有任何解释。
  */
-function openMigrationWindow(target: string, bytes?: number): BrowserWindow {
+function openMigrationWindow(target: string, bytes?: number,action?:"backup"|"restore"): BrowserWindow {
   const size = humanBytes(bytes);
   const win = new BrowserWindow({
     width: 520,
@@ -485,7 +561,7 @@ function openMigrationWindow(target: string, bytes?: number): BrowserWindow {
     // 关不掉是有意的：搬家中途关窗会杀掉守护进程，那份副本要被丢弃重来。
     closable: false,
     // 标题写明白它是什么：任务栏上那一条是用户唯一能看到的解释。
-    title: shellT(shellLocale, "migratingTitle"),
+    title: shellT(shellLocale,action?"maintenanceTitle":"migratingTitle"),
     backgroundColor: "#0b0b0c",
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   });
@@ -504,20 +580,22 @@ function openMigrationWindow(target: string, bytes?: number): BrowserWindow {
     .bar.known i{animation:none;transition:width .3s ease}
     #pct{margin-top:2px;color:#e8e8ea;font-size:12px;font-variant-numeric:tabular-nums}
     @keyframes s{0%{transform:translateX(-70px)}100%{transform:translateX(260px)}}
-  </style><div class="box"><h1>${shellT(shellLocale, "migratingHead")}</h1><div class="bar"><i></i></div>
+  </style><div class="box"><h1>${shellT(shellLocale,action?(action==="backup"?"backupHead":"restoreHead"):"migratingHead")}</h1><div class="bar"><i></i></div>
     <div id="pct">${
-      size
+      action ? shellT(shellLocale,"maintenanceWorking") : size
         ? shellT(shellLocale, "migratingAbout", { size })
         : shellT(shellLocale, "migratingPreparing")
     }</div>
-    <p>${shellT(shellLocale, "migratingNote1")}<br>
+    <p>${shellT(shellLocale,action?"maintenanceNote":"migratingNote1")}<br>
     ${shellT(shellLocale, "migratingNote2")}</p></div>`;
   void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   // 真实进度：守护进程在搬家期间支了一个只答 /health 与 /migration 的小服务
   // （local-host/migration-server.ts）。这里每 500ms 问一次，把那一行字与条宽
   // 注进页面 —— 页面是 data: URL，没有 preload，注入是唯一的通路。
-  const tick = setInterval(() => void paintProgress(win), 500);
-  win.on("closed", () => clearInterval(tick));
+  if(!action){
+    const tick = setInterval(() => void paintProgress(win), 500);
+    win.on("closed", () => clearInterval(tick));
+  }
   return win;
 }
 
@@ -674,6 +752,7 @@ function watchPending(win: BrowserWindow): void {
 
 
 function openWindow(): void {
+  if(mainWindow&&!mainWindow.isDestroyed()){showWorkbench();return;}
   userWindowOpened = true;
   const win = new BrowserWindow({
     width: 1280,
@@ -701,8 +780,14 @@ function openWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
     },
   });
+  mainWindow=win;
+  win.on("close",event=>{if(lifecycle.closeWindow())event.preventDefault();});
+  win.on("closed",()=>{mainWindow=undefined;});
+  win.on("query-session-end",()=>lifecycle.endSession());
+  win.on("session-end",()=>lifecycle.endSession());
   win.once("ready-to-show", () => {
     win.maximize();
     win.show();
@@ -726,8 +811,7 @@ function openWindow(): void {
     // 数据目录搬家只能在开库之前做，所以「生效」= 重启一次。界面按下确认之后
     // 由守护进程发这条事件，壳来真的重开 —— 界面是纯 Web 客户端，做不到。
     if (kind === "app-restart") {
-      app.relaunch();
-      app.quit();
+      void lifecycle.requestExit(true);
     }
     // 打开数据目录：**路径从守护进程拿**，不从事件里拿（事件按总线规矩不带
     // 数据）。这条边界是有意的 —— 界面同一个页面在浏览器里也开着，路径要是
@@ -753,7 +837,7 @@ function openWindow(): void {
     return { action: "allow" };
   });
   void win.loadURL(`http://127.0.0.1:${PORT}/?token=${TOKEN}`);
-  void streamDaemonEvents();
+  if(!daemonEventsStarted){daemonEventsStarted=true;void streamDaemonEvents();}
   watchPending(win);
 }
 
@@ -762,7 +846,7 @@ app.whenReady().then(async () => {
     // 有待搬时：先把那一屏画出来，再起守护进程，并按要搬的字节数放宽等待。
     // 顺序要紧 —— 先画屏，用户才不会看到「应用消失了几分钟」。
     const move = pendingMove();
-    const migrating = move && !SMOKE ? openMigrationWindow(move.target, move.bytes) : undefined;
+    const migrating = move && !SMOKE ? openMigrationWindow(move.target, move.bytes,move.action) : undefined;
     daemon = startDaemon();
     await waitForHealth(move ? moveWaitMs(move.bytes) : undefined);
     if (migrating) {
@@ -810,6 +894,7 @@ app.whenReady().then(async () => {
       app.exit(0);
       return;
     }
+    createTray();
     openWindow();
   } catch (cause) {
     console.error(`[shell] startup failed: ${cause instanceof Error ? cause.message : cause}`);
@@ -821,10 +906,16 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   // 只有开过用户窗口、而且它们都关了，才是「没事可做了」。离屏渲染窗关掉不算
   // —— 它本来就不该把应用带走。
-  if (!userWindowOpened) return;
-  app.quit();
+  if (!userWindowOpened || tray&&!tray.isDestroyed()) return;
+  void lifecycle.requestExit();
+});
+
+app.on("before-quit",event=>{
+  if(SMOKE||!userWindowOpened||lifecycle.quitting)return;
+  event.preventDefault();void lifecycle.requestExit();
 });
 
 app.on("will-quit", () => {
+  tray?.destroy();tray=undefined;
   stopDaemon();
 });

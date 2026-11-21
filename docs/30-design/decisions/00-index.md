@@ -37,6 +37,10 @@
 
 | [ADR-026](ADR-026-capability-and-data-boundary.md) | 能力与数据的边界：**智能体不自建能力面**（取代 ADR-009）；应用能力平台是 Runos；**模型经平台会话中转到 Atlas**；智能体定义由产品提供、针对桌面端打包、平台分发、ruyin 同步与本机存储，按需装到本机；**本机数据不出域、不共享、单人使用**，工作区互通是平台的工作；修订 ADR-012 / 018 / 020 / 023 的来源；§5 收掉为同步预留的旧设计（提议） | 已接受（§5 为提议） | 2026-09-15 |
 
+| [ADR-027](ADR-027-local-source-reading.md) | 本地原文读取：固定离线适配器读取项目已导入文件，逐块保存不可变版本及位置；产品只能提交文件 ID 与摘要，不能提交路径或命令；新增 scoped readings API | P7.1 开发验收，整包发布待验 | 2026-11-19 |
+
+| [ADR-028](ADR-028-agent-owned-inference-and-local-supply.md) | Owner clarification: stable RUYIN host, independently updated agent packages, agent-owned direct Atlas transport, separate Runos cloud consumption/local supply and future local sandbox | Accepted direction; incremental implementation | 2026-11-20 |
+
 后续候选（定稿时立 ADR）：Electron vs Tauri（60 §5.1）、
 每 Workspace 一库（60 §7.1）、推理传输 ≠ 数据存储（10 §15.2）。
 
@@ -52,3 +56,5 @@ RY 文档集是权威（`CLAUDE.md`「Design authority」）。与之冲突、�
 | ADR-026 | §2 第 3 条「ruyin 不发模型回合、模型由产品直接对接 Atlas」**被 RY-100 取代**：循环在本地（ADR-002），模型回合由运行时内核经网关发起，推理上下文是不出域的唯一例外（A7 / A8 / A17）；其余各条不变 | RY-100 §05 / §06 / §07 |
 | ADR-003 | 不变；离线宽限的目标态分两层 | RY-100 A13、RY-202 §05 |
 | ADR-020 §6.2 | 不变 | RY-204 |
+
+2026-11-20 owner clarification: ADR-028 is the current direction for agent-owned Atlas invocation and separate Runos cloud/local supply. It supersedes conflicting central-inference wording in the historical comparison above; the external RY originals still require reconciliation when accessible.

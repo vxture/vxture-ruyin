@@ -19,7 +19,7 @@
  * 产品。UI 侧据此如实标注状态，不虚构订阅。
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { RuyinContract } from "@vxture/ruyin-contract-schema";
 import { loadProducts, type LoadedProduct, type ProductScan } from "./products.js";
@@ -203,7 +203,7 @@ export class ProductRegistry {
   readonly storeDir: string;
 
   constructor(
-    private readonly productsDir: string,
+    private readonly productsDir: string | undefined,
     dataDir: string,
   ) {
     const dir = join(dataDir, "runtime");
@@ -227,8 +227,10 @@ export class ProductRegistry {
   }
 
   private persist(): void {
+    const staging=this.statePath+".tmp";
+    try {
     writeFileSync(
-      this.statePath,
+      staging,
       JSON.stringify(
         { disabled: [...this.disabled], active: this.active },
         null,
@@ -236,6 +238,8 @@ export class ProductRegistry {
       ),
       "utf8",
     );
+    renameSync(staging,this.statePath);
+    } finally { rmSync(staging,{force:true}); }
   }
 
   /**
@@ -243,7 +247,7 @@ export class ProductRegistry {
    * 版本应当盖过随包内置的示例。安装/卸载/切版本后调用。
    */
   rescan(): void {
-    const dev = loadProducts(this.productsDir);
+    const dev = this.productsDir ? loadProducts(this.productsDir) : { loaded: [], failed: [] };
     this.storeVersions.clear();
 
     const stored = listStored(this.storeDir);
@@ -287,8 +291,10 @@ export class ProductRegistry {
     if (!versions?.includes(version)) {
       throw new Error(`${productId}@${version} is not installed`);
     }
+    const previous=this.active[productId];
     this.active[productId] = version;
-    this.persist();
+    try { this.persist(); }
+    catch(cause){if(previous===undefined)delete this.active[productId];else this.active[productId]=previous;throw cause;}
     this.rescan();
   }
 
@@ -302,6 +308,8 @@ export class ProductRegistry {
   }
 
   /** 刷新订阅判定；resolver 返回 null 或抛错 => 保持「未知」。 */
+  clearEntitlements():void { this.entitlements.clear(); }
+
   async refreshEntitlements(resolve: EntitlementResolver): Promise<void> {
     const ids = this.scan.loaded.map((p) => p.id);
     if (ids.length === 0) return;
@@ -406,9 +414,11 @@ export class ProductRegistry {
    */
   setActive(id: string, active: boolean): void {
     if (!this.find(id)) throw new Error(`product not installed: ${id}`);
+    const previous=this.disabled.has(id);
     if (active) this.disabled.delete(id);
     else this.disabled.add(id);
-    this.persist();
+    try { this.persist(); }
+    catch(cause){if(previous)this.disabled.add(id);else this.disabled.delete(id);throw cause;}
   }
 
   contractOf(id: string): RuyinContract | undefined {

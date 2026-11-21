@@ -30,6 +30,15 @@ function fresh(allowUnsigned = true) {
   return { dataDir, lookup, log, registry };
 }
 
+test("local diagnostics reads configuration without pinging an active connector",async()=>{
+ const {registry,dataDir}=fresh();try{
+  await registry.install({id:"diagnostic",command:process.execPath,args:[FAKE],source:"lan"});
+  let probes=0;registry.healthOf=async()=>{probes++;throw Error("Must not ping for local diagnostics");};
+  assert.equal((await registry.list(true))[0]!.state,"active");assert.equal(probes,0);
+  await assert.rejects(registry.list(),/Must not ping/);assert.equal(probes,1);
+ }finally{await registry.stopAll();rmSync(dataDir,{recursive:true,force:true});}
+});
+
 test("registry: production refuses to install - the trust anchor does not exist yet", async () => {
   const { registry, dataDir, lookup } = fresh(false);
   await assert.rejects(

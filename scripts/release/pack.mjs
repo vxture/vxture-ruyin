@@ -13,6 +13,9 @@
  * Usage: node scripts/release/pack.mjs [--dir] [--store]
  *   --dir  build the unpacked win-unpacked/ tree only (fast) instead of the
  *          NSIS installer. The packaged smoke check runs either way.
+ *   RUYIN_ELECTRON_DIST may point to a cached archive directory. The exact
+ *   version/platform zip must match the installed Electron package checksum.
+ *   RUYIN_PACK_OUTPUT_DIR isolates build artifacts and smoke paths from release/.
  *
  * GFW note: local runs may need ELECTRON_MIRROR and
  * ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
@@ -23,7 +26,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import {verifyDocumentReader} from "./verify-document-reader.mjs";
+import { verifyElectronArchive } from "./electron-dist.mjs";
 
 import {
   denyWrites,
@@ -37,6 +42,7 @@ import {
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const shellDir = join(repoRoot, "apps", "shell");
+const releaseDir = resolve(process.env["RUYIN_PACK_OUTPUT_DIR"] ?? join(shellDir, "release"));
 const daemonOut = join(shellDir, "out", "daemon");
 const dirOnly = process.argv.includes("--dir");
 const storePackage = process.argv.includes("--store");
@@ -44,12 +50,12 @@ if (dirOnly && storePackage) {
   throw new Error("--store must produce an AppX package; do not combine it with --dir");
 }
 
-function run(cmd, args, cwd) {
+function run(cmd, args, cwd, shell = process.platform === "win32") {
   console.log(`[pack] ${cmd} ${args.join(" ")}`);
   const res = spawnSync(cmd, args, {
     cwd,
     stdio: "inherit",
-    shell: process.platform === "win32", // .cmd shims on Windows
+    shell, // .cmd shims on Windows; direct Node CLIs use literal arguments.
   });
   if (res.status !== 0) {
     console.error(`[pack] FAILED: ${cmd} ${args.join(" ")}`);
@@ -65,7 +71,7 @@ function run(cmd, args, cwd) {
 // 锁不住就红，并把每种写法、锁着时的 ACL、身份与特权一起打出来；POSIX 上以 root 跑如实
 // 说 SKIPPED（真演练那一步也会跳过）。
 {
-  const scratch = join(shellDir, "release", `.ro-selftest-${process.pid}`);
+  const scratch = join(releaseDir, `.ro-selftest-${process.pid}`);
   mkdirSync(join(scratch, "sub"), { recursive: true });
   let lock;
   try {
@@ -77,7 +83,7 @@ function run(cmd, args, cwd) {
   console.log(`[pack] 只读演练自证:\n${lock.log}`);
   if (!lock.effective) {
     if (process.platform === "win32") {
-      console.error(`[pack] FAILED: 只读演练的锁在这台机器上锁不住 —— 真演练没法做。\n${describeIdentity(join(shellDir, "release"))}`);
+      console.error(`[pack] FAILED: 只读演练的锁在这台机器上锁不住 —— 真演练没法做。\n${describeIdentity(releaseDir)}`);
       process.exit(1);
     }
     console.log(`[pack] 只读演练自证 SKIPPED: ${lock.how} 挡不住当前身份（多半是 root）`);
@@ -89,6 +95,16 @@ function run(cmd, args, cwd) {
 // Ensure a full dev install first (a previous run's deploy step may have
 // left the workspace production-pruned).
 run("pnpm", ["install", "--prefer-offline"], repoRoot);
+const shellRequire = createRequire(join(shellDir, "package.json"));
+let electronArchive;
+if (process.env["RUYIN_ELECTRON_DIST"] !== undefined) {
+  const electronPackage = shellRequire("electron/package.json");
+  electronArchive = await verifyElectronArchive({
+    directory: process.env["RUYIN_ELECTRON_DIST"], version: electronPackage.version,
+    platform: process.platform, arch: process.arch, checksums: shellRequire("electron/checksums.json"),
+  });
+  console.log(`[pack] cached Electron archive matches pinned package: ${JSON.stringify(electronArchive)}`);
+}
 run("pnpm", ["--recursive", "build"], repoRoot);
 
 // 随包第三方组件的许可声明全文（TD-058）：守护进程与界面的生产依赖、外加 Electron。
@@ -115,6 +131,7 @@ if (skillPull) {
   // 预取缓存。它自己核 uv 的 sha256，并在最后用一个空的 UV_TOOL_DIR 断网真起一次
   // —— 那一跑才是「随包这棵树自己够」的凭据。
   run("node", [join(repoRoot, "scripts", "release", "seed-uv-cache.mjs")], repoRoot);
+  run("node", [join(repoRoot,"scripts","release","seed-document-reader.mjs")],repoRoot);
   // 随包真 node.exe：node 形态的服务器借它起，避免 ELECTRON_RUN_AS_NODE 重执行
   // 在 Windows 上弹出空白 cmd 窗口。它自己核 node.exe 的 sha256。
   run("node", [join(repoRoot, "scripts", "release", "seed-node-runtime.mjs")], repoRoot);
@@ -234,11 +251,14 @@ if (storePackage) {
 }
 
 run(
-  "pnpm",
-  ["exec", "electron-builder", "--win",
+  process.execPath,
+  [shellRequire.resolve("electron-builder/cli.js"), "--win", ...(storePackage ? ["appx"] : []),
+    `--config.directories.output=${releaseDir}`,
     ...(storePackage ? ["--config", "electron-builder.store.yml"] : []),
+    ...(electronArchive ? [`--config.electronDist=${electronArchive.directory}`] : []),
     ...(dirOnly ? ["--dir"] : [])],
   shellDir,
+  false,
 );
 
 // Prove the thing we just built actually starts.
@@ -250,10 +270,13 @@ run(
 // installer builds, installs, and the window never appears.
 //
 // The unpacked tree is produced by both modes, so this runs either way.
-const packagedExe = join(shellDir, "release", "win-unpacked", "Ruyin.exe");
+const packagedExe = join(releaseDir, "win-unpacked", "Ruyin.exe");
 // 冒烟前的 resources/ 快照：冒烟不许往安装目录里写（断言在下面，TD-062）。
-const resourcesDir = join(shellDir, "release", "win-unpacked", "resources");
+const resourcesDir = join(releaseDir, "win-unpacked", "resources");
 const resourcesBefore = snapshotTree(resourcesDir);
+if(skillPull||existsSync(join(resourcesDir,"document-reader","lib","ruyin-reader-build.json"))){
+  console.log(`[pack] offline document reader: ${JSON.stringify(verifyDocumentReader(resourcesDir))}`);
+}
 console.log(`[pack] smoke: ${packagedExe} --smoke`);
 const smoke = spawnSync(packagedExe, ["--smoke"], {
   cwd: shellDir,
@@ -342,7 +365,7 @@ if (!smokeOut.includes("[shell-smoke] OK")) {
 // Electron 自带的两份（LICENSE.electron.txt、LICENSES.chromium.html）由 electron-builder
 // 放在 exe 旁边；关于页那句「在安装目录下」说的就是它们，这里一并核。
 {
-  const unpacked = join(shellDir, "release", "win-unpacked");
+  const unpacked = join(releaseDir, "win-unpacked");
   const required = [
     [join(unpacked, "resources", "THIRD-PARTY-NOTICES.txt"), "第三方组件许可声明"],
     [join(unpacked, "LICENSES.chromium.html"), undefined],
@@ -498,7 +521,7 @@ if (process.platform === "win32") {
 // ACL 恢复回来，恢复不了 denyWrites 会抛、并把手动命令放进报错 —— 这棵树接下来还要给
 // upload-artifact 和开发者自己用。
 {
-  const unpacked = join(shellDir, "release", "win-unpacked");
+  const unpacked = join(releaseDir, "win-unpacked");
   const lock = denyWrites(unpacked, [unpacked, resourcesDir]);
   if (lock.log) console.log(`[pack] 只读演练锁定: ${lock.log.split(/\r?\n/).join(" | ")}`);
   if (!lock.effective) {
@@ -591,4 +614,4 @@ if (process.platform === "win32") {
   console.log(`[pack] icon: ${found.length}/${frames.length} 档在 exe 里对上（${found.join(", ")}px）`);
 }
 
-console.log(`[pack] done -> ${join(shellDir, "release")}`);
+console.log(`[pack] done -> ${releaseDir}`);

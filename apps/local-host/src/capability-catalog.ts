@@ -90,12 +90,14 @@ export const MAX_PAGES = 200;
 /** 本地列表分页。 */
 export const DEFAULT_LIST_LIMIT = 100;
 export const MAX_LIST_LIMIT = 1000;
+export const DEFAULT_RUNOS_CATALOG_PATH = "/api/runos/capabilities";
+export class CatalogChangedError extends Error {}
 
 export type RefreshReason = "login" | "focus" | "manual";
 export const REFRESH_REASONS: readonly RefreshReason[] = ["login", "focus", "manual"];
 
-export function catalogPath(dataDir: string): string {
-  return join(dataDir, "capabilities", "catalog.json");
+export function catalogPath(dataDir: string, scope?: string): string {
+  return scope ? join(dataDir,"capabilities","scopes",createHash("sha256").update(scope).digest("hex")+".json") : join(dataDir, "capabilities", "catalog.json");
 }
 
 // ---------------------------------------------------------------------------
@@ -175,14 +177,14 @@ export const CONNECTOR_EQUIVALENTS: Readonly<Record<string, string>> = Object.fr
 
 export interface LocalFacts {
   /** 本机技能登记册（`SkillRegistry.list().items` 的子集字段）。 */
-  skills: ReadonlyArray<{ name: string; source: string; layer: string; enabled: boolean; shadowedBy?: string }>;
+  skills: ReadonlyArray<{ name: string; source: string; layer: string; enabled: boolean; shadowedBy?: string; verifiedCapabilityId?: string | undefined }>;
   /** 本机随包服务器：id 与此刻起不起得来。 */
   servers?: ReadonlyArray<{ id: string; available: boolean }>;
 }
 
 export interface LocalRunnable {
   runnable: boolean;
-  via?: "preset-skill" | "bundled-server";
+  via?: "preset-skill" | "distributed-skill" | "bundled-server";
 }
 
 /** 预置层技能的来源是 `<owner>.<repo>`，Runos 台账的 id 是 `<owner>.<技能名>`。 */
@@ -201,10 +203,13 @@ export function localRunnableIndex(
       .map((s) => skillCapabilityId(s)),
   );
   const servers = new Set((facts.servers ?? []).filter((s) => s.available).map((s) => s.id));
+  const distributed = new Set(facts.skills.filter(s => s.layer === "distributed" && s.enabled && !s.shadowedBy)
+    .map(s => s.verifiedCapabilityId).filter((id): id is string => !!id));
   return (entry) => {
     if (entry.primitiveType === "skill" && skills.has(entry.capabilityId)) {
       return { runnable: true, via: "preset-skill" };
     }
+    if (entry.primitiveType === "skill" && distributed.has(entry.capabilityId)) return { runnable: true, via: "distributed-skill" };
     if (entry.primitiveType === "connector") {
       const local = equivalents[entry.capabilityId];
       if (local && servers.has(local)) return { runnable: true, via: "bundled-server" };
@@ -243,22 +248,46 @@ export type SyncOutcome =
 export class CapabilityCatalog {
   /** 最近一次同步失败的原因；成功一次就清掉。只在内存里 —— 重启后按盘上那份说话。 */
   private lastError?: string;
-  private inflight?: Promise<SyncOutcome>;
-  private readonly path: string;
+  private inflight = new Map<string,Promise<SyncOutcome>>();
+  private scopeKey?: string;
+  private boundSession?: string;
 
   constructor(
-    dataDir: string,
+    private readonly dataDir: string,
     private readonly source: CatalogSource,
     private readonly now: () => number = Date.now,
+    private readonly context?: {
+      session: () => string | undefined;
+      resolve: () => Promise<string | undefined>;
+    },
   ) {
-    this.path = catalogPath(dataDir);
+  }
+
+  /** Resolve identity before a public read; never reuse another session's snapshot. */
+  async prepareScope(): Promise<boolean> {
+    if (!this.context) return true;
+    const session=this.context.session();
+    if (!session) {this.scopeKey=undefined;this.boundSession=undefined;this.lastError=undefined;return false;}
+    let scope:string|undefined;
+    try {scope=await this.context.resolve();}
+    catch {this.scopeKey=undefined;this.boundSession=undefined;this.lastError=undefined;return false;}
+    if (this.context.session()!==session) return false;
+    if(this.scopeKey!==scope||this.boundSession!==session)this.lastError=undefined;
+    this.scopeKey=scope;this.boundSession=session;
+    return !!scope;
+  }
+
+  private currentPath(): string | undefined {
+    if(this.context&&(!this.scopeKey||!this.boundSession||this.context.session()!==this.boundSession))return undefined;
+    return catalogPath(this.dataDir,this.scopeKey);
   }
 
   /** 读坏了（手改过、半截）按「从未取到」处理，不抛：清单拿不到不该拖垮任何东西。 */
   private read(): StoredCatalog | undefined {
-    if (!existsSync(this.path)) return undefined;
+    const path=this.currentPath();
+    if (!path||!existsSync(path)) return undefined;
     try {
-      const raw = JSON.parse(readFileSync(this.path, "utf8")) as Partial<StoredCatalog>;
+      const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<StoredCatalog>;
       if (raw.version !== 1 || !Array.isArray(raw.items) || typeof raw.fetchedAt !== "string" || typeof raw.ref !== "string") {
         return undefined;
       }
@@ -305,18 +334,20 @@ export class CapabilityCatalog {
   }
 
   /** 同时来的几次刷新合成一次：登录后与焦点回来可能挨着到。 */
-  sync(reason: RefreshReason): Promise<SyncOutcome> {
+  async sync(reason: RefreshReason): Promise<SyncOutcome> {
+    if(!await this.prepareScope())return {status:"unavailable",reason:"An active account and workspace are required"};
     if (!this.source.available()) {
       return Promise.resolve({ status: "unavailable", reason: this.source.unavailableReason });
     }
     if (!shouldRefresh(reason, this.read()?.fetchedAt, this.now())) return Promise.resolve({ status: "skipped" });
-    this.inflight ??= this.run().finally(() => {
-      this.inflight = undefined;
-    });
-    return this.inflight;
+    const path=this.currentPath()!,session=this.boundSession;
+    const current=()=>this.currentPath()===path&&this.boundSession===session;
+    let pending=this.inflight.get(path);
+    if(!pending){pending=this.run(path,current).finally(()=>{this.inflight.delete(path);});this.inflight.set(path,pending);}
+    return pending;
   }
 
-  private async run(): Promise<SyncOutcome> {
+  private async run(path:string,current:()=>boolean,attempt=0): Promise<SyncOutcome> {
     try {
       // 1 · 取
       const raw: unknown[] = [];
@@ -325,10 +356,13 @@ export class CapabilityCatalog {
       let version: string | undefined;
       for (let page = 0; ; page++) {
         if (page >= MAX_PAGES) throw new Error(`分页超过 ${MAX_PAGES} 页仍没有取完`);
+        if(!current())throw Error("Catalog context changed during synchronization");
         const res = await this.source.fetchPage(cursor);
+        if(!current())throw Error("Catalog context changed during synchronization");
+        if(page>0&&(res.total!==total||res.version!==version))throw new CatalogChangedError("Catalog version or total changed between pages");
         raw.push(...res.items);
         total = res.total;
-        version = res.version ?? version;
+        version = res.version;
         if (!res.nextCursor) break;
         if (res.nextCursor === cursor) throw new Error("分页游标没有前进");
         cursor = res.nextCursor;
@@ -364,16 +398,19 @@ export class CapabilityCatalog {
         items,
         diff,
       };
-      mkdirSync(dirname(this.path), { recursive: true });
-      const tmp = `${this.path}.tmp`;
+      if(!await this.prepareScope()||!current())throw Error("Catalog context changed before saving");
+      mkdirSync(dirname(path), { recursive: true });
+      const tmp = `${path}.tmp`;
       writeFileSync(tmp, JSON.stringify(stored));
-      renameSync(tmp, this.path);
+      renameSync(tmp, path);
 
       this.lastError = undefined;
       return { status: "synced", total, ref, diff };
     } catch (cause) {
-      this.lastError = cause instanceof Error ? cause.message : String(cause);
-      return { status: "failed", error: this.lastError };
+      if(cause instanceof CatalogChangedError&&attempt===0&&current())return this.run(path,current,1);
+      const error=cause instanceof Error ? cause.message : String(cause);
+      if(current())this.lastError=error;
+      return { status: "failed", error };
     }
   }
 }

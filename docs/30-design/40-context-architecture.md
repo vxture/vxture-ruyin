@@ -515,3 +515,11 @@ Policy        做什么       Tool Gate ∩ Context 策略 ∩ Sync 策略
 # Final
 
 > **契约声明类型，用户绑定来源，Selector 最小化，Gate 管出口，冲突交用户，数据主权永远在用户。**
+
+## Project Markdown inputs (P3 desktop MVP, 2026-11-19)
+
+A context type may declare project_document, a bounded product-owned document ID, together with sources: [project]. The host injects RuntimePorts.projectDocuments; its lookup is scoped by the runtime project ID and contract product ID. Selection records the document revision in ContextItemMeta and limits each document to 256 KiB and the combined document bytes to the task context budget. No browser-supplied task inputs or arbitrary filesystem paths are introduced.
+
+The existing sensitivity checkpoint applies. Before materialization the runtime re-reads the declared document and requires the selected revision; an unavailable reader/document, declaration mismatch, changed revision or budget overflow fails the task before transmission. Task records retain metadata/revision, not an extra plaintext snapshot. Gateway facts identify the project-document connector; transmission auditing records the content hash and revision. Recovery after document edits requires a new task. Changing a context type's project_document binding is treated as a breaking contract comparison.
+
+P7.2 batch authorization (2026-11-19, registered in the local RY-102 addendum): the authenticated host can authorize the exact immutable BackgroundJobs request once. Approval is stored only in the protected job record, bound to its request hash and contract hash. The product bridge cannot grant or inject approval. The daemon still waits for the kernel's context_confirm checkpoint, then checks the single selected project document's ID, complete content and revision against that step, plus every pinned source and the current contract, before recording the context decision. This covers only the job's declared project-document inputs, including unchanged retries. Tool and verification checkpoints keep their separate decisions. Changed source/context/contract stops execution; approval never follows a new job implicitly. The ordinary transmission audit remains in force for each batch.

@@ -24,9 +24,11 @@ vi.mock("./home", () => ({
     onOpen: (id: string) => void;
     onCreated: (id: string) => Promise<void>;
     onSelectProduct?: (id: string | null) => void;
+    onEnterProduct?: (id:string)=>void;
   }) => (
     <div data-testid="home-stub">
       home
+      <button onClick={()=>props.onEnterProduct?.('bidproposal')}>home-enter-product</button>
       <button data-testid="home-stub-select-a" onClick={() => props.onSelectProduct?.("a")}>select-a</button>
       <button data-testid="home-stub-select-none" onClick={() => props.onSelectProduct?.(null)}>select-none</button>
       <button onClick={() => props.onOpen("prj_from_home")}>home-stub-open</button>
@@ -59,6 +61,7 @@ vi.mock("./settings", () => ({
     <div data-testid="settings-stub">settings:{section}</div>
   ),
 }));
+vi.mock("./agent-install-manager",()=>({AgentManagementPage:({onChanged}:{onChanged:()=>Promise<void>})=><div data-testid="agent-management-stub">agents<button onClick={()=>void onChanged()}>refresh-agents</button></div>}));
 vi.mock("./workspace-tabs", () => ({
   PROJECT_TABS: [
     { id: "overview", labelKey: "tabs.overview" },
@@ -141,6 +144,27 @@ function projectList(items: ProjectMeta[], elsewhere = 0): ProjectList {
   return { items, elsewhere };
 }
 
+void test("Workbench: a late project response cannot overwrite a newer refresh", async () => {
+  const { Workbench } = await import("./workbench");
+  window.location.hash = "#projects/bidproposal";
+  let resolveOld!: (value: ProjectList) => void;
+  let listener: ((event: RuntimeEvent) => void) | undefined;
+  const projects = vi.fn()
+    .mockImplementationOnce(() => new Promise<ProjectList>(resolve => { resolveOld = resolve; }))
+    .mockResolvedValue(projectList([workspace({ name: "Fresh project" })]));
+  const api = fakeApi({
+    products: vi.fn().mockResolvedValue([product()]), projects,
+    subscribe: vi.fn(fn => { listener = fn; return () => {}; }),
+  });
+  render(<Workbench api={api} onSignedOut={() => {}} />);
+  await vi.waitFor(() => expect(projects).toHaveBeenCalledTimes(1));
+  act(() => listener?.({ kind: "project", projectId: "prj_1" }));
+  expect(await screen.findByText("Fresh project")).toBeInTheDocument();
+  await act(async () => resolveOld(projectList([workspace({ name: "Stale project" })])));
+  expect(screen.queryByText("Stale project")).not.toBeInTheDocument();
+  expect(screen.getByText("Fresh project")).toBeInTheDocument();
+}, 60_000);
+
 function fakeApi(over: Partial<Api> = {}): Api {
   return {
     session: vi.fn().mockResolvedValue({ signedIn: false, issuer: "", consoleBase: "https://vxture.com", entitlementsConfigured: false }),
@@ -193,6 +217,15 @@ void test("Workbench: starts on the home view, showing the brand and the home st
   expect(screen.queryByTestId("settings-stub")).not.toBeInTheDocument();
 });
 
+test("Agents is a host navigation peer of Home, routes directly and retains the host brand and shared sidebar",async()=>{
+ const {Workbench}=await import("./workbench");const api=fakeApi();render(<Workbench api={api} onSignedOut={()=>{}}/>);
+ await screen.findByTestId("home-stub");await userEvent.click(screen.getByRole("link",{name:"智能体"}));
+ await screen.findByTestId("agent-management-stub");expect(window.location.hash).toBe("#agents");expect(screen.getByRole("link",{name:"智能体"})).toHaveAttribute("aria-current","page");expect(screen.getByText("RUYIN")).toBeInTheDocument();
+ const before=vi.mocked(api.products).mock.calls.length;await userEvent.click(screen.getByRole("button",{name:"refresh-agents"}));await vi.waitFor(()=>expect(api.products).toHaveBeenCalledTimes(before+1));
+ await userEvent.click(screen.getByRole("link",{name:"首页"}));await screen.findByTestId("home-stub");
+ act(()=>{window.location.hash="agents";window.dispatchEvent(new HashChangeEvent("hashchange"));});await screen.findByTestId("agent-management-stub");
+});
+
 /**
  * 字标点了弹一份软件信息面板（owner 2026-09-16）：首页态点它原本是去 `#home`
  * 的空转——现在换成有用的东西。内容与「关于」页的品牌块一致（品牌/版本/条款/
@@ -230,6 +263,12 @@ void test("Workbench: 点 RUYIN 字标弹出软件信息面板，只讲本软件
   // 本机信息（处理器/内存/机器 ID……）不在这里——那是「关于」页自己的板块。
   expect(screen.queryByText("本机配置")).not.toBeInTheDocument();
   expect(screen.queryByText(/处理器/)).not.toBeInTheDocument();
+  const close=document.querySelector(".brand-info-close button") as HTMLButtonElement;
+  expect(close).toHaveTextContent("关闭");await vi.waitFor(()=>expect(close).toHaveFocus());
+  await user.keyboard("{Enter}");expect(screen.queryByRole("dialog")).toBeNull();
+  const brand=screen.getByRole("button",{name:"RUYIN"});expect(brand).toHaveFocus();
+  await user.click(brand);await user.keyboard("{Escape}");expect(screen.queryByRole("dialog")).toBeNull();
+  await user.click(brand);await user.click(document.querySelector(".brand-info-close button")!);expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 /**
@@ -255,7 +294,7 @@ void test("Workbench: a refreshSidebar failure surfaces as an error box, not a s
   const { Workbench } = await import("./workbench");
   const api = fakeApi({ products: vi.fn().mockRejectedValue(new Error("守护进程未响应")) });
   render(<Workbench api={api} onSignedOut={() => {}} />);
-  expect(await screen.findByText("守护进程未响应")).toBeInTheDocument();
+  expect(await screen.findByText("项目列表读取失败，请稍后重试")).toBeInTheDocument();
 });
 
 void test("Workbench: clicking 设置 switches the header identity, sidebar domain, and main content together", async () => {
@@ -359,33 +398,14 @@ void test("Workbench: 最近工作 is newest-first, and each row carries its pro
   expect(iNew).toBeLessThan(iOld);
 });
 
-void test("Workbench: with no real project the 最近工作 samples show, marked 示例 and linking nowhere", async () => {
-  const { Workbench } = await import("./workbench");
-  const { DEMO_RECENT } = await import("./catalog");
-  const api = fakeApi({ projects: vi.fn().mockResolvedValue(projectList([])) });
-  render(<Workbench api={api} onSignedOut={() => {}} />);
-  await screen.findByText("最近工作");
-  const sample = DEMO_RECENT[0]!;
-  // 样例不指向任何项目路由 —— 一个点进去是空的项目，比没有这一组更让人困惑。
-  // 而且每条 href 必须唯一：侧栏拿它当 key，撞 key 会让这一组删不干净。
-  const hrefs = DEMO_RECENT.map(
-    (d) => screen.getByText(d.project).closest("a")?.getAttribute("href") ?? "",
-  );
-  expect(new Set(hrefs).size).toBe(DEMO_RECENT.length);
-  for (const h of hrefs) {
-    expect(h).not.toMatch(/^#ws\//);
-  }
-  expect(screen.getByText(sample.project).closest("a")).toHaveAttribute(
-    "href",
-    "#sample/0",
-  );
-  // 同一个产品下可以有多条样例，所以按 All 取。
-  expect(screen.getAllByText(`示例 · ${sample.product}`).length).toBeGreaterThan(0);
+void test("Workbench: empty project list never creates sample recent work", async () => {
+ const {Workbench}=await import("./workbench");const api=fakeApi({projects:vi.fn().mockResolvedValue(projectList([]))});
+ render(<Workbench api={api} onSignedOut={()=>{}}/>);await vi.waitFor(()=>expect(api.projects).toHaveBeenCalled());
+ expect(screen.queryByText("最近工作")).not.toBeInTheDocument();expect(document.querySelector('a[href^="#sample/"]')).toBeNull();
 });
 
 void test("Workbench: one real project and the whole sample group is gone - never mixed together", async () => {
   const { Workbench } = await import("./workbench");
-  const { DEMO_RECENT } = await import("./catalog");
   const api = fakeApi({
     projects: vi
       .fn()
@@ -396,8 +416,8 @@ void test("Workbench: one real project and the whole sample group is gone - neve
   render(<Workbench api={api} onSignedOut={() => {}} />);
   expect(await screen.findByText("真项目")).toBeInTheDocument();
   // 真假混排是最坏的一种：用户没有办法分辨哪一条是自己的。
-  for (const d of DEMO_RECENT) {
-    expect(screen.queryByText(d.project)).not.toBeInTheDocument();
+  for (const name of ["某储能电站 EPC 投标", "城市轨道信号系统投标", "2026 Q3 经营复盘"]) {
+    expect(screen.queryByText(name)).not.toBeInTheDocument();
   }
 });
 
@@ -477,7 +497,7 @@ void test("Workbench: window focus also asks for a throttled Runos catalog refre
   expect(screen.queryByText(/CAPABILITY_CATALOG/)).not.toBeInTheDocument();
 });
 
-void test("Workbench: opening a project with same-product siblings lists them in the sidebar", async () => {
+void test("Workbench: opening a project keeps siblings outside the workspace", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi({
     products: vi.fn().mockResolvedValue([product()]),
@@ -494,8 +514,14 @@ void test("Workbench: opening a project with same-product siblings lists them in
   await user.click(await screen.findByText("项目甲"));
   await screen.findByTestId("project-panel-stub");
 
-  expect(screen.getByText("同产品的其他项目")).toBeInTheDocument();
-  expect(screen.getByText("项目乙")).toBeInTheDocument();
+  expect(screen.queryByText("同产品的其他项目")).not.toBeInTheDocument();
+  expect(screen.queryByText("项目乙")).not.toBeInTheDocument();
+  expect(screen.getByRole('link', {name: '项目配置'})).toBeInTheDocument();
+  expect(screen.queryByRole('link', {name: '材料'})).not.toBeInTheDocument();
+  expect(screen.queryByRole('combobox', {name:'切换投标项目'})).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', {name:'返回项目清单'}));
+  expect(await screen.findByRole('heading', {name:'我的项目'})).toBeInTheDocument();
+  expect(screen.getByRole('button', {name: /项目乙/})).toBeInTheDocument();
 });
 
 void test("Workbench: 回到工作台 navigates back to the home view from settings", async () => {
@@ -647,6 +673,7 @@ void test("Workbench: 会话被平台悄悄收回（并非用户主动退出）�
     .mockResolvedValueOnce({
       signedIn: true,
       workspace: { name: "某工作区" },
+      org: {name:"某租户"},
       issuer: "",
       consoleBase: "https://vxture.com",
       entitlementsConfigured: false,
@@ -654,7 +681,7 @@ void test("Workbench: 会话被平台悄悄收回（并非用户主动退出）�
     .mockResolvedValue({ signedIn: false, issuer: "", consoleBase: "https://vxture.com", entitlementsConfigured: false });
   const { Workbench } = await import("./workbench");
   render(<Workbench api={fakeApi({ session })} onSignedOut={onSignedOut} />);
-  await screen.findByText("某工作区");
+  await screen.findByText("某租户");
   expect(onSignedOut).not.toHaveBeenCalled();
 
   await act(async () => {
@@ -673,6 +700,7 @@ void test("Workbench: session() 读失败（网络抖动）不触发退出通知
     .mockResolvedValueOnce({
       signedIn: true,
       workspace: { name: "某工作区" },
+      org: {name:"某租户"},
       issuer: "",
       consoleBase: "https://vxture.com",
       entitlementsConfigured: false,
@@ -680,7 +708,7 @@ void test("Workbench: session() 读失败（网络抖动）不触发退出通知
     .mockRejectedValue(new Error("网关 502"));
   const { Workbench } = await import("./workbench");
   render(<Workbench api={fakeApi({ session })} onSignedOut={onSignedOut} />);
-  await screen.findByText("某工作区");
+  await screen.findByText("某租户");
 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(30_000);
@@ -689,12 +717,13 @@ void test("Workbench: session() 读失败（网络抖动）不触发退出通知
   vi.useRealTimers();
 });
 
-void test("Workbench: the active workspace name shows in the header once signed in", async () => {
+void test("Workbench: the active organization name shows in the header once signed in", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi({
     session: vi.fn().mockResolvedValue({
       signedIn: true,
       workspace: { name: "某工作区" },
+      org: {name:"某租户"},
       issuer: "",
       consoleBase: "https://vxture.com",
       entitlementsConfigured: false,
@@ -702,7 +731,7 @@ void test("Workbench: the active workspace name shows in the header once signed 
   });
   render(<Workbench api={api} onSignedOut={() => {}} />);
   await screen.findByTestId("home-stub");
-  expect(await screen.findByText("某工作区")).toBeInTheDocument();
+  expect(await screen.findByText("某租户")).toBeInTheDocument();
 });
 
 void test("Workbench: search also matches a project by its productId, not just its name", async () => {
@@ -721,7 +750,7 @@ void test("Workbench: search also matches a project by its productId, not just i
   expect(await results.findByText("无关名字")).toBeInTheDocument();
 });
 
-void test("Workbench: pending task count from an open project appends to the 任务 tab label", async () => {
+void test("Workbench: pending task count from an open project appends to the project configuration entry", async () => {
   const { Workbench } = await import("./workbench");
   const api = fakeApi({
     products: vi.fn().mockResolvedValue([product()]),
@@ -734,7 +763,7 @@ void test("Workbench: pending task count from an open project appends to the 任
   await screen.findByTestId("project-panel-stub");
 
   await user.click(screen.getByText("project-stub-set-pending"));
-  expect(await screen.findByText("任务（3）")).toBeInTheDocument();
+  expect(await screen.findByText("项目配置（3）")).toBeInTheDocument();
 });
 
 void test("Workbench (electron chrome): the caption-button spacer appears, browser chrome's does not", async () => {
@@ -760,18 +789,16 @@ void test("Header workspace control: icon + name only (no 工作区 label); open
     }),
   });
   render(<Workbench api={api} onSignedOut={() => {}} />);
-  const trigger = await screen.findByRole("button", { name: /某工作区/ });
+  const trigger = await screen.findByRole("button", { name: /某租户/ });
   expect(trigger.textContent).not.toContain("工作区名");
   expect(screen.queryByText("工作区", { exact: true })).not.toBeInTheDocument();
   const user = userEvent.setup();
   await user.click(trigger);
-  expect(await screen.findByText("某租户")).toBeInTheDocument();
+  expect(screen.getAllByText("某租户")).toHaveLength(2);
   // 身份卡第二行不再带「工作区：」前缀（owner 2026-09-16）：与触发按钮同一个
   // 裸名字，图标已经说明这是工作区，文字前缀是同一件事说两遍。
-  expect(screen.getAllByText("某工作区")).toHaveLength(2); // 触发按钮 + 身份卡各一次
-  expect((screen.getByRole("link", { name: /租户管理/ }) as HTMLAnchorElement).href).toBe(
-    "https://console.vxture.com/tenant-settings",
-  );
+  expect(screen.getAllByText("某工作区")).toHaveLength(1); // 触发按钮 + 身份卡各一次
+  expect(screen.queryByRole("link",{name:/组织管理/})).toBeNull();
 
   // 2026-09-04 layout: workspace + Runtime sit right after the brand (leading, .app-header-context);
   // pending + settings stay on the far right (trailing). Document order: brand < workspace < Runtime < 设置.
@@ -815,7 +842,7 @@ void test("产品界面：契约声明了界面 → 侧栏第一格是产品名�
   expect(await screen.findByTestId("project-panel-stub")).toHaveTextContent("project:prj_ui:product");
   expect(window.location.hash).toBe("#ws/prj_ui/product");
   expect(sidebarItems()[0]).toBe("标书编写");
-  expect(sidebarItems().slice(1, 5)).toEqual(["概览", "上下文", "任务", "审计"]);
+  expect(sidebarItems().slice(1)).toEqual(["项目配置"]);
   expect(api.productSurface).toHaveBeenCalledWith("prj_ui");
 });
 
@@ -845,7 +872,7 @@ void test("产品界面：没声明 → 不列那一格，默认进概览", asyn
   await userEvent.setup().click(await screen.findByText("没界面的项目"));
   expect(await screen.findByTestId("project-panel-stub")).toHaveTextContent("project:prj_plain:overview");
   expect(window.location.hash).toBe("#ws/prj_plain/overview");
-  expect(sidebarItems().slice(0, 4)).toEqual(["概览", "上下文", "任务", "审计"]);
+  expect(sidebarItems()).toEqual(["项目配置"]);
   expect(screen.queryByRole("link", { name: "标书编写" })).not.toBeInTheDocument();
 });
 
@@ -956,10 +983,10 @@ void test("Workbench: 侧栏拉不到时顶部报一条，且那条提醒可以�
   const { Workbench } = await import("./workbench");
   const api = fakeApi({ projects: vi.fn().mockRejectedValue(new Error("daemon unreachable")) });
   render(<Workbench api={api} onSignedOut={() => {}} />);
-  expect(await screen.findByText("daemon unreachable")).toBeInTheDocument();
+  expect(await screen.findByText("项目列表读取失败，请稍后重试")).toBeInTheDocument();
   // 关掉之后不再占着内容区顶部；它讲的是刚才那次拉取，不是这一页的状态。
   await userEvent.setup().click(screen.getByRole("button", { name: "关闭提醒" }));
-  expect(screen.queryByText("daemon unreachable")).not.toBeInTheDocument();
+  expect(screen.queryByText("项目列表读取失败，请稍后重试")).not.toBeInTheDocument();
 });
 
 /**
@@ -1093,4 +1120,57 @@ void test("换语言：侧栏导航当场跟着变，不必重新挂载", async 
 
   expect((await screen.findAllByText("Home")).length).toBeGreaterThan(0);
   expect(screen.queryByText("首页")).not.toBeInTheDocument();
+});
+
+test('product home opens the project catalog, library, project and explicit creation',async()=>{
+ localStorage.setItem('ruyin-language','zh-CN');
+ const {Workbench}=await import('./workbench');
+ const api=fakeApi({products:vi.fn().mockResolvedValue([product()]),projects:vi.fn().mockResolvedValue(projectList([workspace()])),createProject:vi.fn().mockResolvedValue(workspace({id:'new'})),librarySurface:vi.fn().mockResolvedValue({productId:'bidproposal',available:false}),productSurface:vi.fn().mockResolvedValue(SURFACE_OK)});
+ render(<Workbench api={api} onSignedOut={()=>{}}/>);const user=userEvent.setup();
+ await user.click(await screen.findByText('home-enter-product'));
+ expect(await screen.findByRole('heading',{name:'产品工作台'})).toBeTruthy();
+ await user.click(screen.getByRole('button',{name:'管理知识资料'}));
+ await vi.waitFor(()=>expect(window.location.hash).toBe('#library/bidproposal'));
+ expect(await screen.findByText('产品尚未接入此板块的数据与管理入口。')).toBeTruthy();
+ await user.click(screen.getByRole('link',{name:'首页'}));
+ await user.click(await screen.findByRole('button',{name:'全部项目'}));
+ await vi.waitFor(()=>expect(window.location.hash).toBe('#projects/bidproposal'));
+ await user.click(screen.getByRole('button',{name:/投标项目/}));
+ expect(await screen.findByTestId('project-panel-stub')).toHaveTextContent('project:prj_1:product');
+ act(()=>{window.location.hash='#product/bidproposal';window.dispatchEvent(new HashChangeEvent('hashchange'));});
+ await user.click(await screen.findByRole('button',{name:'新建项目'}));
+ await user.type(screen.getByRole('textbox',{name:'项目名称'}),'New project');
+ await user.click(screen.getByRole('button',{name:'创建并进入'}));
+ expect(await screen.findByTestId('project-panel-stub')).toHaveTextContent('project:new:product');
+ expect(api.createProject).toHaveBeenCalledWith('bidproposal','New project');
+});
+
+test('project workflow remains scoped, handles collapse and opens configuration/account controls',async()=>{
+ localStorage.setItem('ruyin-language','zh-CN');
+ const {Workbench}=await import('./workbench');window.location.hash='#ws/prj_1/product';
+ const api=fakeApi({products:vi.fn().mockResolvedValue([product()]),projects:vi.fn().mockResolvedValue(projectList([workspace()])),productSurface:vi.fn().mockResolvedValue(SURFACE_OK)});
+ render(<Workbench api={api} onSignedOut={()=>{}}/>);await screen.findByTestId('project-panel-stub');
+ act(()=>window.dispatchEvent(new CustomEvent('ruyin-product-navigation',{detail:{projectId:'prj_1',items:[{id:'analysis',label:'Analyze',state:'complete',startedAt:'2026-11-19T01:00:00Z',completedAt:'2026-11-19T01:00:20Z'},{id:'writing',label:'Write'}]}})));
+ const nav=await screen.findByRole('navigation',{name:'项目流程'});expect(within(nav).getByRole('link',{name:'Analyze'})).toHaveAttribute('aria-current','step');
+ const user=userEvent.setup();await user.click(screen.getByRole('button',{name:'收起导航'}));expect(document.querySelector('.project-workflow-nav')).toHaveClass('is-collapsed');
+ await user.click(screen.getByRole('button',{name:'展开导航'}));
+ await user.click(screen.getByRole('link',{name:'Write'}));await vi.waitFor(()=>expect(window.location.hash).toBe('#ws/prj_1/product/writing'));
+ await user.click(screen.getByRole('link',{name:'项目设置'}));await vi.waitFor(()=>expect(window.location.hash).toBe('#ws/prj_1/overview'));
+ await user.click(screen.getByText('user-stub-open-settings'));expect(await screen.findByTestId('settings-stub')).toHaveTextContent('account');
+});
+
+test('late session resolution after unmount cannot signal a logout',async()=>{
+ const {Workbench}=await import('./workbench');let resolve!:(s:unknown)=>void;
+ const api=fakeApi({session:vi.fn().mockImplementation(()=>new Promise(r=>{resolve=r;}))}),signedOut=vi.fn();
+ const {unmount}=render(<Workbench api={api} onSignedOut={signedOut}/>);
+ unmount();await act(async()=>resolve({signedIn:false}));expect(signedOut).not.toHaveBeenCalled();
+});
+
+test('an older products failure cannot replace a newer successful refresh',async()=>{
+ const {Workbench}=await import('./workbench');let reject!:(e:Error)=>void,listener!: (event:RuntimeEvent)=>void;
+ const products=vi.fn().mockImplementationOnce(()=>new Promise((_r,j)=>{reject=j;})).mockResolvedValue([product()]);
+ const api=fakeApi({products,projects:vi.fn().mockResolvedValue(projectList([workspace({name:'Newest project'})])),subscribe:vi.fn(fn=>{listener=fn;return ()=>{};})});
+ render(<Workbench api={api} onSignedOut={()=>{}}/>);await vi.waitFor(()=>expect(products).toHaveBeenCalledTimes(1));
+ act(()=>listener({kind:'project',projectId:'prj_1'}));expect(await screen.findByText('Newest project')).toBeTruthy();
+ await act(async()=>reject(Error('Stale failure')));expect(screen.queryByText('Stale failure')).toBeNull();expect(screen.getByText('Newest project')).toBeTruthy();
 });

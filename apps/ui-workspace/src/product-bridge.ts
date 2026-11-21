@@ -99,6 +99,8 @@ export interface ProductBridgeOptions {
    * 响应的桥（以及它的用例）不该平白多一条长连接。
    */
   events?: boolean;
+  /** Separate scope credential and routes for workspace/product resource UI. */
+  endpointPrefix?: "/bridge" | "/library-bridge";
   /** 事件流断了之后多久重连（毫秒，每次翻倍、封顶 5 秒）。供测试调小。 */
   reconnectDelayMs?: number;
 }
@@ -111,6 +113,7 @@ export class ProductBridge {
   private cached?: { token: string; expiresAt: number };
   private readonly eventsEnabled: boolean;
   private readonly reconnectDelayMs: number;
+  private readonly endpointPrefix:string;
   private streamAbort?: AbortController;
 
   private readonly listener = (event: MessageEvent): void => {
@@ -133,6 +136,7 @@ export class ProductBridge {
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
     this.eventsEnabled = options.events ?? false;
     this.reconnectDelayMs = options.reconnectDelayMs ?? 500;
+    this.endpointPrefix=options.endpointPrefix??"/bridge";
   }
 
   attach(): void {
@@ -244,7 +248,7 @@ export class ProductBridge {
 
     let res: Response;
     try {
-      res = await this.fetchImpl(`/bridge${request.path}`, {
+      res = await this.fetchImpl(`${this.endpointPrefix}${request.path}`, {
         method: request.method,
         headers: {
           authorization: `Bearer ${token}`,

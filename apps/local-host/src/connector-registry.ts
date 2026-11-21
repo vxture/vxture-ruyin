@@ -290,11 +290,11 @@ export class ConnectorRegistry implements ConnectorToolSource {
     return this.bundledIds().includes(id);
   }
 
-  async list(): Promise<ConnectorView[]> {
+  async list(localOnly = false): Promise<ConnectorView[]> {
     const out: ConnectorView[] = [];
     for (const spec of this.specs) {
       out.push(
-        spec.state === "stashed"
+        spec.state === "stashed" || localOnly
           ? this.viewOf(spec)
           : {
               ...spec,

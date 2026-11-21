@@ -103,6 +103,8 @@ export function parseSkillMd(raw: string): ParsedSkill {
 
 /** 界面与 GET /skills 看到的一条。 */
 export interface SkillView {
+  /** Display identity only; does not grant local execution or tool permissions. */
+  capabilityId?: string;
   name: string;
   description: string;
   layer: SkillLayer;

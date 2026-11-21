@@ -29,10 +29,12 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { materializePythonAliases } from "./materialize-python-aliases.mjs";
+import {ensurePinnedPython} from './pinned-python.mjs';
+import {readPythonConstraints} from './python-constraints.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const manifest = JSON.parse(readFileSync(join(repoRoot, "resources", "skill-manifest.json"), "utf8"));
@@ -42,6 +44,13 @@ const uvHome = join(resourcesDir, "uv");
 const cacheDir = join(uvHome, "cache");
 const pythonDir = join(uvHome, "python");
 const py = manifest.pythonRuntime;
+const seeds = (py?.seed ?? []).map(id => {
+  const server = manifest.servers?.find(s => s.id === id);
+  if (server?.launch?.runtime !== 'uvx') throw Error('Python seed is not a uvx server: ' + id);
+  return server.launch;
+});
+const constraintsSource = join(repoRoot, 'resources', 'python-runtime', 'requirements.txt');
+readPythonConstraints(constraintsSource, seeds);
 
 /** 目录占多少字节 —— 只为把裁掉了多少如实报出来。 */
 function dirSize(dir) {
@@ -145,11 +154,19 @@ async function fetchUv() {
 
 mkdirSync(cacheDir, { recursive: true });
 mkdirSync(pythonDir, { recursive: true });
+const pythonSite=join(uvHome,'python-site');
+mkdirSync(pythonSite,{recursive:true});
+copyFileSync(join(repoRoot,'resources','python-runtime','sitecustomize.py'),join(pythonSite,'sitecustomize.py'));
+const constraints = join(uvHome, 'python-constraints.txt');
+copyFileSync(constraintsSource, constraints);
 const env = {
   ...process.env,
   UV_CACHE_DIR: cacheDir,
   UV_PYTHON_INSTALL_DIR: pythonDir,
   UV_NO_PROGRESS: "1",
+  PYTHONPATH: pythonSite,
+  // Unlike argv, uv's environment list splits paths on whitespace.
+  UV_CONSTRAINT: pathToFileURL(constraints).href,
 };
 
 function uv(argv, { offline = false, extraEnv } = {}) {
@@ -162,18 +179,12 @@ function uv(argv, { offline = false, extraEnv } = {}) {
 }
 
 // 1. 托管的 CPython。运行时 UV_PYTHON_DOWNLOADS=never，所以它必须在构建时就位。
-uv(["python", "install", py.cpython.version.split(".").slice(0, 2).join(".")]);
+ensurePinnedPython({root:pythonDir,version:py.cpython.version,install:version=>uv(['python','install',version]),probe:executable=>{
+ const r=spawnSync(executable,['-I','-c','import platform; print(platform.python_version())'],{encoding:'utf8',windowsHide:true,timeout:30000});
+ if(r.status!==0)throw Error('Pinned CPython cannot start');return r.stdout.trim();
+}});
 
 // 2. 每个 seed 包的 wheel。版本从清单的 launch 里取 —— 钉死的那一个，不是最新的。
-const seeds = [];
-for (const id of py.seed ?? []) {
-  const server = (manifest.servers ?? []).find((s) => s.id === id);
-  if (!server?.launch || server.launch.runtime !== "uvx") {
-    console.error(`[seed-uv-cache] pythonRuntime.seed 里的 ${id} 不是一个 uvx 形态的服务器`);
-    process.exit(1);
-  }
-  seeds.push(server.launch);
-}
 // **用运行时那条一模一样的命令去预热，只是不带 `--offline`。**
 // 先前这里是 `uv tool install`，那是错的：它把 venv 装进 UV_TOOL_DIR（包外的
 // 用户目录），缓存里并没有留下 uvx 解析得到的东西 —— 隔离复核当场戳穿：

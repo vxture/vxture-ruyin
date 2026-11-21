@@ -278,6 +278,11 @@ jobs:
         env:
           RUYIN_REQUIRE_HARNESS_SMOKE: "1"
 
+      - name: Built-runtime backup and package signing integration
+        run: node --test scripts/dev/runtime-backup.test.mjs scripts/release/sign-agent-package.test.mjs
+        env:
+          RUYIN_REQUIRE_BUILT_TESTS: "1"
+
   # -- Test coverage (required check) -----------------------------------------
   # Runs recursive `test` across the workspace. Coverage is measured and
   # thresholded INSIDE each package's own `test` script

@@ -9,7 +9,7 @@
  * 写法，它会把「字段没对上」报成「找不到类型」；更糟的是两边都抠出空数组，然后
  * **一致地通过**。
  *
- * 所以这里造一份**处处对得上的基线**（十一个接口 + 一个联合 + 事件词表 + 标题栏
+ * 所以这里造一份**处处对得上的基线**（十二个接口 + 一个联合 + 事件词表 + 标题栏
  * 高度），再每次只坏一处。那份基线本身就是这道守卫的说明书。
  */
 
@@ -22,6 +22,8 @@ const GUARD = "check-shared-shapes.mjs";
 
 /** 界面复制的那些类型：[界面名, 源头名, 源头文件]，与守卫里的表一一对应。 */
 const SHARED = [
+  ["DesktopDevice", "DesktopDevice", "apps/local-host/src/desktop-devices.ts"],
+  ["DesktopDeviceList", "DesktopDeviceList", "apps/local-host/src/desktop-devices.ts"],
   ["AuditEvent", "AuditEvent", "packages/runtime-core/src/ports.ts"],
   ["LegacyAuditEvent", "LegacyAuditEvent", "packages/runtime-core/src/ports.ts"],
   ["ProductInfo", "ProductView", "apps/local-host/src/product-registry.ts"],
@@ -33,6 +35,9 @@ const SHARED = [
   ["SkillListing", "SkillListing", "apps/local-host/src/skill-registry.ts"],
   ["ToolView", "ToolView", "apps/local-host/src/tool-registry.ts"],
   ["ComponentStatus", "ComponentStatus", "apps/local-host/src/component-store.ts"],
+  ["BackgroundJobSummary", "BackgroundJobSummary", "apps/local-host/src/background-jobs.ts"],
+  ["MaintenanceRecord", "MaintenanceRecord", "apps/local-host/src/maintenance.ts"],
+  ["DiagnosticReport", "DiagnosticReport", "apps/local-host/src/diagnostics.ts"],
 ];
 
 const STATES = ["idle", "acquiring", "ready", "unreachable"];

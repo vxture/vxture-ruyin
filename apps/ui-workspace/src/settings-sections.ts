@@ -20,7 +20,7 @@ export type SectionId =
    * Atlas（ADR-026 §2 第 3 条）。
    */
   | "models"
-  /** 能力平台（ADR-018 §2.7）：本机装着的技能与工具，一张清单。代码标识符仍叫 skills。 */
+  /** Local/cloud skill instructions; executable tool providers live under Connectors. */
   | "skills"
   | "database"
   | "updates"
@@ -52,10 +52,10 @@ export const SETTINGS_SECTIONS: Array<{
    * 他还没有理由关心的东西。
    */
   /** 模型平台排在能力平台**前面**（owner 2026-09-15）。只展示，不调用。 */
-  { id: "models", labelKey: "sections.models", icon: "cpu" },
-  { id: "skills", labelKey: "sections.skills", icon: "sparkles" },
+  { id: "models", labelKey: "sections.models", icon: "sparkles" },
+  { id: "skills", labelKey: "sections.skills", icon: "cpu" },
   { id: "connectors", labelKey: "sections.connectors", icon: "plugs-connected" },
-  { id: "database", labelKey: "sections.database", icon: "table" },
+  { id: "database", labelKey: "sections.database", icon: "database" },
   { id: "updates", labelKey: "sections.updates", icon: "arrow-down" },
   { id: "about", labelKey: "sections.about", icon: "info" },
 ];

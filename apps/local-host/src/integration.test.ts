@@ -670,11 +670,14 @@ test("project database is encrypted at rest (TD-009)", async () => {
 test("the pre-rename layout migrates in place, ids untouched", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-mig-"));
   try {
+    const originalKeys = await KeyManager.open(dataDir);
     // Lay down what a pre-rename install looks like: an existing container
     // under the old names, with the old `ws_` id.
     const legacyId = "ws_legacy0001";
     const legacyDir = join(dataDir, "workspaces", legacyId);
     mkdirSync(legacyDir, { recursive: true });
+    originalKeys.workspaceKeyHex(legacyDir);
+    const wrappedKey = readFileSync(join(legacyDir, "key.enc"));
     writeFileSync(join(legacyDir, "workspace.db"), "not-a-real-db");
     // A live WAL-mode container has these two beside its database. They are
     // the part that used to be left behind.
@@ -686,6 +689,7 @@ test("the pre-rename layout migrates in place, ids untouched", async () => {
     try {
       assert.ok(!existsSync(join(dataDir, "workspaces")), "old dir is gone");
       const moved = join(dataDir, "projects", legacyId);
+      assert.deepEqual(readFileSync(join(moved,"key.enc")),wrappedKey,"original wrapped key travels with its database");
       assert.ok(
         existsSync(join(moved, "project.db")),
         "container moved under its ORIGINAL id",
@@ -1119,8 +1123,8 @@ test("安装包：字节直接 POST，回来的形状就是界面声明的那个
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const post = (body: Buffer) =>
-    fetch(`${base}/products/install`, {
+  const post = (body: Buffer, action = "install") =>
+    fetch(`${base}/products/${action}`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,
@@ -1130,6 +1134,13 @@ test("安装包：字节直接 POST，回来的形状就是界面声明的那个
     });
 
   try {
+    const preview = await post(installablePackage(), "preflight");
+    assert.equal(preview.status, 200);
+    const report = await preview.json();
+    assert.equal(report.productId, "test.pkg");
+    assert.equal(report.signed, false);
+    assert.ok(report.name && report.publisher);
+    assert.ok(!registry.installed().some((p) => p.id === "test.pkg"));
     const res = await post(installablePackage());
     // 先把 body 读出来再断言：把 `await res.text()` 当断言信息会先消费掉它，
     // 后面的 res.json() 就只能拿到「Body has already been read」。

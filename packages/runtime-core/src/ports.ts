@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Host ports - the seam between the isomorphic kernel and its hosts
  * (local Node daemon / cloud runtime). Design authority:
  * RY-101 s.02 (ports the kernel requires from a host); formerly 30-design/60 section 6.2.
@@ -63,7 +63,7 @@ export interface ToolCall {
 /** One message in a capability's conversation. */
 export type TurnMessage =
   | { role: "user"; content: string }
-  | { role: "assistant"; content: string; toolCalls?: ToolCall[] }
+  | { role: "assistant"; content: string; toolCalls?: ToolCall[]; reasoning?: Record<string, unknown> }
   // A tool message carries whatever the tool returned - a file's contents, an
   // API's response. That is DATA too, and for the same reason as context:
   // someone other than the user may have written it.
@@ -304,8 +304,8 @@ export interface CapabilityTurnRequest {
  * 写入回执**（写到哪、多少字节），不是一个可以去取回的引用。
  */
 export type CapabilityTurn =
-  | { kind: "tool_calls"; calls: ToolCall[] }
-  | { kind: "content"; content: string }
+  | { kind: "tool_calls"; calls: ToolCall[]; content?: string; reasoning?: Record<string, unknown> }
+  | { kind: "content"; content: string; reasoning?: Record<string, unknown> }
   | { kind: "verdict"; passed: boolean; reason?: string };
 
 /**
@@ -396,6 +396,7 @@ export interface Binding {
 }
 
 export interface ContextItemMeta {
+  documentRevision?: number;
   id: string;
   type: string;
   source: string;
@@ -679,6 +680,7 @@ export interface StoragePort {
 
 /** The port bundle the kernel is constructed with. */
 export interface RuntimePorts {
+  projectDocuments?: { get(projectId: string, productId: string, id: string): { markdown: string; revision: number } | undefined };
   storage: StoragePort;
   clock: ClockPort;
   id: IdPort;

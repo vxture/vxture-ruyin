@@ -78,6 +78,8 @@ const ui = readFileSync(
  * 一样** —— 名字是称呼，字段是契约。
  */
 const SHARED = [
+  ["DesktopDevice", "DesktopDevice", "apps/local-host/src/desktop-devices.ts"],
+  ["DesktopDeviceList", "DesktopDeviceList", "apps/local-host/src/desktop-devices.ts"],
   ["AuditEvent", "AuditEvent", "packages/runtime-core/src/ports.ts"],
   ["LegacyAuditEvent", "LegacyAuditEvent", "packages/runtime-core/src/ports.ts"],
   ["ProductInfo", "ProductView", "apps/local-host/src/product-registry.ts"],
@@ -94,6 +96,9 @@ const SHARED = [
   // 获取通道（ADR-018 §7.2）：界面照 ComponentStatus 渲染体积 / 许可证 / 来源主机
   // 与进度。少一个字段，界面就少显示一件**点下去之前必须看见**的事。
   ["ComponentStatus", "ComponentStatus", "apps/local-host/src/component-store.ts"],
+  ["BackgroundJobSummary", "BackgroundJobSummary", "apps/local-host/src/background-jobs.ts"],
+  ["MaintenanceRecord", "MaintenanceRecord", "apps/local-host/src/maintenance.ts"],
+  ["DiagnosticReport", "DiagnosticReport", "apps/local-host/src/diagnostics.ts"],
 ];
 
 /**

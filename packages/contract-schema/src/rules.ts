@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Semantic validation rules (L2 referential + L3 compatibility layers).
  *
  * 编号是稀疏的：R2 已退役且编号不复用，R6/R12 属于别的层。**权威清单是
@@ -156,6 +156,7 @@ const r5: Rule = (c, errors) => {
     }
   }
   c.context.types.forEach((t, i) => {
+    if(t.project_document && !t.sources.includes("project"))err(errors,"R5",`context.types[${i}].project_document`,"project_document requires sources: [project]");
     if (t.required && t.sources.length === 0) {
       err(
         errors,

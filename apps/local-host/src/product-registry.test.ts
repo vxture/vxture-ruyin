@@ -9,6 +9,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { installPackage } from "./installer.js";
+import { makeTestZip } from "./pkg-testkit.js";
+import { createHash } from "node:crypto";
+import { CHECKSUMS_ENTRY } from "./pkg.js";
 import {
   ProductRegistry,
   availabilityOf,
@@ -97,6 +101,42 @@ function makeDirs(): { productsDir: string; dataDir: string } {
   writeFileSync(join(productsDir, "demo", "ruyin.product.yaml"), CONTRACT);
   return { productsDir, dataDir };
 }
+
+test("production registry starts without business fixtures and retains independently installed packages", () => {
+  const {productsDir,dataDir}=makeDirs();
+  const fixtureData=mkdtempSync(join(tmpdir(),"ruyin-fixture-"));
+  try {
+    assert.deepEqual(new ProductRegistry(undefined,dataDir).list(),[]);
+    const yaml=Buffer.from(CONTRACT);
+    const sums=Buffer.from(createHash("sha256").update(yaml).digest("hex")+"  ruyin.product.yaml\n");
+    installPackage(makeTestZip([{name:"ruyin.product.yaml",data:yaml},{name:CHECKSUMS_ENTRY,data:sums}]),
+      {storeDir:join(dataDir,"products"),runtimeVersion:"0.2.0",requireSignature:false});
+    const production=new ProductRegistry(undefined,dataDir);
+    assert.equal(production.list()[0]?.supply,"package");
+    assert.equal(production.list()[0]?.id,"test.demo");
+    assert.equal(new ProductRegistry(productsDir,fixtureData).list()[0]?.supply,"builtin");
+  } finally {
+    rmSync(productsDir,{recursive:true,force:true});rmSync(dataDir,{recursive:true,force:true});
+    rmSync(fixtureData,{recursive:true,force:true});
+  }
+});
+
+test("failed state persistence preserves the prior default and enable state in memory and across reopening",()=>{
+ const {productsDir,dataDir}=makeDirs();
+ try{
+  const storeDir=join(dataDir,"products");
+  for(const version of ["1.0.0","1.1.0"]){
+   const yaml=Buffer.from(CONTRACT.replace("version: 1.0.0","version: "+version));
+   const checksums=Buffer.from(createHash("sha256").update(yaml).digest("hex")+"  ruyin.product.yaml\n");
+   installPackage(makeTestZip([{name:"ruyin.product.yaml",data:yaml},{name:CHECKSUMS_ENTRY,data:checksums}]),{storeDir,runtimeVersion:"99.0.0",requireSignature:false});
+  }
+  const registry=new ProductRegistry(undefined,dataDir);registry.activate("test.demo","1.0.0");registry.setActive("test.demo",false);
+  const staging=join(dataDir,"runtime","products.state.json.tmp");mkdirSync(staging);
+  assert.throws(()=>registry.activate("test.demo","1.1.0"));assert.throws(()=>registry.setActive("test.demo",true));
+  assert.equal(registry.list()[0]!.version,"1.0.0");assert.equal(registry.list()[0]!.state,"inactive");
+  const reopened=new ProductRegistry(undefined,dataDir);assert.equal(reopened.list()[0]!.version,"1.0.0");assert.equal(reopened.list()[0]!.state,"inactive");
+ }finally{rmSync(productsDir,{recursive:true,force:true});rmSync(dataDir,{recursive:true,force:true});}
+});
 
 void test("availabilityOf: 订阅未知按可用（不因查不到而锁死用户）", () => {
   assert.equal(availabilityOf(true, null).availability, "available");

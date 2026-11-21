@@ -10,6 +10,7 @@
  */
 
 import Database from "better-sqlite3-multiple-ciphers";
+import {createHash} from "node:crypto";
 import { mkdirSync, existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -127,22 +128,23 @@ const require = createRequire(import.meta.url);
 /**
  * Native binding selection (TD-010).
  *
- * Under plain Node the package's own binding is used (build/Release, fetched
- * for the host ABI at install time; what `node --test` and `node dist/main.js`
- * run). Under Electron the daemon runs in the shell's utilityProcess, i.e. in
+ * Plain Node prefers build/node-v<ABI>-<platform>-<arch>, fetched by
+ * scripts/native/sqlite-node-binding.mjs for the chosen development runtime,
+ * otherwise the package default (build/Release). Under Electron the daemon runs in
  * Electron's bundled Node with its *own* ABI, so the host binding cannot load;
  * scripts/native/sqlite-electron-binding.mjs drops the matching electron
  * prebuilt next to it and this picks it by the running ABI. Returns the
  * binding path for Electron, undefined for the package default.
  */
 export function resolveNativeBinding(): string | undefined {
-  if (!process.versions["electron"]) return undefined;
   const pkgDir = dirname(
     require.resolve("better-sqlite3-multiple-ciphers/package.json"),
   );
-  const label = `electron-v${process.versions.modules}-${process.platform}-${process.arch}`;
+  const electron = !!process.versions["electron"];
+  const label = `${electron ? "electron" : "node"}-v${process.versions.modules}-${process.platform}-${process.arch}`;
   const binding = join(pkgDir, "build", label, "better_sqlite3.node");
   if (!existsSync(binding)) {
+    if (!electron) return undefined;
     throw new Error(
       `SQLite native binding for ${label} not found at ${binding} - run "pnpm native:electron" ` +
         `(apps/shell start/smoke run it automatically; the installer pack chain runs it in scripts/release/pack.mjs)`,
@@ -172,6 +174,28 @@ export class SqliteProjectStore implements ProjectStore {
         "INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       )
       .run(key, value);
+  }
+
+  /** Product-owned Markdown only; values remain in the encrypted project database. */
+  getProductDocument(productId: string, id: string): { id: string; markdown: string; revision: number } | undefined {
+    const raw = this.kvGet("product-document:" + JSON.stringify([productId, id]));
+    return raw === undefined ? undefined : JSON.parse(raw);
+  }
+
+  listProductDocuments(productId: string, prefix: string): { id: string; markdown: string; revision: number }[] {
+    const start = "product-document:" + JSON.stringify([productId, prefix]).slice(0, -2);
+    const rows = this.db.prepare("SELECT key, value FROM kv WHERE key >= ? AND key < ?").all(start, start + "\uffff") as {key: string; value: string}[];
+    return rows.filter(row => { const [product, id] = JSON.parse(row.key.slice("product-document:".length)) as string[]; return product === productId && id?.startsWith(prefix); }).map(row => JSON.parse(row.value));
+  }
+
+  putProductDocument(productId: string, id: string, markdown: string, revision: number): { id: string; markdown: string; revision: number } | undefined {
+    return this.db.transaction(() => {
+      const current = this.getProductDocument(productId, id);
+      if ((current?.revision ?? 0) !== revision) return undefined;
+      const next = { id, markdown, revision: revision + 1 };
+      this.kvPut("product-document:" + JSON.stringify([productId, id]), JSON.stringify(next));
+      return next;
+    })();
   }
 
   async putMeta(meta: ProjectMeta): Promise<void> {
@@ -448,15 +472,20 @@ export class SqliteStoragePort implements StoragePort {
   }
 
   private openDb(projectId: string): SqliteProjectStore {
+    return this.openContainer(projectId,this.projectDir(projectId));
+  }
+
+  private openContainer(projectId:string,dir:string):SqliteProjectStore {
     const cached = this.open.get(projectId);
     if (cached) return cached.store;
-    const dir = this.projectDir(projectId);
+    mkdirSync(dir,{recursive:true});
+    const key = this.keys.workspaceKeyHex(dir);
     const db = openDatabase(join(dir, PROJECT_DB));
     // At-rest encryption (TD-009): SQLCipher-compatible scheme, raw hex key
     // per workspace. Cipher selection must precede the key pragma, both
     // before any other statement.
     db.pragma(`cipher='sqlcipher'`);
-    db.pragma(`key="x'${this.keys.workspaceKeyHex(dir)}'"`);
+    db.pragma(`key="x'${key}'"`);
     try {
       db.pragma("user_version");
     } catch (cause) {
@@ -471,6 +500,19 @@ export class SqliteStoragePort implements StoragePort {
     const store = new SqliteProjectStore(db);
     this.open.set(projectId, { store, db });
     return store;
+  }
+
+  /** Separate encrypted library containers; these are never business projects. */
+  openLibraryStore(workspaceId:string,productId:string){
+    if(!workspaceId||workspaceId.length>200||!/^[a-z][a-z0-9_-]{0,31}$/.test(productId))throw Error("Invalid library scope");
+    const scopeId=createHash("sha256").update(JSON.stringify([workspaceId,productId])).digest("hex"),dir=join(this.dataDir,"libraries",scopeId),store=this.openContainer("library:"+scopeId,dir);
+    if(!store.getProductDocument("runtime","scope"))store.putProductDocument("runtime","scope",JSON.stringify({workspaceId,productId,scopeId}),0);
+    return {scopeId,store,files:new ProjectFileStore(dir,this.keys.workspaceKeyHex(dir))};
+  }
+
+  listLibraryScopes():{workspaceId:string;productId:string;scopeId:string}[]{
+    const root=join(this.dataDir,"libraries");if(!existsSync(root))return [];
+    return readdirSync(root,{withFileTypes:true}).filter(e=>e.isDirectory()&&/^[a-f0-9]{64}$/.test(e.name)).flatMap(e=>{const store=this.openContainer("library:"+e.name,join(root,e.name)),doc=store.getProductDocument("runtime","scope");if(!doc)return [];const scope=JSON.parse(doc.markdown);return scope.scopeId===e.name?[scope]:[];});
   }
 
   async createProjectStore(projectId: string): Promise<ProjectStore> {

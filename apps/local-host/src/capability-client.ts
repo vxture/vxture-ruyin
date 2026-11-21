@@ -108,7 +108,12 @@ export class CapabilityClient implements AIGatewayPort {
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      if (TRANSIENT_STATUS.has(res.status)) {
+      let retryable = TRANSIENT_STATUS.has(res.status);
+      try {
+        const error = JSON.parse(body) as { retryable?: unknown } | null;
+        if (typeof error?.retryable === "boolean") retryable = error.retryable;
+      } catch { /* Older providers may return text instead of an envelope. */ }
+      if (retryable) {
         throw new TransientError(
           `capability provider returned ${res.status}: ${body.slice(0, 200)}`,
         );
@@ -132,12 +137,25 @@ function parseTurn(body: unknown): CapabilityTurn {
     calls?: unknown;
     passed?: unknown;
     reason?: unknown;
+    reasoning?: unknown;
   };
+  const record = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+  if (data?.reasoning !== undefined && !record(data.reasoning)) throw new Error("capability provider returned unreadable continuation state");
+  const continuation = data?.reasoning ? { reasoning: data.reasoning as Record<string, unknown> } : {};
   if (data?.kind === "tool_calls" && Array.isArray(data.calls)) {
-    return { kind: "tool_calls", calls: data.calls as ToolCall[] };
+    const calls = data.calls;
+    if (calls.length === 0 || calls.some(call => !record(call) || typeof call.id !== "string" || !call.id ||
+        typeof call.tool !== "string" || !call.tool || !record(call.arguments)) ||
+        new Set(calls.map(call => (call as ToolCall).id)).size !== calls.length ||
+        (data.content !== undefined && typeof data.content !== "string")) {
+      throw new Error("capability provider returned unreadable tool calls");
+    }
+    return { kind: "tool_calls", calls: calls as ToolCall[],
+      ...(typeof data.content === "string" ? { content: data.content } : {}), ...continuation };
   }
   if (data?.kind === "content" && typeof data.content === "string") {
-    return { kind: "content", content: data.content };
+    return { kind: "content", content: data.content, ...continuation };
   }
   if (data?.kind === "verdict" && typeof data.passed === "boolean") {
     return {
@@ -149,7 +167,7 @@ function parseTurn(body: unknown): CapabilityTurn {
   // A shape we cannot read is not a result. Failing here beats handing the
   // harness an empty answer that would read as "the capability produced nothing".
   throw new Error(
-    `capability provider returned an unreadable turn: ${JSON.stringify(body).slice(0, 200)}`,
+    "capability provider returned an unreadable turn",
   );
 }
 

@@ -15,6 +15,7 @@ nodeGypRebuild: false
 
 files:
   - dist/**
+  - icons/icon.ico
   - package.json
 extraResources:
   # Self-contained daemon produced by `pnpm deploy --legacy` (scripts/release/pack.mjs).
@@ -27,11 +28,7 @@ extraResources:
   # scripts/release/third-party.mjs --full 写出。关于页指向的就是这一份。
   - from: out/THIRD-PARTY-NOTICES.txt
     to: THIRD-PARTY-NOTICES.txt
-  # Built-in products (transitional, TD-006). Contracts only - no source.
-  - from: ../../products
-    to: products
-    filter:
-      - "**/ruyin.product.yaml"
+  # Business agents are independently installed .ruyinpkg files, never bundled.
   # 预置技能层（ADR-018 §2.3）：构建时按 resources/skill-manifest.json 拉取到仓内
   # resources/skills（scripts/release/pull-skills.mjs，pack.mjs 会先跑它），连同
   # index.json 与每个来源的许可证文件一起进包。首启离线可用。
@@ -49,6 +46,16 @@ extraResources:
   # 由 scripts/release/seed-uv-cache.mjs 生成，那一步自己核对 uv 的 sha256。
   - from: ../../resources/uv
     to: uv
+  - from: ../../resources/document-reader
+    to: document-reader
+    filter:
+      - reader.py
+      - requirements.lock
+      - lib/**
+      # python-docx loads templates/default.docx. This unpacked source scaffold
+      # contains OPC _rels files that MakeAppx treats as AppX relationships.
+      - "!lib/docx/templates/default-docx-template/**"
+      - "!**/__pycache__/**"
   # 随包真 node.exe（owner 2026-09-16）：node 形态的预置 MCP 服务器用它起，不再
   # 借 Ruyin.exe 自己 + ELECTRON_RUN_AS_NODE 重执行——那条路子在 Windows 上会弹出
   # 一个空白 cmd 窗口。由 scripts/release/seed-node-runtime.mjs 生成，那一步自己

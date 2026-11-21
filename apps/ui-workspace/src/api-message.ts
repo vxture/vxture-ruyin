@@ -43,6 +43,8 @@ const CODE_KEY: Record<string, MessageKey> = {
   ACCOUNT_DELETING: "err.accountDeleting",
   UNAUTHORIZED: "err.authRequired",
   MIGRATING: "err.migrating",
+  RUNTIME_INITIALIZING: "err.initializing",
+  RUNTIME_START_FAILED: "err.startFailed",
 };
 
 /**

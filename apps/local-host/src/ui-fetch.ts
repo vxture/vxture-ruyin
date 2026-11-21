@@ -32,6 +32,7 @@ import { dirname, join } from "node:path";
 import { parseContract, type RuyinContract } from "@vxture/ruyin-contract-schema";
 import { MANIFEST_ENTRY, type FetchOutcome } from "./contract-fetch.js";
 import { readPackage, type ZipLimits } from "./pkg.js";
+import { assertAgentPayload } from "./agent-payload.js";
 
 /** 产品库里放界面包的那一层：`<storeDir>/<productId>/ui/<sha256>/`。 */
 export const UI_DIR = "ui";
@@ -96,6 +97,21 @@ export function uiBundleDir(storeDir: string, productId: string, sha256: string)
 export function hasUiBundle(storeDir: string, productId: string, sha256: string): boolean {
   if (!PRODUCT_SEGMENT.test(productId) || !DIGEST.test(sha256)) return false;
   return existsSync(join(uiBundleDir(storeDir, productId, sha256), UI_ENTRY));
+}
+
+/** Shared admission for downloaded and offline embedded UI bundles. No writes. */
+export class UiBundleError extends Error {
+  constructor(readonly reason: UiUnavailableReason, message: string) { super(message); }
+}
+export function validateUiBundle(bytes: Buffer, pinned: string, maxBytes = MAX_UI_BUNDLE_BYTES): Map<string, Buffer> {
+  if (bytes.length > maxBytes) throw new UiBundleError("too_large", "ui bundle exceeds byte limit");
+  const actual = createHash("sha256").update(bytes).digest("hex");
+  if (actual !== pinned) throw new UiBundleError("digest_mismatch", `fetched bytes hash to ${actual}, contract pins ${pinned}`);
+  let entries: Map<string, Buffer>;
+  try { entries = readPackage(bytes, UI_ZIP_LIMITS); assertAgentPayload(entries); }
+  catch (cause) { throw new UiBundleError("invalid_bundle", String(cause)); }
+  if (!entries.has(UI_ENTRY)) throw new UiBundleError("invalid_bundle", "ui bundle has no index.html at its root");
+  return entries;
 }
 
 /**
@@ -164,21 +180,10 @@ export async function fetchUiBundle(contract: RuyinContract, opts: UiFetchOption
     clearTimeout(timer);
   }
 
-  // ---- 摘要：对不上的字节一个都不解开 ---------------------------------------
-  const actual = createHash("sha256").update(bytes).digest("hex");
-  if (actual !== pinned) {
-    return unavailable("digest_mismatch", `fetched bytes hash to ${actual}, contract pins ${pinned}`);
-  }
-
-  // ---- 护栏解包 + 入口 -------------------------------------------------------
   let entries: Map<string, Buffer>;
-  try {
-    entries = readPackage(bytes, UI_ZIP_LIMITS);
-  } catch (cause) {
-    return unavailable("invalid_bundle", cause instanceof Error ? cause.message : String(cause));
-  }
-  if (!entries.has(UI_ENTRY)) {
-    return unavailable("invalid_bundle", `ui bundle has no ${UI_ENTRY} at its root`);
+  try { entries = validateUiBundle(bytes, pinned, maxBytes); }
+  catch (cause) {
+    return unavailable(cause instanceof UiBundleError ? cause.reason : "invalid_bundle", String(cause));
   }
 
   // ---- 原子落盘 --------------------------------------------------------------
