@@ -278,8 +278,8 @@ jobs:
         env:
           RUYIN_REQUIRE_HARNESS_SMOKE: "1"
 
-      - name: Built-runtime backup and package signing integration
-        run: node --test scripts/dev/runtime-backup.test.mjs scripts/release/sign-agent-package.test.mjs
+      - name: Built-runtime backup, Markdown and package signing integration
+        run: node --test scripts/dev/runtime-backup.test.mjs scripts/dev/bid-markdown-blocks.test.mjs scripts/release/sign-agent-package.test.mjs
         env:
           RUYIN_REQUIRE_BUILT_TESTS: "1"
 

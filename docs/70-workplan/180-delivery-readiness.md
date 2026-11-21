@@ -46,3 +46,7 @@ synthetic task after a microtask-only flush, while the UI action still awaits
 WebCrypto and document persistence. Failures occur at different adoption stages.
 Wait for the existing refresh control to become idle before directly driving
 the synthetic result. Keep all draft/history/evidence assertions unchanged.
+
+Clean-run CI also exposed the Markdown mapper test's dependency on compiled
+document code. Like backup and signing integration, it must run after build
+with missing artifacts treated as failure; static checks explicitly defer it.
