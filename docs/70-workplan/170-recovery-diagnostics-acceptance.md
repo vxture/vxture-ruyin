@@ -268,3 +268,13 @@ Evidence: `p23-distribution/store-submission-result.json`,
 current-source CI/packaged execution plus P23.3 Microsoft-signed installation
 and upgrade acceptance; P24 release preparation follows those gates. No standing
 monitor or automatic publication has been configured.
+
+### P24 certification refresh (2026-11-22)
+
+A fresh overview reload now shows Ready to publish and the explicit result:
+"Your product has passed the certification process. It will start publishing
+to the Store after you click Publish now." Publishing remains Not started.
+The subordinate submission-summary label still says In certification; use the
+explicit decision as the authoritative result. No publish action was taken.
+This advances certification only: Microsoft-signed actual installation,
+upgrade and DPAPI migration remain separate acceptance work.

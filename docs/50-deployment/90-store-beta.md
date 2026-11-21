@@ -2,7 +2,7 @@
 
 ## Current observed status (2026-11-22)
 
-Submission 1 is now **In certification / Pre-processing** for the new
+Submission 1 is now **Ready to publish** for the new
 `Ruyin-Store-0.2.1-beta.1-x64.appx`, Store version `0.2.1.0`. The owner explicitly
 authorized replacement and resubmission. The exact file SHA256
 `42ad77d12f94939c0987c2679aa86cd5a8d2687db33903acffe62a989f7a569b`
@@ -11,8 +11,12 @@ the replacement of the old `0.2.0.0` package, then accepted Submit for
 certification. All submission sections were Complete. The manual publishing
 hold was verified both in Submission Options and after resubmission: publication
 starts only after Publish now. No publication or installed-app replacement
-occurred. Certification is pending; the portal says a few hours, sometimes up
-to three business days. Evidence: `p23-distribution/store-resubmitted-current.jpg`
+occurred. A fresh overview read during P24 on 2026-11-22 explicitly says
+"Your product has passed the certification process" and publication begins
+only after Publish now. The subordinate submission-summary label still reads
+In certification; it is stale relative to the explicit certification result.
+This approval does not establish Microsoft-signed installation acceptance.
+Initial submission evidence: `p23-distribution/store-resubmitted-current.jpg`
 and `store-submission-result.json` under the local acceptance evidence root.
 
 ### Previous certification and package history
