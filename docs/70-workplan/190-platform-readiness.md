@@ -66,3 +66,19 @@ P23.3 获取检查：2026-11-22 在 Partner Center 的 Current packages → Subm
 `b850d6c7e001b95ebc3d27510aaafc2832630048db733f3dd2aaafd799f2da10`
 保持不变。临时测试密钥和安装已清理；这不代表生产签名权威或平台接入已经建立。
 本批没有宿主运行时代码改动；远端最终检查以 PR #311 当前提交为准。
+
+## 后续验证复查（2026-11-22）
+
+代码检查点 `c32f5ce336eb23a81b1597733805712a94afe3de` 的全部远端检查通过，
+PR #311 无冲突。Partner Center 仍明确显示认证通过、Ready to publish，
+需 Publish now 才启动分发；本批未发布，Store 安装记录仍为空。
+
+出现新的本机验证结果：固定候选普通启动通过，随后实际拒绝写入候选目录，
+使用另一个空数据目录再次启动也通过。资源快照一致、目录权限恢复、DPAPI
+主密钥存在且无明文主密钥。Smart App Control 保持 On，未改变策略。
+候选 EXE 与固定 AppX 的 `app/Ruyin.exe` 摘要一致，固定 AppX 哈希未变。
+此前本机执行拦截不再是当前复验结果；原因未经证据确认，不归因于某个后台操作。
+
+证据位于本机验收目录 `p26-registry/launch-recheck.json`、
+`readonly-recheck.json`、对应日志与 `launched-appx-correspondence.json`。
+解包候选启动验收不代表 Store 实际安装/升级完成，P23.3 保持待验收。

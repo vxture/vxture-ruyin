@@ -19,6 +19,14 @@ This approval does not establish Microsoft-signed installation acceptance.
 Initial submission evidence: `p23-distribution/store-resubmitted-current.jpg`
 and `store-submission-result.json` under the local acceptance evidence root.
 
+The later 2026-11-22 local launch recheck now passes for the exact candidate EXE
+SHA256 `6ef25d604fc3f094adf0bc3711747be2490ec697b52271935988848060ebf9a9`,
+including normal and enforced-read-only launch with fresh isolated data. Smart
+App Control remains On. The EXE equals `app/Ruyin.exe` inside the fixed AppX;
+no installed app was replaced. This supersedes the earlier current-machine
+execution-block result, but does not establish Store installation/activation
+or upgrade acceptance. See [candidate checklist](100-beta-021.md).
+
 ### Previous certification and package history
 
 Before the authorized replacement, Submission 1 was **Ready to publish**. After reloading Partner Center on
