@@ -124,3 +124,44 @@ changing their implementation or binary entry. Verify a packed-archive consumer
 can build the real Bid product through this public entry. Bid can then pin the
 published package and remove the cross-repository build argument. No product
 SDK, local-host API or runtime presentation package is introduced here.
+
+## B6.4.2 shared presentation implementation scope
+
+Extract the original project presentation into `packages/workbench-ui` as
+`@vxture/ruyin-workbench-ui`. Move the existing workflow sidebar, product home,
+library picker, project/settings/task confirmation panel, pending inbox,
+product-surface/bridge metadata, audit-chain display, typed UI client/SSE and
+locale/provider/catalog modules, their tests and current application CSS.
+Keep re-export/import wrappers at their old app paths so the original desktop
+uses the same source. This is relocation, not a redesign or a second UI.
+
+The module retains the same native client defaults. Add only an injectable
+request transport for product-owned Web routing and an optional product canvas
+slot in the original project panel. Browser file selection will use an explicit
+environment adapter; do not expose server filesystem input as a Web feature.
+
+Update `apps/ui-workspace/package.json`, package/public exports, TS/Vitest
+configuration, the necessary lockfile, existing package publish order, version
+manifests and architecture/entry docs. All five public packages release in the
+existing lockstep process as 0.2.1. Update i18n, shared-shape and CSS-token guards
+to check the relocated source as well as native app composition; do not drop
+their assertions. Retain existing coverage thresholds in both test locations.
+
+Acceptance: original desktop build and full tests; original project/sidebar/
+review behavior against the moved components; independent installed-package Web
+composition and visual desktop/narrow-screen comparison. No global RUYIN
+settings, Electron shell or daemon is included in the public presentation entry.
+No platform change, production release or synchronization behavior.
+
+### Local presentation acceptance
+
+The original modules and styles now live in the public package; desktop paths
+are implementation-free re-exports. The injected transport, product canvas and
+browser upload/context slots preserve the same task and review controls. The
+shared suite passed 335 cases with 100% line coverage; the combined native/shared
+suite passed 806 cases (99.48% statements, 96.27% branches, 99.12% functions,
+100% lines). Coverage runs from the repository root so moved implementation is
+measured together with its original native callers, without lowering gates.
+Recursive build/type-check and 35 focused version/order/shape guard tests pass.
+Installed-registry Web composition and production runtime acceptance follow
+after the reviewed package release; these local results do not imply deployment.

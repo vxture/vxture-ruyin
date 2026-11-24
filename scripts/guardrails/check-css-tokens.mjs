@@ -165,7 +165,8 @@ const isDefined = (name) => {
   return false;
 };
 
-const css = readFileSync(appCss, "utf8");
+const sharedCss = join(repoRoot, "packages/workbench-ui/src/styles.css");
+const css = readFileSync(appCss, "utf8") + (existsSync(sharedCss) ? "\n" + readFileSync(sharedCss,"utf8") : "");
 /** Declared locally in app.css itself (e.g. none today) still counts. */
 for (const m of css.matchAll(/(--[a-z0-9-]+)\s*:/g)) defined.add(m[1]);
 

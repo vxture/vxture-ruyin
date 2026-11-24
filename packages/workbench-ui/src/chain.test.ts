@@ -22,8 +22,8 @@
  */
 
 import { expect, test } from "vitest";
-import { verifyChain } from "./chain";
-import type { AuditEvent, LegacyAuditEvent } from "./api";
+import { verifyChain } from "./chain.js";
+import type { AuditEvent, LegacyAuditEvent } from "./api.js";
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));

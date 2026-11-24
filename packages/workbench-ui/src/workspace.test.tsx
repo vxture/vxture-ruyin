@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ProjectPanel, describeBreaks } from "./workspace";
+import { ProjectPanel, ProjectFilesSection, describeBreaks } from "./workspace.js";
 import {
   Api,
   type AuditEvent,
@@ -25,8 +25,8 @@ import {
   type TaskInstance,
   type ToolPolicyRow,
   type ProjectFile,
-} from "./api";
-import { translate, type TKey, type Vars } from "./i18n";
+} from "./api.js";
+import { translate, type TKey, type Vars } from "./i18n.js";
 
 /** 直接调纯函数的那几条用例用得上的两个 t()。 */
 const tzh = (k: TKey, v?: Vars) => translate("zh-CN", k, v);
@@ -170,6 +170,45 @@ function fakeApi(over: Partial<Api> = {}): Api {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+test("a product-owned canvas preserves host confirmations and replaces only the iframe", async () => {
+  const api = fakeApi();
+  render(<ProjectPanel api={api} id="prj_1" tab="product"
+    productView={<main>Shared Bid business canvas</main>} />);
+  expect(await screen.findByText("Shared Bid business canvas")).toBeTruthy();
+  expect(screen.queryByTestId("product-tab-stub")).toBeNull();
+  expect(api.decide).not.toHaveBeenCalled();
+});
+
+test("browser uploads use an explicit adapter while keeping the original file list", async () => {
+  const api = fakeApi();
+  const upload = vi.fn<(file: File) => Promise<void>>().mockResolvedValue();
+  const { container } = render(<ProjectFilesSection api={api} projectId="prj_1" grants={[]} uploadFile={upload} />);
+  await screen.findByText("还没有收进任何原件");
+  expect(screen.queryByPlaceholderText(/已授权文件夹/)).toBeNull();
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  fireEvent.change(input, { target: { files: [] } });
+  expect(upload).not.toHaveBeenCalled();
+  const document = new File(["Synthetic source"], "tender.md", { type: "text/markdown" });
+  await userEvent.upload(input, document);
+  expect(upload).toHaveBeenCalledWith(document);
+  await waitFor(() => expect(input).not.toBeDisabled());
+  expect(api.addFile).not.toHaveBeenCalled();
+  upload.mockRejectedValueOnce(new Error("Workspace storage full"));
+  await userEvent.upload(input, document);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Workspace storage full");
+  upload.mockRejectedValueOnce("Unavailable");
+  await userEvent.upload(input, document);
+  expect(await screen.findByRole("alert")).toHaveTextContent("这个文件收不进来");
+});
+
+test("a Web context adapter replaces native folder paths without changing confirmation authority", async () => {
+  const api = fakeApi();
+  render(<ProjectPanel api={api} id="prj_1" tab="context" contextView={<p>Product upload controls</p>} />);
+  expect(await screen.findByText("Product upload controls")).toBeTruthy();
+  expect(screen.queryByPlaceholderText("文件夹绝对路径")).toBeNull();
+  expect(api.addGrant).not.toHaveBeenCalled();
 });
 test('business review opens only the pending host review; closing never adopts, user confirmation does',async()=>{
  const instances=[taskInstance({id:'first',state:'waiting_human',checkpoints:[{id:'cp1',kind:'verification_review',subject:{},options:['approve','reject'],raisedAt:'2026-11-20T00:00:00Z'}]}),taskInstance({id:'requested',state:'waiting_human',checkpoints:[{id:'cp2',kind:'verification_review',subject:{},options:['approve','reject'],raisedAt:'2026-11-20T00:00:00Z'}],capabilityOutputs:{generation:JSON.stringify({chapters:[{title:'Backup architecture',purpose:'Daily backup'},{},null]})}})];

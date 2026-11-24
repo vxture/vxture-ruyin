@@ -1,8 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { render, renderHook, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { PendingInbox, usePending } from "./pending";
-import { Api, type PendingConfirmation } from "./api";
+import { PendingInbox, usePending } from "./pending.js";
+import { Api, type PendingConfirmation } from "./api.js";
 
 function row(over: Partial<PendingConfirmation> = {}): PendingConfirmation {
   return {

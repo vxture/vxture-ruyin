@@ -47,6 +47,18 @@ void test("引用设计系统里有的 token 就通过，并报出认得几个",
   assert.match(r.out, /\(2 known\)/, "认得几个要报出来 —— 这个数掉下去说明依赖变了");
 });
 
+test("shared presentation CSS is checked when the native stylesheet only imports it", () => {
+  const repo = fixtureRepo("ruyin-csstok-shared-");
+  try {
+    repo.write(CSS, '@import "@vxture/ruyin-workbench-ui/styles.css";');
+    repo.write(`${TOKENS}/tokens.css`, ":root { --border: #ccc; }");
+    repo.write("packages/workbench-ui/src/styles.css", ".a { color: var(--unregistered); }");
+    const outcome = repo.run(GUARD);
+    assert.equal(outcome.code, 1);
+    assert.match(outcome.out, /--unregistered/);
+  } finally { repo.clean(); }
+});
+
 void test("引用一个不存在的 token 要拦，**并说出是哪一行**", () => {
   const r = check(`.a { color: var(--text-primary); }\n.b { border: 1px solid var(--border-soft); }`);
   assert.equal(r.code, 1);

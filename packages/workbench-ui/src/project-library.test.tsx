@@ -1,8 +1,8 @@
 import {test,expect,vi,afterEach} from "vitest";
 import {render,screen,cleanup,waitFor} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import {ProjectLibrary} from "./project-library";
-import {Api,type LibrarySelection} from "./api";
+import {ProjectLibrary} from "./project-library.js";
+import {Api,type LibrarySelection} from "./api.js";
 afterEach(cleanup);
 test("explicit version choice pins the requested revision, source preview reads the pin, and removal preserves library resources",async()=>{
  let selection:LibrarySelection={revision:1,items:[{id:"resource",name:"Synthetic qualification.md",version:1,hash:"a".repeat(64),fileId:"f1",readingId:"r1",category:"qualification",selectedAt:"2026-11-20"}]};

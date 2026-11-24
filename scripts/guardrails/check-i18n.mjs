@@ -16,12 +16,14 @@
  * 名单已经清空并删除 —— 全部界面文件都过这一条，没有例外，只有下面那份
  * 「本来就不是文案」的清单。
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const uiSrc = join(repoRoot, "apps", "ui-workspace", "src");
+const sharedSrc = join(repoRoot,"packages/workbench-ui/src");
+const catalogs = existsSync(join(sharedSrc,"locales/zh-CN.ts")) ? sharedSrc : uiSrc;
 const HAN = /[一-鿿]/;
 
 /**
@@ -45,8 +47,8 @@ const problems = [];
 
 /* ---- 一、目录对账 -------------------------------------------------------- */
 
-const zhSrc = readFileSync(join(uiSrc, "locales", "zh-CN.ts"), "utf8");
-const enSrc = readFileSync(join(uiSrc, "locales", "en.ts"), "utf8");
+const zhSrc = readFileSync(join(catalogs, "locales", "zh-CN.ts"), "utf8");
+const enSrc = readFileSync(join(catalogs, "locales", "en.ts"), "utf8");
 
 /** 从目录源码里取键。不 import：这是个 .mjs 脚本，目录是 TypeScript。 */
 function keysOf(src) {
@@ -99,11 +101,11 @@ function strip(src) {
     .replace(/^import[\s\S]*?;$/gm, "");
 }
 
-for (const file of readdirSync(uiSrc)) {
+for (const source of [uiSrc, ...(existsSync(sharedSrc) ? [sharedSrc] : [])]) for (const file of readdirSync(source)) {
   if (!/\.tsx?$/.test(file)) continue;
   if (file.includes(".test.")) continue;
   if (NOT_COPY.has(file)) continue;
-  const body = strip(readFileSync(join(uiSrc, file), "utf8"));
+  const body = strip(readFileSync(join(source, file), "utf8"));
   const lines = body.split("\n");
   for (const [i, line] of lines.entries()) {
     if (!HAN.test(line)) continue;

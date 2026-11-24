@@ -7,7 +7,7 @@
  */
 
 import { afterEach, expect, test, vi } from "vitest";
-import { ProductBridge, type BridgeOutboundMessage, type ProductBridgeOptions } from "./product-bridge";
+import { ProductBridge, type BridgeOutboundMessage, type ProductBridgeOptions } from "./product-bridge.js";
 
 const ORIGIN = "https://product.local";
 
