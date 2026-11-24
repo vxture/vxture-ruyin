@@ -22,5 +22,9 @@ export class RenderDownloads {
  }
  private sweep(now:number){for(const [key,value]of this.tickets)if(value.expiresAt<=now)this.tickets.delete(key);}
 }
-export function renderFilename(title:string,format:string){return (title.replace(/[<>:"/\\|?*\x00-\x1f\x7f]/g,'_').replace(/[. ]+$/,'').slice(0,120)||'deliverable')+'.'+format;}
+export function renderFilename(title:string,format:string){
+ const name=title.slice(0,120).replace(/[<>:"/\\|?*\x00-\x1f\x7f]/g,'_');
+ let end=name.length;while(end>0&&(name[end-1]==='.'||name[end-1]===' '))end--;
+ return (name.slice(0,end)||'deliverable')+'.'+format;
+}
 export function attachmentDisposition(filename:string){return `attachment; filename="deliverable.${filename.split('.').pop()}"; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase())}`;}
