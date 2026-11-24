@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Kernel tests over the in-memory reference storage: workspace lifecycle,
  * business state machine, harness state machine (including waiting_human
  * suspension and rebuild-on-resume), and audit chain integrity.
@@ -83,6 +83,31 @@ function makePorts(): RuntimePorts {
     skills: MemorySkills.forContract(bidContract as RuyinContract),
   };
 }
+
+test("durable host request keys recover an existing task after reopening the harness",async()=>{
+ const runtime=new ProjectRuntime(makePorts());const project=await runtime.createProject(bidContract as RuyinContract,"Background acceptance","wsp_test");
+ const first=await runtime.createHarness(project.id);const created=await first.startTask("analyze_tender",undefined,{requestKey:"job:one:step1"});
+ const reopened=await runtime.createHarness(project.id);const recovered=await reopened.startTask("analyze_tender",undefined,{requestKey:"job:one:step1"});
+ assert.equal(recovered.id,created.id);assert.equal((await runtime.listTaskInstances(project.id)).length,1);
+});
+
+test("host request keys cannot alias another task and remain project scoped", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const project = await runtime.createProject(bidContract, "first", "wsp_test");
+  const harness = await runtime.createHarness(project.id);
+  const first = await harness.startTask("analyze_tender", undefined, { requestKey: "job:shared" });
+  const otherTask = (bidContract as RuyinContract).tasks.find(task => task.id !== "analyze_tender")!;
+  await assert.rejects(
+    harness.startTask(otherTask.id, undefined, { requestKey: "job:shared" }),
+    /request key belongs to a different task/,
+  );
+  const another = await runtime.createProject(bidContract, "second", "wsp_test");
+  const independent = await (await runtime.createHarness(another.id)).startTask(
+    "analyze_tender", undefined, { requestKey: "job:shared" },
+  );
+  assert.notEqual(independent.id, first.id);
+  assert.equal((await runtime.listTaskInstances(project.id)).length, 1);
+});
 
 /**
  * startTask + advance. Recording an instance is fast, running it is not, so
@@ -585,6 +610,38 @@ test("verify: a FAIL sends the reason back and the work is regenerated", async (
   );
 });
 
+test("verify: a revised proposal must re-pass a rule that passed on the first draft", async () => {
+  const ports = verifyingPorts(["PASS", "inconsistent draft", "PASS", "PASS"]);
+  const turn = ports.gateway.turn.bind(ports.gateway);
+  const checked: string[] = [];
+  ports.gateway = {
+    turn(req) {
+      if (req.capability.startsWith("verify:")) checked.push(req.capability);
+      return turn(req);
+    },
+  };
+  const runtime = new ProjectRuntime(ports);
+  const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
+  const harness = await runtime.createHarness(meta.id);
+  const instance = await runTask(harness, "generate_proposal", {
+    requirement_matrix: {},
+    enterprise_capability: {},
+    case_library: {},
+    enterprise_knowledge: {},
+  });
+
+  assert.deepEqual(checked, [
+    "verify:requirement_coverage",
+    "verify:consistency_check",
+    "verify:requirement_coverage",
+    "verify:consistency_check",
+  ]);
+  assert.equal(instance.revisionRound, 1);
+  assert.deepEqual(instance.verification.map(({ status }) => status), [
+    "passed", "passed", "pending_human",
+  ]);
+});
+
 test("verify: revisions are bounded and the end is always a person", async () => {
   const runtime = new ProjectRuntime(verifyingPorts(["still wrong"]));
   const meta = await runtime.createProject(bidContract, "ws", "wsp_test");
@@ -985,6 +1042,38 @@ test("harness: an ask-class tool suspends on tool_ask, then runs on approval", a
   assert.deepEqual(executed, ["write_document"]);
   assert.equal(done.state, "waiting_human"); // now the verification review
   assert.equal(pendingCheckpoint(done)?.kind, "verification_review");
+});
+
+test("opaque model continuation survives a tool checkpoint and a reopened Harness", async () => {
+  for (const approve of [true, false]) {
+    const ports = makePorts(); let turns = 0; let executed = 0;
+    const reasoning = { text: "display projection", vendor: { signature: "opaque-state", blocks: [1, { future: true }] } };
+    ports.tools = { supports: () => true, execute: async () => { executed++; return { content: "written" }; } };
+    ports.gateway = { turn: async req => {
+      if (req.capability.startsWith("verify:")) return { kind: "verdict", passed: true };
+      if (++turns === 1) return { kind: "tool_calls", content: "Preparing the document", reasoning,
+        calls: [{ id: "c1", tool: "write_document", arguments: { path: "C:/work/out.md", content: "synthetic" } }] };
+      const assistant = req.messages.find(m => m.role === "assistant");
+      assert.equal(assistant?.content, "Preparing the document");
+      assert.ok(assistant?.role === "assistant");
+      assert.deepEqual(assistant.reasoning, reasoning);
+      assert.equal(req.messages.filter(m => m.role === "tool" && m.callId === "c1").length, 1);
+      return { kind: "content", content: "done" };
+    } };
+    const runtime = new ProjectRuntime(ports);
+    const project = await runtime.createProject(bidContract, "Continuation recovery", "wsp_test");
+    await runtime.addGrant(project.id, "C:/work", "readwrite");
+    const parked = await runTask(await runtime.createHarness(project.id), "analyze_tender", { tender_document: {} });
+    assert.equal(pendingCheckpoint(parked)?.kind, "tool_ask"); assert.equal(executed, 0);
+    assert.deepEqual(parked.conversation?.find(m => m.role === "assistant"), {
+      role: "assistant", content: "Preparing the document", reasoning,
+      toolCalls: [{ id: "c1", tool: "write_document", arguments: { path: "C:/work/out.md", content: "synthetic" } }],
+    });
+    const reopened = new ProjectRuntime(ports);
+    const done = await decide(await reopened.createHarness(project.id), parked.id, approve);
+    assert.equal(done.capabilityOutputs.requirement_analysis, "done");
+    assert.equal(executed, approve ? 1 : 0); assert.equal(turns, 2);
+  }
 });
 
 /**
@@ -1607,6 +1696,12 @@ test("在等我：跨项目汇总未决确认，最久的排最前", async () =>
   assert.equal(after[0]!.taskInstanceId, ib.id);
 });
 
+test('cancelled and archived tasks retain checkpoint history without appearing in global pending',async()=>{
+ const runtime=new ProjectRuntime(makePorts()),project=await runtime.createProject(bidContract,'Pending cleanup','wsp_test'),harness=await runtime.createHarness(project.id);
+ const task=await runTask(harness,'analyze_tender',{tender_document:{}});assert.equal((await runtime.listPendingConfirmations()).length,1);
+ await harness.cancel(task.id);assert.equal((await runtime.listPendingConfirmations()).length,0);const saved=(await runtime.listTaskInstances(project.id))[0]!;assert.equal(saved.checkpoints.length,1);assert.equal(saved.checkpoints[0]!.decision,undefined);
+ await runtime.archiveProject(project.id);assert.equal((await runtime.listPendingConfirmations()).length,0);assert.equal((await runtime.listTaskInstances(project.id))[0]!.checkpoints.length,1);
+});
 test("audit chain verifies end-to-end and detects tamper", async () => {
   const ports = makePorts();
   const runtime = new ProjectRuntime(ports);
@@ -2452,4 +2547,34 @@ test("upgrade: 契约不合法、或是别的产品的契约 —— 那是调用
     })),
     ProjectLifecycleError,
   );
+});
+
+test("project documents keep product scope and fail if revised after context approval", async () => {
+  const ports=makePorts();let revision=1;const requests:string[]=[];
+  ports.projectDocuments={get:(pid,product,id)=>{requests.push(`${pid}/${product}/${id}`);return {markdown:"confirmed requirements",revision};}};
+  const c=structuredClone(bidContract) as RuyinContract;const type=c.context.types.find(t=>t.id==="tender_document")!;type.sources=["project"];type.project_document="test_doc";type.sensitivity="high";
+  const runtime=new ProjectRuntime(ports);const project=await runtime.createProject(c,"doc test","wsp_test");const h=await runtime.createHarness(project.id);let run=await h.startTask("analyze_tender");run=await h.advance(run.id);assert.equal(pendingCheckpoint(run)?.kind,"context_confirm");assert.equal(run.contextSet?.[0]?.documentRevision,1);revision=2;await h.decideCheckpoint(run.id,{choice:"approve"});run=await h.advance(run.id);assert.equal(run.state,"failed");assert.ok(requests.every(v=>v===`${project.id}/bidproposal/test_doc`));
+});
+
+
+test("project document budget and unavailable ports fail before inference",async()=>{for(const size of [0,100]){const ports=makePorts();ports.contextBudgetBytes=10;if(size)ports.projectDocuments={get:()=>({markdown:'x'.repeat(size),revision:1})};const c=structuredClone(bidContract) as RuyinContract;const type=c.context.types.find(t=>t.id==='tender_document')!;type.sources=['project'];type.project_document='doc';const runtime=new ProjectRuntime(ports);const p=await runtime.createProject(c,'budget','wsp_test');const h=await runtime.createHarness(p.id);let task=await h.startTask('analyze_tender');task=await h.advance(task.id);assert.equal(task.state,'failed');assert.equal(task.contextSet,undefined);}});
+
+test("project document reaches gateway only after consent with declared source",async()=>{const ports=makePorts();let facts:unknown;ports.projectDocuments={get:()=>({markdown:'exact snapshot',revision:3})};const original=ports.gateway;ports.gateway={turn:async(request)=>{facts=request.context;return original.turn(request);}};const c=structuredClone(bidContract) as RuyinContract;const type=c.context.types.find(t=>t.id==='tender_document')!;type.sources=['project'];type.project_document='doc';type.sensitivity='high';const runtime=new ProjectRuntime(ports);const p=await runtime.createProject(c,'doc','wsp_test');const h=await runtime.createHarness(p.id);let task=await h.startTask('analyze_tender');task=await h.advance(task.id);assert.equal(facts,undefined);await h.decideCheckpoint(task.id,{choice:'approve'});task=await h.advance(task.id);assert.ok(JSON.stringify(facts).includes('exact snapshot'));assert.ok(JSON.stringify(facts).includes('project-document'));});
+
+test("a project document exceeding the UTF-8 byte ceiling never reaches inference", async () => {
+  const ports = makePorts();
+  let calls = 0;
+  ports.contextBudgetBytes = 1024 * 1024;
+  ports.projectDocuments = { get: () => ({ markdown: "\u4e2d".repeat(87382), revision: 1 }) };
+  ports.gateway = { turn: async () => { calls++; return { kind: "content", content: "unexpected" }; } };
+  const contract = structuredClone(bidContract) as RuyinContract;
+  const context = contract.context.types.find(type => type.id === "tender_document")!;
+  context.sources = ["project"];
+  context.project_document = "oversized_snapshot";
+  const runtime = new ProjectRuntime(ports);
+  const project = await runtime.createProject(contract, "size limit", "wsp_test");
+  const harness = await runtime.createHarness(project.id);
+  const task = await harness.startTask("analyze_tender");
+  assert.equal((await harness.advance(task.id)).state, "failed");
+  assert.equal(calls, 0);
 });

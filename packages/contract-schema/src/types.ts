@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Ruyin Runtime Contract types.
  *
  * Design authority: docs/30-design/30-contract-schema.md (03-A). Field-level
@@ -115,6 +115,7 @@ export interface StateMachine {
 }
 
 export interface ContextType {
+  project_document?: string;
   id: string;
   name: string;
   required: boolean;
@@ -147,6 +148,7 @@ export interface VerificationRule {
 
 export interface TaskDefinition {
   id: string;
+  name?: string;
   objective: string;
   input_types: string[];
   output_types: string[];
