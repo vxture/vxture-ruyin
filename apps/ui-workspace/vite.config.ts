@@ -3,6 +3,15 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+// Pure relocation shims contain no implementation; any added code restores coverage.
+const source = fileURLToPath(new URL("./src/", import.meta.url));
+const shims = readdirSync(source, { recursive: true }).filter((name): name is string =>
+  typeof name === "string" && /\.tsx?$/.test(name) &&
+  /^\s*export \* from "@vxture\/ruyin-workbench-ui\/[^"\n]+";\s*$/.test(readFileSync(source + name, "utf8")),
+).map(name => "src/" + name.replaceAll("\\", "/"));
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -19,13 +28,22 @@ export default defineConfig({
     },
   },
   test: {
+    root: fileURLToPath(new URL("../../", import.meta.url)),
+    // Exercise the moved implementation, rather than its emitted declaration/source map.
+    alias: [
+      { find: /^react(\/.*)?$/, replacement: fileURLToPath(new URL("./node_modules/react", import.meta.url)) + "$1" },
+      { find: /^react-dom(\/.*)?$/, replacement: fileURLToPath(new URL("./node_modules/react-dom", import.meta.url)) + "$1" },
+      { find: /^@vxture\/ruyin-workbench-ui$/, replacement: fileURLToPath(new URL("../../packages/workbench-ui/src/index.ts", import.meta.url)) },
+      { find: /^@vxture\/ruyin-workbench-ui\/(.+)$/, replacement: fileURLToPath(new URL("../../packages/workbench-ui/src/", import.meta.url)) + "$1" },
+    ],
+    include: ["apps/ui-workspace/src/**/*.test.{ts,tsx}", "packages/workbench-ui/src/**/*.test.{ts,tsx}"],
     environment: "jsdom",
-    setupFiles: ["./src/vitest.setup.ts"],
+    setupFiles: [fileURLToPath(new URL("./src/vitest.setup.ts", import.meta.url))],
     css: false,
     coverage: {
       provider: "v8",
-      include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/**/*.test.{ts,tsx}", "src/main.tsx", "src/vitest.setup.ts"],
+      include: ["apps/ui-workspace/src/**/*.{ts,tsx}", "packages/workbench-ui/src/**/*.{ts,tsx}"],
+      exclude: ["**/*.test.{ts,tsx}", "**/vitest.setup.ts", "packages/workbench-ui/src/index.ts", "apps/ui-workspace/src/main.tsx", ...shims.map(name => "apps/ui-workspace/" + name)],
       // TD-031 的六个大组件、api.ts/chain.ts/sse.ts 都到了 100% 或接近
       // 100%（细节见前几批提交信息）。这批把剩下几个真能测的分支也补上了：
       // pending.tsx 的 waitedFor() 时间分档（刚刚/分钟/小时/天，此前一次都

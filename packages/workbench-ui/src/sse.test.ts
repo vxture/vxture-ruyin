@@ -8,8 +8,8 @@
  */
 
 import { expect, test } from "vitest";
-import { extractSseEvents } from "./sse";
-import type { RuntimeEvent } from "./api";
+import { extractSseEvents } from "./sse.js";
+import type { RuntimeEvent } from "./api.js";
 
 void test("extractSseEvents: a single complete frame in one chunk", () => {
   const { events, buffer } = extractSseEvents("", 'data: {"kind":"task"}\n\n');

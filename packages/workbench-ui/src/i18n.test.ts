@@ -5,8 +5,8 @@
  * 回退链、复数、插值、以及首次启动挑哪门语言。
  */
 import { expect, test, vi } from "vitest";
-import { preferredLocale, translate, type MessageKey } from "./i18n";
-import { LANGUAGE_KEY, readLocale, writeLocale } from "./locale-provider";
+import { preferredLocale, translate, type MessageKey } from "./i18n.js";
+import { LANGUAGE_KEY, readLocale, writeLocale } from "./locale-provider.js";
 
 test("translate: 两门语言各取各的句子", () => {
   expect(translate("zh-CN", "update.current")).toBe("已是最新版本");

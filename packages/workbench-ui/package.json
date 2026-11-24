@@ -1,0 +1,59 @@
+{
+  "name": "@vxture/ruyin-workbench-ui",
+  "version": "0.2.1",
+  "description": "Shared original project workflow, settings, review and product presentation for RUYIN hosts and product Web applications.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vxture/vxture-ruyin.git",
+    "directory": "packages/workbench-ui"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./styles.css": "./src/styles.css",
+    "./package.json": "./package.json",
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src/styles.css",
+    "!dist/**/*.test.*",
+    "!dist/vitest.setup.*"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@vxture/design-system": "^12.10.3"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.6",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitest/coverage-v8": "^4.1.12",
+    "jsdom": "^30.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.12",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@vxture/design-system": "^12.10.3"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --coverage"
+  }
+}

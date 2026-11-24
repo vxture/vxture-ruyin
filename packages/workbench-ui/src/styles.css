@@ -1,0 +1,2427 @@
+/* Ruyin Workspace UI - business-assembly styles only (DS usage contract §6).
+   All L0/L1 visuals come from @vxture/design-system: what lives here is layout
+   glue, the desktop titlebar contract, and entity-specific assembly. Colors
+   and spacing reference the DS T2 semantic layer only - the private --ry-*
+   palette retired with the shell redesign, and dark mode needs no local
+   redefinitions (both DS modes carry the full 132-key set). */
+
+/* Tailwind must scan the app's own sources for utility classes used in tsx
+   (the DS globals' @source only covers the DS dist). */
+@source "./";
+
+html, body, #root { height: 100%; }
+body {
+  background: var(--background);
+  color: var(--foreground);
+  margin: 0;
+}
+#root { display: flex; flex-direction: column; }
+
+/* ---------- desktop titlebar (Electron frameless window) ---------- */
+/* The ShellHeader doubles as the drag region; every interactive cluster
+   inside opts out. The spacer clears the Windows caption-button overlay
+   (shell titleBarOverlay, 48px high) so trailing controls never sit under
+   the native buttons. */
+.titlebar { -webkit-app-region: drag; app-region: drag; }
+.titlebar .no-drag { -webkit-app-region: no-drag; app-region: no-drag; }
+.caption-spacer { width: 138px; height: 1px; flex-shrink: 0; }
+/* （.titlebar-wco 已随 PWA 一并移除：装成 PWA 会得到一个不启动运行时的应用
+   图标。桌面应用只有 Electron 壳一个入口；普通浏览器窗口的 .app-topbar 不带
+   .titlebar，是纯工具条，不拖拽不避让。） */
+
+/* ---------- login screen (first surface) + splash ---------- */
+.splash {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  background: var(--background);
+}
+.splash-mark { width: 88px; height: 88px; opacity: 0.9; }
+/* 单条标题栏模式下无 header 页面（登录/加载）的不可见拖拽带。 */
+.dragstrip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  z-index: 40;
+}
+
+.login-screen {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+}
+/* 语言在右上角：登录页只有一个动作（登录），语言是次要的，不该在版面中央
+   与它抢。高度与标题栏那条拖拽带对齐，所以它看起来就在标题栏里。 */
+.login-top {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: var(--spacing-xs) var(--spacing-md);
+  min-height: var(--spacing-control-lg);
+}
+.language-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.language-menu:hover { color: var(--foreground); background: var(--accent); }
+.language-menu-name { white-space: nowrap; }
+
+.login-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-md);
+  padding: 0 var(--spacing-lg);
+  text-align: center;
+}
+.login-mark {
+  width: 120px;
+  height: 120px;
+  margin-bottom: var(--spacing-xs);
+}
+.login-title {
+  font-size: var(--heading-2-font-size);
+  font-weight: 700;
+}
+.login-sub {
+  color: var(--muted-foreground);
+  font-size: var(--body-md-font-size);
+  max-width: 30em;
+}
+.login-btn {
+  min-width: 220px;
+  margin-top: var(--spacing-sm);
+}
+.login-hint { margin-top: var(--spacing-2xs); }
+.desktop-devices { min-width: 0; text-align: left; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.desktop-device-header { padding: var(--spacing-xl) var(--spacing-xl) var(--spacing-lg); }
+.desktop-device-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-md); }
+.desktop-device-header-actions { display: flex; align-items: center; gap: var(--spacing-xs); flex-shrink: 0; }
+.desktop-device-heading h1, .desktop-device-heading h2 { margin: 0; font-size: var(--heading-3-font-size); font-weight: 600; }
+.desktop-device-count { flex-shrink: 0; padding: var(--spacing-2xs) var(--spacing-sm); border-radius: var(--radius-md); background: var(--muted); color: var(--muted-foreground); font-size: var(--body-sm-font-size); font-variant-numeric: tabular-nums; }
+.desktop-device-description { margin: var(--spacing-sm) 0 0; color: var(--muted-foreground); font-size: var(--body-md-font-size); line-height: 1.65; }
+.desktop-device-body { padding: 0 var(--spacing-xl) var(--spacing-lg); }
+.desktop-device-list { border: 1px solid var(--border); border-radius: var(--radius-md); margin: 0; padding: 0; min-width: 0; overflow: hidden; }
+.desktop-device-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) 24px; gap: var(--spacing-md); align-items: center; padding: var(--spacing-md); border-bottom: 1px solid var(--border); cursor: pointer; }
+.desktop-device-row:last-of-type { border-bottom: 0; }
+.desktop-device-row:hover { background: var(--muted); }
+.desktop-device-row:focus-within { outline: 2px solid var(--ring); outline-offset: -2px; }
+.desktop-device-row.is-selected { background: var(--accent); box-shadow: inset 3px 0 var(--primary); }
+.desktop-device-row:has(input:disabled) { cursor: default; color: var(--muted-foreground); }
+.desktop-device-row input { width: 16px; height: 16px; margin: 0; justify-self: center; accent-color: var(--primary); }
+.desktop-device-icon { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--background); color: var(--muted-foreground); flex-shrink: 0; }
+.is-selected .desktop-device-icon { color: var(--primary); }
+.desktop-device-info { display: flex; flex-direction: column; gap: var(--spacing-2xs); min-width: 0; overflow-wrap: anywhere; }
+.desktop-device-name { font-size: var(--body-md-font-size); font-weight: 600; white-space: pre-wrap; }
+.desktop-device-meta { font-size: var(--body-sm-font-size); color: var(--muted-foreground); line-height: 1.6; }
+.desktop-device-meta time { font-variant-numeric: tabular-nums; }
+.desktop-device-note { display: flex; align-items: flex-start; gap: var(--spacing-xs); margin: var(--spacing-md) 0 0; color: var(--muted-foreground); font-size: var(--body-sm-font-size); line-height: 1.6; }
+.desktop-device-note svg { flex-shrink: 0; margin-top: var(--spacing-2xs); }
+.desktop-device-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-md); padding: var(--spacing-md) var(--spacing-xl); border-top: 1px solid var(--border); }
+.desktop-device-secondary { display: flex; flex-wrap: wrap; gap: var(--spacing-xs); }
+.desktop-device-placeholder { display: flex; flex-direction: column; align-items: flex-start; gap: var(--spacing-sm); padding: var(--spacing-lg); }
+.desktop-device-confirm-computer { display: flex; align-items: center; gap: var(--spacing-md); padding: var(--spacing-md); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.device-access-screen { overflow-y: auto; }
+.device-access-screen .login-top { justify-content: space-between; padding: var(--spacing-md) var(--spacing-xl); border-bottom: 1px solid var(--border); }
+.device-access-brand { display: flex; align-items: center; gap: var(--spacing-sm); font-size: var(--heading-3-font-size); font-weight: 600; letter-spacing: .16em; }
+.device-access-brand img { width: 28px; height: 28px; }
+.device-access-screen .login-center { flex: 1 0 auto; align-items: stretch; width: min(100%, 35rem); margin-inline: auto; padding: var(--spacing-xl) var(--spacing-lg); box-sizing: border-box; }
+.device-access-screen .login-foot { padding: var(--spacing-md) 0; }
+@media (max-width: 620px) {
+  .desktop-device-header { padding: var(--spacing-lg); }
+  .desktop-device-heading { align-items: flex-start; flex-wrap: wrap; gap: var(--spacing-xs); }
+  .desktop-device-body { padding: 0 var(--spacing-lg) var(--spacing-lg); }
+  .desktop-device-row { grid-template-columns: 32px minmax(0, 1fr) 24px; gap: var(--spacing-sm); }
+  .desktop-device-row .desktop-device-icon { width: 32px; height: 32px; }
+  .desktop-device-footer { flex-wrap: wrap; padding: var(--spacing-md) var(--spacing-lg); }
+  .desktop-device-footer > button { margin-left: auto; }
+}
+/* 「换个账号登录」：次级动作，不该长得像第二个主按钮 —— 一屏上两个同等分量的
+   按钮，等于没有主动作。做成一条可按的文字，与下面那句说明同宽同色。 */
+.login-alt {
+  margin-top: var(--spacing-sm);
+  background: none;
+  border: 0;
+  padding: var(--spacing-2xs);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font: inherit;
+  color: inherit;
+}
+.login-alt:hover:not(:disabled) { color: var(--foreground); }
+/* 停用态（TD-070）：灰掉并去掉下划线 —— 下划线是「这里可以按」的信号，留着
+   它就等于一边说不可用一边继续邀请人按。外层 span 接管指针样式与提示，因为
+   停用的按钮不派发鼠标事件。 */
+.login-alt:disabled {
+  cursor: default;
+  opacity: 0.45;
+  text-decoration: none;
+}
+.login-alt-wrap { display: inline-block; cursor: help; }
+/* 登录按钮下面那句状态说明（「会直接用浏览器里那个账号」+ 换人的路）。
+   宽度跟 .login-sub 一致，免得它比标语还长、把这一屏的重心带偏。 */
+.login-note {
+  margin-top: var(--spacing-sm);
+  max-width: 30em;
+  text-align: center;
+}
+/* （.login-local 已随「暂不登录，先本地使用」一并移除。） */
+.login-foot {
+  display: flex;
+  justify-content: center;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-lg) 0;
+  font-size: var(--body-sm-font-size);
+}
+.login-foot a { color: var(--muted-foreground); text-decoration: none; }
+.login-foot a:hover { color: var(--foreground); }
+
+/* ---------- shared assembly ---------- */
+.row {
+  display: flex;
+  gap: var(--spacing-xs);
+  align-items: center;
+  margin: var(--spacing-xs) 0;
+  flex-wrap: wrap;
+}
+.row > input { flex: 1; }
+
+.mono {
+  font-family: var(--code-md-font-family, ui-monospace, monospace);
+  font-size: var(--code-sm-font-size, 12px);
+  word-break: break-all;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+}
+.card.clickable { cursor: pointer; }
+.card.clickable:hover { border-color: var(--ring); }
+
+.error-box {
+  border: 1px solid var(--destructive);
+  border-left-width: 3px;
+  background: var(--destructive-muted, transparent);
+  color: var(--destructive-text, var(--destructive));
+  border-radius: var(--radius-md);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  margin: var(--spacing-xs) 0;
+  font-size: var(--body-sm-font-size);
+  word-break: break-all;
+}
+/* 页面顶部那条提醒**要能关掉**（owner 2026-09-04 第 2 条）：它讲的是刚才那个
+   动作的结果，读完就没用了；不给关，它会一直占着内容区顶部，直到用户换一页。
+   只有页面级的这一条能关 —— 贴在某个失败操作旁边的错误框不给关闭按钮，那不是
+   通知，是那块内容当前的状态。 */
+.notice-bar { display: flex; align-items: flex-start; gap: var(--spacing-sm); }
+.notice-bar > span { min-width: 0; flex: 1; }
+.notice-bar-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -2px -4px -2px 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.notice-bar-close:hover { opacity: 1; background: var(--surface-3, rgba(127, 127, 127, 0.14)); }
+
+/* 语气块：淡底 + 深字 + 左边一条边，与 .pcard-alert--warning 同一组语气 token。
+   用在「装之前要先知道」这类叮嘱上 —— 它比灰色小字重，比错误条轻。 */
+.set-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  margin: var(--spacing-sm) 0 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--body-sm-font-size);
+  line-height: 1.5;
+}
+.set-callout > svg { flex-shrink: 0; margin-top: 1px; }
+.set-callout--warning {
+  color: var(--warning-muted-foreground);
+  background: var(--warning-muted);
+  border: 1px solid var(--warning-border);
+  border-left-width: 3px;
+}
+
+.ws-name { font-weight: 600; }
+.ws-meta-line {
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  font-family: var(--code-sm-font-family, ui-monospace, monospace);
+  word-break: break-all;
+}
+
+/* Product identifier line under a card title (bidproposal@1.0.0). Block so it
+   drops below the single-line description while inheriting the title column's
+   indent; one shade fainter than the description; mono, truncates on overflow. */
+.product-ident {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--code-sm-font-family, ui-monospace, monospace);
+  font-size: var(--code-sm-font-size, 12px);
+  color: var(--muted-foreground);
+  opacity: 0.68;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* ListCard 变体：description 单行装不下第二行，标识落 meta 区，左缩进
+   = ListCard 的 icon 列宽 + gap（固定），把标识左缘对齐标题左缘。 */
+.product-ident--inset {
+  margin-top: 0;
+  margin-left: 26px;
+}
+
+/* ---------- home ---------- */
+.home {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xl);
+}
+
+/* ---------- 运行状态：三张压扁的卡，并排占一行 ---------- */
+/* 三件事本来就是三件事 —— 合并成一根条，读者得自己去数分隔点在哪；卡片边界
+   替他分好。高度按「出问题时要多醒目」来定，不是按平时能占多少来定，所以
+   padding 收到最小、字号降一档，颜色全部收在那个状态点上。 */
+.status-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@media (max-width: 720px) {
+  .status-cards { grid-template-columns: 1fr; }
+}
+/* 图标一列占两行，右边名称 / 结论两行左对齐；留白放宽（owner 2026-09-03 定）。 */
+/* 淡化（owner 2026-09-16）：这三条平时都对，不该跟下面的智能体卡片抢注意力
+   ——去掉实色底、只留描边。**只淡「一切正常」那两种**（ok / muted），warn /
+   danger 不淡：淡化是为了让「不出事」的日常状态往后退，但出事时这一屏
+   本来就是唯一的红点来源，不能让「整体淡化」把警示一起淡没了。 */
+.status-card {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-width: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+}
+.status-card--ok, .status-card--muted { opacity: 0.82; }
+.status-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-3, rgba(127, 127, 127, 0.12));
+  color: var(--color-muted-foreground);
+  flex-shrink: 0;
+}
+.status-card--ok .status-card-icon { color: var(--color-success, #22c55e); }
+.status-card--warn .status-card-icon { color: var(--color-warning, #f59e0b); }
+.status-card--danger .status-card-icon { color: var(--destructive); }
+.status-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.status-card-body {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-muted-foreground);
+}
+.status-dot--ok { background: var(--color-success, #22c55e); }
+.status-dot--warn { background: var(--color-warning, #f59e0b); }
+.status-dot--danger { background: var(--destructive); }
+.status-dot--muted { background: var(--color-muted-foreground); }
+.status-label {
+  font-size: var(--body-sm-font-size);
+  color: var(--color-muted-foreground);
+}
+.status-value {
+  font-size: var(--body-sm-font-size);
+  font-weight: 600;
+}
+/* 细节比结论再弱一档：它是解释，不是结论本身。 */
+.status-detail {
+  font-size: var(--body-sm-font-size);
+  color: var(--color-muted-foreground);
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ---------- 产品卡 ---------- */
+/* 一条对齐轴：内容全部左对齐，只有两处靠右 —— 标题行的状态徽章、卡片底部的
+   动作。这两处是卡片的固定位置，扫一列卡片时不必每张重新找。 */
+/* 渐变底，比设置页那份更深一档（owner 2026-09-16）：`--surface-1` →
+   `--background`——浅色 neutral-200 到 neutral-100，深色 neutral-900 到
+   neutral-950，纯中性面阶、不带品牌色相（同一条 09-16 的「深色不要蓝」）。
+   设置页那份是 `--card` → `--surface-1`，浅一档；两页各自的渐变起点刚好接上
+   对方的终点，深浅关系读起来是连续的，不是各画各的。 */
+.pcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 12px);
+  background: linear-gradient(155deg, var(--surface-1), var(--background));
+  min-width: 0;
+}
+.pcard--blocked { opacity: 0.82; }
+.pcard-product-logo { width: 100%; height: 100%; object-fit: contain; border-radius: inherit; }
+
+/* 图标占两行（名称行 + 标识行），右边两行行距收紧，徽章靠右。
+   一条对齐轴：图标列宽 40 + gap 12 = 52px，说明、警示、项目数全部缩进到它。 */
+.pcard-head {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--spacing-sm);
+  min-width: 0;
+  row-gap: var(--spacing-2xs, 4px);
+}
+.pcard-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-3, rgba(127, 127, 127, 0.12));
+  color: var(--color-foreground);
+  flex-shrink: 0;
+}
+.pcard-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  /* 名称至少留 140px 再让徽章换行；徽章推到行尾：状态永远在标题行右端。 */
+  flex: 1 1 140px;
+  margin-right: auto;
+}
+.pcard-title {
+  margin: 0;
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
+  color: var(--color-foreground);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pcard-badges {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--spacing-2xs, 4px);
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+/* 组内 2px、组间 8px、区块间 12px（owner 2026-09-04 定的三档呼吸感）。 */
+.pcard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 0;
+  min-width: 0;
+}
+/* 字号四级：名称 14/600 前景 · 说明与项目数 13/400 前景 85% · 标识与徽章 12 muted · 警示 13 warning。 */
+.pcard-desc {
+  color: var(--color-foreground);
+  opacity: 0.85;
+  font-size: var(--body-sm-font-size);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pcard--selected {
+  border-color: var(--primary, var(--color-primary));
+  box-shadow: 0 0 0 1px var(--primary, var(--color-primary)) inset;
+}
+.pcard { cursor: default; }
+.pcard-desc {
+  margin: 0;
+  font-size: var(--body-sm-font-size);
+  color: var(--color-muted-foreground);
+}
+/* 副标题：产品标识 + 版本连成一句。它们回答同一个问题（哪个产品的哪一版），
+   拆到两处会逼读者把一句话的两半自己拼回去。 */
+.pcard-ident {
+  margin: 0;
+  font-family: var(--code-sm-font-family, ui-monospace, monospace);
+  font-size: var(--code-sm-font-size, 12px);
+  line-height: 1.25;
+  color: var(--color-muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 警示：与说明分得开 —— warning 语气的色 + 图标 + 浅底，不是又一行灰字。 */
+.pcard-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-2xs, 4px);
+  margin: 0;
+  padding: var(--spacing-2xs, 4px) var(--spacing-xs);
+  border-radius: var(--radius-sm, 6px);
+  font-size: var(--body-sm-font-size);
+  line-height: 1.4;
+}
+/* 走 DS 的 warning 语气三件套（底 / 字 / 边），与 .error-box 用 destructive
+   那一组同一个写法。此前拿 `--color-warning` 当**文字色** —— 那是语气的原色
+   （亮琥珀），深色底上勉强能读，浅色卡上就是一行发黄发绿的字（owner 2026-09-04
+   指出）。muted 那一组才是给「淡底 + 深字」的贴片准备的，两个模式各自定义过。 */
+.pcard-alert--warning {
+  color: var(--warning-muted-foreground);
+  background: var(--warning-muted);
+  border: 1px solid var(--warning-border);
+}
+.pcard-alert > svg { flex-shrink: 0; margin-top: 2px; }
+
+/* 横线下这一行：左边项目数，右边动作。一行说完，不再上下叠成两行。 */
+.pcard-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: var(--spacing-xs);
+  border-top: 1px solid var(--color-border);
+}
+/* 左下角一组元信息，顶头对齐图标（owner 2026-09-04 定）：版本淡、hover 亮；
+   关键数字紧随其后留一段；单位「项目」再小再淡一档。 */
+.pcard-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+.pcard-install-state,
+.pcard-entry-note {
+  font-size: var(--body-sm-font-size);
+  color: var(--color-muted-foreground);
+}
+.pcard-install-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  white-space: nowrap;
+}
+.pcard-version {
+  font-family: var(--code-sm-font-family, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+.pcard:hover .pcard-version { opacity: 1; }
+.pcard-count {
+  font-size: var(--body-sm-font-size);
+  color: var(--color-foreground);
+  opacity: 0.85;
+  white-space: nowrap;
+}
+.pcard-count b { font-weight: 600; font-size: var(--body-md-font-size); }
+.pcard-unit {
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  margin-left: 1px;
+}
+.pcard-count b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-foreground);
+}
+/* 动作靠右，主动作在最右 —— 读到卡片末尾手停在右侧，最常点的东西就该在那里。 */
+.pcard-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-left: auto;
+}
+/* 主按钮加宽：它是这张卡存在的理由，不该和一个辅助按钮一样窄。 */
+.pcard-open { min-width: 96px; }
+/* 低频文字链：再小再淡一档（owner 2026-09-04 定），hover 才回到正常深浅。 */
+.pcard-link {
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+  opacity: 0.7;
+  text-decoration: none;
+}
+.pcard-link:hover { color: var(--color-foreground); opacity: 1; text-decoration: underline; }
+
+/* 标题行右侧的动作簇：主按钮在最右。 */
+.section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  /* 动作簇不参与挤压：窄窗口下宁可自己换行，也不能把标题压成一列字。 */
+  flex-shrink: 0;
+}
+.install-inline { display: inline-flex; }
+.install-inline input[type="file"] { display: none; }
+.install-inline, .install-review { align-items: center; flex-wrap: wrap; gap: 8px; }
+.install-review { display: inline-flex; }
+
+/* 推荐区靠底：订阅少时贴着页面底部，多时随内容顺延。父容器高度是自适应的，
+   百分比 min-height 拿不到参照，所以按视口算：视口减去标题栏与页面上下留白。 */
+.home { min-height: calc(100vh - 48px - 2 * var(--spacing-lg, 24px)); }
+.home-catalog { margin-top: auto; }
+
+/* 推荐卡的 meta：分类一行、能力标签一行、动作一行。三行各说一件事，
+   挤在一行里读起来是一串没有断句的词。 */
+.catalog-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+.catalog-category {
+  font-size: var(--body-sm-font-size, 12px);
+  color: var(--muted-foreground);
+}
+.catalog-caps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2xs, 4px);
+}
+.catalog-meta > button {
+  align-self: flex-start;
+}
+
+/* 安装本地包：功能要留着，但它是维护动作，不该长得像主路径。 */
+.install-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  padding-top: var(--spacing-xs);
+}
+/* 原生 file input 藏起来，由旁边那个 DS 按钮代打开。
+   它由浏览器渲染，文案跟**浏览器语言**走（「Choose File / No file chosen」），
+   改不掉，而且每个平台长得还不一样 —— 一句英文夹在中文界面里。
+   用 display:none 而不是「视觉隐藏」：视觉隐藏会留在 Tab 序里，成为一个看不见
+   却能聚焦的控件；这里按钮才是那个控件。 */
+.install-row input[type="file"] {
+  display: none;
+}
+/* 左右 41px 是 DS 容器的默认留白；在只有一个内容列的工作台里那是纯损耗。
+   纵向同理：header 之下立刻是内容，不需要再垫一段。 */
+/* 内容区左右各 32px（owner 2026-09-04 定）：与侧栏、与右边界都隔开一段。 */
+.workbench-page {
+  padding-block: var(--spacing-md);
+  padding-inline: 32px;
+  max-width: none;
+}
+
+/* ---------- workspace: business-state stepper ---------- */
+.stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+}
+.step { display: flex; align-items: center; gap: var(--spacing-2xs); }
+.step-line { width: 22px; height: 1px; background: var(--border); }
+.step-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+  border: 1px solid var(--border);
+}
+.step.done .step-dot { background: var(--success, var(--primary)); border-color: transparent; }
+.step.current .step-dot { background: var(--primary); border-color: transparent; }
+.step-label { font-size: var(--body-sm-font-size); color: var(--muted-foreground); }
+.step.current .step-label { color: var(--foreground); font-weight: 600; }
+
+.audit-scroll { max-height: 420px; overflow: auto; }
+.audit-table { font-size: var(--code-sm-font-size, 12px); }
+.audit-table td { word-break: break-all; }
+
+/* NativeSelect wrapper widths (width lives on the wrapper, per DS contract). */
+.sel-narrow { max-width: 220px; width: 100%; }
+.sel-audit { max-width: 260px; width: 100%; }
+.sel-lang { max-width: 200px; width: 100%; }
+
+/* ---------- 原生 select 的下拉列表：必须自带底色 ----------
+   `<option>` 的背景默认是**透明**的，而展开的那张列表由**系统**绘制，不是页面。
+   于是在暗色模式下会出现这一幕：文字从 select 那里继承到近白色
+   （`text-foreground`），而列表的底色跟的是 Windows 的应用主题 —— 系统是浅色时
+   就是白底白字，一个字都看不见（owner 2026-09-07 在「能力平台 → 技能 → 全部来源」
+   上报的）。
+
+   为什么 select 自己的背景救不了它：那是一个**带透明度**的颜色
+   （`dark:bg-input/30`），透明背景给不了列表一个实底，系统照样用自己的。
+
+   为什么 `color-scheme: dark` 也救不了：根上确实是 dark，但 Windows 上这张列表
+   是 OS 级菜单，跟的是系统主题而不是页面的 color-scheme。
+
+   所以只有一条路：给 option 一个**实色**底与前景。写在这里而不是某一个页面上 ——
+   全应用的每一个 `<select>` 都是同一个 NativeSelect，同一个毛病；只修用户报的
+   那一个，剩下的仍然看不见。
+
+   **owner 2026-09-08 在装起来的程序上复核确认已修好。** 记这一句是因为这条
+   修复**没有、也不可能有自动化测试**：展开的那张列表是 Windows 画的，不在
+   页面里，jsdom 里根本不存在。人眼看过就是它能拿到的全部证据 —— 不写下来，
+   下一个人只会看到「没有测试」，无从知道它到底验没验过。 */
+select option,
+select optgroup {
+  background-color: var(--color-card);
+  color: var(--color-foreground);
+}
+
+/* ---------- settings ---------- */
+/* （.settings / .settings-nav / .settings-content 已随页内那根竖直导航一并
+   删除：设置有了自己的框架，分区在侧栏里。留着这些规则，下一个人会以为页面
+   里还该有第二根导航。） */
+/* 设置页各板块用渐变底，不是纯色（owner 2026-09-15）：浅色模式下大片纯白显得
+   平。**不用 DS 的 `--gradient-card-*`**（owner 2026-09-16 指出深色那一档
+   `brand-950` 是藏青色，深色模式不该带蓝）——改用纯中性面阶 `--card` →
+   `--surface-1`：浅色白到浅灰（neutral-200）的轻过渡，深色 neutral-800 到
+   neutral-900 的过渡，都不带品牌色相，两套值同样由 DS 按主题给。**只在设置页
+   生效**（选择器带 `.settings-page` 前缀），不改首页 / 项目面板里同样用
+   `.card` 的卡片观感——首页那份更深一档，见「首页」小节。 */
+.settings-page .card {
+  background: linear-gradient(155deg, var(--card), var(--surface-1));
+}
+/* ---------- 单行类的行：一处定义，账户 / 通用设置 / 软件更新 共用 ----------
+   行高一个值、虚下划线一种画法（owner 2026-09-04 第 7 条：全局一致）。
+   `.setting-row` 与 `.fact-row` 都是它的皮肤 —— 一个放控件，一个放事实，
+   但行高、分隔线、名称列的宽度必须一样，否则同一个设置页里三种页面三种节奏。 */
+/* 度量取自参考稿《账号信息页重排方案》第三节：名称列 96px、控件统一 280px
+   定宽（**不全宽**）、行最小高 44px、行间虚线、面头与内容之间一条实线。 */
+:root {
+  --set-row-h: 44px;
+  --set-label-w: 96px;
+  --set-control-w: 280px;
+}
+
+/*
+ * 名称列的宽度**按语言走**（owner 2026-09-17 在「关于 › 本机配置」上看到的）。
+ *
+ * 96px 是按中文量的（参考稿第三节）。英文落地之后它不够了 ——「Motherboard /
+ * BIOS」「Operating system」在 96px 里会折成两行，于是那一行比别的高一截，
+ * 全局一个行高当场破掉。
+ *
+ * 不把它统一调大：那会让中文界面凭空多出一截留白，而那个节奏是量过的。
+ * 挂在 `<html lang>` 上 —— 那个属性本来就跟着语言走（locale-provider.tsx），
+ * 不必为它另立一个状态。
+ */
+:root[lang="en"] {
+  --set-label-w: 148px;
+}
+
+
+/* ---------- 密度三档：把「宽松」真正撑开（owner 2026-09-04）----------
+   实测 @vxture/design-tokens@3.0.0：`.density-comfortable` 的**内缩尺度与默认
+   逐字相同** —— `--space-2xs..lg` 与 `--space-row-*` 一个值都没变，只有
+   `--space-control-*` 抬了一档（分段控件 32 → 36px）。于是卡片内边距 16/16、
+   卡片间距 10/10、板块间距 26/26 在两档之间纹丝不动，用户看到的就是「宽松基本
+   等于默认」。**这不是本仓库的样式问题，是上游尺度的缺口**（TD-040）。
+
+   另一半是我们自己的：`--set-row-h` 写死 44px，于是连「紧凑」都推不动设置页
+   的行 —— 三档下行高都是 44。
+
+   这里的做法：只定义 **ruyin 自己的量**与只改**ruyin 自己的容器**（外加 DS 的
+   `.card` 内边距，那是我们在自己的壳里用它）。**不改写 `--space-*` /
+   `--spacing-*` 的尺度** —— 那等于在产品仓里把组织级尺度分叉，上游哪天补上
+   宽松档，两套值会打架。上游补齐后这一段整体删除。 */
+html.density-compact { --set-row-h: 36px; }
+html.density-comfortable { --set-row-h: 52px; }
+html.density-comfortable .card { padding: var(--spacing-lg); }
+html.density-comfortable .set-block { gap: var(--spacing-md); }
+html.density-comfortable .set-block-body { padding-top: var(--spacing-md); }
+html.density-comfortable .settings-page { gap: var(--spacing-lg); }
+/* 首页那几张卡也要跟着松：它们用的是 `--spacing-sm/md`，而这两个值在默认与
+   宽松之间是同一个数（见上面那段），所以不逐个抬一下，首页在两档之间一模一样。
+   这份名单**是有意逐个列出的**：它标出了「哪些是 ruyin 自己的容器」，上游补齐
+   宽松档之后照着删就行。 */
+html.density-comfortable .status-cards { gap: var(--spacing-md); }
+html.density-comfortable .status-card { padding: var(--spacing-md) var(--spacing-lg); }
+html.density-comfortable .pcard { padding: var(--spacing-lg); gap: var(--spacing-md); }
+html.density-comfortable .set-row,
+html.density-comfortable .fact-row,
+html.density-comfortable .crypto-chain li { padding: var(--spacing-xs) 0; }
+/* 设置页那一摞卡片：原来是 Tailwind 的 `gap-md`，写死在类名里就跟不了密度。 */
+.settings-page { display: flex; flex-direction: column; gap: var(--spacing-md); }
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  min-height: var(--set-row-h);
+  /* 4px 而不是 8px：控件本身 36px，加 8+8 会把这一行顶到 52，于是带控件的行
+     比纯文字行高一截 —— 全局一个行高（owner 第 7 条）就得让 36+4+4 正好落在
+     44 上，纯文字行则由 min-height 撑到同一个值。 */
+  padding: var(--spacing-2xs) 0;
+  /* 线画在**下面**，每一行都有 —— 画在上面时最后一行就没有线，那正是
+     owner 2026-09-04 第 1 条说的「不一致」。 */
+  border-bottom: 1px dashed var(--border);
+  font-size: var(--body-sm-font-size);
+  min-width: 0;
+}
+.set-row-label { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
+.set-row-control { flex: 0 0 var(--set-control-w); min-width: 0; }
+.set-row-control > * { width: 100%; }
+/* 下拉框跟着行走小一号：它原来是 14px，同一行右边的分段选项是 12px，两个
+   控件并排却不同号（owner 2026-09-04 第 2 条）。 */
+.set-row-control :is(select, input, textarea) { font-size: var(--body-sm-font-size); }
+/* 分段控件：**选项自己等分容器**。DS 的项是 `flex: 0 1 auto`，于是三个 44px
+   的项挤在 280px 的左边、右边空着（owner 第 4 条，实测 320px 容器里内容
+   132px）。选中态改成实心主色 + 白字：原来是 `--primary` 当文字色压在深色
+   卡上，实测 2.65:1，暗色下读不出来（第 3 条）；白字压主色两种模式都 5.71:1。 */
+.set-row-control [role="radiogroup"] { display: flex; }
+.set-row-control [role="radiogroup"] > [role="radio"] {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+}
+.set-row-control [role="radiogroup"] > [role="radio"][aria-checked="true"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.set-row-value { min-width: 0; word-break: break-word; }
+/* 说明单独一行、整行宽 —— 不再挤进名称列里换行（owner 第 10 条）。 */
+/* 板块底部/行下的说明文字：**一套间距、一套宽度**（owner 2026-09-04 第 1、4 条）。
+   此前三种说明各自一套 —— `.set-note` 上边距 8px、`.crypto-note` 与
+   `.set-row-note` 都是 0，于是「数据加密」「账号信息」「推理策略」的说明贴在
+   上一行的虚线上，只有「存储位置」是留白的。
+   62em 的宽度上限也去掉了：内容区已经比 62em 宽得多，这个上限只会让一句话在
+   半空中折行（第 4 条），而这几处都是一两句解释，不是需要控制行长的长正文。 */
+.set-note,
+.crypto-note,
+.set-row-note {
+  margin: var(--spacing-sm) 0 0;
+  padding-left: 0;
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+}
+
+/* （`.setting-row` 那套纵向行已删：最后一个用它的地方是「更新渠道」，改成
+   共用的 `.set-row` 之后就没人用了。留着它，下一个人会以为设置页有两种行。） */
+
+/* 账户页：头像 + 姓名 / 邮箱 + 右侧「在线修改」。 */
+.account-head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding-bottom: var(--spacing-md);
+}
+.account-avatar { width: 48px; height: 48px; }
+.account-ident { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-right: auto; }
+.account-name { font-weight: 600; font-size: var(--title-md-font-size, 16px); }
+.account-email { color: var(--muted-foreground); font-size: var(--body-sm-font-size); }
+
+/* 居中（owner 2026-09-16：又改回来了——09-15 那次改左对齐是「logo 推到中轴、
+   跟条款按钮对不上边」，owner 09-16 真机看过之后明确要求整块居中，包括图形标
+   + 两行文字这一组）。图形标那一行作为一个整体在 `.about-block` 里居中
+   （`align-items: center`），行内每一段文字各自也居中（`text-align: center`）。 */
+.about-block {
+  padding: var(--spacing-lg) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+/* 品牌区到下面这串事实之间的间距，与事实彼此之间的间距，是两个不同量级
+   （owner 2026-09-15：原来是散落的行内像素值 10 / 0 / 12，看起来忽近忽远）：
+   品牌 → 简介，正常一档（这是新的一段）；简介 → 版本号，收紧（同一句「这是
+   什么、哪个版本」）；版本号 → 版权，回到正常一档（版权是另一类信息，法律
+   身份，不是产品身份）。再往下到条款按钮那一档更大的间距不变，那是「另一
+   类东西」（见 `.about-legal`）。 */
+.about-desc { margin-top: var(--spacing-sm); }
+.about-runtime { margin-top: var(--spacing-2xs); }
+.about-copyright { margin-top: var(--spacing-sm); }
+/* 图形标 + 两行文字（RUYIN / Intelligent Workbench），logo 高度跨两行。 */
+.about-brand { display: flex; align-items: center; gap: var(--spacing-md); }
+.about-mark { width: 56px; height: 56px; flex-shrink: 0; }
+.about-brand-text { display: flex; flex-direction: column; gap: 2px; text-align: center; }
+/* RUYIN 用品牌色（owner 2026-09-15）：只在这一处，不改 `.brand-name` 本身——
+   登录页用同一个类，那一屏的配色是另一件事，不该被这里的改动带着变。
+   深色模式改回白色（owner 2026-09-16）：浅色保持品牌蓝，深色换成 `--foreground`
+   （深色主题下即近白色）——`.dark`/`:root.dark` 是 DS 实际用的深色选择器
+   （见 @vxture/design-tokens 的 color-semantic.css），不是这份文档自己另起
+   一套判断。 */
+.about-brand-text .brand-name { color: var(--primary); }
+.dark .about-brand-text .brand-name,
+:root.dark .about-brand-text .brand-name {
+  color: var(--foreground);
+}
+
+.logo-cn { font-weight: 700; font-size: var(--title-xl-font-size, 20px); }
+.logo-en { color: var(--muted-foreground); letter-spacing: 0.18em; }
+/* 品牌字标与标语：RUYIN 大写、字距拉开；Intelligent Workbench 弱化一档跟在后面。 */
+.brand-name { font-weight: 700; letter-spacing: 0.18em; font-size: var(--title-xl-font-size, 20px); }
+.brand-tag { color: var(--muted-foreground); letter-spacing: 0.04em; font-weight: 400; }
+.login-title .brand-name { font-size: var(--heading-2-font-size); }
+.login-title .brand-tag { display: block; font-size: var(--body-md-font-size); margin-top: 4px; }
+
+/* ---------- sidebar footer identity strip ---------- */
+.user-slot-wrap {
+  padding: var(--spacing-2xs);
+  border-top: 1px dashed var(--border);
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+.user-chip { gap: var(--spacing-xs); }
+.user-chip-avatar { position: relative; flex-shrink: 0; display: inline-flex; }
+.user-chip-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--success, #22c55e);
+  border: 2px solid var(--background);
+}
+.user-chip-dot.off { background: var(--muted-foreground); }
+/* 面板里的动作行行高调大一档（owner 2026-09-16：加了「配额用量」之后信息
+   拥挤）：`ShellPanelRow` 默认给 `h-control-md`（DS 的 Tailwind 工具类，在
+   `@layer utilities` 里）。这条规则不带 `@layer`，级联上天然压过它（未分层
+   的规则总是赢分层的，与源码先后无关），不用跟 tailwind-merge 打交道、
+   也不需要 `!important`——与 `.brand-info-dialog` 那条同一个道理。 */
+.user-panel-row { height: var(--spacing-control-lg); }
+/* 面板抬头：去掉头像之后左对齐，并把标题与下面那一行的间距放开一档
+   （owner 2026-09-17：「让信息别那么拥挤」）。DS 的抬头本来按「左边一个
+   头像、右边两行字」排版，头像一去，那份为圆形留的缩进就成了悬空的留白。 */
+.user-panel-head {
+  text-align: left;
+  padding-block: var(--spacing-xs);
+  row-gap: var(--spacing-2xs);
+}
+.user-panel-head > .min-w-0 { min-width: 0; width: 100%; }
+.user-panel-head .user-panel-organization { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-sm); }
+.user-panel-organization > span:first-child { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.user-panel-head p:has(.user-panel-organization) > span { flex: 1; overflow: visible; white-space: normal; }
+.tenant-panel-head > .min-w-0 { flex: 1; }
+.tenant-panel-head .text-label-lg {
+  flex: 1;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+/* Single line, clear hierarchy: name carries weight+color, the status word
+   drops a size (body-sm) and a color step (muted). Name truncates first. */
+.user-chip-name {
+  font-weight: 600;
+  color: var(--foreground);
+  min-width: 0;
+  max-width: 128px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* （`.user-chip-sub` 已删：那一格只放显示名 —— owner 2026-09-04 第 5 条。
+   头像上的首字 + 显示名 + 再加一个租户名，扫过去像是同一个名字写了两遍。） */
+/* (agent dock retired 2026-08-30: ruyin is the workspace RUNTIME - agents live
+   inside business products' task flows, never as shell-level chrome.) */
+
+/* 未决确认入口（M4）。计数徽标用 danger 而非 accent：它不是装饰，是「有人
+   在等」；语义色与品牌强调色分开，正是为了让需要注意的东西一眼可辨。 */
+.pending-trigger {
+  position: relative;
+  padding-inline: var(--spacing-xs);
+}
+.pending-count {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding-inline: 4px;
+  border-radius: 999px;
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.pending-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.pending-item:hover,
+.pending-item:focus-visible {
+  background: var(--accent);
+}
+.pending-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.pending-item-title {
+  font-weight: 600;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pending-item-kind,
+.pending-item-age {
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  white-space: nowrap;
+}
+.pending-item-age {
+  flex-shrink: 0;
+}
+
+/* 待导入提示（M5 / ADR-015）。用 warning 而非 destructive：这不是出错，是一个
+   不该长期停留的状态；也不用 muted，否则它会被当成可以一直忽略的说明文字。 */
+.notice-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+  border: 1px solid var(--warning, var(--border));
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--card);
+}
+.sidebar-elsewhere {
+  padding: var(--spacing-2xs) var(--spacing-sm);
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 各处一次性失败提示的公共样式（技能 / 工具 / Runos 清单 / 模型平台……）。
+   `--warn` 用于「没查到」这类——它绝不能看起来像「已是最新」，那正是检查更新
+   上一版的毛病；该功能的结果现在搬到页面顶部的 `.update-notice`（见下）了，
+   这里留的是别处仍在用的一般提示行。 */
+.update-line {
+  margin-top: 6px;
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+  line-height: 1.6;
+}
+.update-line--warn { color: var(--warning, var(--destructive)); }
+
+/* 检查更新的结果（owner 2026-09-15：搬到设置页顶部，自动检查与手动检查共用
+   这一条）。「有新版本」给两个动作（升级 / 关闭）；其余几档只给一个叉号关掉。 */
+.update-notice { margin: 0 0 var(--spacing-sm); }
+/* 文字那一列吃掉剩余宽度，动作（关闭按钮，或「升级 / 关闭」）才会贴在最右——
+   与 `.notice-bar` 同一个道理。 */
+.update-notice > span:first-of-type { min-width: 0; flex: 1; }
+.update-notice-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.set-callout--info {
+  color: var(--info-muted-foreground);
+  background: var(--info-muted);
+  border: 1px solid var(--info-border);
+  border-left-width: 3px;
+}
+.set-callout--success {
+  color: var(--success-muted-foreground);
+  background: var(--success-muted);
+  border: 1px solid var(--success-border);
+  border-left-width: 3px;
+}
+
+/* 启动时自动检查的右下角浮层（owner 2026-09-15）：只在「有新版本」时出现，
+   贴屏幕角落，不占正文位置——与页面顶部那条 `.update-notice`（设置页里，
+   四种结果都显示）故意不是同一个视觉形。 */
+.update-toast {
+  position: fixed;
+  right: var(--spacing-lg, 24px);
+  bottom: var(--spacing-lg, 24px);
+  z-index: 60;
+  width: min(340px, calc(100vw - 2 * var(--spacing-lg, 24px)));
+  padding: var(--spacing-md);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--info-border);
+  background: var(--card, var(--background));
+  box-shadow: var(--shadow-notification);
+}
+.update-toast-head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-weight: 600;
+  color: var(--foreground);
+}
+.update-toast-head .notice-bar-close { margin-left: auto; }
+.update-toast-body { margin: var(--spacing-2xs) 0 var(--spacing-sm); color: var(--muted-foreground); }
+.update-toast-actions { display: flex; align-items: center; gap: var(--spacing-sm); }
+
+/* ---------- 项目摘要带（把四个 tab 后面的事实并到一行） ---------- */
+.proj-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-md) var(--spacing-xl);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card);
+}
+.proj-summary-cell { display: flex; align-items: baseline; gap: var(--spacing-xs); }
+.proj-summary-k {
+  font-size: var(--body-sm-font-size);
+  color: var(--color-muted-foreground);
+  white-space: nowrap;
+}
+.proj-summary-v {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--spacing-xs);
+  font-variant-numeric: tabular-nums;
+}
+.proj-summary-flag { font-style: normal; color: var(--color-warning, #d97706); }
+.proj-summary-run { font-style: normal; color: var(--color-info, #2563eb); }
+.proj-summary-ok { font-style: normal; color: var(--color-muted-foreground); }
+/* 标识挤到最后，宽度不够时第一个换行 —— 它是最不需要一眼看到的那个。 */
+.proj-summary-id { margin-inline-start: auto; }
+.proj-summary-id code {
+  font-size: var(--body-sm-font-size);
+  color: var(--color-muted-foreground);
+}
+
+/* ---------- 产品态标题栏身份（进了产品就是进了另一套框架） ---------- */
+.app-ident {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+.app-ident-product {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.app-ident-sep { color: var(--color-muted-foreground); }
+/* 项目名可以被截断，产品名不行：产品是身份，项目是文档。 */
+.app-ident-doc {
+  color: var(--color-muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 品牌锁定式：标记 + RUYIN + Workspace。
+   字标压到 body 尺寸 —— 标题栏是工具条，不是招牌；应用名天天在那里，用户
+   第二次打开之后就不再需要它大声说话，宽度该留给他正在做的事。 */
+.capability-library {
+  padding: var(--spacing-lg);
+  min-width: 0;
+}
+.capability-library-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+.capability-library-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+.capability-library-filters > input { flex: 1 1 160px; width: 160px; min-width: 90px; max-width: 220px; }
+.capability-library-filters > span:not(.capability-filter-count) { flex: 0 1 130px; width: 130px; min-width: 110px; }
+.capability-filter-count { margin-right: auto; flex: 0 0 auto; color: var(--muted-foreground); font-size: var(--body-sm-font-size); white-space: nowrap; }
+@media (max-width: 760px) {
+  .capability-library-filters { flex-wrap: wrap; }
+  .capability-library-filters > input { max-width: none; }
+}
+.capability-provider-summary { display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer; padding: var(--spacing-md); }
+.capability-library-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs) var(--spacing-md);
+  padding-block: var(--spacing-sm);
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+}
+.capability-library-synced { margin-left: auto; }
+.capability-inventory-list { list-style: none; margin: 0; padding: 0; }
+.capability-inventory-item { border-top: 1px solid var(--border); }
+.capability-record > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) var(--spacing-xs);
+  cursor: pointer;
+  list-style: none;
+}
+.capability-record > summary::-webkit-details-marker { display: none; }
+.capability-record[open] > summary .capability-record-caret { transform: rotate(180deg); }
+.capability-record > summary:hover { background: var(--muted); }
+.capability-record-icon { display: inline-flex; color: var(--muted-foreground); flex-shrink: 0; }
+.capability-record-text { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: var(--spacing-2xs); }
+.capability-record-name { font-size: var(--body-md-font-size); font-weight: 600; overflow-wrap: anywhere; }
+.capability-record-description {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted-foreground); font-size: var(--body-sm-font-size);
+}
+.capability-record-badges {
+  display: flex; align-items: center; flex-direction: row;
+  gap: var(--spacing-sm); flex-shrink: 0;
+}
+.capability-record-locations { display: inline-flex; align-items: center; gap: var(--spacing-xs); }
+.capability-record-location { display: inline-flex; color: var(--muted-foreground); }
+.capability-record-action { flex-shrink: 0; display: inline-flex; }
+.capability-record-caret { flex-shrink: 0; color: var(--muted-foreground); }
+.capability-record-detail {
+  margin: 0 var(--spacing-xs) var(--spacing-md) var(--spacing-lg);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border);
+}
+.capability-copy-controls { margin-bottom: var(--spacing-md); }
+.capability-copy-control { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-md); padding-block: var(--spacing-sm); }
+.capability-copy-control > span { display: flex; flex-wrap: wrap; gap: var(--spacing-sm); }
+.capability-skill-guidance { margin-bottom: var(--spacing-lg); padding: var(--spacing-md); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--muted); font-size: var(--body-sm-font-size); overflow-wrap: anywhere; }
+.capability-skill-guidance > strong { display: block; }
+.capability-skill-guidance p { margin: var(--spacing-sm) 0; line-height: 1.7; }
+.capability-full-description { margin: 0 0 var(--spacing-lg); font-size: var(--body-sm-font-size); line-height: 1.7; overflow-wrap: anywhere; color: var(--muted-foreground); white-space: pre-wrap; }
+.capability-skill-metadata { margin: 0; padding: 0; list-style: none; }
+.capability-skill-copy + .capability-skill-copy { margin-top: var(--spacing-md); padding-top: var(--spacing-md); border-top: 1px solid var(--border); }
+.capability-meta-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: var(--spacing-sm) var(--spacing-lg); margin: 0; }
+.capability-meta-grid > div { display: flex; align-items: baseline; gap: var(--spacing-sm); min-width: 0; font-size: var(--body-sm-font-size); }
+.capability-meta-grid dt { flex: 0 0 auto; color: var(--muted-foreground); }
+.capability-meta-grid dd { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+.capability-cloud-meta { display: flex; flex-wrap: wrap; margin-top: var(--spacing-lg); padding-top: var(--spacing-md); border-top: 1px solid var(--border); gap: var(--spacing-sm) var(--spacing-md); color: var(--muted-foreground); font-size: var(--body-sm-font-size); overflow-wrap: anywhere; }
+.capability-meta-label { font-weight: 600; }
+.capability-cloud-note { flex-basis: 100%; }
+@media (max-width: 760px) {
+  .capability-record-badges { flex-wrap: wrap; max-width: 120px; gap: var(--spacing-2xs); }
+  .capability-meta-grid { grid-template-columns: minmax(0,1fr); }
+}
+.organization-option:hover:not(:disabled) { background: var(--muted); }
+.organization-options { padding: var(--spacing-md); font-size: var(--body-sm-font-size); }
+.organization-options p { margin: 0 0 var(--spacing-sm); line-height: 1.7; overflow-wrap: anywhere; }
+.organization-options [role="alert"] { color: var(--destructive); }
+.organization-options ul { list-style: none; margin: 0; padding: 0; }
+.organization-options .organization-groups { max-height: 280px; overflow-y: auto; }
+.organization-groups > li + li { margin-top: var(--spacing-sm); padding-top: var(--spacing-sm); border-top: 1px solid var(--border); }
+.organization-groups > li > ul { padding-left: var(--spacing-md); }
+.organization-group-heading { display: flex; align-items: center; gap: var(--spacing-sm); padding-block: var(--spacing-xs); }
+.organization-group-heading strong { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.organization-group-heading > svg { flex-shrink: 0; color: var(--muted-foreground); }
+.organization-option { width: 100%; display: flex; align-items: center; gap: var(--spacing-sm); margin-top: var(--spacing-2xs); padding: var(--spacing-sm); text-align: left; border-radius: var(--radius-md); }
+.organization-option > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.organization-option > svg { flex-shrink: 0; color: var(--muted-foreground); }
+.organization-option.is-current { background: var(--primary-muted); color: var(--primary-muted-foreground); }
+.organization-option:disabled:not(.is-current) { opacity: var(--opacity-disabled); }
+.organization-switch-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--spacing-sm); }
+.organization-switch-actions a { color: var(--primary-text); text-decoration: underline; }
+.capability-local-summary { padding-top: var(--spacing-md); color: var(--muted-foreground); font-size: var(--body-sm-font-size); }
+.capability-local-summary > summary { cursor: pointer; }
+.app-header-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+}
+.app-header-back {
+  min-width: 0;
+  margin-left: -7px;
+  padding: 0;
+  border: 0;
+}
+.app-header-back:active { translate: none; }
+.app-header-mark > img,
+.app-header-back > svg {
+  width: 18px;
+  height: 18px;
+}
+/* 直接点名 DS 的字标类：`.vx-brand-name` 自己设了 18px，挂在外层的
+   font-size 继承不过去 —— 父元素上的字号对一个自己声明了字号的子元素无效。 */
+.app-brand .vx-brand-name {
+  font-size: var(--body-md-font-size);
+  letter-spacing: 0.04em;
+}
+/* 标语「Intelligent Workbench」：设计系统默认把子名做成贴片（浅底 + 描边），那是给
+   「产品代号 / 环境名」用的。标语不是标签 —— 它是字标的一句轻声注脚（owner 2026-09-03
+   定：去掉背景与边框，字更小更淡）。 */
+.app-brand .vx-brand-local-name {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 11px /* DS 最小是 body-sm(12px)，这里有意再降一档 */;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+  opacity: 0.7;
+  margin-left: 2px;
+  align-self: center;
+}
+/* 字标改成按钮，弹一份软件信息面板（owner 2026-09-16，见 brand-info-trigger.tsx）：
+   视觉上要跟原来那个 `<a>` 一模一样，所以不用 `all: unset`（那样会把 `.vx-brand-lockup`
+   的 `display: inline-flex` 也一并清掉），照 `.app-runtime-trigger` 的手法，只清掉
+   原生 `<button>` 会带出来的边框/底色/字体差异。 */
+.app-brand-trigger {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  height: 32px;
+  margin-left: -7px;
+  padding: 0 7px 0 0;
+  border-radius: var(--radius-sm, 6px);
+}
+.app-brand-trigger:hover { background: var(--surface-3, rgba(127, 127, 127, 0.12)); }
+/* 软件信息弹窗（owner 2026-09-16 二次改版：popover 换成屏幕居中的 Dialog）：
+   比原来那条 400px 的浮层宽，按 4:3 定形状，不是任由内容把高度撑成随便什么
+   比例。`DialogContent` 自带的 `max-w-panel-md`（512px）比这里想要的窄，
+   这条规则不带 `@layer`，在级联上天然压过 DS 工具类的 `@layer utilities`
+   （未分层的规则总是赢分层的，与源码顺序无关），不需要 `!important`。
+   内容（`.about-block`）本身比 4:3 的高度矮，用 flex 居中，不贴顶。 */
+.brand-info-dialog {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 672px;
+  max-width: min(672px, 90vw);
+  aspect-ratio: 4 / 3;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.brand-info-dialog > .about-block { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+.brand-info-close { flex-shrink: 0; display: flex; justify-content: center; width: 100%; padding-top: var(--spacing-md); }
+
+/* 当前工作区：常驻，两态都在。原来只有一个光秃秃的名字，「这是什么」写在
+   title 里 —— 而 title 要悬停才看得到，等于没说。 */
+/* 工作区：图标 + 名称 + 下拉箭头，是个按钮（下拉看租户与切换入口）。 */
+.app-workspace {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs, 4px);
+  font-size: var(--body-sm-font-size);
+  color: var(--color-muted-foreground);
+  padding: 2px var(--spacing-xs);
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  white-space: nowrap;
+  min-width: max-content;
+  flex-shrink: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.app-workspace:hover { background: var(--surface-3, rgba(127, 127, 127, 0.12)); }
+.app-workspace-caret { opacity: 0.6; }
+.app-workspace-name {
+  color: var(--color-foreground);
+  max-width: none;
+  overflow: visible;
+  white-space: nowrap;
+}
+/* 租户菜单的配额段：三行版式的行本身比 DS 默认的单行 ShellPanelRow 高得多，
+   DS 段内默认的 gap-xs（4px）是给单行邻居留的，两个三行块贴这么近会显得挤
+   （owner 2026-09-16：一贯要求松散布局）。只放开这一段，不动 ShellPanelSection
+   全局默认，其余仍是单行邻居的地方不需要这么松。 */
+.quota-section { gap: var(--spacing-lg); }
+.quota-meter-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--spacing-md);
+  /* DS 的行组件（ShellPanelRow/ShellPanelHeader 等）都带 px-sm 的左右内边距
+     （ROW_INSET）对齐面板边缘；这个手写行漏了这一条，内容比上下相邻的行更
+     宽，明显探出面板左右两边（owner 2026-09-16 现场发现）。 */
+  padding-inline: var(--spacing-sm);
+}
+.quota-meter-row-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.quota-meter-row-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+.quota-meter-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-md);
+}
+.quota-meter-row-label {
+  min-width: 0;
+  flex: 1;
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
+}
+.quota-meter-row-headline {
+  flex-shrink: 0;
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.quota-meter-row-caption {
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+  text-align: right;
+}
+.proj-summary { flex-direction: column; align-items: stretch; gap: var(--spacing-xs); }
+.proj-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm) var(--spacing-lg);
+}
+.proj-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs) var(--spacing-md);
+  font-size: var(--body-sm-font-size);
+  color: var(--color-muted-foreground);
+}
+.proj-summary-meta code { font-size: inherit; }
+
+/* ---------- 面板内的列表与表格密度 ---------- */
+
+/* 一行就是一行：一条授权 / 一条绑定不该各配一张卡、一道边框、16px 内边距。 */
+.row-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.row-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-card);
+}
+.row-item + .row-item { border-top: 1px solid var(--color-border); }
+.row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--body-sm-font-size);
+}
+.row-tag {
+  flex: 0 0 auto;
+  font-size: var(--body-sm-font-size);
+  color: var(--color-muted-foreground);
+}
+
+/* 已安装的连接器：一个连接器一张卡，不再共用 `.row-list`（owner 2026-09-16）
+   ——启用后要展开一段工具清单，塞进 `.row-item` 那种单行里，「工具：a、b、c」
+   一长串文字会把状态徽章、启用/停用按钮全部挤到一起，越是暴露的工具多的
+   连接器越挤。卡片高度按需长高，不再是固定一行的密度。 */
+.connector-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--spacing-sm); }
+.connector-card { border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-card); overflow: hidden; }
+/* 标题行：图标 + id + 来源标签是「这是什么」，靠左；状态与操作是「现在怎样、
+   能做什么」，靠右但留出呼吸空间——不是原来那样贴着彼此、贴着右边缘挤成
+   一串（owner 2026-09-16 第 4 条：「操作和状态信息可以松散一些布局」）。
+   展开/收起箭头钉死在最右侧（owner 2026-09-16 第二次修正：这是每张卡自己
+   的事，不是整个板块的事）——所以这一行只分两组、不是三组：标题在左，
+   「状态+操作」与「箭头」拼成一组一起靠右，`space-between` 只用在两组
+   之间，箭头才能稳稳落在最右边缘，不会被 `space-between` 拆得离状态徽章
+   忽远忽近。 */
+.connector-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+/* 标题行可以点（owner 2026-09-16）：与 `.set-block-head-hit` 同一个手法，
+   `all: unset` 清掉原生 <button> 的默认样式，只在「这张卡有内容可展开」时
+   才会被渲染成 <button>（否则就是一个普通 <span>，点了没反应，因为没有
+   反应可给）。 */
+.connector-card-head-hit {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 0;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+/* 没内容可展开时标题不是按钮，用同样布局的 <span> 占住「左边那一组」——
+   `.connector-card-head` 下必须永远只有两个直接子节点，`space-between`
+   才对得上（否则图标、标题、trailing 三个各自散开，标题会飘到中间）。 */
+.connector-card-head-static { display: flex; align-items: center; gap: var(--spacing-xs); min-width: 0; }
+.connector-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3, rgba(127, 127, 127, 0.12));
+  color: var(--color-muted-foreground);
+  flex-shrink: 0;
+}
+.connector-card-title { display: flex; align-items: center; gap: var(--spacing-xs); min-width: 0; }
+.connector-card-id {
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 「状态+操作」与箭头的外层拼盘——箭头永远贴着这一组的最右边，就是这一行
+   的最右边。 */
+.connector-card-trailing { display: inline-flex; align-items: center; gap: var(--spacing-md); flex-shrink: 0; }
+.connector-card-side { display: inline-flex; align-items: center; gap: var(--spacing-md); flex-shrink: 0; }
+/* 箭头按钮：没内容可展开时禁用而不是藏起来（owner 2026-09-16）——藏起来的
+   话每张卡这一列宽度不一致，禁用则始终占位，「这张卡没什么可看」与「这张
+   卡还没读完」一眼能分清。 */
+.connector-card-toggle {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.connector-card-toggle:hover:not(:disabled) { background: var(--surface-3, rgba(127, 127, 127, 0.12)); color: var(--foreground); }
+.connector-card-toggle:disabled { color: var(--content-disabled, var(--muted-foreground)); opacity: 0.4; cursor: default; }
+/* 展开区：默认值跟着「有没有内容可展开」走，之后由用户手动切换（owner
+   2026-09-16 第二次修正：不再是状态锁死的自动展开，箭头说了算）。左右缩进
+   给足（`--space-5xl` = 64px，owner 建议的量），与标题行的图标对不齐也没
+   关系：这一块是「详情」，本来就该退后一步，缩进越大越读得出「这是附属
+   信息」。 */
+.connector-card-tools { padding: var(--space-md) var(--space-5xl); border-top: 1px solid var(--color-border); }
+.connector-card-tools-label { display: block; font-size: var(--body-sm-font-size); font-weight: 600; color: var(--foreground); }
+/* 概要句撑满这一块的宽度（owner 2026-09-16：「必须容器满宽布局」）——`p` 本来
+   就是块级元素，这里只是显式声明，避免以后有人把它跟 chip 那行搞混改成
+   inline。 */
+.connector-card-tools-caption { display: block; width: 100%; margin: 2px 0 var(--spacing-sm); font-size: var(--body-sm-font-size); color: var(--color-muted-foreground); }
+/* 长文字段落改成一排排小方块（owner 2026-09-16）：空间有限时自动换行，
+   每个工具名各自一块，不再是一条逗号顿号连起来的长句，找哪个工具接没接
+   不用再从头数逗号。 */
+.connector-card-tools-grid { display: flex; flex-wrap: wrap; gap: var(--spacing-xs); }
+.connector-tool-chip {
+  font-family: var(--code-sm-font-family, ui-monospace, monospace);
+  font-size: var(--code-sm-font-size, 12px);
+  padding: 2px var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+/* 审计：一条记录一行。撑开行高的三个元凶——完整 ISO 时间、会换行的动作名、
+   无长度上限的 payload——各自钉住。 */
+.audit-row td { padding-block: var(--spacing-2xs); vertical-align: middle; }
+.audit-idx { text-align: right; font-variant-numeric: tabular-nums; width: 3em; }
+.audit-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--body-sm-font-size);
+  color: var(--color-muted-foreground);
+}
+.audit-action { white-space: nowrap; }
+.audit-payload {
+  max-width: 0; /* 与 table-layout 协作：让省略号真的生效，而不是把表撑宽 */
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--body-sm-font-size);
+  color: var(--color-muted-foreground);
+}
+
+/* ---------- 2026-09-04 owner 的首页 / 导航一批 ---------- */
+
+/* 卡片：内边距四周一致 16px；头部 → 正文 8px；正文 → 底部分割线 12px。 */
+.pcard { padding: 16px; gap: 8px; }
+.pcard-head { row-gap: 4px; }
+.pcard-foot { margin-top: 4px; padding-top: 12px; }
+/* 同一行卡片高度不一时，分隔线与底部操作要沉底对齐（owner 2026-09-15）。上面这条
+   margin-top: 4px 盖掉了 .pcard-foot 原先的 margin-top: auto，底部于是跟着内容往上走。
+   不改回 auto：那样「正文 → 分割线 12px」的下限就只剩 gap 8px。让正文吃掉剩余高度，
+   分隔线自然落到底，12px 仍是最小间距。 */
+.pcard-body { flex: 1 1 auto; }
+.pcard-badges { gap: 4px; }
+.pcard-badges [data-slot="badge"], .pcard .catalog-caps [data-slot="badge"] { font-size: 11px; }
+.pcard-ident { font-size: 12px; }
+
+/* 7. 滚动条：细、透明、不滚动时隐藏（Chromium）。 */
+/* 只写给真正会滚的容器（主内容区、DS 的 overflow 容器、文本域），不用 `*`：
+   `html[data-scrolling] *` 会让每次打标记都重算整棵树的样式，滚动时反而卡。 */
+:is(main, .overflow-y-auto, .overflow-auto, .overflow-x-auto, textarea)::-webkit-scrollbar { width: 6px; height: 6px; }
+:is(main, .overflow-y-auto, .overflow-auto, .overflow-x-auto, textarea)::-webkit-scrollbar-track { background: transparent; }
+:is(main, .overflow-y-auto, .overflow-auto, .overflow-x-auto, textarea)::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+html[data-scrolling] :is(main, .overflow-y-auto, .overflow-auto, .overflow-x-auto, textarea)::-webkit-scrollbar-thumb,
+:is(main, .overflow-y-auto, .overflow-auto, .overflow-x-auto, textarea):hover::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--foreground) 28%, transparent); }
+:is(main, .overflow-y-auto, .overflow-auto, .overflow-x-auto, textarea)::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--foreground) 45%, transparent); }
+:is(main, .overflow-y-auto, .overflow-auto, .overflow-x-auto, textarea)::-webkit-scrollbar-corner { background: transparent; }
+
+/* 16. 标题栏：必须与壳的原生标题栏叠加层（caption-overlay.ts 的三个窗口按钮，
+   Windows 的 titleBarOverlay）像素级同一个底色，否则两边接缝处颜色对不上。
+   这两边是两套渲染管线，谁都读不到对方——Electron 原生 overlay 只吃字面色，
+   这份 CSS 也没法把值喂给主进程——所以钉的是 caption-overlay.ts 里 DARK.color /
+   LIGHT.color 那两个字面值本身，不经过语义 token 中转。
+
+   owner 2026-09-16 现场纠了两轮：
+   ① 标题栏原来用 --card 调过色，深色下比 overlay（--background 系）亮了小
+      30% 的明度，右上角一块显眼的灰；
+   ② 改成 var(--background) 之后深色对上了，但浅色的 --background 是
+      neutral-100（97% 明度的浅灰），不是 overlay 钉的纯白 #ffffff——token
+      只是在深色那边碰巧接近，靠它兜不住两套管线的一致，所以改回直接抄
+      overlay 的字面值，两个主题各钉一次。
+
+   底线之下用一条同色系细线（不是通用的 --border，那个专为卡片边、分隔线
+   设计，对比度比这里需要的强）分出「标题栏」与「内容区」两块范围——内容区
+   仍然读 --background token，不需要跟着字面值走。 */
+.app-topbar {
+  background: #ffffff;
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  box-shadow: none;
+}
+.dark .app-topbar {
+  background: #0a0a0a;
+}
+.app-topbar [cmdk-root] > div { height: 28px; min-height: 28px; }
+/* 17. 工作区 + Runtime 紧跟品牌之后，隔一段。 */
+.app-header-context {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-left: var(--spacing-lg);
+}
+/* Runtime 徽章：字号与标语「Intelligent Workbench」一致（11px），样式（圆点 + 描边）不变。
+   2026-09-11 起徽章外面包了一层可点的触发器（runtime-menu.tsx），**选择器跟着往里挪
+   一层**：原来的 `.app-runtime > *` 如今会落在按钮上而不是徽章上，字号就对不上了。 */
+.app-runtime-trigger > :first-child {
+  font-size: 11px /* DS 最小是 body-sm(12px)，这里有意再降一档 */;
+  line-height: 1.2;
+  padding-block: 1px;
+}
+/* 触发器照租户按钮的样子：透明底、悬停一层浅底、圆角，右边一个上下箭头。 */
+.app-runtime-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs, 4px);
+  padding: 1px var(--spacing-2xs, 4px);
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.app-runtime-trigger:hover { background: var(--surface-3, rgba(127, 127, 127, 0.12)); }
+/* 连不上时下拉里那句说明：窄一点，免得一行拉得比面板还宽。 */
+.app-runtime-note { max-width: 260px; margin: 0; line-height: 1.5; }
+
+/* 标题栏的搜索（header-search.tsx）：平时一个图标；展开是**浮层**，从图标处向左
+   展开 —— 不推挤标题栏上别的东西。宽度收窄到 320（原来常驻时上限 520），窗口窄时
+   再按视口收。 */
+.header-search { position: relative; display: inline-flex; align-items: center; }
+.header-search-box {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(320px, 60vw);
+  z-index: 50;
+}
+
+/* 9-12. 侧栏：不写域名文字，只留收缩按钮；首页组不画组头；导航项加高，
+   两行文字拉开；「最近工作」第一行小字是智能体，第二行是任务。 */
+/* 域名那一行只留收缩按钮：首页传的是空字符串，本来就没字。（此前按类名隐藏，
+   把同样带 text-label-md 的收缩按钮一起藏掉了 —— owner 2026-09-04 指出。） */
+/* 这两条从「只在首页」改成「所有页」：侧栏那一行不写标题（owner 2026-09-04），
+   所以标签要藏、收缩按钮要自己顶到右端 —— 三种页面同一个位置，切页时按钮不会
+   跳。下面带 --home 的几条仍然只对首页：那是「总览」分组与它的留白，产品态的
+   分组是产品自己的页签，不该一起摘掉。 */
+.app-sidebar .h-header-sm > :not(:first-child):not(:has(button)) { display: none; }
+/* 标签藏起来之后，那一行只剩两个按钮，末尾那个（分组展开 / 收起）会贴到左边
+   的收缩按钮旁 —— 原来是标签把它顶到右端的。自己顶（owner 2026-09-04 指出）。
+   收起态整行只剩一个按钮，那时不顶，否则窄栏里它会被推到边上。 */
+.app-sidebar .h-header-sm > :last-child:not(:first-child) { margin-left: auto; }
+/* 第一组没有标题时，那颗折叠箭头也没有意义 —— 它折叠的是一个空标题。产品态
+   与首页同一条（owner 2026-09-04）。 */
+.app-sidebar--home nav > div:first-child > button,
+.app-sidebar--ws nav > div:first-child > button,
+.app-sidebar--set nav > div:first-child > button { display: none; }
+.app-sidebar--home nav > div:first-child,
+.app-sidebar--ws nav > div:first-child,
+.app-sidebar--set nav > div:first-child { padding-top: var(--spacing-sm); padding-bottom: var(--spacing-sm); }
+.app-sidebar nav a { min-height: 44px; padding-block: 4px; }
+.app-sidebar nav a > span:last-child > span { flex-direction: column-reverse; gap: 3px; padding-block: 2px; }
+.app-sidebar nav a > span:last-child > span > span:first-child { font-size: var(--body-md-font-size); }
+/* 「最近工作」第一行的智能体名：照标题栏 Runtime 徽章的样子做成 chip ——
+   前面一颗鲜亮的圆点，底色与文字都淡（owner 2026-09-04 定）。 */
+.app-sidebar nav a > span:last-child > span > span:last-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 1px 7px 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--foreground) 62%, transparent);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+.app-sidebar nav a > span:last-child > span > span:last-child::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--primary, var(--color-primary, #4f7cff));
+}
+.app-sidebar--home nav > div + div { padding-top: var(--spacing-sm); }
+
+/* 「更新」上的 new 标记：小、圆角、品牌色，只在真有可切的新版本时出现。 */
+.dot-new {
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+  color: var(--primary-foreground, #fff);
+  background: var(--primary, var(--color-primary, #4f7cff));
+}
+
+/* 加密链：三行「保护什么 → 怎么保护」。左列定宽，三行的机制名对齐成一列，
+   扫下来是一条链而不是三句话。 */
+/* 加密链的三行走**和别处一样的行**：此前它自己一套（4.5em 的名称列、没有
+   分隔线），于是「数据加密」这一块的标题与内容对不上其他板块（owner 第 2 条）。 */
+.crypto-chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.crypto-chain li {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  min-height: var(--set-row-h);
+  /* 4px 而不是 8px：控件本身 36px，加 8+8 会把这一行顶到 52，于是带控件的行
+     比纯文字行高一截 —— 全局一个行高（owner 第 7 条）就得让 36+4+4 正好落在
+     44 上，纯文字行则由 min-height 撑到同一个值。 */
+  padding: var(--spacing-2xs) 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: var(--body-sm-font-size);
+}
+.crypto-what { flex: 0 0 var(--set-label-w); color: var(--muted-foreground); }
+/* 关键词高亮（owner 2026-09-15）：对勾 + 淡底 + 圆角，扫一眼就找到「用的是
+   什么算法 / 机制」，不必读完整句话。tone 借 success（这是「已经在保护」的
+   事实，不是警示）。 */
+.crypto-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--success-muted);
+  color: var(--success-muted-foreground);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.crypto-tag svg { flex-shrink: 0; }
+.crypto-how { min-width: 0; }
+.crypto-note { opacity: 0.85; }
+
+/* ---------- 关于页 ----------
+   三块（owner 2026-09-15 第二次修正，原「两块」的黄金分割版式作废）：① 「关于」
+   卡**撑满**剩下的高度，内容在卡的框里居中（不再靠卡外两条看不见的弹性空白
+   把卡「顶」到中部——那两条空白与「本机配置」卡叠在一起时，读起来是卡与卡
+   之间一大段无缘无故的空白，owner 直接看见了这个问题）；② 「本机配置」块
+   按需高度；③ 提示信息按需显隐、固定高度。要撑满就得让这条链上每一层都有
+   确定高度 —— 滚动容器是 flex 定高的，所以只在**关于页在场时**给
+   `.workbench-page` 一个 `min-height: 100%`，其余页面照旧按内容高，不受影响。 */
+.workbench-page:has(.about-page) { min-height: 100%; }
+.settings-page:has(.about-page) { flex: 1; min-height: 0; }
+.about-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.about-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* 卡片本身撑满 `.about-main` 剩下的高度，内容纵向居中在卡的框里 —— 撑满与
+   居中现在是同一块框在做的两件事，不再是「卡 + 卡外空白」拼出来的效果。
+   去掉默认的下外边距：`.card` 自带 margin-bottom 是给「一摞卡」用的，这里
+   由 `.about-page` 的 `gap` 统一控距。 */
+.about-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow-y: auto;
+  margin-bottom: 0;
+}
+/* 关于页的字标放大到 heading-1（36px，缺省 `.brand-name` 是 20px）。这一页的
+   主角就是这个字标 —— 登录页有 120px 的图形标撑场，这里没有，只有字。 */
+.about-block .brand-name { font-size: var(--heading-1-font-size); }
+
+/* 「本机配置」现在是一个标准 `SettingsBlock`（`.set-block`），与设置页别处
+   一致；它在关于页里仍然是**按需高度**，不参与上面那张卡的 `flex: 1`，也不
+   跟着 `.about-page` 的 `gap` 再叠一次 `.card` 自带的下外边距。 */
+.about-page > .set-block { margin-bottom: 0; flex-shrink: 0; }
+
+/* 固定高度取 `--space-row-2xl`（96px）：实测那条提醒在 1280 宽是 57px、900 宽
+   75px、760 宽 93px，96 刚好罩住最窄那一档。**内部仍留滚动兜底** —— 固定高度是
+   为了版式不跳，不是为了把话裁掉；再窄的窗口下宁可滚，也不能少一行。 */
+.about-notice {
+  flex: 0 0 var(--space-row-2xl);
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+}
+.about-notice > .set-callout { margin: 0; width: 100%; }
+
+/* 条款做成**按钮式**（owner 2026-09-10），但底层仍是 `<a>`：真链接才能中键新开、
+   右键复制地址。**左对齐**（owner 2026-09-15，原先居中）：跟着 `.about-block`
+   整块左对齐走，不再单独居中出一行。 */
+.about-legal {
+  display: flex;
+  /* 居中（owner 2026-09-16，随整块改回居中）：换行时也要居中，不只是外层
+     `align-items: center` 把这一行整体摆中间——那只管没换行的那一次。 */
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  /* 与上面的版权行拉开一段（24 → 48px）：它们是**另一类东西** —— 上面是
+     「这是什么」，下面是「去别处看条款」，靠太近会读成同一段。 */
+  margin-top: var(--space-row-sm);
+}
+.about-legal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  padding: var(--spacing-2xs) var(--spacing-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.about-legal-btn:hover {
+  color: var(--foreground);
+  border-color: var(--ring);
+  background: var(--surface-3, rgba(127, 127, 127, 0.1));
+}
+/* 「三方许可」——与上面三条条款同一行、同一个版式（owner 2026-09-15：原先
+   自己另起一行、下划线文字链接样式，现在外观对齐成同一种按钮）。刻意不复用
+   `.about-legal-btn` 这个类名：那个类被测试钉着数目=3（它们是真链接 `<a>`），
+   这个是 `<button>`——外观一样，类各自独立。 */
+.about-third-party {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  padding: var(--spacing-2xs) var(--spacing-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.about-third-party:hover {
+  color: var(--foreground);
+  border-color: var(--ring);
+  background: var(--surface-3, rgba(127, 127, 127, 0.1));
+}
+/* 面板宽一些、左右留白多一些（owner 2026-09-15）：清单有五列，原先 760px
+   在窄一点的字号下就得横向滚动列。 */
+.third-party-dialog {
+  max-width: min(920px, 94vw);
+  padding-inline: var(--spacing-xl, 24px);
+}
+.third-party-scroll {
+  max-height: 60vh;
+  overflow: auto;
+  /* 内容与滚动条之间留一点气 —— 原先表格贴着滚动条，滚动条一出现就顶着最后
+     一列（owner 2026-09-15）。 */
+  padding-right: var(--spacing-sm);
+}
+/* 序号列：窄、右对齐——数字天然右对齐才整齐，个位数与两位数才能对齐右边缘。
+   宽度按 4 位数留（owner 2026-09-15：228 个组件已经是 3 位，`em` 量出来的宽度
+   跟着字号漂、不够留 4 位数的余地）——`ch` 是这个等宽字体一个数字的实际宽度，
+   量得准；`white-space: nowrap` 兜底，够宽也不会因为别的原因换行。 */
+.third-party-idx { width: 4ch; min-width: 4ch; text-align: right; white-space: nowrap; }
+/* 「所属模块」那一列——短标签飘在一列长空白的左边缘不好看，居中（owner
+   2026-09-15）。 */
+.third-party-part { text-align: center; }
+/* 事实行尾的动作（「打开目录」）：顶到右端，不去挤值那一列 —— 值是这一行的
+   主角，路径本来就长。 */
+/* 行尾的动作位。可以放不止一个（数据目录那一行有「打开目录」和「更改…」），
+   所以它自己是一个带间距的行内容器。 */
+.fact-action {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+}
+/* 换目录那层弹窗：沿用页面里那套行度量，别在弹层里另起一套节奏。 */
+.move-dlg { display: flex; flex-direction: column; gap: var(--spacing-xs); min-width: 0; }
+.move-dlg .fact-row:first-child { border-top: none; }
+
+/* ---------- 设置：二级板块（owner 2026-09-04 的统一标题模式）---------- */
+/* 小图标 + 标题 + 说明，内容缩进到标题文字的左缘（图标 24 + gap 8 = 32px）。
+   标题行只分两组、不是三个各自散落的 flex item（owner 2026-09-16 第三次
+   修正：与 `.connector-card-head` 同一个手法）——标题在左，「筛选/刷新/
+   折叠箭头」等操作拼成 `.set-block-trailing` 一组一起靠右，`space-between`
+   只用在两组之间。此前标题没有外层包一层，`margin-right: auto` 挂在
+   `.set-block-titles` 上；可折叠板块把标题包进 `.set-block-head-hit`
+   （`all: unset` 的按钮）之后，auto margin 就锁在按钮内部、推不动按钮外面
+   的兄弟节点了——于是操作区看起来「紧跟在标题后面」而不是「贴在最右」。 */
+.set-block { display: flex; flex-direction: column; gap: var(--spacing-sm); }
+.set-block-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+/* 不可折叠板块：标题不是按钮，用一个同样布局的 <span> 占住「左边那一组」，
+   保证 `.set-block-head` 下永远只有两个直接子节点。 */
+.set-block-head-static { display: flex; align-items: flex-start; gap: var(--spacing-sm); min-width: 0; }
+.set-block-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+.set-block-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.set-block-title {
+  margin: 0;
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.set-block-desc {
+  margin: 0;
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+  max-width: 62em;
+}
+/* 「右边那一组」：筛选/刷新/折叠箭头等操作拼盘，永远贴着标题行最右侧。 */
+.set-block-trailing { display: inline-flex; align-items: center; gap: var(--spacing-md); flex-shrink: 0; }
+/* 标题行右侧可能不止一个东西（筛选 + 刷新按钮；勾选 + 提示 + 检查按钮），
+   给它一条 gap，多个控件才不会贴在一起（owner 2026-09-15）。只有一个子项时
+   gap 不生效，不影响原来只放一个按钮的那些地方。 */
+.set-block-aside { flex-shrink: 0; display: inline-flex; align-items: center; gap: var(--spacing-xs); }
+/* 板块标题行里的紧凑筛选按钮（owner 2026-09-15）：压到内容宽度，不像原来
+   内容区里那个全宽 <select>。 */
+.cap-filter-trigger { white-space: nowrap; }
+/* 「自动检查」勾选（软件更新，owner 2026-09-15）：命中区落在文字上，勾选框
+   本身够小，hover 提示挂在整个 label 上比只挂在方框上好碰到。 */
+.update-auto-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* 面头与内容之间一条**浅色实线**（owner 第 1 条）：说明是解释，下面是事实，
+   两者之间要有一道边界。内容再缩一档（参考稿的 L3）。 */
+.set-block-body {
+  padding-left: 32px;
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+
+
+/* 事实行：名称定宽一列，值一列，徽章跟在值后面。 */
+/* 个人信息那几行原来挤在 5px 的上下内边距里（owner 第 1 条：太密集）。
+   现在与设置行同一个行高、同一条虚线、同一个名称列宽。 */
+.fact-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  min-height: var(--set-row-h);
+  /* 4px 而不是 8px：控件本身 36px，加 8+8 会把这一行顶到 52，于是带控件的行
+     比纯文字行高一截 —— 全局一个行高（owner 第 7 条）就得让 36+4+4 正好落在
+     44 上，纯文字行则由 min-height 撑到同一个值。 */
+  padding: var(--spacing-2xs) 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: var(--body-sm-font-size);
+}
+/* 标签不折行：宽度已经按这门语言最长的那条取了，真放不下时省略号，不是换行
+   —— 换行会把这一行顶高，而全局只允许一个行高。 */
+.fact-label {
+  flex: 0 0 var(--set-label-w);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fact-value {
+  min-width: 0;
+  /* 单行 + 省略号。路径可以很长（用户自己选的位置），让它换行会把这一行撑成
+     两行、破掉全局那个 44px 的行高（owner 2026-09-04 要的是一个行高）。完整
+     路径在 title 里，而真正要去那儿的人有「打开目录」。 */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* 同一行里的第二段事实（工作区跟在租户后面，owner 第 4 条）：用一个淡分隔点。 */
+.fact-sep {
+  color: var(--muted-foreground);
+  opacity: 0.5;
+  padding: 0 6px;
+}
+.fact-empty { color: var(--muted-foreground); opacity: 0.6; }
+.fact-badge { flex-shrink: 0; }
+.fact-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+/* 租户名后面那个「个人租户 / 组织租户」徽标（owner 2026-09-15）：原先紧贴着
+   名字，隔开一点。 */
+.fact-tag { margin-left: 6px; }
+
+/* 添加连接器那一页的动作行：测试 → 添加 → 暂存，从左到右就是流程的顺序。 */
+.add-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  padding-top: var(--spacing-sm);
+}
+
+/* ---------- 18. 标题栏搜索框：把内容看清 ---------- */
+/*
+ * DS 给的是 `bg-muted/60` —— 半透明的 --muted 叠在标题栏上。标题栏本身又是
+ * `color-mix(--card 88%, --foreground 4%)`，两层叠完，框与栏的亮度差只剩几个
+ * 百分点：框的边界看不出来，里面的字也就没有一个稳定的底可依（owner 2026-09-07
+ * 报「搜索框内容看不清」）。
+ *
+ * 修法是给它一个**不透明的底 + 一道描边**：底用 --card（跟着主题走，亮暗两套
+ * 都成立），描边用 --border。文字与占位符仍由 DS 给（--foreground /
+ * --muted-foreground），它们对 --card 的对比度是设计系统自己保证过的 —— 这里
+ * 只把「底」换成一个它们本来就该站的底。
+ *
+ * 选择器用 :has 精确定位那一个框，不动标题栏里别的东西。
+ */
+.app-topbar div:has(> input[type="search"]) {
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+/* 聚焦时 DS 会把底换成 --card 并加环；此时描边让位给环，否则两圈叠着。 */
+.app-topbar div:has(> input[type="search"]):focus-within { border-color: transparent; }
+
+/* ---------- 19. 能力平台：同步说明、大类计数与折叠、业务小类 ---------- */
+/* 顶上那句「同出一份登记册」。它是这一屏的前提，所以在第一个板块之前、
+   与板块同宽；图标只是锚点，信息全在文字里。 */
+.cap-sync {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-xs);
+  margin: 0 0 var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  line-height: 1.6;
+}
+.cap-sync strong { color: var(--foreground); font-weight: 500; }
+/* 调用路径（ADR-025）收成标签贴在同一行里，不再单独占一句话
+   （owner 2026-09-15：两条信息挤成了一条，第二条整段收进标签）。 */
+.cap-sync-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  margin-left: var(--spacing-xs);
+}
+
+/* 大类标题上的条数：收起之后它是唯一还看得见的量，所以不能只当装饰。 */
+.set-block-count {
+  margin-left: var(--spacing-xs);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 400;
+  vertical-align: middle;
+}
+.set-block-toggle { flex: 0 0 auto; }
+/* 箭头版折叠钮（owner 2026-09-16，全站统一版式）：标题行本身也是一个
+   按钮——点图标、点标题文字都能展开/收起，不必精确点中那个小箭头。
+   `all: unset` 清掉原生 <button> 的边框/底色/字体继承问题，再把原来
+   `.set-block-head` 直接摆 icon+titles 那两条布局属性搬过来，视觉上跟不可
+   点的版本长得一样。间距交给外层 `.set-block-trailing` 的 gap，这里不用再
+   自己加 margin-left。 */
+.set-block-head-hit {
+  all: unset;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  min-width: 0;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.set-block-toggle--chevron {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.set-block-toggle--chevron:hover { background: var(--surface-3, rgba(127, 127, 127, 0.12)); color: var(--foreground); }
+
+/* 业务小类：一行一个，标题行里是「名称 · 条数 · 一句说明」。
+   说明在窄屏先被截掉 —— 名称与条数是找东西用的，说明是解释用的。 */
+.cap-groups { display: block; }
+.cap-group { border-bottom: 1px solid var(--border); }
+.cap-group:last-child { border-bottom: none; }
+/* DS 的 AccordionTrigger 默认把内容两端撑开（标题在左、箭头在右），于是
+   「名称 / 条数 / 说明」被摊成三列，中间两段大空白。这里改回一行读的顺序：
+   名称 → 条数 → 说明，说明吃掉剩余宽度，箭头仍在最右。 */
+.cap-group-head {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: var(--spacing-xs);
+}
+.cap-group-head > svg { margin-left: auto; align-self: center; flex: 0 0 auto; }
+.cap-group-label { font-weight: 500; color: var(--foreground); }
+.cap-group-count {
+  margin-left: var(--spacing-xs);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.cap-group-desc {
+  flex: 1 1 auto;
+  margin-left: var(--spacing-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+  font-weight: 400;
+}
+@media (max-width: 760px) { .cap-group-desc { display: none; } }
+
+/* 产品自己的界面（ADR-023；owner 2026-09-11：侧栏单独一格，给整块地方）。云端的产品
+   独占一个子域名、一整页；本地也给整块内容区，不是一条缝 —— 同一个界面包在两边
+   得是同一个产品。高度照 .home 的算法按视口算（父容器高度自适应，百分比拿不到
+   参照）。后面的 workbench-page 规则把业务界面铺满画布；运行确认在宿主独立面板中
+   展开，不再通过插入卡片增加业务页面高度。 */
+.product-surface {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 48px - 2 * var(--spacing-lg, 24px) - 88px);
+  min-height: 360px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+}
+
+/* 私有模型服务的接入表单（RY-001 §07 #41）。设置页此前没有多字段表单 —— 连接器
+   那一页有自己的布局，这里是块内的一小段，所以单独一组类而不是去改那边。 */
+.set-form {
+  display: grid;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+  max-width: 34em;
+}
+.set-field {
+  display: grid;
+  gap: var(--spacing-2xs);
+  font-size: var(--body-sm-font-size);
+  color: var(--muted-foreground);
+}
+.set-field input {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--body-md-font-size);
+}
+.set-field input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/*
+ * 运行环境那一块的行（owner 2026-09-18 第 4 条）。
+ *
+ * 一行里「是什么 · 什么状态 · 一句说明」靠左，「要点的按钮」靠右 —— 扫一眼就知道
+ * 哪边是动作。此前这一行没有任何样式（就是个 div），于是按钮跟在文字后面挤在左边。
+ */
+.env-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-block: var(--space-sm);
+}
+
+.env-row + .env-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.env-name {
+  font-weight: 600;
+  min-width: 5rem;
+}
+
+/* 说明占满中间那段，把按钮推到最右边；窄屏下它自己换行，按钮不会被挤出去。 */
+.env-note {
+  flex: 1 1 12rem;
+  color: var(--muted-foreground);
+  font-size: var(--body-sm-font-size);
+}
+
+.env-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-inline-start: auto;
+}
+.project-information{align-self:flex-end;font-size:12px;color:var(--muted-foreground);position:relative;z-index:5}.project-information>summary{cursor:pointer;list-style:none;padding:4px 10px}.project-information[open]>.proj-summary{position:absolute;right:0;top:30px;width:min(560px,85vw);box-shadow:0 12px 36px #0005;background:var(--background);z-index:20}.project-information[open]>summary{color:var(--foreground)}.project-switcher{background:transparent;border:0;color:inherit;max-width:260px;min-width:100px;font:inherit;text-overflow:ellipsis}.project-switcher option{background:var(--background);color:var(--foreground)}.product-surface{height:calc(100vh - 48px - 2 * var(--spacing-lg,24px) - 40px);border:0;border-radius:8px}
+.project-catalog{max-width:1000px;margin:auto;padding:24px}.project-catalog h1{font-size:24px;margin-bottom:24px}.project-catalog-row{display:flex;justify-content:space-between;align-items:center;width:100%;padding:22px;margin:12px 0;background:var(--card);border:1px solid var(--border);border-radius:10px;text-align:left}.project-catalog-row span{font-size:12px;color:var(--muted-foreground)}
+
+.project-config-nav { display:flex; flex-wrap:wrap; gap:8px; border-bottom:1px solid var(--border); padding-bottom:12px; }
+.project-config-nav a { padding:8px 14px; border-radius:6px; color:var(--muted-foreground); }
+.project-config-nav a[aria-current=page] { background:var(--accent); color:var(--foreground); font-weight:600; }
+.product-home { display:flex; flex-direction:column; gap:24px; padding:16px 0; }
+.product-home-heading,.product-panel-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.product-home h1 { font-size:24px; font-weight:650; } .product-home h2 {font-size:18px;font-weight:600;}
+.product-home-heading p,.product-helper { color:var(--muted-foreground); font-size:12px; }
+.product-business-panel { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:20px; display:flex; flex-direction:column; gap:16px; min-width:0; }
+.product-resource-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}
+.product-resume {display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px;background:var(--accent);border-radius:6px;}
+.product-resume div {display:flex;flex-direction:column;gap:4px;min-width:0;} .product-resume span {font-size:12px;color:var(--muted-foreground);}
+.product-project-list {display:flex;flex-direction:column;gap:0;border-top:1px solid var(--border);}
+.product-project-row {display:grid;grid-template-columns:minmax(180px,1fr) 100px 160px 110px;gap:16px;text-align:left;align-items:center;margin:0;padding:16px 12px;border-bottom:1px solid var(--border);border-radius:0;width:100%;cursor:pointer;}
+.product-project-row strong {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .product-project-row span,.product-project-row time {font-size:12px;}
+.product-project-row:hover {background:var(--accent);} .product-project-row:focus-visible {background:var(--accent);outline:2px solid var(--ring);outline-offset:-2px;}
+.product-catalog-controls,.product-create {display:flex;align-items:end;gap:12px;flex-wrap:wrap;} .product-create label {display:flex;flex-direction:column;gap:8px;min-width:280px;}
+.product-catalog-controls input {max-width:360px;} .product-catalog-controls select {background:var(--card);border:1px solid var(--border);padding:6px 12px;border-radius:6px;}
+@media(max-width:1000px){.product-project-row {grid-template-columns:minmax(140px,1fr) 100px;} .product-resource-grid {grid-template-columns:1fr;}}
+.project-workflow-nav {display:flex;flex-direction:column;height:100%;min-height:0;padding:var(--spacing-xs);}
+.workflow-nav-heading {padding:0;}
+.workflow-scroll {flex:1;min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;padding:16px 4px 4px;}
+.workflow-info,.workflow-step > a {position:relative;display:flex;align-items:center;gap:var(--spacing-xs);min-height:48px;padding:4px 0;text-decoration:none;color:var(--muted-foreground);border-radius:var(--radius-md);font-size:var(--body-md-font-size);}
+.workflow-info {margin-bottom:8px;font-weight:600;}
+.workflow-info:hover,.workflow-step > a:hover {background:var(--accent);color:var(--foreground);}
+.workflow-info[aria-current=page],.workflow-step > a[aria-current=step] {background:var(--surface-selected);color:var(--primary-text);}
+.workflow-info:focus-visible,.workflow-step > a:focus-visible {outline:2px solid var(--ring);outline-offset:-2px;}
+.workflow-icon-slot {display:flex;align-items:center;justify-content:center;flex:0 0 40px;width:40px;height:40px;}
+.workflow-marker {display:flex;align-items:center;justify-content:center;flex-shrink:0;width:26px;height:26px;border:1px solid var(--border);border-radius:50%;font-size:10px;background:var(--card);z-index:1;}
+.app-sidebar .workflow-timeline > .workflow-step {position:relative;height:94px;padding:0;}
+.workflow-step:not(:last-child)::before {content:"";position:absolute;left:20px;top:24px;bottom:-24px;width:1px;background:var(--border);}
+.workflow-step[data-state=complete] .workflow-marker {color:var(--success-muted-foreground);border-color:var(--success-muted-foreground);background:var(--success-muted);}
+.workflow-step-name {font-weight:600;flex:1;white-space:nowrap;}
+.workflow-state {font-size:10px;white-space:nowrap;color:var(--muted-foreground);padding-right:4px;}
+.workflow-step[data-state=complete] .workflow-state {color:var(--success-muted-foreground);}
+.workflow-step dl {margin:0 0 0 48px;font-size:10px;color:var(--muted-foreground);line-height:1.5;}
+.workflow-step dl > div {display:flex;gap:4px;white-space:nowrap;}
+.workflow-step dt::after {content: ":";}
+.workflow-step dd {margin:0;}
+.workflow-total {font-size:11px;border-top:1px solid var(--border);padding:8px 4px;}
+.workflow-total > span {float:right;color:var(--muted-foreground);}
+.workflow-total p {margin:4px 0 0;color:var(--muted-foreground);}
+.workflow-footer {border-top:1px dashed var(--border);}
+.project-workflow-nav.is-collapsed .workflow-label,.project-workflow-nav.is-collapsed .workflow-step-name,.project-workflow-nav.is-collapsed .workflow-state,.project-workflow-nav.is-collapsed dl,.project-workflow-nav.is-collapsed .workflow-total {visibility:hidden;}
+
+
+/* Labels must not wrap and enlarge a collapsed rail in CJK locales. */
+.workflow-info {height:48px;flex-shrink:0;overflow:hidden;}
+.workflow-label {min-width:0;white-space:nowrap;}
+.workflow-total {flex-shrink:0;margin:0 4px;min-height:58px;}
+
+.project-settings-header {display:flex;flex-direction:column;gap:20px;}
+.project-settings-title {margin:0;font-size:24px;font-weight:650;line-height:1.3;color:var(--foreground);}
+
+/* The collapsed rail keeps marker positions, but reserves no totals block. */
+.workflow-scroll {scrollbar-width:none;-ms-overflow-style:none;}
+.workflow-scroll::-webkit-scrollbar {display:none;width:0;height:0;}
+.project-workflow-nav.is-collapsed .workflow-total {display:none;}
+/* Product pages own the available canvas; only the embedded page scrolls. */
+main:has(.product-surface) {padding:0;overflow:hidden;}
+.workbench-page:has(.product-surface) {width:100%;max-width:none;height:100%;min-height:0;padding:0;gap:0;}
+.workbench-page > div:has(> .product-surface) {flex:1;min-height:0;height:100%;gap:0;}
+.workbench-page .product-surface {flex:1;height:100%;min-height:0;border:0;border-radius:0;}
+
+.project-library{padding:20px 0;border-block:1px solid var(--border)}.project-library h2{font-size:16px;font-weight:600}.project-library p{font-size:12px;color:var(--muted-foreground);line-height:1.8}.project-library-row{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);font-size:12px}.project-library-row strong{flex:1;min-width:180px}.project-library-row span{color:var(--muted-foreground)}.project-library-picker{padding:16px;background:var(--muted);border-radius:8px;margin-top:14px}.project-library-source{padding:20px;background:var(--background);border:1px solid var(--border);border-radius:8px;margin-top:16px}.project-library-source>div{display:flex;justify-content:space-between}.project-library-source pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.9;margin-top:16px}
+
+/* Host confirmations overlay the canvas only after an explicit user action. */
+.project-actions-trigger {position:fixed;right:var(--spacing-lg);bottom:calc(var(--spacing-lg) + 56px);z-index:30;box-shadow:var(--shadow-overlay);}
+.project-actions-dialog {position:fixed;inset:0 0 0 auto;top:0;left:auto;transform:none;translate:none;width:min(680px,100vw);max-width:none;height:100dvh;max-height:100dvh;border-radius:0;display:flex;flex-direction:column;gap:var(--spacing-lg);overflow:hidden;}
+.project-actions-dialog > [data-slot=dialog-header] {padding-right:var(--spacing-lg);}
+.project-actions-body {flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:var(--spacing-md);}
+.agent-management-page { display: flex; flex-direction: column; gap: var(--spacing-lg); min-width: 0; }
+.agent-management-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--spacing-md); }
+.agent-management-header h1 { margin: 0; font-size: var(--heading-3-font-size); font-weight: 600; }
+.agent-management-header p { margin: var(--spacing-xs) 0 0; font-size: var(--body-sm-font-size); color: var(--muted-foreground); }
+.agent-manager-toolbar { display: flex; justify-content: space-between; align-items: center; gap: var(--spacing-md); }
+.agent-manager-filters,.agent-manager-tools { display: flex; align-items: center; gap: var(--spacing-xs); }
+.agent-manager-tools input { width: 12rem; }
+.agent-manager-filter-count { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.agent-manager-body { display: flex; flex-direction: column; gap: var(--spacing-md); }
+.agent-manager-message { margin: 0; font-size: var(--body-sm-font-size); display: flex; align-items: center; gap: var(--spacing-sm); }
+.agent-install-record { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--spacing-md); }
+.agent-install-head { display: flex; align-items: center; gap: var(--spacing-sm); }
+.agent-install-icon { display: inline-flex; flex-shrink: 0; color: var(--muted-foreground); }
+.agent-install-identity { min-width: 0; flex: 1; }
+.agent-install-identity h3 { margin: 0; font-size: var(--body-md-font-size); font-weight: 600; overflow-wrap: anywhere; }
+.agent-install-identity p { margin: var(--spacing-2xs) 0 0; color: var(--muted-foreground); font-size: var(--body-sm-font-size); overflow-wrap: anywhere; }
+.agent-install-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-sm); padding: var(--spacing-md) 0; }
+.agent-install-buttons { display: flex; align-items: center; gap: var(--spacing-sm); flex-shrink: 0; }
+.agent-install-versions { border-top: 1px dashed var(--border); padding-top: var(--spacing-sm); }
+.agent-install-versions summary { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-sm); cursor: pointer; color: var(--muted-foreground); font-size: var(--body-sm-font-size); list-style: none; }
+.agent-install-versions summary::-webkit-details-marker { display: none; }
+.agent-install-versions[open] summary > svg { transform: rotate(180deg); }
+.agent-install-versions ul { margin: var(--spacing-sm) 0 0; padding: 0; list-style: none; }
+.agent-install-versions li { display: flex; justify-content: space-between; align-items: center; min-height: var(--space-row-md); gap: var(--spacing-sm); border-top: 1px solid var(--border); font-size: var(--body-sm-font-size); }
+.agent-manager-footnote { margin: 0; color: var(--muted-foreground); font-size: var(--body-sm-font-size); }
+.agent-registry-panel { padding: var(--spacing-md); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.agent-registry-panel h2 { margin: 0 0 var(--spacing-sm); font-size: var(--body-md-font-size); font-weight: 600; }
+@media (max-width: 1100px) {
+  .agent-manager-toolbar,.agent-management-header { flex-wrap: wrap; }
+  .agent-manager-tools { flex: 1; }
+  .agent-manager-tools input { flex: 1; min-width: 0; }
+}
+.recovery-settings { display: flex; flex-direction: column; gap: var(--spacing-sm); }
+.recovery-path { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-sm); }
+.recovery-path label { flex: 0 0 9rem; font-size: var(--body-sm-font-size); color: var(--muted-foreground); }
+.recovery-path input { flex: 1; min-width: 12rem; }
+.recovery-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-sm); }
+.recovery-operation { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-sm); font-size: var(--body-sm-font-size); overflow-wrap: anywhere; }
+.recovery-operation .mono { width: 100%; color: var(--muted-foreground); }
+.diagnostic-results { margin: var(--spacing-md) 0 0; padding: 0; list-style: none; }
+.diagnostic-results li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--spacing-sm); padding: var(--spacing-sm) 0; border-bottom: 1px dashed var(--border); font-size: var(--body-sm-font-size); }
+.diagnostic-results p { margin: 0; width: 100%; color: var(--muted-foreground); }
+@source "../dist";

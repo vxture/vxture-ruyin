@@ -67,7 +67,7 @@ function fieldsOf(source, name) {
 }
 
 const ui = readFileSync(
-  join(repoRoot, "apps/ui-workspace/src/api.ts"),
+  join(repoRoot, existsSync(join(repoRoot,"packages/workbench-ui/src/api.ts")) ? "packages/workbench-ui/src/api.ts" : "apps/ui-workspace/src/api.ts"),
   "utf8",
 );
 
@@ -217,7 +217,7 @@ function eventKinds(source) {
 
 const EVENT_SOURCES = [
   ["apps/local-host/src/events.ts", "守护进程（发）"],
-  ["apps/ui-workspace/src/api.ts", "界面（收）"],
+  [existsSync(join(repoRoot,"packages/workbench-ui/src/api.ts")) ? "packages/workbench-ui/src/api.ts" : "apps/ui-workspace/src/api.ts", "界面（收）"],
   // 壳的词表本来声明在 main.ts；那一半改由 daemon-events.ts 声明并被
   // main.ts 引入，因为 main.ts 顶层 import "electron"，node:test 加载不了
   // 它——SSE 解析要能被直接测，就不能和事件种类的声明挤在同一个文件里。
@@ -288,7 +288,7 @@ if (!band) {
 
 // 链校验必须认两种形状的链接字段，只认一种等于对另一种谎报断裂。
 const chain = readFileSync(
-  join(repoRoot, "apps/ui-workspace/src/chain.ts"),
+  join(repoRoot, existsSync(join(repoRoot,"packages/workbench-ui/src/chain.ts")) ? "packages/workbench-ui/src/chain.ts" : "apps/ui-workspace/src/chain.ts"),
   "utf8",
 );
 for (const field of ["prevHash", "prev_hash"]) {

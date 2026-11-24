@@ -1,7 +1,7 @@
 import { test, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ProjectWorkflowNav } from "./project-workflow-nav";
+import { ProjectWorkflowNav } from "./project-workflow-nav.js";
 test("workflow exposes one merged settings entry, stage status and recorded duration",async()=>{
  const navigate=vi.fn();
  render(<ProjectWorkflowNav projectId="p" activeId="requirements" collapsed={false} onToggle={()=>{}} onNavigate={navigate} footer={null} items={[

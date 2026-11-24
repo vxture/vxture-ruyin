@@ -2,8 +2,8 @@ import { test, expect, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach } from "vitest";
-import { ProductHome } from "./product-home";
-import { Api, type ProductInfo, type ProjectMeta } from "./api";
+import { ProductHome } from "./product-home.js";
+import { Api, type ProductInfo, type ProjectMeta } from "./api.js";
 
 afterEach(() => {cleanup();vi.restoreAllMocks();localStorage.clear();});
 const product = {id:"bidproposal",name:"Bid",availability:"available"} as ProductInfo;

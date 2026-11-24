@@ -99,6 +99,7 @@ vxture-ruyin/
 │   ├── contract-schema/            # @vxture/ruyin-contract-schema
 │   ├── runtime-core/               # @vxture/ruyin-core（同构内核，云端 Runtime 消费）
 │   ├── document/                   # @vxture/ruyin-document（mdast 表示 + docx/PDF 渲染，ADR-016/017）
+│   ├── workbench-ui/               # @vxture/ruyin-workbench-ui：从原桌面提取的项目/流程/审核呈现，桌面和产品 Web 共用
 │   ├── product-sdk/                # @vxture/ruyin-product-sdk（07 §6.2）—— **尚未建**，W3
 │   └── cli/                        # ruyin lint / pack / registry（dev 尚未落地，07 §7–§9）
 ├── apps/                           # 不发布 npm，只进安装包
@@ -114,6 +115,7 @@ vxture-ruyin/
 
 - **packages/ 与 apps/ 的分界 = 是否被仓外消费**。云端 Runtime 与未来产品团队只消费
   packages/ 的 npm 包，绝不引用本仓源码（对齐平台"依赖 = 已发布 npm 包 + API 契约"的硬约束，方向对等适用）
+- 2026-11-25：项目呈现模块及其类型化客户端、语言和样式迁入 `workbench-ui`，原 app 路径只再导出共享模块。其任务确认仍来自实际运行时；Web 通过注入传输和产品画布适配自己的服务。全局框架设置、Electron 和守护进程仍归 `apps/`，不把它们发布给产品。新增包跟随既有锁步发布，不另建流水线。
 - products/ 是**测试夹具**，不是过渡（2026-09-02 owner 定，TD-006 转 standing）：只有一份契约、
   没有产品代码，也不会有；它随安装包发出，所以首页不空。原文「契约与 SDK 稳定后迁出」的框架已撤
 - `package.json` 预置机检契约脚本名：`type-check:all`、`lint`、`lint:docs-numbering`、
@@ -139,7 +141,7 @@ vxture-ruyin/
 
 | 流 | 构件 | 通道 | 消费者 |
 |---|---|---|---|
-| A | npm 包（contract-schema / runtime-core / document / cli；product-sdk 待建） | GitHub Packages（@vxture scope，org NODE_AUTH_TOKEN 既有基建） | 云端 Runtime、产品团队 |
+| A | npm 包（contract-schema / runtime-core / document / workbench-ui / cli；product-sdk 待建） | GitHub Packages（@vxture scope，org NODE_AUTH_TOKEN 既有基建） | 云端 Runtime、产品团队 |
 | B | 安装包（NSIS `.exe` + blockmap + `latest.yml` 更新 feed） | **网站平台下载（主通道，§7）** | 最终用户 |
 | C | 产品包（`.ruyinpkg`） | MVP：与 B 同一下载主机的静态目录 + 清单文件；后期：Registry 服务（03-A §18.3） | Runtime 拉取 |
 

@@ -14,9 +14,9 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Api } from "./api";
-import { PRODUCT_SANDBOX, ProductLibrarySurface, ProductSurface, ProductTab, productFrameEntry, sameOrigin } from "./product-surface";
-import type { SurfaceInfo } from "./product-surface-info";
+import type { Api } from "./api.js";
+import { PRODUCT_SANDBOX, ProductLibrarySurface, ProductSurface, ProductTab, productFrameEntry, sameOrigin } from "./product-surface.js";
+import type { SurfaceInfo } from "./product-surface-info.js";
 
 const SHA = "a".repeat(64);
 const ORIGIN = "http://bidproposal.localhost:7421";
@@ -204,7 +204,7 @@ test("product frame includes only explicit parent origin and preserves the pinne
   expect(url.searchParams.get("hostOrigin")).toBe("http://127.0.0.1:7420");
   expect(url.searchParams.get("theme")).toBe("dark");
 });
-import { productNavigation } from './product-navigation';
+import { productNavigation } from './product-navigation.js';
 test('product navigation validates bounded internal identifiers and unique labels',()=>{
  expect(productNavigation([{id:'requirements',label:'Requirements'}])).toEqual([{id:'requirements',label:'Requirements'}]);
  for(const items of [[{id:'https://bad',label:'x'}],[{id:'x',label:'x'},{id:'x',label:'y'}],[{id:'x',label:''}],Array.from({length:13},(_,i)=>({id:'s'+i,label:'x'}))])expect(productNavigation(items)).toBeNull();

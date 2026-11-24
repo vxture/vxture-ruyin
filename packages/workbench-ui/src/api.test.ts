@@ -17,7 +17,7 @@ import {
   type Checkpoint,
   type LegacyAuditEvent,
   type TaskInstance,
-} from "./api";
+} from "./api.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -28,6 +28,16 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+test("an injected environment transport handles project calls without global fetch", async () => {
+  const native = vi.fn();
+  globalThis.fetch = native;
+  const transport = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ items: [] }));
+  const api = new Api("host-only", transport);
+  expect(await api.projects()).toEqual({ items: [] });
+  expect(transport).toHaveBeenCalledWith("/projects", expect.objectContaining({ method: "GET" }));
+  expect(native).not.toHaveBeenCalled();
 });
 
 test("backup, cancellation and diagnostics use the existing local bearer boundary",async()=>{

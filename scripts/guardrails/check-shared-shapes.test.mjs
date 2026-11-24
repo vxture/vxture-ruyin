@@ -101,6 +101,18 @@ void test("处处对得上的基线要通过 —— 造不出它，下面每一�
   assert.match(r.out, new RegExp(`${SHARED.length} 个共享接口`));
 });
 
+test("relocated public UI metadata stays guarded after native paths become re-exports", () => {
+  const files = baseline();
+  files["packages/workbench-ui/src/api.ts"] = files["apps/ui-workspace/src/api.ts"];
+  files["packages/workbench-ui/src/chain.ts"] = files["apps/ui-workspace/src/chain.ts"];
+  files["apps/ui-workspace/src/api.ts"] = 'export * from "@vxture/ruyin-workbench-ui/api";';
+  files["apps/ui-workspace/src/chain.ts"] = 'export * from "@vxture/ruyin-workbench-ui/chain";';
+  assert.equal(check(files).code, 0);
+  files["packages/workbench-ui/src/api.ts"] = files["packages/workbench-ui/src/api.ts"]
+    .replace("interface ContextItemMeta {\n  id: string;", "interface ContextItemMeta {\n  unexpected: string;\n  id: string;");
+  assert.equal(check(files).code, 1);
+});
+
 void test("**源头加了字段、界面没跟上** —— 这正是它存在的那件事", () => {
   const base = baseline();
   const r = check({
