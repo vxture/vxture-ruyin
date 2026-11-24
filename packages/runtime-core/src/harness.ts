@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Business Runtime Harness - task-scoped execution kernel.
  * Design authority: docs/30-design/50-harness.md, 40-context-architecture.md.
  *
@@ -214,6 +214,8 @@ export interface TaskResult {
 
 export interface TaskInstanceRecord {
   id: string;
+  /** Durable host correlation, used to recover an accepted background step. */
+  requestKey?: string;
   workspace: string;
   taskId: string;
   definition: TaskDefinition;
@@ -278,6 +280,7 @@ export interface TaskInstanceRecord {
 }
 
 export interface HarnessDeps {
+  projectDocuments?: { get(projectId: string, productId: string, id: string): { markdown: string; revision: number } | undefined } | undefined;
   store: ProjectStore;
   contract: RuyinContract;
   projectId: string;
@@ -389,9 +392,17 @@ export class Harness {
        * 只进审计，不改变任何判断 —— 关卡对谁都一样。
        */
       requestedBy?: string;
+      requestKey?: string;
     },
   ): Promise<TaskInstanceRecord> {
     const { contract, clock, id } = this.deps;
+    if (options?.requestKey) {
+      const existing = (await this.deps.store.listTaskInstances()).map(raw => JSON.parse(raw) as TaskInstanceRecord).find(t => t.requestKey === options.requestKey);
+      if (existing) {
+        if(existing.taskId!==taskId)throw new HarnessError("request key belongs to a different task");
+        return existing;
+      }
+    }
     const definition = contract.tasks.find((t) => t.id === taskId);
     if (!definition) {
       throw new HarnessError(`task "${taskId}" is not declared in the contract`);
@@ -426,6 +437,7 @@ export class Harness {
     }
     const instance: TaskInstanceRecord = {
       id: id.newId("ti"),
+      ...(options?.requestKey ? { requestKey: options.requestKey } : {}),
       workspace: this.deps.projectId,
       taskId,
       definition,
@@ -684,7 +696,7 @@ export class Harness {
           name: i.name,
           bytes: i.bytes,
           ref: i.ref,
-          origin: "local_file",
+          origin: i.documentRevision !== undefined ? "project_document" : "local_file",
         })),
         // Stated so the person deciding knows what they are agreeing to: these
         // files go out as material to work FROM. Anything inside them that
@@ -837,6 +849,16 @@ export class Harness {
     // 此前那版 `slice(0, 3)` 的做法，而三条备忘录与三份百页标书在它眼里一样。
     const rankedTypes: RankedType[] = [];
     for (const type of definition.input_types) {
+      const declared = contract.context.types.find(t => t.id === type);
+      if (declared?.project_document) {
+        if (!declared.sources.includes("project")) return {ok:false,reason:`context ${type} project_document requires project source`};
+        const doc = this.deps.projectDocuments?.get(this.deps.projectId, contract.product.id, declared.project_document);
+        if (!doc) return {ok:false,reason:`project document ${declared.project_document} is unavailable`};
+        const bytes = new TextEncoder().encode(doc.markdown).length;
+        if (bytes > 262144) return {ok:false,reason:`project document ${declared.project_document} exceeds 256 KiB`};
+        rankedTypes.push({type,required:true,ranked:[{id:`doc_${declared.project_document}_v${doc.revision}`,type,source:"project",connector:"project-document",ref:declared.project_document,name:`${declared.name} v${doc.revision}`,bytes,modifiedAt:this.deps.clock.now(),documentRevision:doc.revision}]});
+        continue;
+      }
       const binding = bindings.find((b) => b.type === type);
       let candidates: ContextItemMeta[] = [];
       // 本项目自己产出的成果。契约把这类上下文声明为 `sources: [project]`，
@@ -901,11 +923,15 @@ export class Harness {
       );
     }
 
+    const documentBytes=rankedTypes.flatMap(t=>t.ranked).filter(i=>i.documentRevision!==undefined).reduce((sum,i)=>sum+i.bytes,0);
+    const limit=this.deps.contextBudgetBytes ?? DEFAULT_CONTEXT_BUDGET_BYTES;
+    if(limit>0 && documentBytes>limit)return {ok:false,reason:"project documents exceed task context budget; narrow the plan"};
     const budget = selectWithinBudget(rankedTypes, {
       budgetBytes: this.deps.contextBudgetBytes ?? DEFAULT_CONTEXT_BUDGET_BYTES,
       maxPerType: MAX_ITEMS_PER_TYPE,
     });
     const selected = budget.selected;
+    if (rankedTypes.some(t => t.ranked.some(i => i.documentRevision !== undefined) && !selected.some(i => i.type === t.type))) return {ok:false,reason:"project document exceeds task context budget; narrow the plan"};
     // 声明了输入、却一份都没拿到 —— 这个任务达不成它的目标。
     //
     // 每个类型单看都是 `required: false`，所以逐个检查一个都不会响；而合起来
@@ -944,6 +970,16 @@ export class Harness {
     if (instance.contextSet) {
       transmissionItems = [];
       for (const meta of instance.contextSet) {
+        if (meta.documentRevision !== undefined) {
+          const declared = this.deps.contract.context.types.find(t => t.id === meta.type);
+          if (!declared?.project_document || declared.project_document !== meta.ref) return this.fail(instance,"project document declaration changed");
+          const doc = this.deps.projectDocuments?.get(this.deps.projectId,this.deps.contract.product.id,meta.ref);
+          if (!doc || doc.revision !== meta.documentRevision) return this.fail(instance,"project document changed after selection; start a new task");
+          context.push({type:meta.type,name:meta.name,content:{kind:"text",text:doc.markdown},origin:{kind:"connector",connector:"project-document",source:"project"}});
+          transmissionItems.push({id:meta.id,type:meta.type,source:"project",connector:"project-document",ref:meta.ref,revision:doc.revision,...describeForAudit({kind:"text",text:doc.markdown},crypto),bytes:meta.bytes});
+          await this.journal(instance,"context_read",{item:meta.id});
+          continue;
+        }
         const connectorId = itemConnector(meta);
         const connector = connectors.get(connectorId);
         if (!connector) {
@@ -1121,7 +1157,7 @@ export class Harness {
       );
 
       if (turn.kind === "content") {
-        messages.push({ role: "assistant", content: turn.content });
+        messages.push({ role: "assistant", content: turn.content, ...(turn.reasoning ? { reasoning: turn.reasoning } : {}) });
         await this.audit(instance, "capability.completed", { capability, turns: step });
         return { kind: "content", content: turn.content };
       }
@@ -1136,7 +1172,8 @@ export class Harness {
         };
       }
 
-      messages.push({ role: "assistant", content: "", toolCalls: turn.calls });
+      messages.push({ role: "assistant", content: turn.content ?? "", toolCalls: turn.calls,
+        ...(turn.reasoning ? { reasoning: turn.reasoning } : {}) });
       const gated = await this.gateCalls(instance, turn.calls);
 
       /*
@@ -1572,9 +1609,8 @@ export class Harness {
       };
       // Discard what failed review so it is produced again; keep the
       // conversation, which now carries the reason.
-      instance.verification = instance.verification.filter(
-        (v) => v.status !== "failed",
-      );
+      // Every verdict was for the previous output, including rules that passed.
+      instance.verification = [];
       instance.capabilityOutputs = {};
       instance.conversation = messages;
       await this.persist(instance);

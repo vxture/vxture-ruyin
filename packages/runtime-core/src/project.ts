@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Workspace Runtime - workspace-scoped, long-lived kernel surface.
  * Design authority: RY-100 s.05 and RY-101 s.02 (formerly 30-design/10 section 7).
  *
@@ -619,6 +619,7 @@ export class ProjectRuntime {
       crypto: this.ports.crypto,
       gateway: this.ports.gateway,
       connectors: this.ports.connectors ?? new Map(),
+      projectDocuments: this.ports.projectDocuments,
       ranker: this.ports.ranker,
       tools: this.ports.tools,
       skills: this.ports.skills,
@@ -729,6 +730,7 @@ export class ProjectRuntime {
   async listPendingConfirmations(): Promise<PendingConfirmation[]> {
     const out: PendingConfirmation[] = [];
     for (const project of await this.listProjects()) {
+      if (project.archivedAt) continue;
       let instances: TaskInstanceRecord[];
       try {
         instances = await this.listTaskInstances(project.id);
@@ -738,6 +740,7 @@ export class ProjectRuntime {
         continue;
       }
       for (const instance of instances) {
+        if (instance.state !== "waiting_human") continue;
         const checkpoint = pendingCheckpoint(instance);
         if (!checkpoint) continue;
         out.push({

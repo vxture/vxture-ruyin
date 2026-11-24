@@ -89,6 +89,18 @@ const processor = unified().use(remarkParse).use(remarkGfm).use(remarkDirective)
  */
 export function parseDocument(markdown: string): RuyinDocument {
   const root = processor.parse(markdown) as Root;
+  // remark-directive also recognizes the :00 in 08:00 as a directive. Preserve
+  // clock text without relaxing unsupported directive/content diagnostics.
+  walk(root, node => {
+    const d = node as Node & {name?:string;attributes?:Record<string,unknown>;children?:Node[]};
+    const start=node.position?.start.offset,end=node.position?.end.offset;
+    if(node.type==="textDirective" && /^[0-5]\d$/.test(d.name??"") &&
+      !Object.keys(d.attributes??{}).length && !d.children?.length &&
+      start!==undefined && end!==undefined && /\d/.test(markdown.charAt(start-1))){
+      Object.assign(node,{type:"text",value:markdown.slice(start,end)});
+    }
+    return true;
+  });
   const diagnostics: Diagnostic[] = [];
   walk(root, (node, parent) => inspect(node, parent, diagnostics));
   return { root, diagnostics };

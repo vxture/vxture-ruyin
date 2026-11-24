@@ -61,22 +61,27 @@ test("http connector: discover/read/health/tools over Streamable HTTP end to end
 });
 
 test("http connector: a read after the server is gone is unavailable, not a thrown task failure", async () => {
-  const server = await startFakeMcpHttpServer({ exitAfterInit: true });
+  const server = await startFakeMcpHttpServer({});
   const connector = new McpConnector({ id: "crm", transport: "streamable_http", url: server.url }, { timeoutMs: 2000 });
-  await connector.start();
-  await new Promise((r) => setTimeout(r, 100));
-  const item = await connector.read({
-    id: "itm_x",
-    type: "t",
-    source: "lan",
-    connector: "crm",
-    ref: "crm://accounts/1",
-    name: "x",
-    bytes: 0,
-    modifiedAt: "",
-  });
-  assert.equal(item.content.kind, "unavailable");
-  await server.close();
+  try {
+    await connector.start();
+    // A closed listener may still serve keep-alive connections; close both.
+    await server.close();
+    const item = await connector.read({
+      id: "itm_x",
+      type: "t",
+      source: "lan",
+      connector: "crm",
+      ref: "crm://accounts/1",
+      name: "x",
+      bytes: 0,
+      modifiedAt: "",
+    });
+    assert.equal(item.content.kind, "unavailable");
+  } finally {
+    await connector.stop();
+    await server.close();
+  }
 });
 
 test("http connector: a huge tool result is truncated and says so (TD-046), same as stdio", async () => {

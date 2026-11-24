@@ -2,6 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { inflateRawSync } from "node:zlib";
 
+void test("clock times in paragraphs and tables survive Word rendering without hiding real directives",async()=>{
+ const source='Service 08:00-20:00 and 12:34:56.\n\n| Shift | Time |\n|---|---|\n| Day | 09:30 |';
+ const parsed=parseDocument(source);assert.equal(isLossy(parsed.diagnostics),false);
+ const xml=unzip(await renderDocx(parsed),'word/document.xml');
+ for(const time of ['08',':00','20','12',':34',':56','09',':30'])assert.ok(xml.includes(time));
+ assert.equal(isLossy(parseDocument('Example :unsupported[content]').diagnostics),true);
+ assert.equal(isLossy(parseDocument('Value 12:34[content]').diagnostics),true);
+});
+
 import {
   DocumentLossError,
   isLossy,

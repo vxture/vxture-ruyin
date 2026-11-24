@@ -77,6 +77,7 @@ export function compareContracts(prev: RuyinContract, next: RuyinContract): Cont
     }
     if (!t.required && n.required) narrowed(`context.types.${t.id}.required`);
     if (t.sources.some((s) => !n.sources.includes(s))) narrowed(`context.types.${t.id}.sources`);
+    if (t.project_document !== n.project_document) narrowed(`context.types.${t.id}.project_document`);
     if (t.class !== n.class) narrowed(`context.types.${t.id}.class`);
   }
 
