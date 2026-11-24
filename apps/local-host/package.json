@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json && node --test-timeout=60000 --test-concurrency=4 --experimental-test-coverage --test-coverage-include=\"dist/**/*.js\" --test-coverage-exclude=\"dist/**/*.test.js\" --test-coverage-exclude=\"dist/pkg-testkit.js\" --test-coverage-exclude=\"dist/fake-mcp-server.js\" --test-coverage-exclude=\"dist/fake-mcp-http-server.js\" --test-coverage-exclude=\"dist/fake-openai-server.js\" --test-coverage-lines=90 --test-coverage-branches=78 --test-coverage-functions=88 --test \"dist/**/*.test.js\"",
+    "test": "tsc -p tsconfig.json && node --test-timeout=60000 --test-concurrency=4 --experimental-test-coverage --test-coverage-include=\"dist/**/*.js\" --test-coverage-include=\"../../packages/node-runtime/dist/**/*.js\" --test-coverage-exclude=\"../../packages/node-runtime/dist/**/*.test.js\" --test-coverage-exclude=\"dist/**/*.test.js\" --test-coverage-exclude=\"dist/pkg-testkit.js\" --test-coverage-exclude=\"dist/fake-mcp-server.js\" --test-coverage-exclude=\"dist/fake-mcp-http-server.js\" --test-coverage-exclude=\"dist/fake-openai-server.js\" --test-coverage-lines=90 --test-coverage-branches=78 --test-coverage-functions=88 --test \"dist/**/*.test.js\"",
     "start": "node dist/main.js"
   },
   "dependencies": {
@@ -19,7 +19,8 @@
     "@vxture/ruyin-document": "workspace:*",
     "better-sqlite3-multiple-ciphers": "^12.0.0",
     "systeminformation": "^5.33.16",
-    "yaml": "^2.8.0"
+    "yaml": "^2.8.0",
+    "@vxture/ruyin-node-runtime": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

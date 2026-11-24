@@ -165,3 +165,37 @@ measured together with its original native callers, without lowering gates.
 Recursive build/type-check and 35 focused version/order/shape guard tests pass.
 Installed-registry Web composition and production runtime acceptance follow
 after the reviewed package release; these local results do not imply deployment.
+
+## B6.5 reusable Node runtime adapters
+
+Continue the authorized full desktop-to-Web migration by extracting the original
+storage/file store, background jobs, task runner/queue, event bus, document
+reading/rendering, product library, download tickets and Word layout modules into
+`packages/node-runtime` (`@vxture/ruyin-node-runtime`). Keep native re-export
+wrappers and the existing native integration tests. Move/copy the focused module
+tests into the public package as appropriate, and add a structural storage-key
+provider boundary so server hosts never import the native DPAPI/development
+master-key manager. The fixed original Python reader and hash-locked requirements
+are copied byte-for-byte into the package by its build, retaining their existing
+canonical source in resources/document-reader.
+
+Update the local-host dependency, package manifests/lockstep version (0.2.2),
+existing publish order and shape guard source pointers. Add the package export,
+build/type/test configuration and documented import. No new local-host HTTP
+routes, provider credentials, private app imports, product logic, automatic
+synchronization or platform changes. Web identity, workspace namespace, resource
+limits, persistent volume and Linux layout are product-owned adapters verified
+separately before deployment. Runtime storage remains encrypted and durable;
+server key provisioning cannot fall back to a generated plaintext master key.
+
+### Node extraction local acceptance
+
+The public Node module and its native re-export wrappers pass recursive build and
+type checking, 61 targeted tests and all 874 original native integration tests.
+The latter measures both original app and extracted implementation together at
+the unchanged 90/78/88 coverage floor (96.79/89.50/92.81 achieved). Structural
+key injection is tested against real encrypted SQLite and encrypted file bytes:
+reopening retains revisions/content, wrong and invalid keys fail. No native key
+manager or development plaintext fallback is exported. Eleven shape-guard cases
+also pass, including drift in the moved event implementation. Server production
+identity, namespace/limits, Linux reader/layout and release remain product work.

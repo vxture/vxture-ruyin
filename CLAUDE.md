@@ -41,7 +41,8 @@ used in ADR cross-references, and which of those documents were retired).
 ## Source layout and the publishing boundary
 
 - `packages/` - published to GitHub Packages (@vxture scope), consumed OUTSIDE
-  this repo: contract-schema, runtime-core, document, workbench-ui, cli. The cloud runtime
+  this repo: contract-schema, runtime-core, document, node-runtime, workbench-ui,
+  cli. The cloud runtime
   consumes these as npm packages, never this repo's source. (product-sdk is
   planned, not present - workplan W3; do not list it as if it existed.)
 - `apps/` - never published as packages; shipped only inside the installer:

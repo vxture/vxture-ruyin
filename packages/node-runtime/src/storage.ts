@@ -1,0 +1,643 @@
+/**
+ * Original Node runtime adapter shared by native and product server hosts.
+ * @package @vxture/ruyin-node-runtime
+ * @layer Infrastructure
+ * @category Runtime
+ * @author AI-Generated
+ * @date 2026-11-25
+ */
+﻿/**
+ * SQLite StoragePort - one database per workspace under the data directory
+ * (RY-301 s.03; formerly 30-design/60 section 7.1):
+ *
+ *   <dataDir>/projects/<id>/project.db
+ *
+ * 落盘即加密（TD-009 已回收）：SQLCipher 方案，每个项目一把密钥，密钥由
+ * KeyManager 保管（Windows 上走 DPAPI）。表：kv（meta / 契约 / 业务状态 /
+ * 授权 / 绑定 / 成果登记）、task_instances、audit_events、journal、fts_index。
+ */
+
+import Database from "better-sqlite3-multiple-ciphers";
+import {createHash} from "node:crypto";
+import { mkdirSync, existsSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+export interface StorageKeyProvider { workspaceKeyHex(directory: string): string; }
+import { ProjectFileStore, type StoredFile } from "./file-store.js";
+import type {
+  AuditEvent,
+  JournalEntry,
+  StoragePort,
+  ProjectMeta,
+  ProjectStore,
+} from "@vxture/ruyin-core";
+
+/** On-disk home of the local containers (ADR-007: they are projects). */
+const PROJECTS_DIR = "projects";
+const PROJECT_DB = "project.db";
+
+/**
+ * One-time move of the pre-rename layout into place.
+ *
+ * Only the directory and file names change - **ids are left exactly as they
+ * are**. The audit chain''s genesis hash is `sha256("genesis:" + id)`, so
+ * rewriting an id would invalidate every chain already written; ids are opaque,
+ * so `ws_` and `prj_` coexist meaning nothing.
+ *
+ * Refuses to act if the new directory already exists: a half-finished move is
+ * worse than an unmoved one, and there is no safe way to merge the two.
+ *
+ * **The `-wal` file must travel with its database.** In WAL mode a committed
+ * transaction lives in `<db>-wal` until a checkpoint folds it back; SQLite
+ * finds that file by the database's name. Renaming the database alone leaves
+ * the WAL orphaned under the old name, and everything still in it is silently
+ * gone - the database opens perfectly well, just missing its most recent
+ * writes. `-shm` is the opposite case: pure shared-memory index, rebuilt on
+ * demand, and a stale one is worse than none, so it is removed rather than
+ * carried.
+ */
+function migrateWorkspaceDirs(dataDir: string): void {
+  const from = join(dataDir, "workspaces");
+  const to = join(dataDir, PROJECTS_DIR);
+  if (!existsSync(from) || existsSync(to)) return;
+  renameSync(from, to);
+  for (const entry of readdirSync(to, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const dir = join(to, entry.name);
+    const oldDb = join(dir, "workspace.db");
+    if (!existsSync(oldDb)) continue;
+    renameSync(oldDb, join(dir, PROJECT_DB));
+    const oldWal = `${oldDb}-wal`;
+    if (existsSync(oldWal)) renameSync(oldWal, `${join(dir, PROJECT_DB)}-wal`);
+    rmSync(`${oldDb}-shm`, { force: true });
+  }
+  console.log(`[ruyin] migrated ${from} -> ${to} (ids unchanged)`);
+}
+
+const DDL = `
+CREATE TABLE IF NOT EXISTS kv (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_instances (
+  id         TEXT PRIMARY KEY,
+  data       TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS audit_events (
+  seq      INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE,
+  hash     TEXT NOT NULL,
+  data     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS journal (
+  seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_instance TEXT NOT NULL,
+  data          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_journal_task ON journal (task_instance);
+CREATE TABLE IF NOT EXISTS files (
+  id         TEXT PRIMARY KEY,
+  hash       TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  bytes      INTEGER NOT NULL,
+  media_type TEXT NOT NULL,
+  added_at   TEXT NOT NULL,
+  source_ref TEXT
+);
+-- 引用计数靠这个索引数出来：同一份内容可以有两条登记（招标文件.pdf 与
+-- 甲方发来的最终版.pdf 字节一样），删掉最后一条时那份密文才真的删。
+CREATE INDEX IF NOT EXISTS idx_files_hash ON files (hash);
+CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5(
+  item_id UNINDEXED,
+  type UNINDEXED,
+  name,
+  content,
+  tokenize='trigram'
+);
+`;
+
+/**
+ * `trigram` 而不是默认的 `unicode61`，因为默认分词器**对中文是零命中**。
+ *
+ * 这不是推断，是量出来的：一段含「储能项目」的中文正文，用 unicode61 索引后
+ * 查「储能」「储能项目」「电化学储能」「案例」，四条全是 0 命中 —— unicode61
+ * 把一整串连续汉字当成一个 token，除非查询词与它逐字相同，否则永远不匹配。
+ * 也就是说这个索引对中文资料一直是死的，而唯一的症状是排序悄悄退化成按时间，
+ * 看起来和「就是没有更相关的」一模一样。
+ *
+ * trigram 的代价要说清：**它需要至少 3 个字符**。「储能」「案例」这类两字词
+ * MATCH 不到，由 `fts.ts` 用 LIKE 扫描兜底。索引也比词级分词更大。
+ */
+const FTS_TOKENIZER = "trigram";
+
+const require = createRequire(import.meta.url);
+
+/**
+ * Native binding selection (TD-010).
+ *
+ * Plain Node prefers build/node-v<ABI>-<platform>-<arch>, fetched by
+ * scripts/native/sqlite-node-binding.mjs for the chosen development runtime,
+ * otherwise the package default (build/Release). Under Electron the daemon runs in
+ * Electron's bundled Node with its *own* ABI, so the host binding cannot load;
+ * scripts/native/sqlite-electron-binding.mjs drops the matching electron
+ * prebuilt next to it and this picks it by the running ABI. Returns the
+ * binding path for Electron, undefined for the package default.
+ */
+export function resolveNativeBinding(): string | undefined {
+  const pkgDir = dirname(
+    require.resolve("better-sqlite3-multiple-ciphers/package.json"),
+  );
+  const electron = !!process.versions["electron"];
+  const label = `${electron ? "electron" : "node"}-v${process.versions.modules}-${process.platform}-${process.arch}`;
+  const binding = join(pkgDir, "build", label, "better_sqlite3.node");
+  if (!existsSync(binding)) {
+    if (!electron) return undefined;
+    throw new Error(
+      `SQLite native binding for ${label} not found at ${binding} - run "pnpm native:electron" ` +
+        `(apps/shell start/smoke run it automatically; the installer pack chain runs it in scripts/release/pack.mjs)`,
+    );
+  }
+  return binding;
+}
+
+function openDatabase(file: string): Database.Database {
+  const nativeBinding = resolveNativeBinding();
+  return nativeBinding ? new Database(file, { nativeBinding }) : new Database(file);
+}
+
+export class SqliteProjectStore implements ProjectStore {
+  constructor(private readonly db: Database.Database) {}
+
+  private kvGet(key: string): string | undefined {
+    const row = this.db
+      .prepare("SELECT value FROM kv WHERE key = ?")
+      .get(key) as { value: string } | undefined;
+    return row?.value;
+  }
+
+  private kvPut(key: string, value: string): void {
+    this.db
+      .prepare(
+        "INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(key, value);
+  }
+
+  /** Product-owned Markdown only; values remain in the encrypted project database. */
+  getProductDocument(productId: string, id: string): { id: string; markdown: string; revision: number } | undefined {
+    const raw = this.kvGet("product-document:" + JSON.stringify([productId, id]));
+    return raw === undefined ? undefined : JSON.parse(raw);
+  }
+
+  listProductDocuments(productId: string, prefix: string): { id: string; markdown: string; revision: number }[] {
+    const start = "product-document:" + JSON.stringify([productId, prefix]).slice(0, -2);
+    const rows = this.db.prepare("SELECT key, value FROM kv WHERE key >= ? AND key < ?").all(start, start + "\uffff") as {key: string; value: string}[];
+    return rows.filter(row => { const [product, id] = JSON.parse(row.key.slice("product-document:".length)) as string[]; return product === productId && id?.startsWith(prefix); }).map(row => JSON.parse(row.value));
+  }
+
+  putProductDocument(productId: string, id: string, markdown: string, revision: number): { id: string; markdown: string; revision: number } | undefined {
+    return this.db.transaction(() => {
+      const current = this.getProductDocument(productId, id);
+      if ((current?.revision ?? 0) !== revision) return undefined;
+      const next = { id, markdown, revision: revision + 1 };
+      this.kvPut("product-document:" + JSON.stringify([productId, id]), JSON.stringify(next));
+      return next;
+    })();
+  }
+
+  async putMeta(meta: ProjectMeta): Promise<void> {
+    this.kvPut("meta", JSON.stringify(meta));
+  }
+  async getMeta(): Promise<ProjectMeta | undefined> {
+    const raw = this.kvGet("meta");
+    return raw ? (JSON.parse(raw) as ProjectMeta) : undefined;
+  }
+
+  async putContract(contractJson: string): Promise<void> {
+    this.kvPut("contract", contractJson);
+  }
+  async getContract(): Promise<string | undefined> {
+    return this.kvGet("contract");
+  }
+
+  async putGrants(grantsJson: string): Promise<void> {
+    this.kvPut("grants", grantsJson);
+  }
+  async getGrants(): Promise<string | undefined> {
+    return this.kvGet("grants");
+  }
+  async putToolPolicy(policyJson: string): Promise<void> {
+    this.kvPut("tool-policy", policyJson);
+  }
+  async getToolPolicy(): Promise<string | undefined> {
+    return this.kvGet("tool-policy");
+  }
+  async putBindings(bindingsJson: string): Promise<void> {
+    this.kvPut("bindings", bindingsJson);
+  }
+  async getBindings(): Promise<string | undefined> {
+    return this.kvGet("bindings");
+  }
+  async putArtifacts(artifactsJson: string): Promise<void> {
+    this.kvPut("artifacts", artifactsJson);
+  }
+  async getArtifacts(): Promise<string | undefined> {
+    return this.kvGet("artifacts");
+  }
+
+// --- 文件区的登记（TD-041）。密文在磁盘上，这里只存「有哪些、叫什么」------
+
+  listFiles(): StoredFile[] {
+    const rows = this.db
+      .prepare(
+        "SELECT id, hash, name, bytes, media_type, added_at, source_ref FROM files ORDER BY added_at DESC, id",
+      )
+      .all() as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      id: String(r["id"]),
+      hash: String(r["hash"]),
+      name: String(r["name"]),
+      bytes: Number(r["bytes"]),
+      mediaType: String(r["media_type"]),
+      addedAt: String(r["added_at"]),
+      ...(r["source_ref"] ? { sourceRef: String(r["source_ref"]) } : {}),
+    }));
+  }
+
+  getFile(id: string): StoredFile | undefined {
+    return this.listFiles().find((f) => f.id === id);
+  }
+
+  addFile(file: StoredFile): void {
+    this.db
+      .prepare(
+        "INSERT INTO files (id, hash, name, bytes, media_type, added_at, source_ref) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        file.id,
+        file.hash,
+        file.name,
+        file.bytes,
+        file.mediaType,
+        file.addedAt,
+        file.sourceRef ?? null,
+      );
+  }
+
+  /**
+   * 删掉一条登记，并回答**这份内容还有没有别的登记指着它**。
+   *
+   * 这个返回值不是可有可无的：调用方据它决定要不要删磁盘上的密文。少了它，
+   * 删掉一个名字会让指向同一份内容的另一个名字变成一条断掉的记录 —— 而那要到
+   * 用户去取原件时才发现。
+   */
+  removeFile(id: string): { removed: boolean; hash?: string; stillReferenced: boolean } {
+    const row = this.db.prepare("SELECT hash FROM files WHERE id = ?").get(id) as
+      | { hash: string }
+      | undefined;
+    if (!row) return { removed: false, stillReferenced: false };
+    this.db.prepare("DELETE FROM files WHERE id = ?").run(id);
+    const rest = this.db
+      .prepare("SELECT COUNT(*) AS n FROM files WHERE hash = ?")
+      .get(row.hash) as { n: number };
+    return { removed: true, hash: row.hash, stillReferenced: rest.n > 0 };
+  }
+
+  // -- FTS index (host-specific surface, 04 section 5.1) --------------------
+
+  replaceIndexForType(
+    type: string,
+    rows: Array<{ id: string; name: string; content: string }>,
+  ): void {
+    this.db.prepare("DELETE FROM fts_index WHERE type = ?").run(type);
+    const insert = this.db.prepare(
+      "INSERT INTO fts_index (item_id, type, name, content) VALUES (?, ?, ?, ?)",
+    );
+    for (const row of rows) insert.run(row.id, type, row.name, row.content);
+  }
+
+  searchIndex(matchQuery: string, limit = 50): string[] {
+    const rows = this.db
+      .prepare(
+        "SELECT item_id FROM fts_index WHERE fts_index MATCH ? ORDER BY rank LIMIT ?",
+      )
+      .all(matchQuery, limit) as Array<{ item_id: string }>;
+    return rows.map((r) => r.item_id);
+  }
+
+  /**
+   * 命中 + 命中处的摘录，按相关度排序。
+   *
+   * 摘录由 FTS5 的 `snippet()` 从索引里取，**不回读源文件**：索引里存的就是
+   * 当时读到的正文，回读一遍既慢又可能读到已经变了的内容。
+   */
+  searchExcerpts(
+    matchQuery: string,
+    limit: number,
+  ): Array<{ id: string; name: string; excerpt: string }> {
+    const rows = this.db
+      .prepare(
+        `SELECT item_id, name, snippet(fts_index, 3, '', '', '…', 20) AS excerpt
+           FROM fts_index WHERE fts_index MATCH ? ORDER BY rank LIMIT ?`,
+      )
+      .all(matchQuery, limit) as Array<{
+      item_id: string;
+      name: string;
+      excerpt: string;
+    }>;
+    return rows.map((r) => ({ id: r.item_id, name: r.name, excerpt: r.excerpt }));
+  }
+
+  /**
+   * 子串扫描兜底。trigram 需要至少 3 个字符，而「储能」「案例」这类两字词在
+   * 中文里恰恰是最常查的 —— 少了这条兜底，它们会一律返回「没找到」。
+   */
+  scanIndex(
+    substring: string,
+    limit: number,
+  ): Array<{ id: string; name: string; excerpt: string }> {
+    const like = `%${substring.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+    const rows = this.db
+      .prepare(
+        `SELECT item_id, name, content FROM fts_index
+           WHERE content LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\' LIMIT ?`,
+      )
+      .all(like, like, limit) as Array<{
+      item_id: string;
+      name: string;
+      content: string;
+    }>;
+    return rows.map((r) => ({
+      id: r.item_id,
+      name: r.name,
+      excerpt: around(r.content, substring),
+    }));
+  }
+
+  async setBusinessState(state: string): Promise<void> {
+    this.kvPut("business_state", state);
+  }
+  async getBusinessState(): Promise<string | undefined> {
+    return this.kvGet("business_state");
+  }
+
+  async putTaskInstance(id: string, dataJson: string): Promise<void> {
+    this.db
+      .prepare(
+        "INSERT INTO task_instances (id, data, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+      )
+      .run(id, dataJson);
+  }
+  async getTaskInstance(id: string): Promise<string | undefined> {
+    const row = this.db
+      .prepare("SELECT data FROM task_instances WHERE id = ?")
+      .get(id) as { data: string } | undefined;
+    return row?.data;
+  }
+  async listTaskInstances(): Promise<string[]> {
+    const rows = this.db
+      .prepare("SELECT data FROM task_instances ORDER BY updated_at")
+      .all() as Array<{ data: string }>;
+    return rows.map((r) => r.data);
+  }
+
+  async appendAuditEvent(event: AuditEvent): Promise<void> {
+    this.db
+      .prepare(
+        "INSERT INTO audit_events (event_id, hash, data) VALUES (?, ?, ?)",
+      )
+      .run(event.eventId, event.hash, JSON.stringify(event));
+  }
+  async listAuditEvents(): Promise<AuditEvent[]> {
+    const rows = this.db
+      .prepare("SELECT data FROM audit_events ORDER BY seq")
+      .all() as Array<{ data: string }>;
+    return rows.map((r) => JSON.parse(r.data) as AuditEvent);
+  }
+  async lastAuditHash(): Promise<string | undefined> {
+    const row = this.db
+      .prepare("SELECT hash FROM audit_events ORDER BY seq DESC LIMIT 1")
+      .get() as { hash: string } | undefined;
+    return row?.hash;
+  }
+
+  async appendJournal(entry: JournalEntry): Promise<void> {
+    this.db
+      .prepare("INSERT INTO journal (task_instance, data) VALUES (?, ?)")
+      .run(entry.taskInstance, JSON.stringify(entry));
+  }
+  async listJournal(taskInstance: string): Promise<JournalEntry[]> {
+    const rows = this.db
+      .prepare("SELECT data FROM journal WHERE task_instance = ? ORDER BY seq")
+      .all(taskInstance) as Array<{ data: string }>;
+    return rows.map((r) => JSON.parse(r.data) as JournalEntry);
+  }
+}
+
+export class SqliteStoragePort implements StoragePort {
+  private readonly open = new Map<
+    string,
+    { store: SqliteProjectStore; db: Database.Database }
+  >();
+
+  constructor(
+    private readonly dataDir: string,
+    private readonly keys: StorageKeyProvider,
+  ) {
+    migrateWorkspaceDirs(dataDir);
+    mkdirSync(join(dataDir, PROJECTS_DIR), { recursive: true });
+  }
+
+  /**
+   * Prove the native binding loads in THIS runtime by opening and querying a
+   * throwaway in-memory database (TD-010). Called once at daemon startup so
+   * an ABI mismatch fails the process (and the shell smoke) immediately
+   * instead of on the first workspace open.
+   */
+  selfCheck(): { binding: string; sqliteVersion: string } {
+    const nativeBinding = resolveNativeBinding();
+    const db = openDatabase(":memory:");
+    try {
+      const row = db.prepare("SELECT sqlite_version() AS v").get() as { v: string };
+      return {
+        binding: nativeBinding ?? `package default (node ABI ${process.versions.modules})`,
+        sqliteVersion: row.v,
+      };
+    } finally {
+      db.close();
+    }
+  }
+
+  /** Close every open database handle (daemon shutdown / test cleanup). */
+  closeAll(): void {
+    for (const { db } of this.open.values()) db.close();
+    this.open.clear();
+  }
+
+  private projectDir(projectId: string): string {
+    return join(this.dataDir, PROJECTS_DIR, projectId);
+  }
+
+  private openDb(projectId: string): SqliteProjectStore {
+    return this.openContainer(projectId,this.projectDir(projectId));
+  }
+
+  private openContainer(projectId:string,dir:string):SqliteProjectStore {
+    const cached = this.open.get(projectId);
+    if (cached) return cached.store;
+    mkdirSync(dir,{recursive:true});
+    const key = this.keys.workspaceKeyHex(dir);
+    if (!/^[a-f0-9]{64}$/i.test(key)) throw new Error("Storage key provider must return a 32-byte hexadecimal key");
+    const db = openDatabase(join(dir, PROJECT_DB));
+    // At-rest encryption (TD-009): SQLCipher-compatible scheme, raw hex key
+    // per workspace. Cipher selection must precede the key pragma, both
+    // before any other statement.
+    db.pragma(`cipher='sqlcipher'`);
+    db.pragma(`key="x'${key}'"`);
+    try {
+      db.pragma("user_version");
+    } catch (cause) {
+      db.close();
+      throw new Error(
+        `workspace "${projectId}" database cannot be unlocked - wrong key or a pre-encryption dev database (delete the dev data dir to reset): ${cause instanceof Error ? cause.message : cause}`,
+      );
+    }
+    db.pragma("journal_mode = WAL");
+    db.exec(DDL);
+    migrateFtsTokenizer(db, projectId);
+    const store = new SqliteProjectStore(db);
+    this.open.set(projectId, { store, db });
+    return store;
+  }
+
+  /** Separate encrypted library containers; these are never business projects. */
+  openLibraryStore(workspaceId:string,productId:string){
+    if(!workspaceId||workspaceId.length>200||!/^[a-z][a-z0-9_-]{0,31}$/.test(productId))throw Error("Invalid library scope");
+    const scopeId=createHash("sha256").update(JSON.stringify([workspaceId,productId])).digest("hex"),dir=join(this.dataDir,"libraries",scopeId),store=this.openContainer("library:"+scopeId,dir);
+    if(!store.getProductDocument("runtime","scope"))store.putProductDocument("runtime","scope",JSON.stringify({workspaceId,productId,scopeId}),0);
+    return {scopeId,store,files:new ProjectFileStore(dir,this.keys.workspaceKeyHex(dir))};
+  }
+
+  listLibraryScopes():{workspaceId:string;productId:string;scopeId:string}[]{
+    const root=join(this.dataDir,"libraries");if(!existsSync(root))return [];
+    return readdirSync(root,{withFileTypes:true}).filter(e=>e.isDirectory()&&/^[a-f0-9]{64}$/.test(e.name)).flatMap(e=>{const store=this.openContainer("library:"+e.name,join(root,e.name)),doc=store.getProductDocument("runtime","scope");if(!doc)return [];const scope=JSON.parse(doc.markdown);return scope.scopeId===e.name?[scope]:[];});
+  }
+
+  async createProjectStore(projectId: string): Promise<ProjectStore> {
+    const dir = this.projectDir(projectId);
+    if (existsSync(dir)) {
+      throw new Error(`workspace directory already exists: ${dir}`);
+    }
+    // 建的是项目目录本身。**原来这一行建的是 `<dir>/files`**，项目目录只是它
+    // 顺带带出来的。
+    //
+    // 那个 `files/` 是设计里规划过的「文件区（内容寻址，哈希命名）」，并且
+    // 30-design/60 §7.3 明确写了它要「同密钥体系加密」—— 但**实现里没有任何
+    // 写入方**，加密也还没做（TD-041）。所以先不建它：一个空目录会让下一个人
+    // 以为附件原件已经在那儿了，而那正是最不能猜错的一件事。
+    //
+    // 现在原件不进数据目录：参考资料由工具按目录授权**从用户自己的位置读**，
+    // 抽出的内容写进这个加密库；产出物写到用户授权的导出目录。
+    mkdirSync(dir, { recursive: true });
+    return this.openDb(projectId);
+  }
+
+  async openProjectStore(
+    projectId: string,
+  ): Promise<ProjectStore | undefined> {
+    if (!existsSync(join(this.projectDir(projectId), PROJECT_DB))) {
+      return undefined;
+    }
+    return this.openDb(projectId);
+  }
+
+  /**
+   * 这个项目的文件区（TD-041）。**用的是和 `project.db` 同一把项目密钥**
+   * （§7.3「同密钥体系加密」）—— 另起一把钥匙就等于多一处要备份、要搬家、要
+   * 在换机器时对上的东西，而它保护的是同一批数据。
+   *
+   * 项目不存在时返回 undefined：文件区不能先于项目库存在，否则会出现一个装着
+   * 密文、却没有任何登记指着它们的目录。
+   */
+  openFileStore(projectId: string): ProjectFileStore | undefined {
+    const dir = this.projectDir(projectId);
+    if (!existsSync(join(dir, PROJECT_DB))) return undefined;
+    return new ProjectFileStore(dir, this.keys.workspaceKeyHex(dir));
+  }
+
+  /** Host-side access to the concrete store (FTS index surface). */
+  openHostStore(projectId: string): SqliteProjectStore | undefined {
+    if (!existsSync(join(this.projectDir(projectId), PROJECT_DB))) {
+      return undefined;
+    }
+    return this.openDb(projectId);
+  }
+
+  async listProjectIds(): Promise<string[]> {
+    const root = join(this.dataDir, PROJECTS_DIR);
+    return readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .filter((name) => existsSync(join(root, name, PROJECT_DB)))
+      .sort();
+  }
+}
+
+/** LIKE 兜底没有 snippet()，自己在命中处切一段。 */
+function around(content: string, needle: string, span = 40): string {
+  const at = content.indexOf(needle);
+  if (at < 0) return content.slice(0, span * 2);
+  const from = Math.max(0, at - span);
+  const to = Math.min(content.length, at + needle.length + span);
+  return `${from > 0 ? "…" : ""}${content.slice(from, to)}${to < content.length ? "…" : ""}`;
+}
+
+/**
+ * 把已存在的 fts_index 换成 trigram 分词器（见 FTS_TOKENIZER 上的说明）。
+ *
+ * `CREATE VIRTUAL TABLE IF NOT EXISTS` 碰上已存在的表什么也不做，所以老库会
+ * 一直留着那个对中文零命中的索引 —— 而它不报错，只是永远查不到东西。
+ *
+ * 迁移**不回读源文件**：索引行里本来就存着 name 与 content，原样搬过去即可。
+ * 回读要连接器、要磁盘、还可能读到已经变了的内容，而这里要的只是换个分词器。
+ */
+function migrateFtsTokenizer(db: Database.Database, projectId: string): void {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE name = 'fts_index'")
+    .get() as { sql?: string } | undefined;
+  const sql = row?.sql ?? "";
+  if (!sql || sql.includes(FTS_TOKENIZER)) return;
+
+  const rows = db
+    .prepare("SELECT item_id, type, name, content FROM fts_index")
+    .all() as Array<{
+    item_id: string;
+    type: string;
+    name: string;
+    content: string;
+  }>;
+  // 一个事务：迁移中途崩了，要么还是旧表，要么已经是新表，不会留下一张空的
+  // 新表 —— 那种状态下检索会安静地返回「没找到」。
+  db.exec("BEGIN");
+  try {
+    db.exec("DROP TABLE fts_index");
+    db.exec(
+      `CREATE VIRTUAL TABLE fts_index USING fts5(
+         item_id UNINDEXED, type UNINDEXED, name, content,
+         tokenize='${FTS_TOKENIZER}'
+       )`,
+    );
+    const insert = db.prepare(
+      "INSERT INTO fts_index (item_id, type, name, content) VALUES (?, ?, ?, ?)",
+    );
+    for (const r of rows) insert.run(r.item_id, r.type, r.name, r.content);
+    db.exec("COMMIT");
+  } catch (cause) {
+    db.exec("ROLLBACK");
+    throw cause;
+  }
+  console.log(
+    `[ruyin] ${projectId}: 检索索引已换用 ${FTS_TOKENIZER} 分词器（${rows.length} 条）`,
+  );
+}

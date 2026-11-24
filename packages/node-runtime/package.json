@@ -1,0 +1,48 @@
+{
+  "name": "@vxture/ruyin-node-runtime",
+  "version": "0.2.2",
+  "description": "Original durable Node runtime adapters for RUYIN native and product-owned server hosts.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vxture/vxture-ruyin.git",
+    "directory": "packages/node-runtime"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./document-reader.py": "./dist/document-reader.py",
+    "./requirements.lock": "./dist/requirements.lock",
+    "./package.json": "./package.json",
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-resources.mjs",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --experimental-test-coverage --test-coverage-include=\"dist/**/*.js\" --test-coverage-exclude=\"dist/**/*.test.js\" --test --test-concurrency=4 --test-timeout=60000 \"dist/**/*.test.js\""
+  },
+  "dependencies": {
+    "@vxture/ruyin-core": "workspace:*",
+    "@vxture/ruyin-document": "workspace:*",
+    "better-sqlite3-multiple-ciphers": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}
