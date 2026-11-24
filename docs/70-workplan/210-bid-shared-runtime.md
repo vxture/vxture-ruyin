@@ -106,3 +106,10 @@ bounded overrides in `pnpm-workspace.yaml`, and the corresponding lockfile.
 Regenerate `apps/ui-workspace/src/third-party-list.ts` with the existing script.
 Do not add audit exceptions, change required checks or copy installer/Store code.
 Rebuild and rerun the affected workspace suites and exact CI audit before merge.
+
+Linux CI then exposed a pre-existing HTTP connector test race: the fake server
+scheduled listener shutdown, but an existing keep-alive connection could still
+serve the asserted read. In `apps/local-host/src/connector-mcp-http.test.ts`,
+explicitly await the fake server's existing close method (which also closes
+connections), then assert the same unavailable result and clean up in finally.
+No connector implementation, refusal assertion or coverage threshold changes.
