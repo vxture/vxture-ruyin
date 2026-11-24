@@ -146,10 +146,12 @@ export function ProjectPanel({
   onReloadSurface,
   productView,
   contextView,
+  exportView,
 }: {
   api: Api;
   productView?: ReactNode;
   contextView?: ReactNode;
+  exportView?: ReactNode;
   id: string;
   tab: TabId;
   /** 未决数上报给侧栏：徽章挂在导航条目上，不再另开一条横条。 */
@@ -366,6 +368,8 @@ export function ProjectPanel({
       {tab === "overview" && <ProjectSummary view={view} instances={instances} grants={grants} bindings={bindings} audit={audit} chainOk={chainOk}/>}
       {tab === "overview" && (
         <OverviewTab
+          contextView={contextView}
+          exportView={exportView}
           api={api}
           projectId={id}
           view={view}
@@ -543,11 +547,15 @@ function OverviewTab({
   instances,
   onTransition,
   onArchive,
+  contextView,
+  exportView,
 }: {
   api: Api;
   projectId: string;
   view: ProjectView;
   instances: TaskInstance[];
+  contextView?: ReactNode;
+  exportView?: ReactNode;
   onTransition: (to: string, humanConfirmed: boolean) => void;
   onArchive: () => void;
 }) {
@@ -577,7 +585,8 @@ function OverviewTab({
         </div>
       ))}
       <SectionHeader level={2} title={t("ws.export.title")} icon="folder-open" />
-      <ExportCard api={api} projectId={projectId} />
+      {exportView ?? <ExportCard api={api} projectId={projectId} />}
+      {contextView}
       {/* 归档入口：契约声明了 archive 才有（容器能做什么由产品的契约定）。 */}
       {!archived && view.operations.includes("archive") && (
         <>

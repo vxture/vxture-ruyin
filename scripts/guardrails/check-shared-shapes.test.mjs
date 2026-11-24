@@ -225,3 +225,14 @@ void test("读不到高度时**报错而不是当成通过** —— 那正是它
   );
   assert.equal(r.code, 1, "读不到就该红，不能默认一致");
 });
+
+void test("relocated Node implementation remains the event and job shape authority", () => {
+  const base = baseline();
+  for (const name of ["events", "background-jobs"]) {
+    base[`packages/node-runtime/src/${name}.ts`] = base[`apps/local-host/src/${name}.ts`];
+    base[`apps/local-host/src/${name}.ts`] = `export * from "@vxture/ruyin-node-runtime/${name}";\n`;
+  }
+  assert.equal(check(base).code, 0);
+  const changed = {...base, "packages/node-runtime/src/events.ts": eventUnion([...EVENT_KINDS, "new-event"])};
+  assert.equal(check(changed).code, 1);
+});

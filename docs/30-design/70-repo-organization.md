@@ -100,6 +100,7 @@ vxture-ruyin/
 │   ├── runtime-core/               # @vxture/ruyin-core（同构内核，云端 Runtime 消费）
 │   ├── document/                   # @vxture/ruyin-document（mdast 表示 + docx/PDF 渲染，ADR-016/017）
 │   ├── workbench-ui/               # @vxture/ruyin-workbench-ui：从原桌面提取的项目/流程/审核呈现，桌面和产品 Web 共用
+│   ├── node-runtime/               # @vxture/ruyin-node-runtime：原 Node 存储/文件/任务/读取/排版适配，密钥及身份由宿主注入
 │   ├── product-sdk/                # @vxture/ruyin-product-sdk（07 §6.2）—— **尚未建**，W3
 │   └── cli/                        # ruyin lint / pack / registry（dev 尚未落地，07 §7–§9）
 ├── apps/                           # 不发布 npm，只进安装包

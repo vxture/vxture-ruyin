@@ -96,7 +96,7 @@ const SHARED = [
   // 获取通道（ADR-018 §7.2）：界面照 ComponentStatus 渲染体积 / 许可证 / 来源主机
   // 与进度。少一个字段，界面就少显示一件**点下去之前必须看见**的事。
   ["ComponentStatus", "ComponentStatus", "apps/local-host/src/component-store.ts"],
-  ["BackgroundJobSummary", "BackgroundJobSummary", "apps/local-host/src/background-jobs.ts"],
+  ["BackgroundJobSummary", "BackgroundJobSummary", existsSync(join(repoRoot,"packages/node-runtime/src/background-jobs.ts")) ? "packages/node-runtime/src/background-jobs.ts" : "apps/local-host/src/background-jobs.ts"],
   ["MaintenanceRecord", "MaintenanceRecord", "apps/local-host/src/maintenance.ts"],
   ["DiagnosticReport", "DiagnosticReport", "apps/local-host/src/diagnostics.ts"],
 ];
@@ -216,7 +216,7 @@ function eventKinds(source) {
 }
 
 const EVENT_SOURCES = [
-  ["apps/local-host/src/events.ts", "守护进程（发）"],
+  [(existsSync(join(repoRoot,"packages/node-runtime/src/events.ts")) ? "packages/node-runtime/src/events.ts" : "apps/local-host/src/events.ts"), "守护进程（发）"],
   [existsSync(join(repoRoot,"packages/workbench-ui/src/api.ts")) ? "packages/workbench-ui/src/api.ts" : "apps/ui-workspace/src/api.ts", "界面（收）"],
   // 壳的词表本来声明在 main.ts；那一半改由 daemon-events.ts 声明并被
   // main.ts 引入，因为 main.ts 顶层 import "electron"，node:test 加载不了

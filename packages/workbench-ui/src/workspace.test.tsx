@@ -1468,3 +1468,12 @@ void test("describeBreaks：前三处点名，其余说「等 N 处」；认不�
     ),
   ).toBe("tasks a, tools b, stages draft->review and 4 more");
 });
+
+test("Web overview keeps original project controls and uses environment export/files actions", async () => {
+  const api = fakeApi();
+  render(<ProjectPanel api={api} id="prj_1" tab="overview" contextView={<p>Browser project uploads</p>} exportView={<a href="/project-record">Download project record</a>} />);
+  expect(await screen.findByText("Browser project uploads")).toBeInTheDocument();
+  expect(screen.getByRole("link", {name: "Download project record"})).toHaveAttribute("href", "/project-record");
+  expect(screen.queryByRole("button", {name: "导出"})).not.toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "归档"})).toBeInTheDocument();
+});

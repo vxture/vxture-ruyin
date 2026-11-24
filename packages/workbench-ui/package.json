@@ -1,6 +1,6 @@
 {
   "name": "@vxture/ruyin-workbench-ui",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Shared original project workflow, settings, review and product presentation for RUYIN hosts and product Web applications.",
   "type": "module",
   "repository": {
