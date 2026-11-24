@@ -9,10 +9,12 @@
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@vxture/design-system";
-import { Api, type SessionInfo } from "./api";
+import { Api, type SessionInfo, type DesktopLoginState } from "./api";
+import { DesktopDevicePicker } from "./desktop-devices";
 import { syncChromeTheme } from "./chrome-theme";
 import { useHostChrome } from "./host-chrome";
-import { useT, type MessageKey } from "./i18n";
+import { useLocale, useT, type MessageKey } from "./i18n";
+import { accountsUrl } from "./platform-base";
 import { LanguageMenu } from "./language-menu";
 
 // Workbench (~570 lines, plus its own lazy-loaded home/settings/workspace
@@ -45,16 +47,19 @@ const LOGIN_POLL_MAX_MS = 5 * 60 * 1000;
 /** Decides the first surface once the daemon is reachable: login vs product. */
 export function SessionGate({ api }: { api: Api }) {
   const t = useT();
+  const locale = useLocale();
   const [session, setSession] = useState<SessionInfo | "loading">("loading");
+  const refreshVersion = useRef(0);
 
   const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current;
     try {
       const s = await api.session();
-      setSession(s);
+      if (version === refreshVersion.current) setSession(s);
       return s;
     } catch {
       // Daemon reachable but session endpoint unavailable: treat as signed-out.
-      setSession({
+      if (version === refreshVersion.current) setSession(previous => previous !== "loading" && previous.signedIn ? previous : {
         signedIn: false,
         issuer: "",
         consoleBase: "https://vxture.com",
@@ -66,6 +71,9 @@ export function SessionGate({ api }: { api: Api }) {
 
   useEffect(() => {
     void refresh();
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
   // 窗口按钮的颜色跟着界面主题走（chrome-theme.ts）。放在这里而不是工作台里：
@@ -89,8 +97,24 @@ export function SessionGate({ api }: { api: Api }) {
       <LoginScreen
         api={api}
         consoleBase={session.consoleBase}
+        desktopLogin={session.desktopLogin}
         onSignedIn={refresh}
       />
+    );
+  }
+  if (session.accountStatus === "deleting") {
+    return (
+      <div className="splash">
+        <DragStrip />
+        <p role="status">{t("err.accountDeleting")}</p>
+        <a href={accountsUrl(session, locale, "deletion")} target="_blank" rel="noreferrer">
+          {t("login.manageAccount")}
+        </a>
+        <Button onClick={() => void refresh()}>{t("login.refreshAccount")}</Button>
+        <Button variant="outline" onClick={() => void api.logout().catch(() => undefined).then(refresh)}>
+          {t("login.accountSignOut")}
+        </Button>
+      </div>
     );
   }
   return (
@@ -106,7 +130,8 @@ export function SessionGate({ api }: { api: Api }) {
       {/* 退出登录由工作台里那一格发起，但**决定去留的是这里** —— 闸门只在挂载
           时读过一次会话，所以必须让它重读一次；`refresh()` 读到未登录就换回
           登录页，整棵工作台随之卸载，设置 › 账号那份会话副本也一起没了。 */}
-      <Workbench api={api} onSignedOut={() => void refresh()} />
+      <Workbench key={JSON.stringify([session.profile?.sub,session.org?.id,session.workspace?.id])} api={api}
+        onSessionChanged={()=>void refresh()} onSignedOut={() => { setSession({ ...session, signedIn: false }); void refresh(); }} />
     </Suspense>
   );
 }
@@ -115,13 +140,17 @@ function LoginScreen({
   api,
   consoleBase,
   onSignedIn,
+  desktopLogin,
 }: {
   api: Api;
   consoleBase: string;
-  onSignedIn: () => void;
+  onSignedIn: () => Promise<SessionInfo | null>;
+  desktopLogin?: DesktopLoginState;
 }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  const choosingDevice = desktopLogin?.state === "device_limit";
   /** 从「已发起、还没等到浏览器那边签完」到「签完或放弃」——只驱动按钮自身
    *  的文案，不再另起一段提示（owner 2026-09-16：一个页面，按钮变文案就够，
    *  不是两套内容）。 */
@@ -137,6 +166,7 @@ function LoginScreen({
 
   const startLogin = async (opts: { switchAccount?: boolean } = {}) => {
     setBusy(true);
+    setError(false);
     try {
       const { authorizeUrl } = await api.login(opts);
       setVerifying(true);
@@ -150,10 +180,11 @@ function LoginScreen({
       pollRef.current = window.setInterval(async () => {
         try {
           const s = await api.session();
-          if (s.signedIn) {
+          if (s.signedIn || s.desktopLogin) {
             clearInterval(pollRef.current);
             pollRef.current = undefined;
-            onSignedIn();
+            setVerifying(false);
+            void onSignedIn();
             return;
           }
         } catch {
@@ -167,21 +198,26 @@ function LoginScreen({
           setVerifying(false);
         }
       }, LOGIN_POLL_MS);
+    } catch {
+      setVerifying(false);
+      setError(true);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="login-screen">
+    <div className={`login-screen${choosingDevice ? " device-access-screen" : ""}`}>
       <DragStrip />
       {/* 语言在**门槛之前**（owner 2026-09-17）：设置页那个开关要先登录才够得着，
           而看不懂界面的人正卡在这一屏。`no-drag` 是因为它压在标题栏的拖拽
           带上，不标的话点不动。 */}
       <div className="login-top no-drag">
+        {choosingDevice && <div className="device-access-brand"><img src="/logo.svg" alt="" aria-hidden /><span>RUYIN</span></div>}
         <LanguageMenu />
       </div>
       <div className="login-center">
+        {!choosingDevice && <>
         <img className="login-mark" src="/logo.svg" alt="RUYIN" />
         {/* 品牌 = 产品 = RUYIN，标语 Intelligent Workbench；不再并列一个中文名。 */}
         <h1 className="login-title">
@@ -189,6 +225,19 @@ function LoginScreen({
           <span className="brand-tag">Intelligent Workbench</span>
         </h1>
         <p className="login-sub">{t("login.tagline")}</p>
+        </>}
+        {desktopLogin?.state === "device_limit" ? <>
+          <DesktopDevicePicker view={desktopLogin} mode="login" onRefresh={onSignedIn}
+            onRelease={async id => { await api.releaseDesktopDevice(id); await onSignedIn(); }}
+            secondaryActions={<>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => {
+            setBusy(true); void api.logout().then(onSignedIn).catch(() => setError(true)).finally(() => setBusy(false));
+          }}>{t("devices.cancelLogin")}</Button>
+            </>} />
+          {error && <p role="alert" className="text-body-sm text-destructive">{t("devices.loginError")}</p>}
+        </> : <>
+        {(error || desktopLogin?.state === "failed" || desktopLogin?.state === "timed_out") &&
+          <p role="alert" className="text-body-sm text-destructive">{t(desktopLogin?.state === "timed_out" ? "devices.loginExpired" : "devices.loginError")}</p>}
         <Button
           className="login-btn"
           disabled={busy}
@@ -238,6 +287,7 @@ function LoginScreen({
           {t("login.switchAccountHint")}
         </span>
         <p className="login-note text-body-sm text-muted-foreground">{t("login.note")}</p>
+        </>}
         {/* 这里曾有两个次级入口，都已移除，理由是同一条：入口不该承诺它
             兑现不了的东西。
 

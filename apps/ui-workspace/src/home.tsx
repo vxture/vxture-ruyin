@@ -7,7 +7,7 @@
  * 自己拥有并不存在的订阅。
  *
  * 「热门智能体」是另一句话：「平台上有这些」，不声称所有权，动作只有外链。它的
- * 数据是平台目录的静态快照（catalog.ts，有出处有日期），接上目录端点后即删。
+ * 数据来自平台实时目录，与订阅清单共用产品展示和 Logo 读取逻辑。
  *
  * 「我的智能体」以平台订阅为准（owner 2026-09-15）：登录后向守护进程要本工作区的
  * 订阅清单（console `/api/subscription/subscribed-products`），本机已装的出本地卡片，
@@ -21,12 +21,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  Badge,
   Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
   EmptyState,
   Icon,
   ListCardGrid,
@@ -35,16 +30,19 @@ import {
 } from "@vxture/design-system";
 import {
   Api,
-  type InstalledPackage,
   type RegistryCatalog,
+  type RegistryItem,
   type ProductInfo,
   type SessionInfo,
   type ProjectMeta,
   type SubscribedProduct,
+  type PublicProduct,
+  type SystemInfo,
 } from "./api";
-import { consoleAppBaseOf, consoleBaseOf } from "./platform-base";
-import { CATALOG_SOURCE, RECOMMENDED } from "./catalog";
+import { consoleBaseOf } from "./platform-base";
+import { RUYIN_WEB_URL, agentSubscriptions, compareVersions, packageFor, productHomeUrl, recommendedAgents, tierAbbreviation } from "./agent-catalog";
 import { useT, type MessageKey, type TFn } from "./i18n";
+import {InstallMenu,RegistryList} from "./agent-install-controls";
 
 /** 库里比生效版本更新的那一版（没有就是 undefined）。卡片与标题行读同一份判断。 */
 export function newerVersionOf(product: {
@@ -57,215 +55,8 @@ export function newerVersionOf(product: {
     .pop();
 }
 
-/** x.y.z 比较（与 installer.ts 同一口径）；用于「有没有比生效版本更新的已装版本」。 */
-function compareVersions(a: string, b: string): number {
-  const pa = a.split(".");
-  const pb = b.split(".");
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = Number.parseInt(pa[i] ?? "0", 10) || 0;
-    const nb = Number.parseInt(pb[i] ?? "0", 10) || 0;
-    if (na !== nb) return na - nb;
-  }
-  return 0;
-}
 
-/**
- * 装一个 .ruyinpkg（§18.2）。
- *
- * 用 file input 而不是壳里的原生对话框：**同一个页面在浏览器和壳里都要能用**
- * （Local Web 访问模式从第一天起就成立）。壳里 file input 一样弹系统选择框，
- * 少一条只有壳能走的路。
- */
-/**
- * 静态产品库（流 C，MVP 形态）。点开才去问 —— 首页每次加载都去拉 index 是把
- * 一个可有可无的目录变成首屏的依赖。三种回答各说各的：查不到（不是「没有产品」）、
- * 有但这台机器装不了（未签名，生产拒装）、有且能装。
- */
-function RegistryList({
-  api,
-  open,
-  onDone,
-  onError,
-}: {
-  api: Api;
-  /** 由标题行的「从产品库安装」开关；关着时什么都不渲染、也不去问。 */
-  open: boolean;
-  onDone: () => void | Promise<void>;
-  onError: (msg: string) => void;
-}) {
-  const t = useT();
-  const [catalog, setCatalog] = useState<RegistryCatalog | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const load = async () => {
-    setBusy("__catalog");
-    try {
-      setCatalog(await api.registry());
-    } catch (e) {
-      onError(String((e as Error).message));
-    } finally {
-      setBusy(null);
-    }
-  };
-  const install = async (id: string, version: string) => {
-    setBusy(`${id}@${version}`);
-    try {
-      await api.installFromRegistry(id, version);
-      await onDone();
-      await load();
-    } catch (e) {
-      onError(String((e as Error).message));
-    } finally {
-      setBusy(null);
-    }
-  };
-  useEffect(() => {
-    if (open && catalog === null) void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-  if (!open) return null;
-  return (
-    <div className="install-row" style={{ flexDirection: "column", alignItems: "flex-start" }}>
-      {busy === "__catalog" && catalog === null && (
-        <span className="text-body-sm text-muted-foreground">{t("home.install.reading")}</span>
-      )}
-      {/* **不端出 `catalog.reason`**（owner 2026-09-17）：那是取数失败的原话。
-          用户要知道的只有两件——这次没读到，以及这不等于库是空的。 */}
-      {open && catalog?.status === "unreachable" && (
-        <span className="text-body-sm text-muted-foreground">
-          {t("home.install.catalogUnreachable")}
-        </span>
-      )}
-      {open && catalog?.status === "ok" && catalog.items.length === 0 && (
-        <span className="text-body-sm text-muted-foreground">{t("home.install.catalogEmpty")}</span>
-      )}
-      {open && catalog?.status === "ok" && catalog.items.length > 0 && (
-        <ul className="row-list" aria-label={t("home.install.catalogAria")}>
-          {catalog.items.map((item) => (
-            <li key={`${item.id}@${item.version}`} className="row-item">
-              <span className="row-main">
-                {item.name}{" "}
-                <span className="mono text-muted-foreground">
-                  {item.id} v{item.version}
-                </span>
-              </span>
-              {/* 签没签名照实说：今天静态库里的包都未签名，生产拒装。 */}
-              <span className="row-tag">{t(item.signed ? "home.install.signed" : "home.install.unsigned")}</span>
-              {item.installed ? (
-                <span className="text-body-sm text-muted-foreground">{t("home.install.installed")}</span>
-              ) : catalog.installable ? (
-                <Button
-                  size="sm"
-                  disabled={busy !== null}
-                  onClick={() => void install(item.id, item.version)}
-                >
-                  {t(
-                    busy === `${item.id}@${item.version}`
-                      ? "home.install.installing"
-                      : "home.install.install",
-                  )}
-                </Button>
-              ) : (
-                // 悬停提示原先写着「未经 Vxture Registry 副署（TD-012 / TD-037）」——
-                // **把内部债务编号挂到了用户的鼠标下**。要说的只有一句：为什么装不了。
-                <span
-                  className="text-body-sm text-muted-foreground"
-                  title={t("home.install.unsignedBlockedTitle")}
-                >
-                  {t("home.install.unsignedBlocked")}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-/**
- * 「安装 ▾」：两条安装通道收进一个次级下拉（owner 2026-09-04 定）。订阅了就能
- * 同步，装包只有产品随附本地资产 / 本地技能时才需要 —— 日常用户不该在标题行
- * 看见两个安装按钮，开发者又得找得到侧载入口。
- */
-function InstallMenu({
-  api,
-  onDone,
-  onError,
-  registryOpen,
-  onToggleRegistry,
-}: {
-  api: Api;
-  onDone: () => void | Promise<void>;
-  onError: (msg: string) => void;
-  registryOpen: boolean;
-  onToggleRegistry: () => void;
-}) {
-  const t = useT();
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<InstalledPackage | null>(null);
-  const pick = useRef<HTMLInputElement>(null);
-  return (
-    <span className="install-inline">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" disabled={busy}>
-            {t(busy ? "home.install.installing" : "home.install.install")}
-            <Icon name="caret-up-down" size="xs" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {/* 原生 file input 藏起来，由菜单项代打开。藏它不是为了好看：那个控件由
-              浏览器渲染，按**浏览器的语言**显示「Choose File / No file chosen」——
-              一句改不掉的英文夹在中文界面里。功能照旧走这个 input（同一个页面在
-              浏览器和壳里都要能用，不走只有壳能走的原生对话框）。 */}
-          <DropdownMenuItem onSelect={() => pick.current?.click()}>
-            {t("home.install.fromFile")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onToggleRegistry}>
-            {t(registryOpen ? "home.install.hideRegistry" : "home.install.showRegistry")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <input
-          ref={pick}
-          type="file"
-          accept=".ruyinpkg"
-          disabled={busy}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            // 选完就清掉输入框：同一个文件连选两次也要能触发。
-            e.target.value = "";
-            if (!file) return;
-            setBusy(true);
-            setDone(null);
-            void api
-              .installPackage(file)
-              .then(async (r: InstalledPackage) => {
-                setDone(r);
-                await onDone();
-              })
-              .catch((err: Error) => onError(err.message))
-              .finally(() => setBusy(false));
-          }}
-        />
-      {/* 签没签名要照实说：未签名的包是另一回事，不该和签过的长一个样。 */}
-      {done && (
-        <span className="text-body-sm text-muted-foreground">
-          {t(done.signed ? "home.install.doneSigned" : "home.install.doneUnsigned", {
-            id: done.productId,
-            version: done.version,
-          })}
-        </span>
-      )}
-    </span>
-  );
-}
-
-/**
- * 随包那个示例产品的一句简介。**产品自己的文案原则上不翻译**（它是产品方写的），
- * 但这一条是我们替一个内置示例写的，所以它进目录 —— 真产品的简介仍然由产品给，
- * 是什么语言就显示什么语言。
- */
+/** Localized descriptions for known agents; distribution remains package based. */
 const BLURB_KEYS: Record<string, MessageKey> = {
   bidproposal: "home.blurb.bidproposal",
 };
@@ -276,31 +67,34 @@ function blurbOf(t: TFn, productCode: string): string {
   return key ? t(key) : t("home.card.blurbFallback");
 }
 
-/**
- * Console 的应用中心 —— 本地已装的产品「智能体介绍」/ 顶部「在线使用」的落点。
- *
- * 这几处仍然落应用中心，不落具体产品：顶部按钮管的是整个「我的智能体」板块，
- * 不是某一个产品；本地卡片的「智能体介绍」是宣传页，不是"去用它"。
- */
-const APPCENTER_URL = (consoleBase: string) => `${consoleBase}/zh-CN/appcenter`;
+function ProductLogo({api,code,version,url}:{api:Api;code:string;version?:string|null;url?:string|null}){
+  const src=productHomeUrl(url);
+  const [hosted,setHosted]=useState<string>();
+  useEffect(()=>{
+    if(!version)return;let alive=true,objectUrl:string|undefined;
+    void api.productIcon(code,version).then(blob=>{
+      if(!alive||!blob)return;objectUrl=URL.createObjectURL(blob);setHosted(objectUrl);
+    }).catch(()=>{});
+    return()=>{alive=false;if(objectUrl)URL.revokeObjectURL(objectUrl);setHosted(undefined);};
+  },[api,code,version]);
+  return <ProductLogoImage key={hosted??src??"default"} src={hosted??src}/>;
+}
+function ProductLogoImage({src}:{src?:string}){
+  const [failed,setFailed]=useState(false);
+  return src&&!failed?<img className="pcard-product-logo" src={src} alt="" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>:<Icon name="cube" size="lg"/>;
+}
 
-/**
- * 产品的边缘地址——云端「一个产品一个二级域名」的落点（owner 2026-09-16 现场
- * 确认）：`<productCode>.<consoleBase 的主机名>`，与本机 `product-ui-server.ts`
- * 的 `<productId>.localhost:<port>` 是同一个模型（design 正文 §4.2 第 3 条
- * Same Package, Any Runtime）。**只用在订阅了、本机没装的产品**（
- * `SubscribedElsewhereCard`）——那张卡没有本地契约可进，「在线使用」是它唯一
- * 能兑现的动作，此前落到应用中心是错的：那是个通用广场，不是这个产品自己的
- * 入口。consoleBase 解析不出主机名时退到 `vxture.com`（生产的实际值）。
- */
-function productEdgeUrl(consoleBase: string, productCode: string): string {
-  let host = "vxture.com";
-  try {
-    host = new URL(consoleBase).hostname;
-  } catch {
-    /* consoleBase 形状不对时用生产的实际主机名兜底，不留空。 */
-  }
-  return `https://${productCode}.${host}`;
+function ReleaseBadge({stage}:{stage?:string|null}){
+  const t=useT();const labels:Record<string,MessageKey>={preview:"home.release.preview",beta:"home.release.beta",stable:"home.release.stable",sunset:"home.release.sunset"};
+  const label=stage?labels[stage]:undefined;
+  return label?<StatusBadge tone={stage==="stable"?"success":stage==="sunset"?"warning":"neutral"}>{t(label)}</StatusBadge>:null;
+}
+const knownRelease=(stage?:string|null)=>!!stage&&["preview","beta","stable","sunset"].includes(stage);
+
+/** Package installation is secondary metadata, never a subscription warning. */
+function InstallationState({installed}:{installed:boolean}){
+  const t=useT();
+  return <span className="pcard-install-state"><Icon name="desktop" size="xs" aria-hidden/>{t(installed?"home.badge.localOnly":"home.badge.notInstalled")}</span>;
 }
 
 type StripTone = "ok" | "warn" | "danger" | "muted";
@@ -358,11 +152,13 @@ function StatusCards({
 
 export function HomePage({
   api,
-  products,
+  products: suppliedProducts,
   workspaces,
+  projectsReady = true,
   health,
   onOpen,
   onCreated,
+  onEnterProduct,
   onRefresh,
   onError,
   selectedProductId = null,
@@ -371,8 +167,10 @@ export function HomePage({
   api: Api;
   products: ProductInfo[];
   workspaces: ProjectMeta[];
+  projectsReady?: boolean;
   health: { ok: boolean; version?: string };
   onOpen: (projectId: string) => void;
+  onEnterProduct?: (productId: string) => void;
   onCreated: (projectId: string) => void | Promise<void>;
   /** 重新拉一遍产品与项目。改了本机生效态之后要用它。 */
   onRefresh: () => void | Promise<void>;
@@ -382,44 +180,38 @@ export function HomePage({
   onSelectProduct?: (id: string | null) => void;
 }) {
   const t = useT();
+  const products = suppliedProducts.filter(product => product.supply !== "builtin");
   const [session, setSession] = useState<SessionInfo | null>(null);
+  const [recommendations,setRecommendations]=useState<PublicProduct[]|null>(null);
+  const [catalogFailed,setCatalogFailed]=useState(false);
   const [syncing, setSyncing] = useState(false);
   const [registryOpen, setRegistryOpen] = useState(false);
+  const [packageCatalog, setPackageCatalog] = useState<RegistryCatalog | null>(null);
   /**
-   * 检查更新：对每个产品拉一次契约（一级供给，ADR-012）。拉到新版本的落进产品
-   * 库，卡上随即出现「更新版本」；这里**不自动切换**生效版本 —— 切版本是用户
-   * 看着卡片按一下的事，不是检查顺手做掉的事。
+   * 检查已发布的安装包和平台元数据；不自动下载安装或切换生效版本。
    *
    * `silent` 给启动时那一次用：**没人按过的检查，失败了不该弹错误条**。用户点
    * 「更新」是他问了一句，答不上来要如实说；启动自检答不上来只是没答上来。
    */
-  const checkUpdates = async (ids: string[], silent = false) => {
+  const checkUpdates = async (silent = false) => {
     // 静默那次连忙碌态都不显示：启动自检把按钮翻成「正在检查……」，是让每次
     // 开应用都闪一下，而那一下不对应任何人的动作。
     if (!silent) setSyncing(true);
     try {
-      let fetched = 0;
-      let firstError: string | null = null;
-      for (const id of ids) {
-        try {
-          const r = await api.fetchProduct(id);
-          if (r.status === "fetched") fetched += 1;
-        } catch (e) {
-          firstError ??= String((e as Error).message);
-        }
-      }
-      if (firstError && !silent) onError(firstError);
-      if (fetched > 0) await onRefresh();
+      const catalog = await api.registry();
+      setPackageCatalog(catalog);
+      if (catalog.status === "unreachable" && !silent) onError(t("home.install.catalogUnreachable"));
+      if (!silent) { await reloadSubscriptions(); await onRefresh(); }
+    } catch {
+      if (!silent) onError(t("home.install.catalogUnreachable"));
     } finally {
       if (!silent) setSyncing(false);
     }
   };
   /** 有没有产品攒着一版没切过去 —— 「更新」按钮的 new 标记就看它。 */
-  const hasUpdates = products.some((p) => newerVersionOf(p) !== undefined);
-  const [system, setSystem] = useState<{
-    keyProtection: string;
-    capabilitySurface?: string;
-  } | null>(null);
+  const hasUpdates = products.some((p) => newerVersionOf(p) !== undefined ||
+    compareVersions(packageFor(packageCatalog,p.id)?.version ?? p.version,p.version)>0);
+  const [system, setSystem] = useState<SystemInfo | null>(null);
 
   /**
    * 启动检查一次（owner 2026-09-04 定）。ref 守着：产品列表每刷新一次都重跑，
@@ -428,58 +220,72 @@ export function HomePage({
   const checkedOnce = useRef(false);
   useEffect(() => {
     if (checkedOnce.current || products.length === 0) return;
-    // 能力面没接时这一轮**必定全军覆没**（守护进程直接 503）—— 每次开应用打
-    // 一轮注定失败的请求，只是把日志写脏。等 /system 回来再决定要不要问。
-    if (system === null || system.capabilitySurface !== "configured") return;
     checkedOnce.current = true;
-    void checkUpdates(products.map((p) => p.id), true);
+    void checkUpdates(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products.length, system?.capabilitySurface]);
+  }, [products.length]);
 
   /**
    * 平台上本工作区的订阅清单。null = 不知道（没登录、没问到、问失败了）——
    * 与「问到了、是空的」是两件事，前者不能渲染成「你没有订阅」。
    */
   const [subscribed, setSubscribed] = useState<SubscribedProduct[] | null>(null);
+  const metadataRequest = useRef(0);
+  const metadataScope = useRef<string | undefined>(undefined);
+  const [metadataPending, setMetadataPending] = useState(true);
+  const reloadSubscriptions = async () => {
+    const request = ++metadataRequest.current;
+    setMetadataPending(true);
+    try {
+      const s = await api.session();
+      if (request !== metadataRequest.current) return;
+      const scope = JSON.stringify([s?.profile?.sub,s?.org?.id,s?.workspace?.id,s?.signedIn]);
+      if (scope !== metadataScope.current) { setSubscribed(null);setRecommendations(null);setCatalogFailed(false);metadataScope.current = scope; }
+      setSession(s);
+      void (s?.signedIn?api.recommendedProducts():api.productCatalog()).then(rows=>{
+        if(request===metadataRequest.current){setRecommendations(rows);setCatalogFailed(false);}
+      }).catch(()=>{if(request===metadataRequest.current)setCatalogFailed(true);});
+      if (!s?.signedIn) return;
+      const rows = await api.subscribedProducts();
+      if (request !== metadataRequest.current) return;
+      if (Array.isArray(rows)) setSubscribed(rows);
+      if (!checkedOnce.current) { checkedOnce.current = true; void checkUpdates(true); }
+    } catch { /* A transient refresh keeps this account's existing view. */ }
+    finally { if (request === metadataRequest.current) setMetadataPending(false); }
+  };
 
   useEffect(() => {
     let alive = true;
-    api
-      .session()
-      .then(async (s) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    void reloadSubscriptions();
+    const onFocus = () => void reloadSubscriptions();
+    window.addEventListener("focus", onFocus);
+    const refreshSystem = async () => {
+      try {
+        const s = await api.system();
         if (!alive) return;
-        setSession(s);
-        if (!s?.signedIn) return;
-        const rows = await api.subscribedProducts();
-        if (alive && Array.isArray(rows)) setSubscribed(rows);
-      })
-      .catch(() => {});
-    api
-      .system()
-      .then((s) => alive && setSystem(s))
-      .catch(() => {});
+        setSystem(s);
+        if (s?.startupState === "initializing") timer = setTimeout(() => void refreshSystem(), 1000);
+      } catch { /* A failed read is not proof that the runtime is ready. */ }
+    };
+    void refreshSystem();
     return () => {
       alive = false;
+      clearTimeout(timer);
+      metadataRequest.current++;
+      window.removeEventListener("focus", onFocus);
     };
   }, [api]);
 
-  const consoleBase = consoleBaseOf(session);
-  // `/subscribe` 落在 console-bff 本体上，不是官网（consoleBase）——官网自己的
-  // 「去订阅」入口也是跳去 console 的同一条路径，官网自身没有这个路由（owner
-  // 2026-09-16 audit，见 apps/ui-workspace/src/user.tsx 的 consoleAppBase 说明；
-  // 同一类错此前已在「用户中心」「配额用量」两条上现场纠过一次）。
-  const consoleAppBase = consoleAppBaseOf(session);
-  // 主体在平台：订阅动作一律回 console，**仅显式点击触发，永不自动跳转**。
-  // intent 由 daemon 依 C2 信封判定 —— 从未订阅是首购，曾有已失效是续费。
-  // 写死 intent=subscribe 会把续费的用户引去首购页（TD-014 D4）。
-  // 深链不带工作区 id：console 从会话解析。
+  // The desktop starts at product pricing; the platform owns plan/cycle selection and checkout.
+  const websiteBase = consoleBaseOf(session);
   const subscribeUrl = (
     productId?: string,
-    intent: "subscribe" | "renew" = "subscribe",
+    _intent: "subscribe" | "renew" = "subscribe",
   ) =>
     productId
-      ? `${consoleAppBase}/subscribe?product=${encodeURIComponent(productId)}&intent=${intent}`
-      : `${consoleAppBase}/subscribe`;
+      ? `${websiteBase}/pricing?product=${encodeURIComponent(productId)}`
+      : `${websiteBase}/pricing`;
 
   // 平台订阅清单问到了，或者任何一个本地产品有了订阅事实，都算「订阅状态已知」。
   const subscriptionKnown =
@@ -490,10 +296,9 @@ export function HomePage({
    * 本机已装的由本地卡片承载，这里不重复。
    */
   const localIds = new Set(products.map((p) => p.id));
-  const remoteOnly = (subscribed ?? []).filter(
-    (r): r is SubscribedProduct & { productCode: string } =>
-      !!r.productCode && !localIds.has(r.productCode),
-  );
+  const subscriptions = agentSubscriptions(subscribed ?? []);
+  const remoteOnly = subscriptions.filter(r => !localIds.has(r.productCode));
+  const suggested = recommendations === null ? null : recommendedAgents(recommendations,[...localIds,...subscriptions.map(row=>row.productCode)]);
   const encrypted = system?.keyProtection === "dpapi";
   // 能力面没接时，任务拿到的是 MockAIGateway 的字面量占位输出，而它会一路走到
   // 用户面前当成工作成果（TD-033）。守护进程日志已如实播报，但日志到不了用户
@@ -516,14 +321,14 @@ export function HomePage({
             id: "runtime",
             icon: "cpu",
             label: t("home.card.runtime"),
-            value: t(health.ok ? "home.card.runtime.ok" : "home.card.runtime.off"),
+            value: t(!health.ok ? "home.card.runtime.off" : system?.startupState === "initializing" ? "home.card.runtime.initializing" : system?.startupState === "failed" ? "home.card.runtime.failed" : "home.card.runtime.ok"),
             // 版本号前加 Runtime（owner 2026-09-18）：孤零零一个 0.2.0-beta.1 不说明它是
             // **谁**的版本 —— 这台机器上还有产品、技能、工具各自的版本。
             detail: health.ok && health.version ? `Runtime ${health.version}` : "",
             hint: health.ok
-              ? t("home.card.runtime.hintOk")
+              ? t(system?.startupState === "initializing" ? "home.card.runtime.hintInitializing" : system?.startupState === "failed" ? "home.card.runtime.hintFailed" : "home.card.runtime.hintOk")
               : t("home.card.runtime.hintOff"),
-            tone: health.ok ? "ok" : "danger",
+            tone: !health.ok || system?.startupState === "failed" ? "danger" : system?.startupState === "initializing" ? "warn" : "ok",
           },
           {
             id: "protection",
@@ -560,7 +365,7 @@ export function HomePage({
 
       <Section
         title={t("home.mine.title")}
-        icon="package"
+        icon="squares-four"
         level={2}
         description={
           subscriptionKnown
@@ -575,16 +380,8 @@ export function HomePage({
               <Button
                 variant="outline"
                 size="sm"
-                /* 能力面没接就关掉它（owner 2026-09-04 第 4 条）。此前按下去会
-                   把守护进程那句「契约拉取需要已配置的产品能力面
-                   （RUYIN_CAPABILITY_BASE）；当前未配置」原样摆到用户面前 ——
-                   那是给部署的人看的话，用户读完只知道「有个我没听过的东西没配」。
-                   入口不该承诺它兑现不了的事（与「连接器」那边同一条道理）。 */
-                disabled={syncing || capabilityMock}
-                {...(capabilityMock
-                  ? { title: t("home.mine.updateBlocked") }
-                  : {})}
-                onClick={() => void checkUpdates(products.map((p) => p.id))}
+                disabled={syncing}
+                onClick={() => void checkUpdates()}
               >
                 {t(syncing ? "home.mine.checking" : "home.mine.update")}
                 {/* 有可切的新版本才挂 new：一个常年亮着的标记等于没有标记。
@@ -599,22 +396,24 @@ export function HomePage({
               onError={onError}
               registryOpen={registryOpen}
               onToggleRegistry={() => setRegistryOpen((v) => !v)}
+              onManage={()=>{window.location.hash="agents";}}
             />
-            {products.length > 0 && (
               <Button
                 size="sm"
                 onClick={() =>
-                  window.open(APPCENTER_URL(consoleBase), "_blank", "noopener")
+                  window.open(RUYIN_WEB_URL, "_blank", "noopener")
                 }
               >
                 {t("home.card.useOnline")}
                 <Icon name="external-link" size="xs" />
               </Button>
-            )}
           </span>
         }
       >
         {products.length === 0 && remoteOnly.length === 0 ? (
+          metadataPending ? <p className="text-body-sm text-muted-foreground" role="status">{t("home.mine.loading")}</p> :
+          signedIn && subscribed === null ? <EmptyState icon="package" title={t("home.mine.unavailable")}
+            action={<Button variant="outline" onClick={() => void reloadSubscriptions()}>{t("ph.retry")}</Button>} /> :
           // 0 订阅：环境仍在，引导到平台订阅（主体在平台）。
           <EmptyState
             icon="package"
@@ -630,7 +429,7 @@ export function HomePage({
             }
             action={
               <Button
-                onClick={() => window.open(subscribeUrl(), "_blank", "noopener")}
+                onClick={() => window.open(`${websiteBase}/appcenter`, "_blank", "noopener")}
               >
                 {t("home.empty.subscribe")}
                 <Icon name="external-link" size="xs" />
@@ -644,12 +443,17 @@ export function HomePage({
                 key={p.id}
                 api={api}
                 product={p}
+                onlineUrl={productHomeUrl(subscriptions.find(row => row.productCode === p.id)?.homeUrl)}
+                packageUpdate={packageFor(packageCatalog,p.id)}
+                unsignedAllowed={packageCatalog?.status === "ok" && packageCatalog.installable}
                 projects={workspaces.filter((w) => w.productId === p.id)}
                 subscribeUrl={subscribeUrl}
-                consoleBase={consoleBase}
                 capabilityMock={capabilityMock}
                 selected={selectedProductId === p.id}
                 onToggleSelect={() => onSelectProduct(selectedProductId === p.id ? null : p.id)}
+                platformMetadata={subscriptions.find(row=>row.productCode===p.id)}
+                onEnterProduct={onEnterProduct}
+                projectsReady={projectsReady}
                 onOpen={onOpen}
                 onCreated={onCreated}
                 onRefresh={onRefresh}
@@ -660,7 +464,11 @@ export function HomePage({
               <SubscribedElsewhereCard
                 key={row.subscriptionId}
                 row={row}
-                consoleBase={consoleBase}
+                packageEntry={packageFor(packageCatalog,row.productCode)}
+                unsignedAllowed={packageCatalog?.status === "ok" && packageCatalog.installable}
+                api={api}
+                onRefresh={onRefresh}
+                onError={onError}
                 subscribeUrl={subscribeUrl}
               />
             ))}
@@ -682,7 +490,7 @@ export function HomePage({
             variant="outline"
             size="sm"
             onClick={() =>
-              window.open(CATALOG_SOURCE.url, "_blank", "noopener")
+              window.open(`${websiteBase}/appcenter`, "_blank", "noopener")
             }
           >
             {t("home.catalog.browseAll")}
@@ -693,35 +501,26 @@ export function HomePage({
         {/* 与「我的智能体」同一种卡（pcard）：图标同样大、文字同样对齐，扫过去
             是一个页面而不是两套控件。差别只在动作：这里永远没有「打开」。 */}
         <ListCardGrid>
-          {RECOMMENDED.map((c) => (
-            <article key={c.name} className="pcard pcard--catalog">
+          {suggested?.map((c) => (
+            <article key={c.productCode} className="pcard pcard--catalog">
               <header className="pcard-head">
                 <span className="pcard-icon" aria-hidden>
-                  <Icon name="agent" size="lg" />
+                  <ProductLogo api={api} code={c.productCode} version={c.iconVersion??"current"} url={c.iconUrl}/>
                 </span>
                 <span className="pcard-titles">
-                  <h3 className="pcard-title">{c.name}</h3>
-                  <p className="pcard-ident">{c.category}</p>
+                  <h3 className="pcard-title">{c.productName}</h3>
+                  <p className="pcard-ident">{c.productNick||c.productCode}</p>
                 </span>
                 <span className="pcard-badges">
-                  <StatusBadge tone={c.status === "released" ? "success" : "neutral"}>
-                    {t(c.status === "released" ? "home.catalog.released" : "home.catalog.preview")}
-                  </StatusBadge>
+                  <ReleaseBadge stage={c.releaseStage}/>
                 </span>
               </header>
               <div className="pcard-body">
-                <p className="pcard-desc">{c.summary}</p>
-                <div className="catalog-caps">
-                  {c.capabilities.map((cap) => (
-                    <Badge key={cap} variant="secondary">
-                      {cap}
-                    </Badge>
-                  ))}
-                </div>
+                <p className="pcard-desc">{c.description}</p>
               </div>
               <footer className="pcard-foot">
                 <span className="pcard-meta">
-                  {c.version && <span className="pcard-version">v{c.version}</span>}
+                  {c.releaseVersion && <span className="pcard-version">v{c.releaseVersion}</span>}
                 </span>
                 <span className="pcard-actions">
                   {/* 统一「了解详情」，**不写「订阅」**：这个链接落在目录页，
@@ -731,7 +530,7 @@ export function HomePage({
                     variant="outline"
                     size="sm"
                     onClick={() =>
-                      window.open(CATALOG_SOURCE.url, "_blank", "noopener")
+                      window.open(`${websiteBase}/appcenter`, "_blank", "noopener")
                     }
                   >
                     {t("home.catalog.learnMore")}
@@ -741,10 +540,8 @@ export function HomePage({
             </article>
           ))}
         </ListCardGrid>
-        {/* 出处要写明：这份清单不是实时的，用户有权知道自己看到的是什么时候的。 */}
-        <p className="text-body-sm text-muted-foreground">
-          {t("home.catalog.source", { date: CATALOG_SOURCE.capturedAt })}
-        </p>
+        {recommendations===null&&<p className="text-body-sm text-muted-foreground" role="status">{t(catalogFailed?"home.catalog.unavailable":"home.catalog.loading")}</p>}
+        {suggested?.length===0&&<p className="text-body-sm text-muted-foreground">{t("home.catalog.empty")}</p>}
       </Section>
       </div>
     </div>
@@ -752,60 +549,64 @@ export function HomePage({
 }
 
 /**
- * 平台上订了、本机还没有的智能体。
- *
- * 和本地卡片同一种卡（pcard），版式也跟本地卡片同一套（owner 2026-09-16：
- * 原来自己另起一套——版本号塞在描述里、没有档位标签——扫过去不像同一页）：
- * 属性标签（档位 · 订阅状态 · 本机装没装）在标题行右侧，产品介绍在中间，
- * 版本号在左下角。差别只在动作：这里没有「打开」——本机没有它的契约，打不
- * 开。给的是它能兑现的：在线使用（落这个产品自己的边缘地址，见
- * `productEdgeUrl`；同日现场纠错一次——第一版落到了通用的应用中心，
- * 而这张卡就是为了「本机装不上，去平台上用同一个产品」而存在的，落到广场
- * 而不是这个产品自己的入口，等于没给出它承诺的那件事），或者订阅已失效时
- * 去续订。
+ * Platform subscriptions without a local installation. Local supply comes from
+ * the package registry; online addresses come from platform metadata.
  */
 function SubscribedElsewhereCard({
   row,
-  consoleBase,
   subscribeUrl,
+  api, packageEntry, unsignedAllowed, onRefresh, onError,
 }: {
   row: SubscribedProduct & { productCode: string };
-  consoleBase: string;
   subscribeUrl: (id?: string, intent?: "subscribe" | "renew") => string;
+  api: Api;
+  packageEntry?: RegistryItem;
+  unsignedAllowed: boolean;
+  onRefresh: () => void | Promise<void>;
+  onError: (message: string) => void;
 }) {
   const t = useT();
+  const [installing, setInstalling] = useState(false);
+  const onlineUrl = productHomeUrl(row.homeUrl);
+  const install = async () => {
+    setInstalling(true);
+    try { await api.installFromRegistry(row.productCode, packageEntry!.version); await onRefresh(); }
+    catch (error) { onError((error as Error).message); }
+    finally { setInstalling(false); }
+  };
   const expired = row.status === "expired";
   const title = row.productName ?? row.productNick ?? row.productCode;
+  const version = packageEntry?.version ?? row.releaseVersion;
   return (
     <article className="pcard">
       <header className="pcard-head">
         <span className="pcard-icon" aria-hidden>
-          <Icon name="cube" size="lg" />
+          <ProductLogo api={api} code={row.productCode} version={row.iconVersion} url={row.iconUrl}/>
         </span>
         <span className="pcard-titles">
           <h3 className="pcard-title">{title}</h3>
           <p className="pcard-ident" title={t("home.card.identTitle", { id: row.productCode })}>
-          {row.productCode}
+          {row.productNick&&row.productNick!==title?row.productNick:row.productCode}
         </p>
         </span>
         <span className="pcard-badges">
-          {row.tier && <StatusBadge tone="neutral">{row.tier}</StatusBadge>}
+          {row.tier && <StatusBadge tone="neutral" title={row.tier}>{tierAbbreviation(row.tier)}</StatusBadge>}
           {expired ? (
             <StatusBadge tone="warning">{t("home.badge.expired")}</StatusBadge>
-          ) : (
+          ) : knownRelease(row.releaseStage)?<ReleaseBadge stage={row.releaseStage}/>: (
             <StatusBadge tone="success">{t("home.badge.subscribed")}</StatusBadge>
           )}
-          <StatusBadge tone="neutral">{t("home.badge.notInstalled")}</StatusBadge>
         </span>
       </header>
       <div className="pcard-body">
-        <p className="pcard-desc">{blurbOf(t, row.productCode)}</p>
+        <p className="pcard-desc">{row.description?.trim()||blurbOf(t, row.productCode)}</p>
       </div>
       <footer className="pcard-foot">
         <span className="pcard-meta">
-          {row.releaseVersion && (
-            <span className="pcard-version" title={t("home.card.platformVersion", { version: row.releaseVersion })}>
-              v{row.releaseVersion}
+          {packageEntry && <InstallationState installed={false}/>}
+          {version && (
+            <span className="pcard-version" title={t(packageEntry ? "home.card.packageVersion" : "home.card.platformVersion", { version })}>
+              v{version}
             </span>
           )}
         </span>
@@ -818,16 +619,19 @@ function SubscribedElsewhereCard({
             >
               {t("home.card.renew")}
             </Button>
-          ) : (
-            <Button
-              variant="outline"
+          ) : <>
+            {packageEntry && <Button size="sm" variant={onlineUrl ? "outline" : "default"} disabled={installing || !unsignedAllowed && !packageEntry.signed}
+              title={!unsignedAllowed && !packageEntry.signed ? t("home.install.unsignedBlockedTitle") : undefined}
+              onClick={() => void install()}>{t(installing ? "home.install.installing" : "home.install.install")}</Button>}
+            {onlineUrl && <Button
               size="sm"
-              onClick={() => window.open(productEdgeUrl(consoleBase, row.productCode), "_blank", "noopener")}
+              onClick={() => window.open(onlineUrl, "_blank", "noopener")}
             >
               {t("home.card.useOnline")}
               <Icon name="external-link" size="xs" />
-            </Button>
-          )}
+            </Button>}
+            {!packageEntry && !onlineUrl && <span className="pcard-entry-note" title={t("home.card.entryUnavailableHint")}>{t("home.card.entryUnavailable")}</span>}
+          </>}
         </span>
       </footer>
     </article>
@@ -843,7 +647,7 @@ function SubscribedElsewhereCard({
  *
  * 动作只有两个，且**主次分明**：
  *   打开（主）—— 进本地运行时，这是这个应用存在的理由。
- *   在线（辅）—— 去平台上的同一个产品。桌面装不上、或者临时换台机器时的退路。
+ *   在线（辅）—— 有平台在线地址时保留，与本地运行并行可用。
  *
  * 新建项目 / 停用 / 版本回滚都不在这里：进了产品就交给产品自己。
  */
@@ -851,31 +655,38 @@ function ProductCard({
   api,
   product,
   projects,
+  projectsReady,
   subscribeUrl,
-  consoleBase,
+  onlineUrl, packageUpdate, unsignedAllowed,
   capabilityMock,
   onOpen,
   onCreated,
+  onEnterProduct,
   onRefresh,
   onError,
   selected,
   onToggleSelect,
+  platformMetadata,
 }: {
   api: Api;
   product: ProductInfo;
   projects: ProjectMeta[];
+  projectsReady: boolean;
   subscribeUrl: (id?: string, intent?: "subscribe" | "renew") => string;
-  /** 「智能体介绍」落到平台应用中心（智能体广场）（还没有 per-product 深链，不拼猜出来的地址）。 */
-  consoleBase: string;
+  onlineUrl?: string;
+  packageUpdate?: RegistryItem;
+  unsignedAllowed: boolean;
   /** daemon 说能力面是 mock（TD-033）。运行环境层面的事实，每张卡都受影响。 */
   capabilityMock: boolean;
   onOpen: (projectId: string) => void;
+  onEnterProduct?: (productId: string) => void;
   onCreated: (projectId: string) => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
   onError: (msg: string) => void;
   /** 选中态（与侧栏「最近工作」联动）：点卡片空白处切换，再点一次取消。 */
   selected: boolean;
   onToggleSelect: () => void;
+  platformMetadata?: SubscribedProduct;
 }) {
   const t = useT();
   const [opening, setOpening] = useState(false);
@@ -885,10 +696,13 @@ function ProductCard({
    * 库里有没有比生效版本更新的版本 —— 「更新」拉下来的，或装包装进来的。
    * 有才显示「更新版本」（owner 2026-09-03 定），按一下就把生效版本钉过去。
    */
-  const newer = newerVersionOf(product);
+  const newer = newerVersionOf({ version: product.version, versions: [...product.versions, ...(packageUpdate ? [packageUpdate.version] : [])] });
+  const requiresDownload = !!newer && !product.versions.includes(newer);
+  const updateBlocked = requiresDownload && !unsignedAllowed && !packageUpdate?.signed;
   const updateTo = async (version: string) => {
     setOpening(true);
     try {
+      if (!product.versions.includes(version)) await api.installFromRegistry(product.id, version);
       await api.pinProductVersion(product.id, version);
       await onRefresh();
     } catch (e) {
@@ -910,6 +724,7 @@ function ProductCard({
    * 产品的第一步搬到了框架里。进去之后产品自己会问该问的。
    */
   const open = async () => {
+    if (onEnterProduct) { onEnterProduct(product.id); return; }
     setOpening(true);
     try {
       const latest = [...projects].sort((a, b) =>
@@ -940,15 +755,7 @@ function ProductCard({
       <StatusBadge tone="neutral">{t("home.badge.disabled")}</StatusBadge>
     ) : product.entitled === true ? (
       <StatusBadge tone="success">{t("home.badge.subscribed")}</StatusBadge>
-    ) : product.supply === "builtin" ? (
-      /* 随包的是示例（TD-006 / TD-033），得看起来就是示例：标「本地已装」会让人
-         以为那是一个自己拥有的产品。平台说订了（上一支）时以平台为准。
-         用户看到的词是「内置示例」——「测试夹具」是我们的行话，不是他们的
-         （owner 2026-09-17）。 */
-      <StatusBadge tone="neutral">{t("home.badge.builtinSample")}</StatusBadge>
-    ) : (
-      <StatusBadge tone="neutral">{t("home.badge.localOnly")}</StatusBadge>
-    );
+    ) : null;
 
   return (
     <article
@@ -966,16 +773,17 @@ function ProductCard({
           （owner 2026-09-03 定）。 */}
       <header className="pcard-head">
         <span className="pcard-icon" aria-hidden>
-          <Icon name="cube" size="lg" />
+          <ProductLogo api={api} code={product.id} version={platformMetadata?.iconVersion} url={platformMetadata?.iconUrl}/>
         </span>
         <span className="pcard-titles">
           <h3 className="pcard-title">{product.name}</h3>
           <p className="pcard-ident" title={t("home.card.identTitle", { id: product.id })}>
-          {product.id}
+          {platformMetadata?.productNick||product.id}
         </p>
         </span>
         <span className="pcard-badges">
-          {badge}
+          {product.subscription?.tier&&<StatusBadge tone="neutral" title={product.subscription.tier}>{tierAbbreviation(product.subscription.tier)}</StatusBadge>}
+          {product.availability==="available"&&knownRelease(platformMetadata?.releaseStage)?<ReleaseBadge stage={platformMetadata?.releaseStage}/>:badge}
           {/* 「未接通」与订阅徽章并列而不是替换：「已订阅」和「能力面没接」是两件
               都成立的事。只标在能打开的卡上 —— 打不开的卡不会跑任务，也就没有
               「拿到占位输出当成果」这回事。 */}
@@ -986,7 +794,7 @@ function ProductCard({
       </header>
 
       <div className="pcard-body">
-        <p className="pcard-desc">{blurbOf(t, product.id)}</p>
+        <p className="pcard-desc">{platformMetadata?.description?.trim()||blurbOf(t, product.id)}</p>
         {/* 警示与说明要分得开：说明是灰字，警示走 DS 的 warning 语气（色 + 图标 +
             浅底），扫一眼就知道这是「要留意」而不是「介绍」。 */}
         {!usable && product.reason && (
@@ -1011,39 +819,34 @@ function ProductCard({
             口径进 tooltip：要用一句话说清的东西，不该常年占着版面。 */}
         {/* 左下角顶头对齐图标：版本（淡，hover 亮）→ 关键数字 → 单位（小、淡）。 */}
         <span className="pcard-meta">
+          <InstallationState installed/>
           <span className="pcard-version" title={t("home.card.activeVersion", { version: product.version })}>
             v{product.version}
           </span>
           <span
             className="pcard-count"
             title={
-              total > local
+              !projectsReady ? t("ph.listUnavailable") : total > local
                 ? t("home.card.projectsTitleBoth", { local, total })
                 : t("home.card.projectsTitleLocal", { local })
             }
           >
-            <b>{total > local ? `${local}/${total}` : local}</b> <span className="pcard-unit">{t("home.card.projects")}</span>
+            {projectsReady ? <><b>{total > local ? `${local}/${total}` : local}</b> <span className="pcard-unit">{t("home.card.projects")}</span></> : <span>{t("ph.listUnavailable")}</span>}
           </span>
         </span>
         <span className="pcard-actions">
           {usable ? (
             <>
-              {/* 主按钮「打开」放最右且加宽；左侧一条「智能体介绍」文字链（落平台
-                  应用中心）；库里有更新的版本时多一个「更新版本」。在线使用仍只在
-                  板块标题行出现一次。 */}
-              <a
-                className="pcard-link"
-                href={APPCENTER_URL(consoleBase)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {t("home.card.about")}
-              </a>
+              {onlineUrl && <Button variant="outline" size="sm"
+                onClick={() => window.open(onlineUrl, "_blank", "noopener")}>
+                {t("home.card.useOnline")}<Icon name="external-link" size="xs" />
+              </Button>}
               {newer && (
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={opening}
+                  disabled={opening || updateBlocked}
+                  title={updateBlocked ? t("home.install.unsignedBlockedTitle") : undefined}
                   onClick={() => void updateTo(newer)}
                 >
                   {t("home.card.upgradeTo", { version: newer })}

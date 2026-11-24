@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Local API - loopback-only HTTP surface of the Runtime daemon
  * (RY-102; formerly 30-design/60 section 8). Every request
  * except /health must carry the per-session bearer token; the server binds
@@ -36,9 +36,18 @@ import {
 import { DEV_UI_HTML } from "./dev-ui.js";
 import type { ProductRegistry } from "./product-registry.js";
 import type { TaskRunner } from "./task-runner.js";
+import { BackgroundJobs } from "./background-jobs.js";
+import { DocumentRenders } from "./document-renders.js";
+import {DocumentReadings} from "./document-readings.js";
+import {ProductLibrary,LibraryTokens} from "./product-library.js";
+import type {SqliteStoragePort} from "./storage.js";
+import type {SourceReader} from "./document-reader.js";
+import { RenderDownloads, renderFilename, attachmentDisposition } from "./render-downloads.js";
 import { SkillNotFoundError, type SkillListing, type SkillView } from "./skill-registry.js";
+import { withSkillCatalogIdentity } from "./skill-catalog-identity.js";
 import type { SkillDocument, SkillLayer } from "@vxture/ruyin-core";
-import { installPackage } from "./installer.js";
+import { installPackage, preflightPackage } from "./installer.js";
+import type { PackageTrust } from "./package-signature.js";
 import { ContractFetchError, type FetchOutcome } from "./contract-fetch.js";
 import { hasUiBundle, type UiFetchOutcome } from "./ui-fetch.js";
 import { AlreadyAttributedError } from "@vxture/ruyin-core";
@@ -61,6 +70,10 @@ import {
   type PlatformService,
 } from "./platform.js";
 import type { PrivateModelStore } from "./private-model.js";
+import { DesktopDevicesError } from "./desktop-devices.js";
+import {OrganizationSwitchError} from "./organization-switch.js";
+import {MaintenanceError,type MaintenanceService} from "./maintenance.js";
+import {collectDiagnostics} from "./diagnostics.js";
 import { validate as validatePrivateModel } from "./private-model.js";
 import {
   NotSignedInError as SessionNotSignedInError,
@@ -92,7 +105,7 @@ import {
  * TypeScript 会在这个文件报错，而不是留到运行时才发现某个字段传不过去。
  */
 export interface ConnectorRegistryLike {
-  list(): Promise<unknown[]>;
+  list(localOnly?:boolean): Promise<unknown[]>;
   install(input: ConnectorInstallInput): Promise<unknown>;
   /** 试连一次，不落盘（添加页在写下任何东西之前先问一句）。 */
   probe(input: ConnectorProbeInput): Promise<{ ok: boolean; tools: string[]; detail?: string }>;
@@ -114,18 +127,6 @@ export interface ComponentStoreLike {
   acquireFromDir(dir: string): Promise<unknown>;
   cancel(id: string): boolean;
   remove(id: string): boolean;
-}
-
-/**
- * Python 半边（TD-042 ②）；实现见 python-runtime.ts。uv 不随安装包，所以它有
- * 两步：取 uv 的字节（走上面那条获取通道），再用它在本机装出 CPython 与 wheel。
- * 界面上是一个按钮，所以 `provision` 把两步都做了。
- */
-export interface PythonRuntimeLike {
-  status(): { state: string; component: string | null };
-  provision(opts?: { acquire?: () => Promise<unknown> }): Promise<unknown>;
-  cancel(): boolean;
-  remove(): boolean;
 }
 
 /** 服务端只用登记册的这几个口；完整类型在 skill-registry.ts。 */
@@ -168,6 +169,7 @@ function withRunState(
 export const UI_LANGUAGES = ["zh-CN", "en"];
 
 export interface LocalApiDeps {
+  accountsBase?: string;
   runtime: ProjectRuntime;
   /** 受管产品资产（安装 / 启用 / 订阅可用性，30-contract-schema §18）。 */
   registry: ProductRegistry;
@@ -190,6 +192,17 @@ export interface LocalApiDeps {
    * 存在但每次都答「暂不可用」：一条答不了的路由和一条不存在的路由，在调用方
    * 那里应该是两回事。
    */
+  documents?: {
+    get(projectId: string, productId: string, id: string): { id: string; markdown: string; revision: number } | undefined;
+    put(projectId: string, productId: string, id: string, markdown: string, revision: number): { id: string; markdown: string; revision: number } | undefined;
+    list?(projectId: string, productId: string, prefix: string): { id: string; markdown: string; revision: number }[];
+  };
+  jobs?: BackgroundJobs;
+  renders?: DocumentRenders;
+  readings?: DocumentReadings;
+  sourceReader?: SourceReader;
+  libraryStorage?:SqliteStoragePort;
+  library?:ProductLibrary;
   files?: {
     list: (projectId: string) => StoredFile[];
     get: (projectId: string, fileId: string) => StoredFile | undefined;
@@ -208,16 +221,12 @@ export interface LocalApiDeps {
    */
   skills?: SkillRegistryLike;
   /** 工具登记册的只读视图（能力平台里「工具」那一半）。 */
-  tools?: { list(): Promise<unknown[]> };
+  tools?: { list(localOnly?:boolean): Promise<unknown[]> };
   /**
    * 获取通道（ADR-018 §7.2）。缺省 = 这套装配没有，`/components` 如实回答 503 ——
    * 空列表会被读成「一件可获取的都没有」，那是另一回事。
    */
   components?: ComponentStoreLike;
-  /**
-   * Python 半边（TD-042 ②）。缺省 = 这套装配没有，`/python-runtime` 如实回答 503。
-   */
-  python?: PythonRuntimeLike;
   /** 现场探一遍运行环境（任务 52）。缺省 = 这套装配不提供，路由如实 503。 */
   probeEnvironments?: () => unknown[];
   /**
@@ -245,6 +254,7 @@ export interface LocalApiDeps {
    * 仅开发模式显式置 false 才允许装未签名包。
    */
   requireSignedPackages?: boolean;
+  packageTrust?: PackageTrust;
   /**
    * 一级供给：从产品能力面拉契约（ADR-012）。未配置能力面时缺省——此时
    * POST /products/:id/fetch 如实回答「没有可拉的地方」，不假装拉过。
@@ -278,6 +288,9 @@ export interface LocalApiDeps {
     set(channel: UpdateChannel): UpdateChannel;
   };
   /** 运行时事件总线（TD-027）。不接就没有 /events，消费方回到轮询。 */
+  windowClose?:{get():"background"|"exit";set(action:"background"|"exit"):void};
+  maintenance?:Pick<MaintenanceService,"view"|"queue"|"cancel">;
+  startupReady?: Promise<void>;
   events?: EventBus;
   /**
    * 界面生效主题的**中转**，不是状态：界面告诉守护进程，守护进程广播给壳
@@ -351,6 +364,7 @@ export interface LocalApiDeps {
   setLanguage?: (language: string) => void;
   /** Runtime transparency surface for the settings panel (GET /system). */
   systemInfo: {
+    startupState?: "initializing" | "ready" | "failed";
     version: string;
     platform: string;
     arch: string;
@@ -363,15 +377,14 @@ export interface LocalApiDeps {
      */
     instanceId?: string;
     /**
-     * 能力面接没接（ADR-009）。`mock` = 没配 `RUYIN_CAPABILITY_BASE`，任务会拿到
-     * `MockAIGateway` 的字面量占位输出。界面据此在产品卡上标「未接通」（TD-033）——
-     * 「没接上」绝不能看起来像「在工作」，而守护进程日志到不了用户眼前。
+     * `unavailable` means generation has no configured provider and fails.
+     * `mock` is reserved for explicit development/test hosts.
      */
     /**
      * `local_model` = 直连本地模型（企业版 / 私有化，RY-100 A18）。它与
-     * `configured` 的区别对用户是实的：那一路推理上下文**不出本机**。
+     * `configured` 的区别是私有端点；回环或内网边界由实际地址决定。
      */
-    capabilitySurface: "configured" | "mock" | "local_model";
+    capabilitySurface: "configured" | "mock" | "local_model" | "unavailable";
     /** 直连本地推理开没开通、开通时用的哪个模型（RY-001 §07 #36）。 */
     localInference?: { direct: boolean; model?: string };
     /**
@@ -412,7 +425,7 @@ export interface LocalApiDeps {
    * 来标「本机可运行」，从不喂它。
    */
   capabilityCatalog?: {
-    catalog: Pick<CapabilityCatalog, "list" | "status" | "sync">;
+    catalog: Pick<CapabilityCatalog, "list" | "status" | "sync"> & Partial<Pick<CapabilityCatalog,"prepareScope">>;
     localFacts: () => LocalFacts | Promise<LocalFacts>;
   };
 }
@@ -503,9 +516,14 @@ function send(res: ServerResponse, status: number, body: unknown): void {
   res.end(data);
 }
 
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let bytes = 0;
+  for await (const chunk of req) {
+    bytes += (chunk as Buffer).length;
+    if (bytes <= maxBytes) chunks.push(chunk as Buffer);
+  }
+  if (bytes > maxBytes) throw new RangeError("JSON request exceeds byte limit");
   const text = Buffer.concat(chunks).toString("utf8");
   if (text.trim().length === 0) return {};
   return JSON.parse(text) as Record<string, unknown>;
@@ -538,6 +556,7 @@ async function sendPlatformRead(
     send(res, 200, await read());
   } catch (cause) {
     if (!(cause instanceof PlatformReadError)) throw cause;
+    if (cause.code === "ACCOUNT_DELETING") throw cause;
     if (cause.status === 403) {
       send(res, 403, apiError(REJECTION.POLICY_DENIED, deniedMessage));
     } else {
@@ -572,6 +591,9 @@ function connectorInputFrom(body: Record<string, unknown>): ConnectorProbeInput 
 }
 
 function errorStatus(cause: unknown): { status: number; body: unknown } {
+  if (cause instanceof PlatformReadError && cause.code === "ACCOUNT_DELETING") {
+    return { status: 403, body: apiError("ACCOUNT_DELETING", "Account deletion is pending", { retryable: false }) };
+  }
   if (cause instanceof ContractInvalidError) {
     return {
       status: 400,
@@ -605,6 +627,9 @@ function errorStatus(cause: unknown): { status: number; body: unknown } {
   }
   if (cause instanceof SyntaxError) {
     return { status: 400, body: apiError("REQUEST_MALFORMED", cause.message) };
+  }
+  if (cause instanceof DesktopDevicesError || cause instanceof OrganizationSwitchError) {
+    return { status: cause.status, body: apiError(cause.code, cause.message, { retryable: cause.status >= 500 }) };
   }
   // 两个 NotSignedInError：旧 OIDC 路径（platform.ts）的与会话路径（platform-session.ts）的。
   // 只认前一个时，/platform/* 未登录或会话被平台拒会落成 500 INTERNAL、retryable: true ——
@@ -666,6 +691,11 @@ export async function upgradeProjects(
 }
 
 export function createLocalApi(deps: LocalApiDeps): Server {
+  const documents = deps.documents;
+  if (!deps.jobs && documents?.list) deps.jobs = new BackgroundJobs(deps.runtime, deps.tasks, {...documents,list:documents.list},deps.events);
+  if (!deps.renders && documents?.list && deps.files) deps.renders = new DocumentRenders(deps.runtime,{...documents,list:documents.list},deps.files);
+  if(!deps.readings&&documents?.list&&deps.files&&deps.sourceReader)deps.readings=new DocumentReadings(deps.runtime,{...documents,list:documents.list},deps.files,deps.sourceReader);
+  if(!deps.library&&deps.libraryStorage&&deps.sourceReader)deps.library=new ProductLibrary(deps.libraryStorage,deps.sourceReader);
   /**
    * 产品级凭据表**一台服务器一份**（ADR-022 §3.2）。
    *
@@ -674,26 +704,69 @@ export function createLocalApi(deps: LocalApiDeps): Server {
    * 东西会报错。也不做成模块级单例：两台服务器共用一张表，A 的凭据能开 B 的门。
    */
   const bridgeTokens = new BridgeTokens();
+  const libraryTokens=new LibraryTokens();
   /** 产品提出、等人确认的推进（state-requests.ts）。与凭据表同一条理由：一台服务器一份。 */
   const stateRequests = new StateRequests();
-  return createServer((req, res) => {
-    void handle(deps, bridgeTokens, stateRequests, req, res).catch((cause) => {
+  const renderDownloads = new RenderDownloads();
+  const server = createServer((req, res) => {
+    void handle(deps, bridgeTokens, stateRequests, renderDownloads,libraryTokens, req, res).catch((cause) => {
       const { status, body } = errorStatus(cause);
       send(res, status, body);
     });
   });
+  server.on("listening",()=>{void (deps.startupReady ?? Promise.resolve()).then(()=>deps.jobs?.recoverAll()).catch(cause=>console.error("[ruyin] background recovery failed",cause));});
+  server.on("close",()=>deps.jobs?.close());
+  server.on("listening",()=>{void deps.renders?.recoverAll().catch(cause=>console.error("[ruyin] render recovery failed",cause));});
+  server.on("close",()=>deps.renders?.close());
+  server.on("listening",()=>{void deps.readings?.recoverAll().catch(cause=>console.error("[ruyin] reading recovery failed",cause));});
+  server.on("close",()=>deps.readings?.close());
+  server.on("listening",()=>{void deps.library?.readings.recoverAll().catch(cause=>console.error("[ruyin] library reading recovery failed",cause));});
+  server.on("close",()=>deps.library?.close());
+  return server;
+}
+
+/** Readiness is separate from liveness; never persist a task before its tools load. */
+function startupBlocks(deps: LocalApiDeps, res: ServerResponse): boolean {
+  const state = deps.systemInfo.startupState;
+  if (!state || state === "ready") return false;
+  res.setHeader("retry-after", "2");
+  send(res, 503, apiError(state === "failed" ? "RUNTIME_START_FAILED" : "RUNTIME_INITIALIZING",
+    state === "failed" ? "Runtime capability initialization failed; restart the application" : "Runtime capabilities are initializing; please retry shortly",
+    { retryable: true }));
+  return true;
 }
 
 async function handle(
   deps: LocalApiDeps,
   bridgeTokens: BridgeTokens,
   stateRequests: StateRequests,
+  renderDownloads: RenderDownloads,
+  libraryTokens:LibraryTokens,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const method = req.method ?? "GET";
   const path = url.pathname.replace(/\/+$/, "") || "/";
+
+  // A browser navigation cannot set Authorization. Only a short, one-use
+  // descriptor for one saved file may enter this branch before the bearer gate.
+  const downloadRoute=/^\/downloads\/([a-f0-9]{64})$/.exec(path);
+  if(downloadRoute&&method==='GET'){
+    const ticket=renderDownloads.consume(downloadRoute[1]!);
+    const scope=ticket&&bridgeTokens.verify(ticket.bridgeToken);
+    if(!ticket||!scope||scope.projectId!==ticket.projectId||scope.productId!==ticket.productId||!deps.renders){send(res,404,apiError('NOT_FOUND','Download unavailable or expired'));return;}
+    try{
+      const view=await deps.runtime.openProject(scope.projectId);
+      const job=deps.renders.get(scope.projectId,scope.productId,ticket.renderId);
+      if(view.meta.productId!==scope.productId||view.meta.archivedAt||!job||view.meta.workspaceId&&view.meta.workspaceId!==await activeWorkspace(deps))throw Error('Download unavailable');
+      const file=deps.renders.file(scope.projectId,scope.productId,ticket.renderId,ticket.format),bytes=Buffer.from(file.base64,'base64');
+      if(!bridgeTokens.verify(ticket.bridgeToken))throw Error('Download unavailable');
+      res.writeHead(200,{'content-type':file.mediaType,'content-length':bytes.length,'content-disposition':attachmentDisposition(renderFilename(job.title,ticket.format)),'cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer'});
+      res.end(bytes);
+    }catch{send(res,404,apiError('NOT_FOUND','Download unavailable or expired'));}
+    return;
+  }
 
   // Workspace UI (built React app) at /, when present; the plain dev console
   // stays reachable at /dev. Both are static shells - the token arrives via
@@ -765,6 +838,21 @@ async function handle(
     return;
   }
 
+  if(path==="/library-bridge"||path.startsWith("/library-bridge/")){
+    const bearer=req.headers.authorization?.replace(/^Bearer /,""),scope=libraryTokens.verify(bearer);
+    if(!scope||scope.workspaceId!==await activeWorkspace(deps)||deps.registry.list().find(p=>p.id===scope.productId)?.availability!=="available"){send(res,401,apiError("AUTH_REQUIRED","Library session unavailable"));return;}
+    const library=deps.library;if(!library){send(res,503,apiError("LIBRARY_UNAVAILABLE","Library is unavailable"));return;}
+    const route=/^\/library-bridge\/items(?:\/([a-f0-9-]{36})(?:\/versions\/(\d+)(?:\/units\/(\d+)|\/(retry))?)?)?$/.exec(path);
+    if(!route){send(res,404,apiError("NOT_FOUND","Library route unavailable"));return;}
+    try{if(method==="GET"&&!route[1])send(res,200,{items:library.list(scope)});
+      else if(method==="POST"&&!route[1])send(res,201,await library.import(scope,await readJson(req,30*1024*1024)));
+      else if(method==="GET"&&route[1]&&!route[3]){const value=library.get(scope,route[1]);if(value)send(res,200,value);else send(res,404,apiError("NOT_FOUND","Resource unavailable"));}
+      else if(method==="GET"&&route[1]&&route[3]!==undefined){const value=library.unit(scope,route[1],Number(route[2]),Number(route[3]));if(value)send(res,200,value);else send(res,404,apiError("NOT_FOUND","Reading block unavailable"));}
+      else if(method==="POST"&&route[1]&&route[4])send(res,200,await library.retry(scope,route[1],Number(route[2])));
+      else send(res,405,apiError("INVALID_INPUT","Unsupported library operation"));
+    }catch(cause){send(res,cause instanceof RangeError?413:409,apiError("LIBRARY_REJECTED",cause instanceof Error?cause.message:"Library operation failed"));}return;
+  }
+
   // ---- 产品接入面（ADR-022）：`/bridge/*` 走**另一种凭据**，在会话令牌那道门之前分叉 ----
   //
   // **两个方向都要拒，这是一对，不是一条。**
@@ -797,6 +885,102 @@ async function handle(
       return;
     }
 
+    if (method === "POST" && (path === "/bridge/tasks" || path === "/bridge/jobs") && startupBlocks(deps, res)) return;
+    if(path==="/bridge/library"||path==="/bridge/library-selection"||path.startsWith("/bridge/library-selection/")){
+      const view=await deps.runtime.openProject(scope.projectId),workspaceId=await activeWorkspace(deps);if(!workspaceId||view.meta.workspaceId!==workspaceId||view.meta.productId!==scope.productId||view.meta.archivedAt){send(res,404,apiError("NOT_FOUND","Project unavailable"));return;}
+      const lib=deps.library;if(!lib){send(res,503,apiError("LIBRARY_UNAVAILABLE","Library is unavailable"));return;}const area=lib.scope(workspaceId,scope.productId);
+      try{if(method==="GET"&&path==="/bridge/library")send(res,200,{items:lib.list(area)});else if(method==="GET")send(res,200,lib.selections(scope.projectId,scope.productId));else if(method==="POST"&&path==="/bridge/library-selection")send(res,200,await lib.pin(deps.runtime,area,scope.projectId,await readJson(req)));else if(method==="DELETE")send(res,200,lib.unpin(area,scope.projectId,path.split("/").at(-1)!,Number((await readJson(req))["revision"])));else send(res,405,apiError("INVALID_INPUT","Unsupported operation"));}catch(cause){send(res,409,apiError("SELECTION_REJECTED",cause instanceof Error?cause.message:"Selection failed"));}return;
+    }
+
+    const readingRoute=/^\/bridge\/readings(?:\/([a-f0-9-]{36})(?:\/units\/(\d{1,4}))?)?$/.exec(path);
+    if(readingRoute){
+      if(!deps.readings){send(res,503,apiError("READER_UNAVAILABLE","Local source reader unavailable"));return;}
+      const view=await deps.runtime.openProject(scope.projectId);
+      if(view.meta.productId!==scope.productId||view.meta.archivedAt||view.meta.workspaceId&&view.meta.workspaceId!==await activeWorkspace(deps)){send(res,404,apiError("NOT_FOUND","Project unavailable"));return;}
+      try{
+        if(method==="POST"&&!readingRoute[1])send(res,202,await deps.readings.create(scope.projectId,scope.productId,await readJson(req)));
+        else if(method==="GET"&&!readingRoute[1])send(res,200,{items:deps.readings.list(scope.projectId,scope.productId).map(j=>({...j,sourceAvailable:deps.readings!.available(scope.projectId,j)}))});
+        else if(method==="GET"&&readingRoute[1]){const j=deps.readings.get(scope.projectId,scope.productId,readingRoute[1]);const value=j&&(readingRoute[2]===undefined?{...j,sourceAvailable:deps.readings.available(scope.projectId,j)}:deps.readings.unit(scope.projectId,scope.productId,j.id,Number(readingRoute[2])));if(value)send(res,200,value);else send(res,404,apiError("NOT_FOUND","Reading or block not found"));}
+        else send(res,405,apiError("INVALID_INPUT","Unsupported reading operation"));
+      }catch(cause){send(res,409,apiError("READING_REJECTED",cause instanceof Error?cause.message:"Reading rejected"));}
+      return;
+    }
+    const renderDownloadRoute=/^\/bridge\/renders\/([a-f0-9-]{36})\/downloads\/(md|docx|pdf)$/.exec(path);
+    if(renderDownloadRoute&&method==='POST'&&deps.renders){
+      try{
+        const view=await deps.runtime.openProject(scope.projectId),id=renderDownloadRoute[1]!,format=renderDownloadRoute[2] as 'md'|'docx'|'pdf';
+        const job=deps.renders.get(scope.projectId,scope.productId,id);
+        if(view.meta.productId!==scope.productId||view.meta.archivedAt||!job||view.meta.workspaceId&&view.meta.workspaceId!==await activeWorkspace(deps)){send(res,404,apiError('NOT_FOUND','Render not found'));return;}
+        const file=deps.renders.file(scope.projectId,scope.productId,id,format);
+        const ticket=renderDownloads.issue({...scope,renderId:id,format,bridgeToken:presented.slice('Bearer '.length)});
+        send(res,200,{...ticket,filename:renderFilename(job.title,format),sha256:file.sha256,size:file.size});
+      }catch(cause){send(res,409,apiError('RENDER_REJECTED',cause instanceof Error?cause.message:'Download rejected'));}
+      return;
+    }
+    const renderRoute=/^\/bridge\/renders(?:\/([a-f0-9-]{36})(?:\/files\/(md|docx|pdf))?)?$/.exec(path);
+    if(renderRoute&&deps.renders){
+      const view=await deps.runtime.openProject(scope.projectId);
+      if(view.meta.productId!==scope.productId){send(res,404,apiError("NOT_FOUND","Project unavailable"));return;}
+      try{
+        if(method==="POST"&&!renderRoute[1])send(res,202,await deps.renders.create(scope.projectId,scope.productId,await readJson(req)));
+        else if(method==="GET"&&!renderRoute[1])send(res,200,{items:deps.renders.list(scope.projectId,scope.productId)});
+        else if(method==="GET"&&renderRoute[1]){const job=deps.renders.get(scope.projectId,scope.productId,renderRoute[1]);if(!job)send(res,404,apiError("NOT_FOUND","Render not found"));else send(res,200,renderRoute[2]?deps.renders.file(scope.projectId,scope.productId,job.id,renderRoute[2]):job);}
+        else send(res,405,apiError("INVALID_INPUT","Unsupported render operation"));
+      }catch(cause){send(res,409,apiError("RENDER_REJECTED",cause instanceof Error?cause.message:"Render rejected"));}
+      return;
+    }
+    const jobRoute = /^\/bridge\/jobs(?:\/([a-f0-9-]{36})(?:\/(control))?)?$/.exec(path);
+    if (jobRoute && deps.jobs) {
+      const view=await deps.runtime.openProject(scope.projectId);
+      if(view.meta.productId!==scope.productId){send(res,404,apiError("NOT_FOUND","Project unavailable"));return;}
+      try {
+        if(method==="POST"&&!jobRoute[1])send(res,202,await deps.jobs.create(scope.projectId,scope.productId,await readJson(req,4*1024*1024)));
+        else if(method==="GET"&&!jobRoute[1])send(res,200,{items:deps.jobs.list(scope.projectId,scope.productId)});
+        else if(method==="GET"&&jobRoute[1]&&!jobRoute[2]){const job=deps.jobs.get(scope.projectId,scope.productId,jobRoute[1]);if(job)send(res,200,job);else send(res,404,apiError("NOT_FOUND","Job not found"));}
+        else if(method==="POST"&&jobRoute[1]&&jobRoute[2]){
+          const action=(await readJson(req))["action"];
+          if(action!=="pause"&&action!=="cancel"&&startupBlocks(deps,res))return;
+          send(res,200,await deps.jobs.control(scope.projectId,scope.productId,jobRoute[1],action));
+        }
+        else send(res,405,apiError("INVALID_INPUT","Unsupported job operation"));
+      } catch(cause){send(res,cause instanceof RangeError?413:409,apiError("JOB_REJECTED",cause instanceof Error?cause.message:"Job rejected"));}
+      return;
+    }
+
+    const documentRoute = /^\/bridge\/documents\/([A-Za-z0-9_-]{1,80})$/.exec(path);
+    if (documentRoute && deps.documents && (method === "GET" || method === "PUT")) {
+      const id = documentRoute[1]!;
+      // Scope comes exclusively from the product token; request IDs cannot change it.
+      await deps.runtime.openProject(scope.projectId);
+      if (method === "GET") {
+        const doc = deps.documents.get(scope.projectId, scope.productId, id);
+        if (!doc) send(res, 404, apiError("NOT_FOUND", "文档不存在"));
+        else send(res, 200, doc);
+      } else {
+        if(id.startsWith("runtime_")||deps.jobs?.owns(scope.projectId,scope.productId,undefined,id)){send(res,409,apiError("DOCUMENT_LOCKED","Document belongs to a background job"));return;}
+        let body: Record<string, unknown>;
+        try { body = await readJson(req, 8 * 1024 * 1024); }
+        catch (cause) {
+          send(res, cause instanceof RangeError ? 413 : 400, apiError("INVALID_INPUT", "无效或过大的 JSON 正文"));
+          return;
+        }
+        if (!body || Array.isArray(body) || typeof body["markdown"] !== "string" || Buffer.byteLength(body["markdown"], "utf8") > 1024 * 1024 ||
+          !Number.isSafeInteger(body["revision"]) || (body["revision"] as number) < 0) {
+          send(res, 400, apiError("INVALID_INPUT", "需要 Markdown 正文及非负版本号，正文不超过 1 MiB"));
+          return;
+        }
+        const doc = deps.documents.put(scope.projectId, scope.productId, id, body["markdown"], body["revision"] as number);
+        if (!doc) send(res, 409, apiError("DOCUMENT_CONFLICT", "文档已更新，请重新读取后合并"));
+        else send(res, 200, doc);
+      }
+      return;
+    }
+
+    // Product-scoped immutable imported-file metadata; never expose source paths or bytes.
+    if(method === "GET" && path === "/bridge/files") {
+      if(!deps.files){send(res,503,apiError("FILES_UNAVAILABLE","Project files unavailable"));return;}
+      send(res,200,{items:deps.files.list(scope.projectId).map(({id,hash,name,bytes,mediaType,addedAt})=>({id,hash,name,bytes,mediaType,addedAt}))});return;
+    }
     // GET /bridge/context —— **只回元数据**（接入指南 §6.2 那行注释：产品 UI 不能
     // 读取 Item 内容，只看得到元数据与绑定状态）。
     //
@@ -959,6 +1143,7 @@ async function handle(
     // 以为自己指定了资料，跑出来的却是另一批。资料确认、工具闸门一道不少。
     if (method === "POST" && path === "/bridge/tasks") {
       const body = await readJson(req);
+      if(deps.jobs?.owns(scope.projectId,scope.productId,String(body["taskId"]??""))){send(res,409,apiError("TASK_BUSY","A background job owns this task input"));return;}
       if (body["inputs"] !== undefined) {
         send(
           res,
@@ -1045,6 +1230,13 @@ async function handle(
 
   const segments = path.split("/").filter((s) => s.length > 0);
 
+  const needsReady = method !== "GET" && (
+    segments[0] === "connectors" || segments[0] === "components" ||
+    path === "/system/data-dir" ||
+    method === "POST" && /^\/projects\/[^/]+\/tasks(?:\/[^/]+\/decision)?$/.test(path)
+  );
+  if (needsReady && startupBlocks(deps, res)) return;
+
   // GET /events - 事件流（TD-027）。SSE 而不是 WebSocket：这些事件全是单向
   // 的，服务端到客户端；WS 要多一套连接管理，换不来任何东西。
   //
@@ -1080,6 +1272,42 @@ async function handle(
   }
 
   // GET /system - runtime transparency for the settings panel
+  if(method==="GET"&&path==="/diagnostics"){
+    send(res,200,await collectDiagnostics({version:deps.version,platform:deps.systemInfo.platform,arch:deps.systemInfo.arch,keyProtection:deps.systemInfo.keyProtection,
+      startupState:deps.systemInfo.startupState,agents:deps.registry.installed().length,invalidAgents:deps.registry.failures.length,
+      ...(deps.connectors?{connectors:()=>deps.connectors!.list(true)}:{}),...(deps.tools?{tools:()=>deps.tools!.list(true)}:{}),...(deps.components?{components:()=>deps.components!.list()}:{}),...(deps.uiDir?{uiDir:deps.uiDir}:{})}));return;
+  }
+  if(path==="/maintenance"&&(method==="GET"||method==="POST"||method==="DELETE")){
+    if(!deps.maintenance){send(res,503,apiError("MAINTENANCE_UNAVAILABLE","Backup and restore is unavailable"));return;}
+    try{
+      if(method==="POST"){
+        if(startupBlocks(deps,res))return;
+        const busy=deps.tasks.activeCount>0||(deps.jobs?.activeCount??0)>0||(deps.readings?.activeCount??0)>0||(deps.renders?.activeCount??0)>0||(deps.library?.readings.activeCount??0)>0||deps.components?.list().some(item=>(item as {state?:string}).state==="acquiring");
+        if(busy){send(res,409,apiError("MAINTENANCE_BUSY","Finish active work before scheduling backup or restore",{retryable:true}));return;}
+        send(res,202,await deps.maintenance.queue(await readJson(req)));
+      }else send(res,200,method==="GET"?deps.maintenance.view():deps.maintenance.cancel());
+    }catch(cause){send(res,cause instanceof MaintenanceError?409:400,apiError(cause instanceof MaintenanceError?cause.code:"MAINTENANCE_TARGET",cause instanceof MaintenanceError?cause.message:"Check the backup source and new target paths"));}
+    return;
+  }
+  if ((method === "GET" || method === "PUT") && path === "/ui/window-close") {
+    if(!deps.windowClose){send(res,503,apiError("WINDOW_CLOSE_NOT_CONFIGURED","Window close preference is unavailable"));return;}
+    if(method==="PUT"){
+      const body=await readJson(req),action=body["action"];
+      if(action!=="background"&&action!=="exit"){send(res,400,apiError("REQUEST_MALFORMED","Choose background or exit"));return;}
+      deps.windowClose.set(action);
+    }
+    send(res,200,{action:deps.windowClose.get()});return;
+  }
+  if (method === "GET" && path === "/runtime/activity") {
+    const tasks={running:deps.tasks.runningCount,queued:deps.tasks.queuedCount};
+    const operations={batches:deps.jobs?.activeCount??0,
+      readings:(deps.readings?.activeCount??0)+(deps.library?.readings.activeCount??0),
+      renders:deps.renders?.activeCount??0,
+      downloads:deps.components?.list().filter(item=>(item as {state?:string}).state==="acquiring").length??0};
+    const initializing=deps.systemInfo.startupState==="initializing";
+    send(res,200,{tasks,operations,initializing,busy:initializing||Object.values(tasks).some(n=>n>0)||Object.values(operations).some(n=>n>0)});
+    return;
+  }
   if (method === "GET" && path === "/system") {
     send(res, 200, deps.systemInfo);
     return;
@@ -1218,6 +1446,7 @@ async function handle(
       return;
     }
     const { catalog, localFacts } = deps.capabilityCatalog;
+    await catalog.prepareScope?.();
     const q = url.searchParams;
     const limit = Number.parseInt(q.get("limit") ?? "", 10);
     const page = catalog.list({
@@ -1284,10 +1513,12 @@ async function handle(
          `{signedIn, expiresAt}`，界面于是一律显示「Vxture 用户 / 未命名租户 /
          未选定工作区」—— 登录是通的，看起来却像没登上。 */
       const summary = deps.platform.session();
+      const accountsBase = deps.accountsBase ?? "https://accounts.vxture.com";
       if (!deps.platformSession) {
         send(res, 200, {
           signedIn: false,
           issuer: summary.issuer,
+          accountsBase,
           consoleBase: summary.consoleBase,
           entitlementsConfigured: false,
         });
@@ -1304,14 +1535,35 @@ async function handle(
         issuer: summary.issuer,
         consoleBase: summary.consoleBase,
         // console-bff 本体（真正的 console.vxture.com），与上面 consoleBase
-        // 不是同一个主机（owner 2026-09-16 现场纠错）：consoleBase 是「去订阅」
-        // 深链落点，指向官网；这一个才是「用户中心」「配额用量」这类深链
-        // 真正要落的地方。此前界面误拿 consoleBase 拼这两条链接，结果落到了
-        // 官网而不是 console 应用本体。
+        // 不是同一个主机：订阅与配额使用 consoleAppBase，
+        // 用户中心与账号恢复使用独立的 accountsBase。
         consoleAppBase: deps.platformSession.baseUrl,
+        accountsBase,
         entitlementsConfigured: status.signedIn,
       });
       return;
+    }
+    if(path==="/auth/organizations"&&method==="GET"){
+      if(!deps.platformSession){send(res,503,apiError("PLATFORM_SESSION_NOT_CONFIGURED","Platform login is not configured"));return;}
+      send(res,200,{items:await deps.platformSession.organizations()});return;
+    }
+    if(path==="/auth/organization-switch"&&["GET","POST","DELETE"].includes(method)){
+      const session=deps.platformSession;
+      if(!session){send(res,503,apiError("PLATFORM_SESSION_NOT_CONFIGURED","Platform login is not configured"));return;}
+      if(!session.signedIn()){send(res,401,apiError("AUTH_REQUIRED","Sign in before switching organizations"));return;}
+      if(method==="GET"){send(res,200,session.organizationSwitchStatus(url.searchParams.get("requestId")??undefined));return;}
+      const body=await readJson(req);
+      if(method==="DELETE"){
+        if(typeof body["requestId"]!=="string"||!/^[0-9a-f]{32}$/.test(body["requestId"])){send(res,400,apiError("REQUEST_MALFORMED","An organization switch requestId is required"));return;}
+        send(res,200,session.cancelOrganizationSwitch(body["requestId"]));return;
+      }
+      const result=await session.beginOrganizationSwitch(body["tenantId"],body["workspaceId"]);
+      void session.completeOrganizationSwitch(result.requestId).then(async()=>{
+        if(session.organizationSwitchStatus(result.requestId)?.state!=="completed")return;
+        bridgeTokens.revokeAll();libraryTokens.clear();deps.registry.clearEntitlements();
+        await deps.refreshEntitlements?.();await deps.capabilityCatalog?.catalog.sync("login");
+      }).catch(()=>{/* Bounded status is polled by the UI; the old session survives failure. */});
+      send(res,200,result);return;
     }
     if (method === "POST" && path === "/auth/login") {
       if (!deps.platformSession) {
@@ -1329,12 +1581,26 @@ async function handle(
       void deps.platformSession
         .completeLogin()
         // 登录成功后取一次能力清单（D3）。sync 自己不抛；没有数据源时它什么都不做。
-        .then(() => deps.capabilityCatalog?.catalog.sync("login"))
+        .then(() => deps.platformSession!.signedIn() ? deps.capabilityCatalog?.catalog.sync("login") : undefined)
         .catch(() => {
         /* 超时或被拒：本地会话保持未登录，UI 轮询 /auth/session 自然看得到。
            这里不记日志——用户放弃登录是正常行为，不是异常。 */
       });
       send(res, 200, { authorizeUrl });
+      return;
+    }
+    if ((method === "GET" && path === "/auth/devices") ||
+        (method === "POST" && path === "/auth/devices/release")) {
+      if (!deps.platformSession) {
+        send(res, 503, apiError("PLATFORM_SESSION_NOT_CONFIGURED", "Platform login is not configured"));
+        return;
+      }
+      await sendPlatformRead(res, async () => {
+        if (method === "GET") return deps.platformSession!.desktopDevices();
+        const body = await readJson(req);
+        await deps.platformSession!.releaseDesktopDevice(body["deviceId"] as string);
+        return { ok: true };
+      }, "Desktop device management is unavailable for this account");
       return;
     }
     /*
@@ -1355,7 +1621,7 @@ async function handle(
       }
       await sendPlatformRead(
         res,
-        () => deps.platformSession!.subscribedProducts(),
+        () => deps.platformSession!.subscribedProducts(true),
         "当前角色看不到本租户的订阅清单（平台权限 tenant.billing.read）",
       );
       return;
@@ -1386,7 +1652,26 @@ async function handle(
       );
       return;
     }
-    // 租户 logo（标题栏租户菜单的身份卡）。图片字节，不走 send()——那条是 JSON 专用。
+    // Public display catalog and fixed-destination product image reads.
+    if(method==="GET"&&path==="/platform/recommended-products"){
+      if(!deps.platformSession){send(res,503,apiError("PLATFORM_SESSION_NOT_CONFIGURED","Platform login is not configured"));return;}
+      await sendPlatformRead(res,async()=>({items:await deps.platformSession!.recommendedProducts()}),"Product recommendations are unavailable for this role");return;
+    }
+    if(method==="GET"&&path==="/platform/product-catalog"){
+      if(!deps.platformSession){send(res,503,apiError("PLATFORM_SESSION_NOT_CONFIGURED","Platform login is not configured"));return;}
+      await sendPlatformRead(res,async()=>({items:await deps.platformSession!.productCatalog()}),"Product catalog is unavailable");return;
+    }
+    if(method==="GET"&&path==="/platform/product-icon"){
+      if(!deps.platformSession){send(res,503,apiError("PLATFORM_SESSION_NOT_CONFIGURED","Platform login is not configured"));return;}
+      const code=url.searchParams.get("code")??"",version=url.searchParams.get("version")??"";
+      if(!/^[a-zA-Z0-9_-]{1,80}$/.test(code)||!/^[a-zA-Z0-9_-]{1,128}$/.test(version)){
+        send(res,400,apiError("REQUEST_MALFORMED","A product code and icon version are required"));return;
+      }
+      const icon=await deps.platformSession.productIcon(code,version);
+      if(!icon){res.writeHead(204).end();return;}
+      res.writeHead(200,{"content-type":icon.contentType,"content-length":icon.data.length,"x-content-type-options":"nosniff","cache-control":version==="current"?"private, max-age=60":"private, max-age=3600"});
+      res.end(icon.data);return;
+    }
     // 没传过 logo 是正常状态（204），不是 404：404 在这条路上容易被当成「路由本身
     // 不存在」误读，界面这边靠状态码分支去兜首字母图标，204 更准。
     if (method === "GET" && path === "/platform/org-logo") {
@@ -1569,11 +1854,16 @@ async function handle(
       return;
     }
     try {
-      const result = installPackage(bytes, {
-        storeDir: deps.registry.storeDir,
+      const policy = {
         runtimeVersion: deps.version,
         requireSignature: deps.requireSignedPackages !== false,
-      });
+        ...(deps.packageTrust ? { trust: deps.packageTrust } : {}),
+      };
+      const inspected = preflightPackage(bytes, policy);
+      if(inspected.productId!==id||inspected.version!==version||inspected.contract.product.publisher!==entry.publisher){
+        send(res,422,apiError("REGISTRY_PACKAGE_MISMATCH","The package does not match the selected agent release"));return;
+      }
+      const result = installPackage(bytes, { ...policy, storeDir: deps.registry.storeDir });
       deps.registry.rescan();
       await upgradeProjects(deps, result.productId);
       send(res, 201, {
@@ -1701,7 +1991,7 @@ async function handle(
     // checkpointId 按请求时刻取，壳的系统通知按它去重，每一次新请求各报一次。
     const requests = (await deps.runtime.listProjects()).flatMap((meta) => {
       const p = stateRequests.get(meta.id);
-      return p
+      return p && !meta.archivedAt
         ? [
             {
               projectId: meta.id,
@@ -1840,7 +2130,7 @@ async function handle(
     }
     const project = url.searchParams.get("project") ?? undefined;
     if (method === "GET" && segments.length === 1) {
-      send(res, 200, deps.skills.list(project));
+      send(res, 200, withSkillCatalogIdentity(deps.skills.list(project)));
       return;
     }
     // POST /skills/refresh —— 重扫本机各层，并向每个已装产品的能力面对一次分发目录。
@@ -1849,7 +2139,7 @@ async function handle(
       const distributed = deps.refreshDistributedSkills ? await deps.refreshDistributedSkills() : undefined;
       deps.skills.refresh();
       send(res, 200, {
-        ...deps.skills.list(project),
+        ...withSkillCatalogIdentity(deps.skills.list(project)),
         // 没有能力面就没有分发来源：说清，不用空数组冒充「对过了、没变化」。
         distributed: distributed ?? { unavailable: "没有配置能力面，产品分发层没有来源" },
       });
@@ -1965,10 +2255,10 @@ async function handle(
   /*
    * GET /environments —— **现场**探一遍运行环境（RY-001 §07 任务 52）。
    *
-   * 与 /python-runtime 的状态不同：那个说的是「我们记得装过没有」（一份回执），
-   * 这个说的是「此刻这台机器上到底有没有、是哪个版本」。两者可以不一致 —— 回执
-   * 没了、目录被杀毒清了、或者用户自己装了个更新的。owner 2026-09-19：「我不能
-   * 确认最终是不是成功还是失败」，缺的正是这一条。
+   * 运行环境随安装包走（TD-042 ②，2026-09-19 改判），所以「装没装」这个问题的答案
+   * 恒是「装了」——**这个接口问的不是那个**：它问「此刻这台机器上到底有没有、是哪个
+   * 版本」。两者可以不一致：目录被杀毒清了、或者用户自己装了个更新的（那一份也照实
+   * 报出来）。owner 2026-09-19：「我不能确认最终是不是成功还是失败」，缺的正是这一条。
    *
    * **纯粹是读**：不装任何东西、不改任何状态。
    */
@@ -1981,57 +2271,47 @@ async function handle(
     return;
   }
 
-  // --- Python 半边（ADR-018 §7.2；TD-042 ②）---------------------------------
-  //
-  // uv、CPython 与 wheel **不随安装包**（owner 2026-09-17 定性）。用户点一次，
-  // 这里把两步连起来：取 uv 的字节（获取通道），再用它在本机装出环境。
-  // **下载只在这一条路上发生** —— 启动、刷新、任务要工具时一律不下载。
-  if (segments[0] === "python-runtime") {
-    if (!deps.python) {
-      send(res, 503, apiError("PYTHON_RUNTIME_NOT_AVAILABLE", "当前版本暂不提供 Python 运行环境"));
-      return;
-    }
-    if (method === "GET" && segments.length === 1) {
-      send(res, 200, deps.python.status());
-      return;
-    }
-    if (method === "POST" && segments.length === 2 && segments[1] === "provision") {
-      const component = deps.python.status().component;
-      // **不等它装完**：装 CPython 加预热要几分钟，而这一次请求的答案只是「开始了」。
-      // 界面按 GET /python-runtime 看进度（与获取通道那条一样，事件来了就重新问）。
-      void deps.python.provision(
-        component && deps.components ? { acquire: () => deps.components!.acquire(component) } : {},
-      );
-      send(res, 200, deps.python.status());
-      return;
-    }
-    if (method === "POST" && segments.length === 2 && segments[1] === "cancel") {
-      send(res, 200, { cancelled: deps.python.cancel() });
-      return;
-    }
-    if (method === "DELETE" && segments.length === 1) {
-      send(res, 200, { removed: deps.python.remove() });
-      return;
-    }
-  }
-
   // GET /products - 受管资产视图：已装 + 启用态 + 订阅可用性（§18.5）
   if (method === "GET" && path === "/products") {
     send(res, 200, { items: deps.registry.list() });
     return;
   }
 
+  if(segments[0]==="products"&&segments.length===3&&["library-surface","library-token"].includes(segments[2]!)){
+    if(method!==(segments[2]==="library-token"?"POST":"GET")){send(res,405,apiError("INVALID_INPUT","Unsupported library operation"));return;}
+    const product=deps.registry.find(segments[1]!),workspaceId=await activeWorkspace(deps);if(!workspaceId||!product||deps.registry.list().find(p=>p.id===product.id)?.availability!=="available"){send(res,404,apiError("NOT_FOUND","Product library unavailable"));return;}
+    if(!deps.library){send(res,503,apiError("LIBRARY_UNAVAILABLE","Library is unavailable"));return;}
+    if(method==="POST"&&segments[2]==="library-token"){send(res,200,libraryTokens.mint(deps.library.scope(workspaceId,product.id)));return;}
+    const sha=product.contract.product.ui?.sha256,origin=deps.productUi&&productOrigin(product.id,deps.productUi.port),available=!!(sha&&deps.productUi&&hasUiBundle(deps.productUi.root,product.id,sha)&&existsSync(resolvePath(deps.productUi.root,product.id,"ui",sha,"library.html")));send(res,200,{productId:product.id,available,...(available?{entry:`${origin}/${sha}/library.html`}:{reason:"not_declared"})});return;
+  }
+
   // POST /products/install - 安装 .ruyinpkg（请求体为包字节；管线见 installer.ts）
-  if (method === "POST" && path === "/products/install") {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) chunks.push(chunk as Buffer);
+  if (method === "POST" && (path === "/products/install" || path === "/products/preflight")) {
     try {
-      const result = installPackage(Buffer.concat(chunks), {
-        storeDir: deps.registry.storeDir,
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+        size += (chunk as Buffer).length;
+        if (size > 256 * 1024 * 1024) {
+          res.setHeader("Connection", "close");
+          send(res, 413, apiError("PACKAGE_REJECTED", "Package exceeds the 256 MiB upload limit"));
+          return;
+        }
+        chunks.push(chunk as Buffer);
+      }
+      const bytes = Buffer.concat(chunks, size);
+      const policy = {
         runtimeVersion: deps.version,
-        // 无 Registry 根证书前，生产口径由宿主注入；缺省要求签名（安全默认）。
         requireSignature: deps.requireSignedPackages !== false,
-      });
+        ...(deps.packageTrust ? { trust: deps.packageTrust } : {}),
+      };
+      if (path === "/products/preflight") {
+        const result = preflightPackage(bytes, policy);
+        const { name, publisher, runtime } = result.contract.product;
+        send(res, 200, { productId: result.productId, version: result.version, name, publisher, runtimeMinimum: runtime?.minimum, signed: result.signed });
+        return;
+      }
+      const result = installPackage(bytes, { ...policy, storeDir: deps.registry.storeDir });
       deps.registry.rescan();
       await upgradeProjects(deps, result.productId);
       send(res, 201, {
@@ -2129,6 +2409,19 @@ async function handle(
     segments.length === 3 &&
     (segments[2] === "activate" || segments[2] === "deactivate")
   ) {
+    if(segments[2]==="deactivate"&&deps.registry.find(segments[1]!)){
+      if(startupBlocks(deps,res))return;
+      const terminal=new Set(["completed","failed","cancelled","rejected"]);
+      const projects=(await deps.runtime.listProjects()).filter(p=>p.productId===segments[1]);
+      for(const project of projects){
+        const tasks=await deps.runtime.listTaskInstances(project.id);
+        const working=tasks.some(task=>!terminal.has(task.state))||
+          deps.jobs?.list(project.id,project.productId).some(job=>job.state==="running"||job.state==="cancelling")||
+          deps.readings?.list(project.id,project.productId).some(job=>job.state==="queued"||job.state==="running")||
+          deps.renders?.list(project.id,project.productId).some(job=>job.state==="queued"||job.state==="running");
+        if(working){send(res,409,apiError("PRODUCT_BUSY","Finish or cancel this agent's unfinished work before disabling it",{retryable:true}));return;}
+      }
+    }
     try {
       deps.registry.setActive(segments[1]!, segments[2] === "activate");
     } catch (cause) {
@@ -2266,6 +2559,11 @@ async function handle(
     ) {
       send(res, 409, apiError("PROJECT_ARCHIVED", "项目已归档，只读；恢复之后才能改"));
       return;
+    }
+
+    if(segments[2]==="library"||segments[2]==="library-selection"){
+      const lib=deps.library;if(!lib||!active||!projectMeta||owner!==active){send(res,404,apiError("NOT_FOUND","Project library unavailable"));return;}const area=lib.scope(active,projectMeta.productId);
+      try{if(method==="GET"&&segments[2]==="library")send(res,200,{items:lib.list(area)});else if(method==="GET")send(res,200,lib.selections(projectId,projectMeta.productId));else if(method==="POST")send(res,200,await lib.pin(deps.runtime,area,projectId,await readJson(req)));else if(method==="DELETE"&&segments[3])send(res,200,lib.unpin(area,projectId,segments[3],Number((await readJson(req))["revision"])));else send(res,405,apiError("INVALID_INPUT","Unsupported operation"));}catch(cause){send(res,409,apiError("SELECTION_REJECTED",cause instanceof Error?cause.message:"Selection failed"));}return;
     }
 
     // POST /projects/:id/archive | /restore —— 项目的归档与恢复（契约 project.operations）。
@@ -2422,6 +2720,7 @@ async function handle(
         product: view.contract.product,
         tasks: view.contract.tasks.map((t) => ({
           id: t.id,
+          ...(t.name ? {name: t.name} : {}),
           objective: t.objective,
           input_types: t.input_types,
           // 本宿主跑不了的工具。列出来，是为了让「启动不了」在点击之前就看得
@@ -2751,6 +3050,18 @@ async function handle(
       }
       send(res, 200, withRunState(found, deps));
       return;
+    }
+
+    // Host-only exact-request batch source authorization. No bridge equivalent.
+    if (segments[2] === "jobs" && deps.jobs) {
+      const view=await deps.runtime.openProject(projectId);
+      if(method==="GET"&&segments.length===3){
+        send(res,200,{items:await deps.jobs.summaries(projectId,view.meta.productId)});return;
+      }
+      if(method==="POST"&&segments.length===5&&segments[4]==="context-approval"){
+        try {const body=await readJson(req);await deps.jobs.approveContext(projectId,view.meta.productId,segments[3]!,body["requestHash"]);send(res,200,{approved:true});}
+        catch(e){send(res,409,apiError("JOB_REJECTED",e instanceof Error?e.message:"Approval rejected"));}return;
+      }
     }
 
     // POST /projects/:id/tasks  { task, inputs? }  (inputs absent => selection)

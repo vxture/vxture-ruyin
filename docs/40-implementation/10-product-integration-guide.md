@@ -178,9 +178,7 @@ CI 在 `packaged-smoke` 里盯着它：pack 刚跑过 pull-tools，随后一句 
 | 服务器（连接器 id） | 档位 | 工具数 | 工具名（契约里照这个写） |
 |---|---|---|---|
 | `microsoft.playwright-mcp` | default | 24 | `browser_click`、`browser_close`、`browser_console_messages`、`browser_drag`、`browser_drop`、`browser_evaluate` ⚠️、`browser_file_upload`、`browser_fill_form`、`browser_find`、`browser_handle_dialog`、`browser_hover`、`browser_navigate`、`browser_navigate_back`、`browser_network_request`、`browser_network_requests`、`browser_press_key`、`browser_resize`、`browser_run_code_unsafe` ⚠️、`browser_select_option`、`browser_snapshot`、`browser_tabs`、`browser_take_screenshot`、`browser_type`、`browser_wait_for` |
-| `haris-musa.excel-mcp-server` | acquire-on-demand | — | _未探到：本次构建没有 vendored 它（runtime = uvx）_ |
-| `vivekvells.mcp-pandoc` | acquire-on-demand | — | _未探到：本次构建没有 vendored 它（runtime = uvx）_ |
-| `ihor-sokoliuk.mcp-searxng` | default | 4 | `searxng_instance_info`、`searxng_search_suggestions`、`searxng_web_search`、`web_url_read` |
+| `haris-musa.excel-mcp-server` | default | — | _未探到：本次构建没有 vendored 它（runtime = uvx）_ |
 | `aas-ee.open-websearch` | default | 6 | `fetchCsdnArticle`、`fetchGithubReadme`、`fetchJuejinArticle`、`fetchLinuxDoArticle`、`fetchWebContent`、`search` |
 | `negokaz.excel-mcp-server` | default | 7 | `excel_copy_sheet`、`excel_create_table`、`excel_describe_sheets`、`excel_format_range`、`excel_read_sheet`、`excel_screen_capture`、`excel_write_to_sheet` |
 <!-- BUNDLED-TOOLS:END -->
@@ -189,11 +187,16 @@ CI 在 `packaged-smoke` 里盯着它：pack 刚跑过 pull-tools，随后一句 
 **任务跑到一半不会自己去下载** —— 契约要的工具落在未获取的载荷后面时，`startTask` 在开跑
 前按名拒绝，与缺技能、缺工具走同一条路（ADR-018 §7.2）。
 
-**平台侧前提（2026-09-05 读平台代码核实）**：平台 token-exchange 的 `resolveOboContext` 只接受
-`aud` 等于 caller 自己 client id 的 subject_token；Ruyin 登录得到的用户 token `aud='ruyin'`，
-产品云端拿它去换票会被 `400 invalid_request` 拒掉。这是「桌面客户端 + 产品云端」形态第一次
-撞上单受众纪律，解法（Ruyin 按产品申请受众 RFC 8707 `resource`，或平台侧受托登记）与 bid
-的登记一起提在 vxture-platform/vxture-platform#198。**不定，任何产品的云端能力面在生产上都通不了。**
+**桌面会话与产品云端换票的边界（2026-11-16 核对两仓代码）**：Ruyin 在系统浏览器发起
+console 的原生登录，由 accounts 完成用户认证。Console 保管 OIDC 令牌；桌面守护进程通过
+`/auth/native/claim` 领取不透明的 `rpsid`，用 `X-Vxture-Session` 调 console 的身份与权益接口。
+产品 UI 和产品云端都不能拿这份桌面会话去换票。接入产品时，订阅、配额和工作区上下文仍由
+console 提供；账号资料、安全和注销恢复由 accounts 管理。
+
+**历史背景**：2026-09-05 的平台核对针对旧的直连 OIDC 路径。平台 token-exchange 要求
+subject token 的 `aud` 与调用方 client ID 一致，产品云端用 `aud='ruyin'` 的用户令牌换票
+会得到 `400 invalid_request`。相关接入讨论见 vxture-platform/vxture-platform#198；该流程
+不能作为当前桌面会话的接入方式。
 
 **第一个消费者。** Runos 至今按「baseline-only until first consumer」运行（Runos
 ADR-014）。owner 2026-09-05 定：**bid 产品的云端能力面是 Runos 的第一个消费者**。

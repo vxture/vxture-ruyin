@@ -4,6 +4,7 @@
  */
 
 import { strict as assert } from "node:assert";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,10 +14,12 @@ import {
   compareVersions,
   installPackage,
   listStored,
+  preflightPackage,
   uninstallVersion,
 } from "./installer.js";
-import { CHECKSUMS_ENTRY, MANIFEST_ENTRY, sha256 } from "./pkg.js";
+import { CHECKSUMS_ENTRY, MANIFEST_ENTRY, SIGNATURE_ENTRY, sha256 } from "./pkg.js";
 import { makeTestZip } from "./pkg-testkit.js";
+import { countersignaturePayload } from "./package-signature.js";
 
 function contractYaml(version = "1.0.0", minimum = "0.1.0"): string {
   return `contract: "0.1"
@@ -118,6 +121,55 @@ void test("compareVersions 按数值段比较，缺位补 0", () => {
   assert.ok(compareVersions("1.0.0", "1.0.1") < 0);
   assert.ok(compareVersions("1.2", "1.2.0") === 0);
   assert.ok(compareVersions("2.0.0", "1.9.9") > 0);
+});
+
+void test("preflight identifies a development package without installing it", () => {
+  const report = preflightPackage(pkg(contractYaml()), DEV);
+  assert.equal(report.productId, "test.pkg");
+  assert.equal(report.version, "1.0.0");
+  assert.equal(report.signed, false);
+  assert.equal("dir" in report, false);
+  assert.throws(() => preflightPackage(pkg(contractYaml("1.0.0", "9.9.9")), DEV), {
+    code: "RUNTIME_INCOMPATIBLE",
+  });
+});
+
+void test("an unverifiable signature cannot use the unsigned development exception", () => {
+  const manifest = Buffer.from(contractYaml());
+  const signed = makeTestZip([
+    { name: MANIFEST_ENTRY, data: manifest },
+    { name: CHECKSUMS_ENTRY, data: Buffer.from(`${sha256(manifest)}  ${MANIFEST_ENTRY}\n`) },
+    { name: SIGNATURE_ENTRY, data: Buffer.from("unverifiable") },
+  ]);
+  assert.throws(() => preflightPackage(signed, DEV), { code: "SIGNATURE_UNVERIFIED" });
+});
+
+void test("production installation requires both trusted signatures and the manifest publisher", () => {
+  const author = generateKeyPairSync("ed25519");
+  const registry = generateKeyPairSync("ed25519");
+  const other = generateKeyPairSync("ed25519");
+  const trust = { registryKey: registry.publicKey, publisherKeys: new Map([["vxture", author.publicKey], ["other", author.publicKey]]) };
+  function signedPkg(publisher: string, authorKey = author.privateKey, registryKey = registry.privateKey) {
+    const manifest = Buffer.from(contractYaml());
+    const checksums = Buffer.from(`${sha256(manifest)}  ${MANIFEST_ENTRY}\n`);
+    const publisherSignature = sign(null, checksums, authorKey).toString("base64");
+    const registrySignature = sign(null, countersignaturePayload(publisher, checksums, publisherSignature), registryKey).toString("base64");
+    return makeTestZip([
+      { name: MANIFEST_ENTRY, data: manifest },
+      { name: CHECKSUMS_ENTRY, data: checksums },
+      { name: SIGNATURE_ENTRY, data: Buffer.from(JSON.stringify({ version: 1, publisher, publisherSignature, registrySignature })) },
+    ]);
+  }
+  const opts = { ...DEV, requireSignature: true, trust };
+  for (const buf of [signedPkg("other"), signedPkg("vxture", other.privateKey), signedPkg("vxture", author.privateKey, other.privateKey)]) {
+    assert.throws(() => preflightPackage(buf, opts), { code: "SIGNATURE_UNVERIFIED" });
+  }
+  const storeDir = store();
+  try {
+    assert.equal(installPackage(signedPkg("vxture"), { ...opts, storeDir }).signed, true);
+  } finally {
+    rmSync(storeDir, { recursive: true, force: true });
+  }
 });
 
 void test("安装：验证通过后版本化落盘，可枚举", () => {
@@ -269,4 +321,38 @@ void test("包内资源随安装落盘（保持目录结构）", () => {
   } finally {
     rmSync(storeDir, { recursive: true, force: true });
   }
+});
+
+void test("agent package admission rejects native payloads and host install scripts before any writes",()=>{
+ const storeDir=store();try{
+  const pe=Buffer.alloc(80);pe.write('MZ');pe.writeUInt32LE(64,60);pe.write('PE\0\0',64);
+  for(const [name,bytes]of [['resources/worker.EXE',Buffer.from('binary')],['resources/_module.pyd',Buffer.from('binary')],['install.ps1',Buffer.from('script')],['resources/plugin.node',Buffer.from('binary')],['resources/image.png',pe],['resources/hidden.txt',Buffer.from([0x7f,0x45,0x4c,0x46])],['resources/tool.dll ',Buffer.from('binary')],['resources/asset.txt:worker.exe',Buffer.from('binary')]] as const){
+   const bytesPkg=pkg(contractYaml(),[[name,bytes]]),code=name.endsWith(' ')?'INTEGRITY_FAILED':'INVALID_AGENT_PAYLOAD';assert.throws(()=>preflightPackage(bytesPkg,DEV),{code});assert.throws(()=>installPackage(bytesPkg,{...DEV,storeDir}),{code});assert.deepEqual(readdirSync(storeDir),[]);
+  }
+ }finally{rmSync(storeDir,{recursive:true,force:true});}
+});
+
+void test("embedded agent UI rejects native payloads while browser scripts and templates remain valid",()=>{
+ const makeUi=(entries:Array<[string,Buffer]>)=>makeTestZip([{name:'index.html',data:Buffer.from('<main>Agent</main>')},...entries.map(([name,data])=>({name,data}))]);
+ for(const blocked of [true,false]){
+  const ui=makeUi(blocked?[['assets/helper.dll',Buffer.from('native')]]:[['app.js',Buffer.from('document.title="Agent";')],['styles.css',Buffer.from('main{}')]]);
+  const yaml=contractYaml().replace('contract: "0.1"','contract: "0.2"').replace('  publisher: vxture','  ui:\n    sha256: '+sha256(ui)+'\n  publisher: vxture');
+  const bytes=pkg(yaml,[['ui.zip',ui],['resources/template.docx',Buffer.from('template data')],['resources/guide.md',Buffer.from('# Guide')]]);
+  if(blocked)assert.throws(()=>preflightPackage(bytes,DEV),{code:'INVALID_UI_BUNDLE'});else assert.equal(preflightPackage(bytes,DEV).productId,'test.pkg');
+ }
+});
+
+void test("embedded UI is activated offline and malformed UI fails before registration", () => {
+  const storeDir = store();
+  const ui = makeTestZip([{ name: "index.html", data: Buffer.from("<h1>offline</h1>") }]);
+  const yaml = contractYaml().replace('contract: "0.1"', 'contract: "0.2"').replace("  publisher: vxture", "  ui:\n    sha256: " + sha256(ui) + "\n  publisher: vxture");
+  try {
+    const bad = Buffer.from("tampered");
+    assert.throws(() => preflightPackage(pkg(yaml, [["ui.zip", bad]]), DEV), { code: "INVALID_UI_BUNDLE" });
+    assert.throws(() => installPackage(pkg(yaml, [["ui.zip", bad]]), { ...DEV, storeDir }), { code: "INVALID_UI_BUNDLE" });
+    assert.deepEqual(listStored(storeDir), []);
+    installPackage(pkg(yaml, [["ui.zip", ui]]), { ...DEV, storeDir });
+    assert.ok(existsSync(join(storeDir, "test.pkg", "ui", sha256(ui), "index.html")));
+    assert.equal(listStored(storeDir).length, 1);
+  } finally { rmSync(storeDir, { recursive: true, force: true }); }
 });

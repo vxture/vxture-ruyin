@@ -19,7 +19,7 @@ import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@vxture/design-system";
 import { LocaleProvider } from "./locale-provider";
 import { useEffect, useState } from "react";
-import { SettingsView, type SectionId } from "./settings";
+import { SettingsView, LocalToolRow, type SectionId } from "./settings";
 import { resolveSection } from "./settings-sections";
 import { useUpdateCheck, type UpdateCheckState } from "./update-check";
 import { Api, type SystemInfo, type HardwareInfo, type UpdateCheck, ApiError } from "./api";
@@ -42,6 +42,9 @@ function systemInfo(over: Partial<SystemInfo> = {}): SystemInfo {
 
 function fakeApi(over: Partial<Api> = {}): Api {
   return {
+    windowClose:vi.fn().mockResolvedValue({action:"background"}),
+    maintenance:vi.fn().mockResolvedValue({operation:null}),
+    setWindowClose:vi.fn().mockImplementation(async(action)=>({action})),
     /* 切语言时写给壳的那一条。不 stub 的话每条切语言的用例都会撞未定义。 */
     setLanguage: vi.fn().mockResolvedValue({ language: "zh-CN" }),
     testConnector: vi.fn().mockResolvedValue({ ok: true, tools: [] }),
@@ -56,9 +59,6 @@ function fakeApi(over: Partial<Api> = {}): Api {
     // 缺省当作「守护进程没接这一路」（真实的常见状态：老版本守护进程、或装配
     // 没配）—— 与 server.ts 那一路没配 hardwareInfo 时如实回的 503 一致。
     hardware: vi.fn().mockRejectedValue(new ApiError(503, { error: "HARDWARE_INFO_NOT_CONFIGURED" })),
-    // Python 半边（TD-042 ②）：缺省当作「这一版不带」—— 绝大多数用例不关心它，
-    // 而不 stub 的话每条能力平台的用例都会撞未定义。
-    pythonRuntime: vi.fn().mockRejectedValue(new ApiError(503, { error: "PYTHON_RUNTIME_NOT_AVAILABLE" })),
     // 更新渠道（任务 49）：缺省当作「这套装配不管渠道」—— 那一行整行不显示，
     // 于是偏好设置那几条只数四行的用例照旧成立。
     updateChannel: vi.fn().mockRejectedValue(new ApiError(503, { error: "UPDATE_CHANNEL_NOT_CONFIGURED" })),
@@ -111,6 +111,25 @@ function renderSection(section: SectionId, api: Api = fakeApi()) {
     </ThemeProvider>,
   );
 }
+
+test("General close-window preference loads from the host, persists changes and keeps the old selection on save failure",async()=>{
+ const api=fakeApi(),view=renderSection("general",api);
+ const select=await screen.findByRole("combobox",{name:"关闭窗口"});
+ await vi.waitFor(()=>expect(select).toBeEnabled());expect(select).toHaveValue("background");
+ await userEvent.selectOptions(select,"exit");await vi.waitFor(()=>expect(select).toHaveValue("exit"));
+ expect(api.setWindowClose).toHaveBeenCalledWith("exit");
+ vi.mocked(api.setWindowClose).mockRejectedValueOnce(Error("disk full"));await userEvent.selectOptions(select,"background");
+ await screen.findByText("未能保存，仍使用原设置。");expect(select).toHaveValue("exit");view.unmount();
+});
+
+test("General close-window read failure is retryable and late unmounted reads are ignored",async()=>{
+ const api=fakeApi({windowClose:vi.fn().mockRejectedValueOnce(Error("offline")).mockResolvedValue({action:"exit"})});
+ const view=renderSection("general",api);await screen.findByText("暂时无法读取窗口设置。");
+ expect(screen.getByRole("combobox",{name:"关闭窗口"})).toBeDisabled();
+ await userEvent.click(screen.getByRole("button",{name:"重试"}));await vi.waitFor(()=>expect(screen.getByRole("combobox",{name:"关闭窗口"})).toHaveValue("exit"));view.unmount();
+ let release!:(value:{action:"exit"})=>void;const late=fakeApi({windowClose:vi.fn().mockReturnValue(new Promise(resolve=>{release=resolve;}))});
+ const pending=renderSection("general",late);await vi.waitFor(()=>expect(late.windowClose).toHaveBeenCalled());pending.unmount();release({action:"exit"});await Promise.resolve();
+});
 
 /**
  * 跟着**地址**挂载。「添加连接器」是它自己的一页（owner 2026-09-04 第 5 条），
@@ -644,6 +663,64 @@ const crmView = {
   tools: ["lookup_account", "update_account"],
 };
 
+test("连接器：已连接和未启用的 MCP 来源统一列出，同一来源不重复，获取仍走校验接口",async()=>{
+  const payload={id:"browser",state:"not-acquired" as const,downloadBytes:4,diskBytes:8,license:"MIT",origin:"vendor.test"};
+  const tools=[
+    {id:"crm",kind:"mcp-server" as const,source:"crm",status:"needs-acquisition" as const,launchable:true,component:payload},
+    {id:"registered-provider",kind:"mcp-server" as const,source:"vendor",status:"registered" as const,launchable:true},
+  ];
+  const api=fakeApi({connectors:vi.fn().mockResolvedValue({items:[{...crmView,source:"bundled",state:"stashed",tools:[]}]}),
+    tools:vi.fn().mockResolvedValue({items:tools}),acquireComponent:vi.fn().mockResolvedValue({})});
+  renderSection("connectors",api);
+  await screen.findByText("registered-provider",{selector:"summary code"});
+  expect(document.querySelectorAll(".connector-card")).toHaveLength(2);
+  const crm=document.querySelector(".connector-card") as HTMLElement;
+  expect(within(crm).queryByRole("button",{name:"启用"})).toBeNull();
+  await userEvent.click(within(crm).getByRole("button",{name:"展开"}));
+  await userEvent.click(within(crm).getByRole("button",{name:"获取"}));
+  expect(api.acquireComponent).toHaveBeenCalledWith("browser",undefined);
+  expect(api.activateConnector).not.toHaveBeenCalled();
+});
+
+test("连接器：只有登记来源时不显示空清单，启动调用现有连接器路由",async()=>{
+  const api=fakeApi({connectors:vi.fn().mockResolvedValue({items:[]}),
+    tools:vi.fn().mockResolvedValue({items:[{id:"new-provider",kind:"mcp-server",source:"vendor",status:"registered",launchable:true}]})});
+  renderSection("connectors",api);
+  const summary=await screen.findByText("new-provider",{selector:"summary code"});
+  expect(screen.queryByText("还没有连接器。")).toBeNull();
+  fireEvent.click(summary.closest("summary")!);
+  await userEvent.click(screen.getByRole("button",{name:"启动"}));
+  expect(api.activateConnector).toHaveBeenCalledWith("new-provider");
+});
+
+test("连接器：云端目录只含连接器，展开只展示元数据，刷新失败保留目录",async()=>{
+  const page={items:[{capabilityId:"vendor.search",primitiveType:"connector",title:"Search connector",displayName:{"zh-CN":"搜索连接器"},tags:[],local:{runnable:false},summary:"Search remote sources"}],total:1,source:{kind:"platform",state:"synced"}};
+  const api=fakeApi({connectors:vi.fn().mockResolvedValue({items:[]}),tools:vi.fn().mockResolvedValue({items:[]}),
+    capabilityCatalog:vi.fn().mockResolvedValue(page),refreshCapabilityCatalog:vi.fn().mockRejectedValue(Error("offline"))});
+  renderSection("connectors",api);
+  const block=(await screen.findByText("云端连接器")).closest("section")!;
+  await userEvent.click(within(block).getByRole("button",{expanded:false,name:/云端连接器/}));
+  expect(await within(block).findByText("搜索连接器")).toBeInTheDocument();
+  expect(api.capabilityCatalog).toHaveBeenCalledWith({limit:1000,type:"connector"});
+  expect(within(block).queryByRole("button",{name:"安装"})).toBeNull();
+  await userEvent.click(within(block).getByRole("button",{name:"刷新"}));
+  expect(await within(block).findByText("云端目录暂不可用，仍可查看本机能力。")).toBeInTheDocument();
+  expect(within(block).getByText("搜索连接器")).toBeInTheDocument();
+});
+
+test("连接器：成功刷新新目录并提示缓存陈旧，非连接器记录不出现",async()=>{
+  const catalog={items:[{capabilityId:"vendor.search",primitiveType:"connector",title:"Search connector",tags:[],local:{runnable:false}}],total:1,source:{kind:"platform",state:"stale"}};
+  const api=fakeApi({connectors:vi.fn().mockResolvedValue({items:[]}),tools:vi.fn().mockResolvedValue({items:[]}),
+    capabilityCatalog:vi.fn().mockResolvedValue(catalog),refreshCapabilityCatalog:vi.fn().mockResolvedValue({})});
+  renderSection("connectors",api);
+  const block=(await screen.findByText("云端连接器")).closest("section")!;
+  await userEvent.click(within(block).getByRole("button",{expanded:false,name:/云端连接器/}));
+  expect(await within(block).findByText("云端目录未能更新，当前显示上次保存的记录。")).toBeInTheDocument();
+  await userEvent.click(within(block).getByRole("button",{name:"刷新"}));
+  await waitFor(()=>expect(api.capabilityCatalog).toHaveBeenCalledTimes(2));
+  expect(within(block).getByText("Search connector")).toBeInTheDocument();
+});
+
 void test("Settings/连接器: lists installed connectors with live health, and uninstall calls the api", async () => {
   const api = fakeApi({
     connectors: vi.fn().mockResolvedValue({
@@ -686,7 +763,7 @@ void test("Settings/连接器: 启用且有工具的卡默认展开，点箭头�
   // 点卡片标题行（连接器 id 所在那一行）也能收起，不必精确点中箭头。
   await userEvent.click(screen.getByText("crm"));
   expect(screen.queryByText("工具清单")).not.toBeInTheDocument();
-  const reopened = screen.getByRole("button", { name: "展开" });
+  const reopened = within(document.querySelector(".connector-card") as HTMLElement).getByRole("button", { name: "展开" });
   expect(reopened).toHaveAttribute("aria-expanded", "false");
 
   await userEvent.click(reopened);
@@ -712,7 +789,7 @@ void test("Settings/连接器: 暂存的卡（即便带着工具名）默认收�
   await screen.findByText("stashed-with-tools");
   expect(screen.queryByText("工具清单")).not.toBeInTheDocument();
   expect(screen.queryByText("leftover_tool")).not.toBeInTheDocument();
-  for (const toggle of screen.getAllByRole("button", { name: "展开" })) {
+  for (const toggle of within(document.querySelector(".connector-list") as HTMLElement).getAllByRole("button", { name: "展开" })) {
     expect(toggle).toBeDisabled();
   }
 });
@@ -1006,11 +1083,11 @@ void test("Settings/账户: signed in shows the identity - name, email, tenant, 
   // 「租户管理 → 平台」，两处都能切是同一件事写了两遍。
   expect(within(tenantRow).queryByRole("button")).not.toBeInTheDocument();
   // 「账户中心」那一行链接去掉了（owner 2026-09-04）：右上角的「在线修改」已经是同一个去处。
-  expect(screen.queryByRole("link", { name: "https://console.vxture.com/profile" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "https://accounts.vxture.com/account?vx_locale=zh-CN" })).not.toBeInTheDocument();
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "在线修改" }));
-  expect(open).toHaveBeenCalledWith("https://console.vxture.com/profile", "_blank", "noopener");
+  expect(open).toHaveBeenCalledWith("https://accounts.vxture.com/account?vx_locale=zh-CN", "_blank", "noopener");
   open.mockRestore();
   expect(screen.queryByText("请先登录")).not.toBeInTheDocument();
 });
@@ -1027,7 +1104,7 @@ void test("Settings/账户: 「在线修改」跟着 consoleAppBase 走，不是
       profile: { sub: "u1", name: "郭彦豪" },
       issuer: "",
       consoleBase: "https://vxture.com",
-      consoleAppBase: "https://console.staging.vxture.com",
+      accountsBase: "https://accounts.staging.vxture.com",
       entitlementsConfigured: false,
     }),
   });
@@ -1036,7 +1113,7 @@ void test("Settings/账户: 「在线修改」跟着 consoleAppBase 走，不是
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "在线修改" }));
-  expect(open).toHaveBeenCalledWith("https://console.staging.vxture.com/profile", "_blank", "noopener");
+  expect(open).toHaveBeenCalledWith("https://accounts.staging.vxture.com/account?vx_locale=zh-CN", "_blank", "noopener");
   open.mockRestore();
 });
 
@@ -1212,7 +1289,7 @@ void test("Settings/账户: every claim the platform gave is shown - username, p
   expect(document.body.textContent).not.toContain("8f14e45f");
 });
 
-void test("Settings/通用设置: four blocks - storage, encryption, inference policy, audit - and the data dir is read-only with the reason", async () => {
+void test("Settings/通用设置: window, storage, encryption, inference policy and audit; the data dir is read-only with the reason", async () => {
   const api = fakeApi({
     system: vi.fn().mockResolvedValue(systemInfo({ dataDir: "C:/data", productsDir: "D:/products" })),
   });
@@ -1221,7 +1298,7 @@ void test("Settings/通用设置: four blocks - storage, encryption, inference p
   // 推理与审计拆成两块（owner 第 9 条）：可选的与不可选的不该同一块。
   // 「静态加密」改叫「数据加密」（owner 2026-09-04 第 2 条）：用户找的是自己的
   // 数据安不安全，不是一个密码学状态词。
-  expect(titles).toEqual(["存储位置", "数据加密", "推理策略", "安全审计"]);
+  expect(titles).toEqual(["窗口", "存储位置", "备份与恢复", "诊断", "数据加密", "推理策略", "安全审计"]);
   expect(await screen.findByText("C:/data")).toBeInTheDocument();
   // 目录可以改，但**页面上只有一个按钮**（owner 2026-09-05）：一次性操作不占
   // 常驻位置，表单在弹层里。浏览器里连按钮都没有（系统目录框只有壳弹得出来），
@@ -1756,11 +1833,22 @@ function skillsApi(over: Partial<Api> = {}): Api {
  * 再写 `rows[1]` 就只是在断言分类算法 —— 而这些用例问的从来是「有没有这一条、
  * 它说了什么」。
  */
+function LocalToolsProbe({api}:{api:Api}){
+ const [rows,setRows]=useState<Awaited<ReturnType<Api["tools"]>>["items"]>([]);
+ const reload=async()=>{setRows((await api.tools()).items);};
+ useEffect(()=>{void reload();},[api]);
+ return <ul aria-label="工具 · 本机管理">{rows.map(tool=><LocalToolRow key={tool.id} api={api} tool={tool} onRefresh={reload}/>)}</ul>;
+}
+function renderToolManager(api:Api){return render(<LocalToolsProbe api={api}/>);}
+
 async function capabilityRows(kind: "技能" | "工具"): Promise<HTMLElement[]> {
   // 展开要放在 waitFor 里重试：清单是异步拉的，先点一次的话那时小类还不存在。
   // 展开是幂等的 —— 开过的小类 aria-expanded 变 true，不会再被点到。
   const lists = await waitFor(() => {
     for (const trigger of screen.queryAllByRole("button", { expanded: false })) fireEvent.click(trigger);
+    if(kind==="技能") for(const record of document.querySelectorAll<HTMLDetailsElement>(".capability-record")) {
+      if(!record.open) fireEvent.click(record.querySelector("summary")!);
+    }
     return screen.getAllByRole("list", { name: new RegExp(`^${kind} · `) });
   });
   return lists.flatMap((list) => within(list).getAllByRole("listitem"));
@@ -1780,23 +1868,24 @@ function rowWith(rows: HTMLElement[], text: string | RegExp): HTMLElement {
 }
 
 test("能力平台：技能按层列出，被覆盖 / 停用 / 含脚本各说各的，工具的状态如实", async () => {
-  renderSection("skills", skillsApi());
+  const component=renderSection("skills", skillsApi());
   const rows = await capabilityRows("技能");
   expect(rows).toHaveLength(3);
   // 预置层那条 officecli-docx 被用户层盖住：标「被覆盖」，不标「启用」。
   const shadowed = rowWith(rows, "iofficeai.officecli");
   expect(within(shadowed).getByText("被用户层覆盖")).toBeTruthy();
-  expect(within(shadowed).getByText("预置")).toBeTruthy();
+  expect(within(shadowed).getByText(/预置 · iofficeai/)).toBeTruthy();
   // 装而不启用：停用，且标出含脚本。
   const disabled = rowWith(rows, "sn-deep-research");
-  expect(within(disabled).getByText("停用")).toBeTruthy();
+  expect(within(disabled.closest("details")!).getByText("已停用")).toBeTruthy();
   expect(within(disabled).getByText("含脚本（本地不跑）")).toBeTruthy();
   expect(within(disabled).getByText(/装而不启用/)).toBeTruthy();
   // 用户层那条生效。
   const mine = rowWith(rows, /v1\.2\.0/);
-  expect(within(mine).getByText("启用")).toBeTruthy();
+  expect(within(mine.closest("details")!).getByText("可用")).toBeTruthy();
   expect(screen.getByText("预置 2 · 产品分发 0 · 用户 1")).toBeTruthy();
 
+  component.unmount();renderToolManager(skillsApi());
   const toolRows = await capabilityRows("工具");
   expect(toolRows).toHaveLength(6);
   expect(within(rowWith(toolRows, "crm")).getByText("工具：crm_lookup、crm_write")).toBeTruthy();
@@ -1807,33 +1896,26 @@ test("能力平台：技能按层列出，被覆盖 / 停用 / 含脚本各说�
   expect(within(rowWith(toolRows, "tavily")).getByText("经 Runos")).toBeTruthy();
 });
 
-test("能力平台：两个大类可以收起，收起之后条数还在（owner 2026-09-07）", async () => {
-  renderSection("skills", skillsApi());
-  // 展开态：行在。
-  expect(await capabilityRows("技能")).toHaveLength(3);
-  // 计数挂在标题上，收起之后它是唯一还看得见的量 —— 所以先确认它在。
-  const heads = screen.getAllByRole("heading", { level: 3 });
-  expect(heads.some((h) => (h.textContent ?? "").startsWith("本机技能") && h.textContent!.includes("3"))).toBe(true);
-
-  await userEvent.click(screen.getAllByRole("button", { name: "收起" })[0]!);
-  // 收起：这一类的小类清单整个不在了，但标题与条数还在。
-  expect(screen.queryAllByRole("list", { name: /^技能 · / })).toHaveLength(0);
-  expect(screen.getAllByRole("heading", { level: 3 }).some((h) => (h.textContent ?? "").startsWith("本机技能"))).toBe(true);
-
-  await userEvent.click(screen.getByRole("button", { name: "展开" }));
-  expect(await capabilityRows("技能")).toHaveLength(3);
+test("能力平台：三张清单合为能力库，运行环境默认收起，能力按条目展开", async () => {
+ renderSection("skills",skillsApi());
+ expect(await screen.findByRole("region",{name:"技能库"})).toBeInTheDocument();
+ expect(screen.queryByText("本机技能")).toBeNull();expect(screen.queryByText("云端能力清单")).toBeNull();expect(screen.queryByText("本机工具")).toBeNull();
+ expect(screen.queryByText("Node.js")).toBeNull();
+ expect(document.querySelector(".capability-record")?.hasAttribute("open")).toBe(false);
+ await screen.findByText("sn-deep-research",{selector:".capability-record-name"});
+ expect(document.querySelector(".capability-record")?.hasAttribute("open")).toBe(false);
 });
 
 test("能力平台：停用走 disable、启用走 enable（B-3 动词），键带 layer/source；刷新调 refresh 再重拉", async () => {
   const api = skillsApi();
   renderSection("skills", api);
   const rows = await capabilityRows("技能");
-  await userEvent.click(within(rowWith(rows, "sn-deep-research")).getByRole("button", { name: "启用" }));
+  await userEvent.click(within(rowWith(rows, "sn-deep-research").closest("details")!).getByRole("button", { name: "启用" }));
   expect(api.setSkillEnabled).toHaveBeenCalledWith(
     { name: "sn-deep-research", layer: "bundled", source: "opensensenova.sensenova-skills" },
     true,
   );
-  await userEvent.click(within(rowWith(rows, /v1\.2\.0/)).getByRole("button", { name: "停用" }));
+  await userEvent.click(within(rowWith(rows, /v1\.2\.0/).closest("details")!).getByRole("button", { name: "停用" }));
   expect(api.setSkillEnabled).toHaveBeenCalledWith({ name: "officecli-docx", layer: "user", source: "user" }, false);
 
   await userEvent.click(screen.getByRole("button", { name: "刷新" }));
@@ -1849,19 +1931,15 @@ async function pickFilter(triggerLabel: string, optionLabel: string): Promise<vo
   await user.click(await screen.findByRole("menuitem", { name: optionLabel }));
 }
 
-test("能力平台：按层筛选只看用户层；没有登记册时说清，不是空清单", async () => {
-  renderSection("skills", skillsApi());
-  expect(await capabilityRows("技能")).toHaveLength(3);
-  await pickFilter("按来源层筛选", "用户");
-  expect(await capabilityRows("技能")).toHaveLength(1);
-  await pickFilter("按来源层筛选", "产品分发");
-  expect(screen.getByText("这一层没有技能。")).toBeTruthy();
-
-  renderSection(
-    "skills",
-    skillsApi({ skills: vi.fn().mockRejectedValue(new ApiError(503, { message: "这套装配没有技能登记册" })) }),
-  );
-  expect(await screen.findByText("这套装配没有技能登记册")).toBeTruthy();
+test("能力平台：按安装来源筛选用户技能并保留覆盖；没有登记册仍显示工具", async () => {
+ const api=skillsApi();renderSection("skills",api);
+ await capabilityRows("技能");
+ await userEvent.selectOptions(screen.getByLabelText("安装来源"),"user");
+ fireEvent.change(screen.getByRole("textbox",{name:"搜索技能"}),{target:{value:"我的 docx"}});
+ expect(document.querySelectorAll(".capability-inventory-item")).toHaveLength(1);
+ expect(screen.getByText("我的 docx 规矩",{selector:".capability-record-description"})).toBeInTheDocument();
+ renderSection("skills",skillsApi({skills:vi.fn().mockRejectedValue(new ApiError(503,{message:"这套装配没有技能登记册"}))}));
+ expect(await screen.findByText("这套装配没有技能登记册")).toBeInTheDocument();
 });
 
 test("能力平台：拉不到（非 503）就说拉不到；开关与刷新失败的原因照原样转达；没有工具登记册也说清", async () => {
@@ -1872,8 +1950,8 @@ test("能力平台：拉不到（非 503）就说拉不到；开关与刷新失�
   });
   renderSection("skills", api);
   const rows = await capabilityRows("技能");
-  expect(await screen.findByText("这台电脑上还没有可用的工具。")).toBeTruthy();
-  await userEvent.click(within(rowWith(rows, "sn-deep-research")).getByRole("button", { name: "启用" }));
+  expect(await screen.findByText("本机工具暂不可用，请稍后刷新。")).toBeTruthy();
+  await userEvent.click(within(rowWith(rows, "sn-deep-research").closest("details")!).getByRole("button", { name: "启用" }));
   expect(await screen.findByText("state.json 写不进去")).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "刷新" }));
   expect(await screen.findByText("能力面 503")).toBeTruthy();
@@ -1882,10 +1960,10 @@ test("能力平台：拉不到（非 503）就说拉不到；开关与刷新失�
   expect(await screen.findByText("守护进程没响应")).toBeTruthy();
 });
 
-test("能力平台：还没拉到时两张清单都是省略号，不是「没有」", () => {
-  const pending = new Promise<never>(() => {});
-  renderSection("skills", skillsApi({ skills: vi.fn().mockReturnValue(pending), tools: vi.fn().mockReturnValue(pending) }));
-  expect(screen.getAllByText("…")).toHaveLength(2);
+test("能力平台：初次读取时展示加载状态，不声称没有能力", () => {
+ const pending=new Promise<never>(()=>{});
+ renderSection("skills",skillsApi({skills:vi.fn().mockReturnValue(pending),tools:vi.fn().mockReturnValue(pending)}));
+ expect(screen.getAllByText("正在读取能力…").length).toBeGreaterThan(0);expect(screen.queryByText("没有符合条件的能力。")).toBeNull();
 });
 
 test("能力平台：一条技能都没有时告诉用户预置层从哪来", async () => {
@@ -1896,7 +1974,8 @@ test("能力平台：一条技能都没有时告诉用户预置层从哪来", as
       tools: vi.fn().mockResolvedValue({ items: [] }),
     }),
   );
-  expect(await screen.findByText(/本机还没有任何技能/)).toBeTruthy();
+  expect(await screen.findByText("没有符合条件的能力。")).toBeTruthy();
+  fireEvent.click(screen.getByText("本机安装情况"));
   expect(screen.getByText("预置 0")).toBeTruthy();
 });
 
@@ -1927,7 +2006,7 @@ test("能力平台：预置的 MCP 服务器能启动 / 停止（走连接器的
     activateConnector: vi.fn().mockResolvedValue({}),
     deactivateConnector: vi.fn().mockResolvedValue({}),
   });
-  renderSection("skills", api);
+  renderToolManager(api);
   const rows = await capabilityRows("工具");
   await userEvent.click(within(rowWith(rows, "microsoft.playwright-mcp")).getByRole("button", { name: "启动" }));
   expect(api.activateConnector).toHaveBeenCalledWith("microsoft.playwright-mcp");
@@ -1975,7 +2054,7 @@ test("能力平台 / 连接器：启动与停用失败时，原因照原样转�
     }),
     activateConnector: vi.fn().mockRejectedValue(new Error('bundled tool server "microsoft.markitdown" cannot start: 需要本机有 uv')),
   });
-  renderSection("skills", api);
+  renderToolManager(api);
   const rows = await capabilityRows("工具");
   await userEvent.click(within(rows[0]!).getByRole("button", { name: "启动" }));
   expect(await screen.findByText(/cannot start: 需要本机有 uv/)).toBeTruthy();
@@ -2041,7 +2120,7 @@ function acquisitionApi(over: Record<string, unknown> = {}) {
 }
 
 test("能力平台：未获取的行有自己的徽标，体积 / 许可证 / 来源主机都在按钮左边", async () => {
-  renderSection("skills", acquisitionApi());
+  renderToolManager(acquisitionApi());
   const row = rowWith(await capabilityRows("工具"), "microsoft.playwright-mcp");
   expect(within(row).getByText("未获取")).toBeTruthy();
   // 点之前必须看得见要下多少、什么许可证、从哪个主机来。
@@ -2051,12 +2130,64 @@ test("能力平台：未获取的行有自己的徽标，体积 / 许可证 / �
   // 停着 / 还没获取的行也列工具名 —— 用户在下载之前就看得见会多出哪些工具。
   expect(within(row).getByText("工具：browser_navigate、browser_click")).toBeTruthy();
   // 顶上那句常驻事实数的是「能不能起」，不是清单上有几条。
-  expect(screen.getByText(/预置 1 个，随安装包而来、不下载任何字节；另有 1 个需要获取/)).toBeTruthy();
+  expect(within(row).getByRole("button",{name:"获取"})).toBeEnabled();
+});
+
+/* ── 有几项跑不起来、缺的是什么（owner 2026-09-19）────────────────────────
+ *
+ * 运行环境随安装包走之后，这两句话平时应当是空的。它们的用处正是**在不是空的
+ * 那天说出来** —— 而不是让用户一行行点开去数。所以用例造的是「不是空的那天」。
+ */
+test("能力平台：起不来的工具按原因分组说，认不得的码归「原因未明」", async () => {
+  renderToolManager(
+    skillsApi({
+      tools: vi.fn().mockResolvedValue({
+        items: [
+          { id: "a", kind: "mcp-server", source: "a", status: "unavailable", launchable: true, detailCode: "needs-env", detailVars: { names: "SEARXNG_URL" } },
+          { id: "b", kind: "mcp-server", source: "b", status: "unavailable", launchable: true, detailCode: "needs-env", detailVars: { names: "TAVILY_API_KEY" } },
+          { id: "c", kind: "mcp-server", source: "c", status: "unavailable", launchable: true, detailCode: "needs-python" },
+          // 守护进程给了一个界面不认得的码：**单列**，不混进「要先填配置」——
+          // 混进去就等于让用户照着一条做不到的指引去做。
+          { id: "d", kind: "mcp-server", source: "d", status: "unavailable", launchable: true, detailCode: "sun-spots" },
+          { id: "e", kind: "mcp-server", source: "e", status: "available", launchable: true },
+        ],
+      }),
+    }),
+  );
+  const rows=await capabilityRows("工具");
+  expect(within(rowWith(rows,"SEARXNG_URL")).getByText("需要先配置：SEARXNG_URL")).toBeInTheDocument();
+  expect(within(rowWith(rows,"TAVILY_API_KEY")).getByText("需要先配置：TAVILY_API_KEY")).toBeInTheDocument();
+  expect(screen.getByText("要先装 Python 运行环境")).toBeInTheDocument();
+  expect(screen.getByText("暂不可用，原因未明")).toBeInTheDocument();
+  expect(document.body.textContent).not.toContain("sun-spots");
+});
+
+test("能力平台：本机技能那一层说清有几条用不上、为什么", async () => {
+  renderSection("skills", skillsApi());
+  // 夹具里 3 条：1 条带脚本（TD-005 本机不跑）、1 条被用户层同名技能盖住。
+  expect(await screen.findByText(/其中 2 条用不上：1 条带脚本，脚本在本机不执行、1 条被更近一层的同名技能盖住/)).toBeTruthy();
+});
+
+test("能力平台：技能都能用时不说这半句 —— 没有问题就不要造一句话出来", async () => {
+  renderSection(
+    "skills",
+    skillsApi({
+      skills: vi.fn().mockResolvedValue({
+        scannedAt: "2026-09-19T00:00:00Z",
+        layers: [{ layer: "bundled", present: true, count: 1, dir: "C:/app/resources/skills" }],
+        items: [
+          { name: "ok", description: "好的", layer: "bundled", source: "s", enabled: true, hasScripts: false, dir: "C:/app/resources/skills/s/ok" },
+        ],
+      }),
+    }),
+  );
+  await screen.findByText("预置 1");
+  expect(screen.queryByText(/条用不上/)).toBeNull();
 });
 
 test("能力平台：点「获取」只带 id —— 地址不在界面手上", async () => {
   const api = acquisitionApi();
-  renderSection("skills", api);
+  renderToolManager(api);
   const rows = await capabilityRows("工具");
   await userEvent.click(within(rowWith(rows, "microsoft.playwright-mcp")).getByRole("button", { name: "获取" }));
   expect(api.acquireComponent).toHaveBeenCalledWith("browser.chromium-headless-shell", undefined);
@@ -2064,7 +2195,7 @@ test("能力平台：点「获取」只带 id —— 地址不在界面手上", 
 
 test("能力平台：「从本地文件导入」走系统目录框（气隙机器那条路）", async () => {
   const api = acquisitionApi();
-  renderSection("skills", api);
+  renderToolManager(api);
   const rows = await capabilityRows("工具");
   await userEvent.click(within(rowWith(rows, "microsoft.playwright-mcp")).getByRole("button", { name: "从本地文件导入" }));
   expect(api.pickFolder).toHaveBeenCalled();
@@ -2073,7 +2204,7 @@ test("能力平台：「从本地文件导入」走系统目录框（气隙机�
 
 test("能力平台：用户在目录框里取消，就什么都不做", async () => {
   const api = acquisitionApi({ pickFolder: vi.fn().mockResolvedValue({ cancelled: true }) });
-  renderSection("skills", api);
+  renderToolManager(api);
   const rows = await capabilityRows("工具");
   await userEvent.click(within(rowWith(rows, "microsoft.playwright-mcp")).getByRole("button", { name: "从本地文件导入" }));
   expect(api.acquireComponent).not.toHaveBeenCalled();
@@ -2094,7 +2225,7 @@ test("能力平台：获取中显示进度与「取消」，不显示「获取�
       ],
     }),
   });
-  renderSection("skills", api);
+  renderToolManager(api);
   const row = rowWith(await capabilityRows("工具"), "microsoft.playwright-mcp");
   expect(within(row).getByText("43.2 MB / 114.6 MB")).toBeTruthy();
   expect(within(row).queryByRole("button", { name: "获取" })).toBeNull();
@@ -2129,7 +2260,7 @@ test.each([
       ],
     }),
   });
-  renderSection("skills", api);
+  renderToolManager(api);
   const row = rowWith(await capabilityRows("工具"), "microsoft.playwright-mcp");
   expect(within(row).getByText(said)).toBeTruthy();
   // 原因照原样转达，不改写成「请稍后再试」。
@@ -2142,7 +2273,7 @@ test("能力平台：获取失败时把守护进程的原话摆出来", async ()
   const api = acquisitionApi({
     acquireComponent: vi.fn().mockRejectedValue(new Error("sha256 abc 与清单的 def 不符 —— 字节已丢弃")),
   });
-  renderSection("skills", api);
+  renderToolManager(api);
   const rows = await capabilityRows("工具");
   await userEvent.click(within(rowWith(rows, "microsoft.playwright-mcp")).getByRole("button", { name: "获取" }));
   expect(await screen.findByText(/字节已丢弃/)).toBeTruthy();
@@ -2163,7 +2294,7 @@ test("能力平台：探不到工具名时写一句原因，不写空数组", as
       ],
     }),
   });
-  renderSection("skills", api);
+  renderToolManager(api);
   const rows = await capabilityRows("工具");
   expect(within(rows[0]!).getByText(/工具名未探到：本次构建没有 vendored 它/)).toBeTruthy();
 });
@@ -2184,7 +2315,7 @@ test("能力平台：取消失败时也把原话摆出来（reload 之后再放�
       ],
     }),
   });
-  renderSection("skills", api);
+  renderToolManager(api);
   const rows = await capabilityRows("工具");
   await userEvent.click(within(rows[0]!).getByRole("button", { name: "取消" }));
   expect(await screen.findByText("已经落地了，取消不了")).toBeTruthy();
@@ -2206,6 +2337,7 @@ test("能力平台：顶上那句话末尾贴着调用路径的标签 —— 当
       }),
     } as Partial<Api>),
   );
+  await userEvent.click(screen.getByRole("button",{name:/运行环境/,expanded:false}));
   expect(await screen.findByText("只许本机")).toBeInTheDocument();
   // 名字出现的地方，说明必须一起出现
   expect(screen.getByText("Runos（兼容 Runos 协议的本地能力面）")).toBeInTheDocument();
@@ -2228,6 +2360,7 @@ test("能力平台：云端通路开放后不再显示「云端未开放」标�
       }),
     } as Partial<Api>),
   );
+  await userEvent.click(screen.getByRole("button",{name:/运行环境/,expanded:false}));
   expect(await screen.findByText("优先本机")).toBeInTheDocument();
   expect(screen.queryByText("云端未开放")).not.toBeInTheDocument();
 });
@@ -2287,181 +2420,94 @@ function catalogPage(over: Record<string, unknown> = {}) {
   };
 }
 
-async function catalogBlock(): Promise<HTMLElement> {
-  const title = await screen.findByText("云端能力清单");
-  return title.closest("section") as HTMLElement;
+async function inventoryBlock():Promise<HTMLElement>{
+ return screen.findByRole("region",{name:"技能库"});
 }
-
-test("Runos 清单：平台还没有目录端点时如实说没有 —— 刷新不可点、没有筛选，第一句就说它不是安装", async () => {
-  renderSection(
-    "skills",
-    skillsApi({
-      capabilityCatalog: vi.fn().mockResolvedValue({
-        items: [],
-        total: 0,
-        source: { kind: "platform", state: "unavailable", reason: "平台尚未提供能力目录（vxture-platform#339）" },
-      }),
-    } as Partial<Api>),
-  );
-  // 一句话说完，issue 号在里面；原因不再单独重复一行（RY-001 #23）。
-  expect(await screen.findByText("平台尚未提供能力目录（vxture-platform#339），暂时没有清单。")).toBeInTheDocument();
-  expect(screen.getAllByText(/平台尚未提供能力目录/)).toHaveLength(1);
-  expect(screen.getByText(/不会装到本机/)).toBeInTheDocument();
-  expect(within(await catalogBlock()).getByRole("button", { name: "刷新" })).toBeDisabled();
-  expect(screen.queryByRole("textbox", { name: "搜索 Runos 清单" })).not.toBeInTheDocument();
+test("能力库：云端未配置时本机仍可查看和刷新，不把目录失败当空",async()=>{
+ const api=skillsApi({capabilityCatalog:vi.fn().mockResolvedValue({items:[],total:0,source:{kind:"platform",state:"unavailable"}})});
+ renderSection("skills",api);
+ expect(await screen.findByText("云端目录暂不可用，仍可查看本机能力。")).toBeInTheDocument();
+ expect(await capabilityRows("技能")).toHaveLength(3);
+ expect(within(await inventoryBlock()).getByRole("button",{name:"刷新"})).toBeEnabled();
 });
-
-test("Runos 清单：没有数据源、守护进程也没给原因 —— 仍是一句完整的话", async () => {
-  renderSection(
-    "skills",
-    skillsApi({
-      capabilityCatalog: vi.fn().mockResolvedValue({ items: [], total: 0, source: { kind: "platform", state: "unavailable" } }),
-    } as Partial<Api>),
-  );
-  expect(await screen.findByText("平台尚未提供能力目录，暂时没有清单。")).toBeInTheDocument();
+test("能力库：没有云端错误详情也使用完整的提示",async()=>{
+ renderSection("skills",skillsApi({capabilityCatalog:vi.fn().mockRejectedValue(new Error())}));
+ expect(await screen.findByText("云端目录暂不可用，仍可查看本机能力。")).toBeInTheDocument();
+ expect(screen.queryByText("没有符合条件的能力。")).toBeNull();
 });
-
-test("Runos 清单：有数据源、还没取到过 —— 说还没有，并转达上次失败的原因", async () => {
-  renderSection(
-    "skills",
-    skillsApi({
-      capabilityCatalog: vi.fn().mockResolvedValue({
-        items: [],
-        total: 0,
-        source: { kind: "platform", state: "never", reason: "取到 2 条，平台说共 3 条" },
-      }),
-    } as Partial<Api>),
-  );
-  expect(await screen.findByText("还没有取到 Runos 清单。")).toBeInTheDocument();
-  expect(screen.getByText("取到 2 条，平台说共 3 条")).toBeInTheDocument();
-  expect(within(await catalogBlock()).getByRole("button", { name: "刷新" })).toBeEnabled();
+test("能力库：尚未同步目录时保留本机记录",async()=>{
+ renderSection("skills",skillsApi({capabilityCatalog:vi.fn().mockResolvedValue({items:[],total:0,source:{kind:"platform",state:"never"}})}));
+ expect(await screen.findByText("云端目录暂不可用，仍可查看本机能力。")).toBeInTheDocument();
+ expect(await capabilityRows("技能")).toHaveLength(3);
 });
-
-test("Runos 清单：旧的一份照样列，但说清是哪一刻的、为什么没更新", async () => {
-  renderSection(
-    "skills",
-    skillsApi({
-      capabilityCatalog: vi.fn().mockResolvedValue(
-        catalogPage({
-          source: { kind: "platform", state: "stale", fetchedAt: "2026-09-14T08:00:00Z", total: 3, reason: "HTTP 502" },
-        }),
-      ),
-    } as Partial<Api>),
-  );
-  expect(await screen.findByText(/^显示的是 .+ 时的清单，之后没能更新。$/)).toBeInTheDocument();
-  expect(screen.getByText("HTTP 502")).toBeInTheDocument();
-  expect(screen.queryByText(/本次新增/)).not.toBeInTheDocument();
+test("能力库：旧目录保持可查并明确提示未更新",async()=>{
+ renderSection("skills",skillsApi({capabilityCatalog:vi.fn().mockResolvedValue(catalogPage({source:{kind:"platform",state:"stale",fetchedAt:"2026-09-14T08:00:00Z",total:3}}))}));
+ expect(await screen.findByText("云端目录未能更新，当前显示上次保存的记录。")).toBeInTheDocument();
+ expect(screen.getByText(/^目录更新于/)).toBeInTheDocument();
 });
-
-test("Runos 清单：同步过的一份 —— 条数、时间、本次变化，每条标本机能不能跑（D4）", async () => {
-  renderSection("skills", skillsApi({ capabilityCatalog: vi.fn().mockResolvedValue(catalogPage()) } as Partial<Api>));
-  expect(await screen.findByText(/^共 3 项 · 更新于 /)).toBeInTheDocument();
-  expect(screen.getByText("本次新增 2 · 下线 0 · 变更 1")).toBeInTheDocument();
-  const rows = within(screen.getByRole("list", { name: "Runos 清单条目" })).getAllByRole("listitem");
-  expect(rows).toHaveLength(3);
-  // 中文显示名优先，没有才用 title
-  expect(within(rows[0]!).getByText("深度研究")).toBeInTheDocument();
-  expect(within(rows[0]!).getByText("本机可运行")).toBeInTheDocument();
-  expect(within(rows[0]!).getByText("research")).toBeInTheDocument();
-  expect(within(rows[1]!).getByText("API and Interface Design")).toBeInTheDocument();
-  expect(within(rows[1]!).getByText("本机无")).toBeInTheDocument();
-  expect(within(rows[2]!).getByText("markitdown.document-to-markdown")).toBeInTheDocument();
-  expect(within(rows[2]!).getByText("仅云端")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "再显示更多" })).not.toBeInTheDocument();
+test("能力库：同步后按准确ID去重，本机受限不会被云端本机标志覆盖",async()=>{
+ renderSection("skills",skillsApi({capabilityCatalog:vi.fn().mockResolvedValue(catalogPage())}));
+ await screen.findByText("4 项");
+ expect(document.querySelectorAll(".capability-inventory-item")).toHaveLength(4);
+ await userEvent.selectOptions(screen.getByLabelText("安装来源"),"bundled");
+ fireEvent.change(screen.getByRole("textbox",{name:"搜索技能"}),{target:{value:"sn-deep-research"}});
+ expect(document.querySelectorAll(".capability-inventory-item")).toHaveLength(1);
+ expect(screen.getByText("深度研究",{selector:".capability-record-name"})).toBeInTheDocument();
+ await userEvent.selectOptions(screen.getByLabelText("可用状态"),"ready");
+ expect(screen.getByText("没有符合条件的能力。")).toBeInTheDocument();
 });
-
-test("Runos 清单：没有变化时不说「本次新增 0」", async () => {
-  renderSection(
-    "skills",
-    skillsApi({
-      capabilityCatalog: vi.fn().mockResolvedValue(
-        catalogPage({
-          source: { kind: "platform", state: "synced", total: 3, diff: { added: 0, removed: 0, changed: 0 } },
-        }),
-      ),
-    } as Partial<Api>),
-  );
-  expect(await screen.findByText(/^共 3 项 · 更新于 —$/)).toBeInTheDocument();
-  expect(screen.queryByText(/本次新增/)).not.toBeInTheDocument();
+test("能力库：同一能力含本机版本和云端说明，只占一行",async()=>{
+ renderSection("skills",skillsApi({capabilityCatalog:vi.fn().mockResolvedValue(catalogPage())}));
+ await screen.findByText("深度研究",{selector:".capability-record-name"});
+ const record=screen.getByText("深度研究",{selector:".capability-record-name"}).closest("details")!;
+ fireEvent.click(record.querySelector("summary")!);
+ expect(within(record).getByText("opensensenova.sn-deep-research")).toBeInTheDocument();
+ expect(within(record).getByText("含脚本（本地不跑）")).toBeInTheDocument();
+ expect(within(record).getByRole("button",{name:"启用"})).toBeInTheDocument();
 });
-
-test("Runos 清单：按类型筛选交给守护进程；筛完没有就说没有，筛选本身还在", async () => {
-  const capabilityCatalog = vi
-    .fn()
-    .mockResolvedValueOnce(catalogPage())
-    .mockResolvedValue(catalogPage({ items: [], total: 0 }));
-  renderSection("skills", skillsApi({ capabilityCatalog } as Partial<Api>));
-  await screen.findByRole("list", { name: "Runos 清单条目" });
-  await pickFilter("按类型筛选", "执行器");
-  await waitFor(() => expect(capabilityCatalog).toHaveBeenLastCalledWith({ type: "executor" }));
-  expect(await screen.findByText("没有符合条件的条目。")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "按类型筛选" })).toHaveTextContent("执行器");
+test("能力库：类型筛选在本地进行，切换不重新请求目录",async()=>{
+ const capabilityCatalog=vi.fn().mockResolvedValue(catalogPage());renderSection("skills",skillsApi({capabilityCatalog}));
+ await screen.findByText("深度研究",{selector:".capability-record-name"});
+ await userEvent.selectOptions(screen.getByLabelText("安装来源"),"distributed");
+ expect(screen.getByText("没有符合条件的能力。")).toBeInTheDocument();expect(capabilityCatalog).toHaveBeenCalledTimes(1);
 });
-
-test("Runos 清单：搜索词交给守护进程（q），空白不发", async () => {
-  const capabilityCatalog = vi.fn().mockResolvedValue(catalogPage());
-  renderSection("skills", skillsApi({ capabilityCatalog } as Partial<Api>));
-  const box = await screen.findByRole("textbox", { name: "搜索 Runos 清单" });
-  fireEvent.change(box, { target: { value: " excel " } });
-  await waitFor(() => expect(capabilityCatalog).toHaveBeenLastCalledWith({ q: "excel" }));
-  fireEvent.change(box, { target: { value: "   " } });
-  await waitFor(() => expect(capabilityCatalog).toHaveBeenLastCalledWith({}));
+test("能力库：搜索包含本机与云端，输入和清空均不发HTTP",async()=>{
+ const capabilityCatalog=vi.fn().mockResolvedValue(catalogPage());renderSection("skills",skillsApi({capabilityCatalog}));
+ await screen.findByText("深度研究",{selector:".capability-record-name"});
+ fireEvent.change(screen.getByRole("textbox",{name:"搜索技能"}),{target:{value:" api-and-interface "}});
+ expect(document.querySelectorAll(".capability-inventory-item")).toHaveLength(1);
+ fireEvent.change(screen.getByRole("textbox",{name:"搜索技能"}),{target:{value:"   "}});
+ expect(document.querySelectorAll(".capability-inventory-item")).toHaveLength(4);expect(capabilityCatalog).toHaveBeenCalledTimes(1);
 });
-
-test("Runos 清单：「再显示更多」带着游标取下一页并接在后面；取完按钮就没了", async () => {
-  const capabilityCatalog = vi
-    .fn()
-    .mockResolvedValueOnce(catalogPage({ items: CATALOG_ITEMS.slice(0, 2), nextCursor: "2" }))
-    .mockResolvedValueOnce(catalogPage({ items: CATALOG_ITEMS.slice(2) }));
-  renderSection("skills", skillsApi({ capabilityCatalog } as Partial<Api>));
-  await userEvent.click(await screen.findByRole("button", { name: "再显示更多" }));
-  await waitFor(() => expect(capabilityCatalog).toHaveBeenLastCalledWith({ cursor: "2" }));
-  await waitFor(() =>
-    expect(within(screen.getByRole("list", { name: "Runos 清单条目" })).getAllByRole("listitem")).toHaveLength(3),
-  );
-  expect(screen.queryByRole("button", { name: "再显示更多" })).not.toBeInTheDocument();
+test("能力库：先读完整分页再显示准确总量，不把部分云端目录当完整",async()=>{
+ const capabilityCatalog=vi.fn().mockResolvedValueOnce(catalogPage({items:CATALOG_ITEMS.slice(0,2),nextCursor:"2"})).mockResolvedValueOnce(catalogPage({items:CATALOG_ITEMS.slice(2)}));
+ renderSection("skills",skillsApi({capabilityCatalog}));
+ await screen.findByText("4 项");expect(capabilityCatalog).toHaveBeenLastCalledWith({limit:1000,type:"skill",cursor:"2"});
 });
-
-test("Runos 清单：翻页失败留着已经列出的，并说一句", async () => {
-  const capabilityCatalog = vi
-    .fn()
-    .mockResolvedValueOnce(catalogPage({ items: CATALOG_ITEMS.slice(0, 2), nextCursor: "2" }))
-    .mockRejectedValueOnce(new Error("网络断了"));
-  renderSection("skills", skillsApi({ capabilityCatalog } as Partial<Api>));
-  await userEvent.click(await screen.findByRole("button", { name: "再显示更多" }));
-  expect(await screen.findByText("网络断了")).toBeInTheDocument();
-  expect(within(screen.getByRole("list", { name: "Runos 清单条目" })).getAllByRole("listitem")).toHaveLength(2);
+test("能力库：后续页失败不公布残缺目录，本机项目仍保留",async()=>{
+ const capabilityCatalog=vi.fn().mockResolvedValueOnce(catalogPage({items:CATALOG_ITEMS.slice(0,2),nextCursor:"2"})).mockRejectedValueOnce(new Error("offline"));
+ renderSection("skills",skillsApi({capabilityCatalog}));
+ expect(await screen.findByText("云端目录暂不可用，仍可查看本机能力。")).toBeInTheDocument();
+ expect(screen.queryByText("API and Interface Design")).toBeNull();expect(await capabilityRows("技能")).toHaveLength(3);
 });
-
-test("Runos 清单：刷新 = 手动取一次再重读", async () => {
-  const capabilityCatalog = vi.fn().mockResolvedValue(catalogPage());
-  const refreshCapabilityCatalog = vi.fn().mockResolvedValue({ outcome: "synced", source: catalogPage().source });
-  renderSection("skills", skillsApi({ capabilityCatalog, refreshCapabilityCatalog } as Partial<Api>));
-  await userEvent.click(within(await catalogBlock()).getByRole("button", { name: "刷新" }));
-  await waitFor(() => expect(refreshCapabilityCatalog).toHaveBeenCalledWith("manual"));
-  await waitFor(() => expect(capabilityCatalog).toHaveBeenCalledTimes(2));
+test("能力库：刷新同时读取本机和云端，沿用原有接口",async()=>{
+ const api=skillsApi({capabilityCatalog:vi.fn().mockResolvedValue(catalogPage()),refreshCapabilityCatalog:vi.fn().mockResolvedValue({})});
+ renderSection("skills",api);await screen.findByText("深度研究",{selector:".capability-record-name"});
+ await userEvent.click(within(await inventoryBlock()).getByRole("button",{name:"刷新"}));
+ expect(api.refreshSkills).toHaveBeenCalledTimes(1);expect(api.refreshCapabilityCatalog).toHaveBeenCalledWith("manual");
+ await waitFor(()=>expect(api.capabilityCatalog).toHaveBeenCalledTimes(2));
 });
-
-test("Runos 清单：刷新失败把守护进程的原因原样说出来，列表照旧", async () => {
-  const capabilityCatalog = vi.fn().mockResolvedValue(catalogPage());
-  const refreshCapabilityCatalog = vi
-    .fn()
-    .mockRejectedValue(new ApiError(502, { message: "取到 2 条，平台说共 3 条" }));
-  renderSection("skills", skillsApi({ capabilityCatalog, refreshCapabilityCatalog } as Partial<Api>));
-  await userEvent.click(within(await catalogBlock()).getByRole("button", { name: "刷新" }));
-  expect(await screen.findByText("取到 2 条，平台说共 3 条")).toBeInTheDocument();
-  expect(screen.getByRole("list", { name: "Runos 清单条目" })).toBeInTheDocument();
+test("能力库：刷新失败保留成功目录，展示可理解的失败提示",async()=>{
+ const api=skillsApi({capabilityCatalog:vi.fn().mockResolvedValue(catalogPage()),refreshCapabilityCatalog:vi.fn().mockRejectedValue(new Error("internal details"))});
+ renderSection("skills",api);await screen.findByText("深度研究",{selector:".capability-record-name"});
+ await userEvent.click(within(await inventoryBlock()).getByRole("button",{name:"刷新"}));
+ expect(await screen.findByText("云端目录暂不可用，仍可查看本机能力。")).toBeInTheDocument();expect(screen.getByText("深度研究",{selector:".capability-record-name"})).toBeInTheDocument();
+ expect(screen.queryByText("internal details")).toBeNull();
 });
-
-test("Runos 清单：这套装配没有清单（503）时整块不显示，不拿空列表冒充", async () => {
-  renderSection(
-    "skills",
-    skillsApi({
-      capabilityCatalog: vi.fn().mockRejectedValue(new ApiError(503, { message: "CAPABILITY_CATALOG_NOT_CONFIGURED" })),
-    } as Partial<Api>),
-  );
-  await capabilityRows("技能");
-  expect(screen.queryByText("云端能力清单")).not.toBeInTheDocument();
+test("能力库：旧宿主没有云端目录时仍保留统一的本机视图",async()=>{
+ renderSection("skills",skillsApi({capabilityCatalog:vi.fn().mockRejectedValue(new ApiError(503,{message:"not configured"}))}));
+ expect(await inventoryBlock()).toBeInTheDocument();expect(await capabilityRows("技能")).toHaveLength(3);
+ expect(screen.queryByText("云端能力清单")).toBeNull();
 });
 
 // ───────────────────────── 模型平台（RY-001 #24，只展示） ─────────────────────────
@@ -2804,175 +2850,25 @@ test("私有模型服务：读不到配置时不下断言", async () => {
   expect(screen.queryByText("未开通")).not.toBeInTheDocument();
 });
 
-/* ── Python 运行环境（TD-042 ②）────────────────────────────────────────────
+/* ── 运行环境（owner 2026-09-19：装完就该都在）─────────────────────────────
  *
- * uv 与 CPython 不随安装包，所以这一块要回答的是「装没装、要下多少、装到哪一步、
- * 没装成是哪一种没装成」。**四种状态各说各的**：把它们折叠成「未就绪」，用户就
- * 分不清该等一会儿、该重试，还是该换台机器。
+ * 这一组 2026-09-18 写的是「按需安装」那一路（未安装 / 安装中 / 装了一半 / 没装成）。
+ * owner 改了方向：运行环境随安装包走，差异只在能力启用与否。于是这里剩下两件事 ——
+ * **列出来**，以及**现场检查**。
  */
-function pythonStatus(over: Record<string, unknown> = {}) {
-  return {
-    state: "not-acquired",
-    component: "python.uv",
-    uvVersion: null,
-    pythonVersion: null,
-    packages: [],
-    wanted: ["excel-mcp-server==0.1.8"],
-    payload: {
-      id: "python.uv",
-      kind: "program",
-      version: "0.12.10",
-      state: "not-acquired",
-      downloadBytes: 16989876,
-      diskBytes: 42103296,
-      license: "MIT OR Apache-2.0",
-      origin: "https://github.com",
-      redistribution: "download-only",
-      unlocks: ["haris-musa.excel-mcp-server"],
-    },
-    ...over,
-  };
-}
-
-test("Python 运行环境：没装时点之前就看得见要下多少、许可证与来源，点「安装」走的是那一条", async () => {
-  const provisionPython = vi.fn().mockResolvedValue(pythonStatus({ state: "provisioning", stepCode: "acquire-uv" }));
-  const api = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()), provisionPython });
-  renderSection("skills", api);
-  const line = await screen.findByText(/还没装 · 需下载 16\.2 MB/);
-  expect(line.textContent).toContain("MIT OR Apache-2.0");
-  expect(line.textContent).toContain("github.com");
-  // 安装还会再取 Python 本身与依赖：按流量计费的网络上这句话是有用的。
-  expect(screen.getByText(/安装时还会取 Python 本身/)).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "安装" }));
-  expect(provisionPython).toHaveBeenCalled();
+test("能力平台：运行环境两行都在，且没有任何「安装」按钮 —— 随包就该是装好的", async () => {
+  renderSection("skills", skillsApi());
+  const block = (await screen.findByText("运行环境")).closest("section") as HTMLElement;
+  await userEvent.click(within(block).getByRole("button",{expanded:false,name:/运行环境/}));
+  expect(within(block).getByText("Node.js")).toBeTruthy();
+  expect(within(block).getByText("Python")).toBeTruthy();
+  expect(within(block).getAllByText("已安装").length).toBe(2);
+  // 没有可点的安装 —— 一个「装完还要再装一次」的按钮本身就是自相矛盾。
+  expect(within(block).queryByRole("button", { name: "安装" })).toBeNull();
+  expect(within(block).getByRole("button", { name: "检查" })).toBeTruthy();
 });
 
-test("Python 运行环境：装的时候说在做哪一步，且能取消", async () => {
-  const cancelPython = vi.fn().mockResolvedValue({ cancelled: true });
-  const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "provisioning", stepCode: "install-python" })),
-    cancelPython,
-  });
-  renderSection("skills", api);
-  expect(await screen.findByText("正在安装 Python…")).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "取消" }));
-  expect(cancelPython).toHaveBeenCalled();
-});
 
-test("Python 运行环境：装好了报版本与备好了几个工具包，并且可以移除", async () => {
-  const removePython = vi.fn().mockResolvedValue({ removed: true });
-  const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(
-      pythonStatus({ state: "ready", uvVersion: "0.12.10", pythonVersion: "3.13.15", packages: ["excel-mcp-server==0.1.8"] }),
-    ),
-    removePython,
-  });
-  renderSection("skills", api);
-  expect(await screen.findByText("已就绪 · uv 0.12.10 · Python 3.13.15 · 已备好 1 个工具包")).toBeTruthy();
-  // 装好了就不再念叨还要下什么。
-  expect(screen.queryByText(/安装时还会取 Python 本身/)).toBeNull();
-  await userEvent.click(screen.getByRole("button", { name: "移除" }));
-  expect(removePython).toHaveBeenCalled();
-});
-
-test("Python 运行环境：没装成时说的是**哪一种**没装成，守护进程那句原文一个字不上屏", async () => {
-  const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(
-      pythonStatus({ state: "failed", code: "verify-failed", reason: "error: distribution not found in cache" }),
-    ),
-  });
-  renderSection("skills", api);
-  expect(await screen.findByText("装好了，但试跑没通过 —— 这些工具现在还起不来。")).toBeTruthy();
-  expect(screen.queryByText(/distribution not found/)).toBeNull();
-  expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
-});
-
-test("Python 运行环境：装了一半、或清单换了包，说的都不是「没装过」", async () => {
-  const half = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "not-provisioned" })) });
-  const { unmount } = renderSection("skills", half);
-  expect(await screen.findByText("装了一半 —— Python 本身还没装上。")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "继续安装" })).toBeTruthy();
-  unmount();
-
-  const stale = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "stale" })) });
-  renderSection("skills", stale);
-  expect(await screen.findByText("这一版要的工具包变了，重装一次就好。")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "重新安装" })).toBeTruthy();
-});
-
-test("Python 运行环境：这一版不带它（守护进程回 503）时整块不显示 —— 不摆一个点不动的按钮", async () => {
-  const api = skillsApi({ pythonRuntime: vi.fn().mockRejectedValue(new ApiError(503, { error: "PYTHON_RUNTIME_NOT_AVAILABLE" })) });
-  renderSection("skills", api);
-  await screen.findByText("本机技能");
-  expect(screen.queryByText("Python 运行环境")).toBeNull();
-});
-
-test("能力平台：uvx 形态的工具在 Python 装好之前说「要先装」—— 不在自己那一行摆第二个下载按钮", async () => {
-  const api = skillsApi({
-    tools: vi.fn().mockResolvedValue({
-      items: [
-        { id: "haris-musa.excel-mcp-server", kind: "mcp-server", source: "haris-musa.excel-mcp-server", status: "unavailable", launchable: true, detailCode: "needs-python", license: "MIT", tier: "acquire-on-demand" },
-      ],
-    }),
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
-  });
-  renderSection("skills", api);
-  const rows = await capabilityRows("工具");
-  const row = rowWith(rows, "haris-musa.excel-mcp-server");
-  expect(within(row).getByText("要先装 Python 运行环境")).toBeTruthy();
-  expect(within(row).queryByRole("button", { name: "获取" })).toBeNull();
-});
-
-test("Python 运行环境：点下去没成 / 移除没成，都要说出来 —— 悄悄没反应是这条路最不该有的失败方式", async () => {
-  const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
-    provisionPython: vi.fn().mockRejectedValue(new Error("daemon unreachable")),
-  });
-  renderSection("skills", api);
-  await userEvent.click(await screen.findByRole("button", { name: "安装" }));
-  expect(await screen.findByText(/daemon unreachable/)).toBeTruthy();
-
-  const removeFails = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "ready", uvVersion: "0.12.10", pythonVersion: "3.13.15" })),
-    removePython: vi.fn().mockRejectedValue(new Error("在跑，删不掉")),
-  });
-  const { unmount } = renderSection("skills", removeFails);
-  await userEvent.click(await screen.findByRole("button", { name: "移除" }));
-  expect(await screen.findByText(/在跑，删不掉/)).toBeTruthy();
-  unmount();
-});
-
-test("Python 运行环境：守护进程少给了几样（没有载荷、没有步骤码、没有失败码）时也不编 —— 宁可少说一句", async () => {
-  // 清单里没有这条载荷：不编一个体积出来。
-  const noPayload = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue({ ...pythonStatus(), payload: undefined }) });
-  const a = renderSection("skills", noPayload);
-  expect((await screen.findAllByText("未安装")).length).toBeGreaterThan(0);
-  a.unmount();
-
-  // 在装，但没说到哪一步：按第一步说，不空着。
-  const noStep = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "provisioning" })) });
-  const b = renderSection("skills", noStep);
-  expect(await screen.findByText("正在下载…")).toBeTruthy();
-  b.unmount();
-
-  // 没成，但没给码：也要说一句人话，而不是一片空白。
-  const noCode = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "failed" })) });
-  const c = renderSection("skills", noCode);
-  expect(await screen.findByText("没下载成功，请稍后再试。")).toBeTruthy();
-  c.unmount();
-
-  // 装好了但版本没报上来：句子照样成立（版本是补充，不是主语）。
-  const noVersions = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue(pythonStatus({ state: "ready" })) });
-  renderSection("skills", noVersions);
-  expect(await screen.findByText(/已备好 0 个工具包/)).toBeTruthy();
-});
-
-test("Python 运行环境：清单里整段没有（component 为 null）时同样不显示", async () => {
-  const api = skillsApi({ pythonRuntime: vi.fn().mockResolvedValue({ ...pythonStatus(), component: null, payload: undefined }) });
-  renderSection("skills", api);
-  await screen.findByText("本机技能");
-  expect(screen.queryByText("Python 运行环境")).toBeNull();
-});
 
 /* ── 抢先体验新功能（任务 49）───────────────────────────────────────────────
  *
@@ -3041,7 +2937,6 @@ test("软件更新：写不进去时下拉不许自己变样 —— 看起来开
  */
 test("能力平台：点「检查」后，每一行换成现场探到的版本；随包与本机分开报", async () => {
   const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
     environments: vi.fn().mockResolvedValue({
       items: [
         { id: "node", bundled: { path: "C:/app/node.exe", version: "22.20.0" }, system: { version: "20.11.0" } },
@@ -3050,6 +2945,7 @@ test("能力平台：点「检查」后，每一行换成现场探到的版本�
     }),
   });
   renderSection("skills", api);
+  await userEvent.click(screen.getByRole("button",{expanded:false,name:/运行环境/}));
   await userEvent.click(await screen.findByRole("button", { name: "检查" }));
   // 随包那一份与本机那一份是两件事，分开说。
   expect(await screen.findByText(/随包 22\.20\.0 · 本机 20\.11\.0/)).toBeTruthy();
@@ -3059,12 +2955,12 @@ test("能力平台：点「检查」后，每一行换成现场探到的版本�
 
 test("能力平台：这套装配不提供环境检查时，点了也不假装查过", async () => {
   const api = skillsApi({
-    pythonRuntime: vi.fn().mockResolvedValue(pythonStatus()),
     environments: vi.fn().mockRejectedValue(new ApiError(503, { error: "ENV_PROBE_NOT_AVAILABLE" })),
   });
   renderSection("skills", api);
+  await userEvent.click(screen.getByRole("button",{expanded:false,name:/运行环境/}));
   await userEvent.click(await screen.findByRole("button", { name: "检查" }));
-  // 还是「还没装 · 需下载 …」那一路，没有任何一行冒出版本号。
-  expect(await screen.findByText(/还没装 · 需下载/)).toBeTruthy();
+  // 还是「随安装包提供」那一句，没有任何一行冒出版本号 —— 查不到就别装作查过。
+  expect((await screen.findAllByText(/随安装包提供/)).length).toBeGreaterThan(0);
   expect(screen.queryByText(/随包 /)).toBeNull();
 });

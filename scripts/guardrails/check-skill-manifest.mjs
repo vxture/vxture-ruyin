@@ -119,12 +119,14 @@ for (const s of m.servers ?? []) {
       if (l.runtime === "node" && !s.vendored?.bundled) {
         errors.push(`${where}: node 形态的 default 档必须有 vendored.bundled（随安装包走），否则干净机器上没有它`);
       }
-      // uvx 形态**永远不可能是 default**（2026-09-18，TD-042 ②）：uv 不随安装包了，
-      // 所以干净机器上一个字节都没有它 —— 要先点一次获取。这一条从「要满足三个
-      // 条件」变成「不成立」，而不是被删掉：删掉的话，下一个人把某条 uvx 挂回默认
-      // 档时不会有任何东西反对他。
+      // uvx 形态的 default 档要三个条件同时成立（2026-09-19 翻回来：owner 定「装完
+      // 就不该有起不来的能力」，Python 运行环境重新随包）。2026-09-18 那一版这里写的是
+      // 「uvx 不能是 default」，因为那时 uv 不随包 —— 两种写法都对过，对的是各自那天的
+      // 事实，所以这条规则要跟着事实走，而不是跟着谁写在前面。
       if (l.runtime === "uvx") {
-        errors.push(`${where}: uvx 形态不能是 default 档 —— uv 不随安装包（owner 2026-09-17 定性），要先获取 ${m.pythonRuntime?.component ?? "python.uv"}`);
+        if (l.offline?.cacheSeeded !== true) errors.push(`${where}: uvx 形态的 default 档必须 launch.offline.cacheSeeded = true（wheel 已预取进随包的 uv cache）`);
+        if (!seedIds.has(s.id)) errors.push(`${where}: uvx 形态的 default 档必须列进 pythonRuntime.seed，否则构建时不会有人去预取它的 wheel`);
+        if (!m.pythonRuntime?.uv?.version) errors.push(`${where}: uvx 形态的 default 档要求 pythonRuntime.uv 存在 —— 机器上没有 uv，侧载来的 wheel 也跑不了`);
       }
       if (l.requiresComponent) errors.push(`${where}: default 档不许有 requiresComponent —— 要先下载才能起的，不是「不下载任何字节就能起」`);
     }
@@ -253,28 +255,33 @@ const offlineDefault = servers.filter((e) => e.tier === "default").length;
 // pythonRuntime 也走「钉死 + 校验」那条规则：随包的 uv 是可执行文件，
 // 一个没钉哈希的可执行文件进安装包，比一个没钉哈希的按需组件更糟 —— 它不用
 // 用户点一下就已经在每台机器上了。
-if (m.pythonRuntime) {
-  const py = m.pythonRuntime;
-  const where = "pythonRuntime";
-  // uv 现在是一条**获取通道的组件**，钉死与校验那一套照走上面 components 那一段；
-  // 这里只钉住「pythonRuntime 说的那条 uv 真的存在」，以及它没有偷偷长回随包的样子。
-  if (!py.component) errors.push(`${where}: 缺 component —— uv 从哪来要写明（2026-09-18 起它是一条按需获取的组件，不随包）`);
-  else if (!componentIds.has(py.component)) errors.push(`${where}: component ${py.component} 不在 components[] 里`);
-  if (py.uv) errors.push(`${where}: 不许再有 uv 段 —— 那是「随包引导件」的形状，owner 2026-09-17 定性之后它不该回来`);
-  if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(py.cpython?.version ?? "")) errors.push(`${where}: cpython.version 要钉死到补丁号`);
-  for (const id of py.seed ?? []) {
-    const s = (m.servers ?? []).find((x) => x.id === id);
-    if (!s) errors.push(`${where}.seed: 清单里没有 ${id}`);
-    else if (s.launch?.runtime !== "uvx") errors.push(`${where}.seed: ${id} 不是 uvx 形态`);
+if (m.pythonRuntime?.uv) {
+  // 随包的 uv 是一个**可执行文件**，所以它走与按需组件同一条规则（钉死 + 校验）——
+  // 一个没钉哈希的可执行文件进安装包，比一个没钉哈希的按需组件更糟：它不用用户点
+  // 一下就已经在每台机器上了。
+  const uv = m.pythonRuntime.uv;
+  const where = "pythonRuntime.uv";
+  if (!/^https:\/\//.test(uv.upstream ?? "")) errors.push(`${where}: upstream 必须是 https`);
+  if (!/^[0-9a-f]{64}$/.test(uv.sha256 ?? "")) errors.push(`${where}: sha256 不是 64 位十六进制的钉死值`);
+  if (!Number.isInteger(uv.size) || uv.size <= 0) errors.push(`${where}: size 缺失`);
+  if (!uv.license || !uv.licenseSource) errors.push(`${where}: 许可证与出处都要写`);
+  if (!Array.isArray(uv.licenseFiles) || uv.licenseFiles.length === 0) {
+    errors.push(`${where}: licenseFiles 要列出随件落盘的许可证正文`);
   }
-  // uvx 形态都要 uv：少写一条 requiresComponent，起不来时用户看见的是一句
-  // 「起不来」，而不是那个能点的「获取」按钮（tool-servers.ts 的 plan() 按它给按钮）。
-  for (const s of m.servers ?? []) {
-    if (s.launch?.runtime !== "uvx") continue;
-    if (!(s.launch.requiresComponent ?? []).includes(py.component)) {
-      errors.push(`${s.kind}:${s.id}: uvx 形态要在 launch.requiresComponent 里写上 ${py.component}`);
+  if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(m.pythonRuntime.cpython?.version ?? "")) {
+    errors.push("pythonRuntime.cpython.version 要钉死到补丁号");
+  }
+  for (const id of m.pythonRuntime.seed ?? []) {
+    const s2 = (m.servers ?? []).find((x) => x.id === id);
+    if (!s2) errors.push(`pythonRuntime.seed: 清单里没有 ${id}`);
+    else if (s2.launch?.runtime !== "uvx") errors.push(`pythonRuntime.seed: ${id} 不是 uvx 形态`);
+  }
+  // 2026-09-19：uv 随包之后，uvx 形态**不该**再挂 requiresComponent —— 那是「要先
+  // 下载一份字节」的形状，而现在它装完就在。
+  for (const s2 of m.servers ?? []) {
+    if (s2.launch?.runtime === "uvx" && s2.launch.requiresComponent) {
+      errors.push(`${s2.kind}:${s2.id}: uv 随包之后不该再有 requiresComponent`);
     }
-    if (s.launch.offline) errors.push(`${s.kind}:${s.id}: launch.offline 是「构建时预取进随包缓存」的形状 —— 预热改在获取那一次做，由 pythonRuntime.seed 说了算`);
   }
 }
 

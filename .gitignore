@@ -41,6 +41,8 @@ dist/
 apps/*/release/
 *.tsbuildinfo
 .vite/
+__pycache__/
+*.py[cod]
 
 # Electron packaging outputs
 *.exe
@@ -69,9 +71,14 @@ resources/tools/
 resources/uv/
 # 随包的真 node.exe，构建时由 seed-node-runtime.mjs 生成（owner 2026-09-16）
 resources/node/
+resources/document-reader/lib/
+resources/document-reader/.lib-stage-*/
 
 # playwright-mcp writes accessibility snapshots into its cwd. The fix is that
 # nothing runs it with the repo as cwd (pull-tools.mjs probes in a temp dir);
 # this line is the second net, not the fix - an ignored stray directory is
 # still a stray directory.
 .playwright-mcp/
+
+# Generated Store tiles (source: apps/shell/icons/icon.ico).
+apps/shell/installer/appx/

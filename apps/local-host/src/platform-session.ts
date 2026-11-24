@@ -35,9 +35,13 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { KeyManager } from "./keys.js";
+import { desktopDeviceList, DesktopDevicesError, validDesktopDeviceId,
+  type DesktopDevicesView, type DesktopLoginState } from "./desktop-devices.js";
+import {switchableOrganizationOptions,isScopeId,OrganizationSwitchError,type OrganizationOption,type OrganizationSwitchView} from "./organization-switch.js";
+import {ProductDisplayMetadata} from "./product-display-metadata.js";
 
 // ============================================================================
 // Types
@@ -56,6 +60,10 @@ export interface BeginLoginOptions {
 export interface PlatformSessionConfig {
   /** console-bff 的公网基址，例如 https://console.vxture.com */
   consoleBase: string;
+  /** Public website catalog; no user credential is sent to it. */
+  websiteBase?: string;
+  /** Stable installation identity; no hardware fingerprint or private key. */
+  desktopDevice?: { id: string; name: string; platform: string };
   /**
    * 会话状态迁移写到哪儿（RY-001 §07 任务 50）。
    *
@@ -114,7 +122,7 @@ export const CLAIM_TIMEOUT_MS = 300_000;
 export const PLATFORM_PATHS = {
   login: "/auth/login",
   claim: "/auth/native/claim",
-  logout: "/auth/logout",
+  logout: "/auth/native/logout",
 } as const;
 
 /**
@@ -127,10 +135,14 @@ export const PLATFORM_PATHS = {
  * 开项目全被 ADR-015 拒掉。
  */
 export const PLATFORM_READS = {
+  desktopDevices: "/api/desktop/devices",
   me: "/api/me",
   tenantContext: "/api/tenant-context",
+  organization: "/api/me/organization",
   myWorkspaces: "/api/me/workspaces",
+  switchableWorkspaces: "/api/iam/workspaces/mine",
   subscribedProducts: "/api/subscription/subscribed-products",
+  recommendedProducts: "/api/subscription/recommended-products",
   entitlements: "/api/subscription/entitlements",
   quotaUsage: "/api/subscription/quota-usage",
   /** 当前租户的自定义 logo（console-bff `me.router.ts`）；404 = 没传过，是
@@ -152,6 +164,7 @@ export class PlatformReadError extends Error {
   constructor(
     readonly path: string,
     readonly status: number,
+    readonly code?: string,
   ) {
     super(`${path} failed: HTTP ${status}`);
     this.name = "PlatformReadError";
@@ -190,6 +203,8 @@ export function projectAtlasModels(raw: unknown): AtlasModelView[] {
 
 /** 给 UI 与宿主的身份投射。字段缺失 = 平台这次没给，**不补、不猜**。 */
 export interface SessionIdentity {
+  accountStatus?: string;
+  deletionRequestedAt?: string | null;
   profile?: {
     sub: string;
     name?: string;
@@ -199,7 +214,7 @@ export interface SessionIdentity {
     picture?: string;
     roles?: string[];
   };
-  org?: { id?: string; name?: string; type?: string };
+  org?: { id?: string; name?: string; shortName?: string; type?: string };
   workspace?: { id?: string; name?: string };
 }
 
@@ -209,8 +224,8 @@ export interface SessionIdentity {
  * console-bff 的 `TenantContext.workspace` 在解不出工作区时写的是字面量
  * `"default"`（租户态）或 `"PLATFORM"`（平台态）——那是它内部路由用的占位，
  * 不是一个工作区。拿它当项目归属，**所有租户的项目会落进同一个 "default"**，
- * 跨租户串数据，而且不报错。所以真实 id 只从 `/api/me/workspaces` 取，并且
- * 连那里也挡一遍。
+ * 跨租户串数据，而且不报错。上下文给出真实 UUID 时才优先使用；旧占位形态
+ * 回退到 `/api/me/workspaces`，并且连那里也挡一遍。
  */
 const NOT_A_WORKSPACE_ID = new Set(["", "default", "PLATFORM"]);
 
@@ -221,13 +236,14 @@ const NOT_A_WORKSPACE_ID = new Set(["", "default", "PLATFORM"]);
  *   用户的邮箱，照原样显示就是一句假话，所以丢掉。
  * - 租户：`/api/tenant-context`，只认 `mode === "tenant"`；平台态说明这个人
  *   没有任何组织，不该投射出一个「Vxture Platform」租户。
- * - 工作区：`/api/me/workspaces` 里**当前租户**那一行（优先 `isCurrent`）。
- *   订阅读取（`/api/subscription/*`）用的也是租户默认工作区，两边因此一致。
+ * - 工作区：优先取验证会话的 `/api/tenant-context.workspace` UUID；旧版本
+ *   只有占位值时才回退到 `/api/me/workspaces` 的当前租户默认工作区。
  */
 export function projectIdentity(
   me: unknown,
   tenantContext: unknown,
   myWorkspaces: unknown,
+  organization?: unknown,
 ): SessionIdentity {
   const out: SessionIdentity = {};
   const str = (v: unknown): string | undefined =>
@@ -235,6 +251,10 @@ export function projectIdentity(
 
   if (me && typeof me === "object") {
     const m = me as Record<string, unknown>;
+    const accountStatus = str(m["accountStatus"]);
+    if (accountStatus) out.accountStatus = accountStatus;
+    const deletion = m["deletionRequestedAt"];
+    if (typeof deletion === "string" || deletion === null) out.deletionRequestedAt = deletion;
     const sub = str(m["id"]);
     if (sub) {
       const email = str(m["email"]);
@@ -254,6 +274,7 @@ export function projectIdentity(
   }
 
   let tenantId: string | undefined;
+  let activeWorkspaceId: string | undefined;
   let fallbackWorkspaceName: string | undefined;
   if (tenantContext && typeof tenantContext === "object") {
     const t = tenantContext as Record<string, unknown>;
@@ -264,19 +285,29 @@ export function projectIdentity(
         ...(str(t["name"]) ? { name: str(t["name"])! } : {}),
         ...(str(t["tenantType"]) ? { type: str(t["tenantType"])! } : {}),
       };
+      if (organization && typeof organization === "object") {
+        const org = organization as Record<string, unknown>;
+        if (org["tenantId"] === tenantId) {
+          const name = str(org["tenantName"]);
+          const shortName = str(org["displayName"]) ?? out.org.name;
+          if (name) out.org.name = name;
+          if (shortName) out.org.shortName = shortName;
+        }
+      }
       fallbackWorkspaceName = str(t["workspaceName"]);
+      if(isScopeId(t["workspace"]))activeWorkspaceId=t["workspace"].toLowerCase();
     }
   }
 
   if (tenantId) {
-    // 列表没拉到时名字仍可从租户上下文来；id 只从列表来，所以那时就是有名无 id。
+    // The list contains a tenant's default, not necessarily the verified active workspace.
     const rows = (Array.isArray(myWorkspaces) ? myWorkspaces : []).filter(
       (r): r is Record<string, unknown> =>
         !!r && typeof r === "object" && (r as Record<string, unknown>)["tenantId"] === tenantId,
     );
-    const row = rows.find((r) => r["isCurrent"] === true) ?? rows[0];
-    const id = row ? str(row["workspaceId"]) : undefined;
-    const name = (row ? str(row["workspaceName"]) : undefined) ?? fallbackWorkspaceName;
+    const row = activeWorkspaceId ? rows.find(r=>str(r["workspaceId"])?.toLowerCase()===activeWorkspaceId) : rows.find((r) => r["isCurrent"] === true) ?? rows[0];
+    const id = activeWorkspaceId ?? (row ? str(row["workspaceId"]) : undefined);
+    const name = activeWorkspaceId ? fallbackWorkspaceName ?? (row ? str(row["workspaceName"]) : undefined) : (row ? str(row["workspaceName"]) : undefined) ?? fallbackWorkspaceName;
     if ((id && !NOT_A_WORKSPACE_ID.has(id)) || name) {
       out.workspace = {
         ...(id && !NOT_A_WORKSPACE_ID.has(id) ? { id } : {}),
@@ -292,11 +323,16 @@ export function projectIdentity(
 // ============================================================================
 
 export class PlatformSession {
+  private productDisplay?:ProductDisplayMetadata;
   private rpsidValue?: string;
   private expiresAt = 0;
   private readonly sessionPath: string;
   /** 正在进行的登录：`deviceSecret` 留在内存，**绝不落盘**。 */
   private pending?: { deviceSecret: string; startedAt: number };
+  private desktopLogin?: DesktopLoginState;
+  private claimRun?: { pending: NonNullable<PlatformSession["pending"]>; promise: Promise<void> };
+  private sessionVersion = 0;
+  private organizationAttempt?: {view:OrganizationSwitchView;secret:string;startedAt:number;version:number;userId:string};
   /** C2 读缓存。**只在内存里**——product_220 §3：权益不落盘。 */
   private readCache = new Map<string, { body: unknown; expiresAt: number }>();
 
@@ -336,17 +372,99 @@ export class PlatformSession {
     }
   }
 
-  private persist(): void {
-    if (!this.rpsidValue) return;
-    const value: PersistedSession = {
+  private persist(value: PersistedSession | undefined = this.rpsidValue ? {
       rpsid: this.rpsidValue,
       expiresAt: this.expiresAt,
-    };
+    } : undefined): void {
+    if(!value)return;
     mkdirSync(dirname(this.sessionPath), { recursive: true });
-    writeFileSync(
-      this.sessionPath,
-      this.keys.seal(Buffer.from(JSON.stringify(value), "utf8")),
-    );
+    const stage=this.sessionPath+".pending-"+randomBytes(8).toString("hex");
+    try{writeFileSync(stage,this.keys.seal(Buffer.from(JSON.stringify(value),"utf8")),{flag:"wx"});renameSync(stage,this.sessionPath);}
+    finally{rmSync(stage,{force:true});}
+  }
+
+  async organizations():Promise<OrganizationOption[]> {
+    const version=this.sessionVersion;
+    const [rows,scope,spaces]=await Promise.all([this.cachedGet(PLATFORM_READS.myWorkspaces,true),
+      this.cachedGet(PLATFORM_READS.tenantContext,true),this.cachedGet(PLATFORM_READS.switchableWorkspaces,true)]);
+    this.requireSession(version);return switchableOrganizationOptions(rows,scope,spaces);
+  }
+
+  async beginOrganizationSwitch(tenantId:unknown,workspaceId:unknown):Promise<{requestId:string;authorizeUrl:string}> {
+    if(!isScopeId(tenantId)||!isScopeId(workspaceId))throw new OrganizationSwitchError(400,"REQUEST_MALFORMED","Exact organization and workspace IDs are required");
+    const version=this.sessionVersion;this.requireSession(version);
+    if(this.organizationSwitchStatus()?.state==="pending")throw new OrganizationSwitchError(409,"ORG_SWITCH_BUSY","An organization switch is already pending");
+    const [rows,me]=await Promise.all([this.organizations(),this.cachedGet(PLATFORM_READS.me,true)]);
+    this.requireSession(version);
+    // A second request may have completed its preflight while the reads awaited.
+    if(this.organizationSwitchStatus()?.state==="pending")throw new OrganizationSwitchError(409,"ORG_SWITCH_BUSY","An organization switch is already pending");
+    const target=rows.find(row=>row.tenantId===tenantId.toLowerCase()&&row.workspaceId===workspaceId.toLowerCase());
+    if(!target)throw new OrganizationSwitchError(403,"ORG_SWITCH_NOT_ALLOWED","This organization is not in the authorized list");
+    if(target.current)throw new OrganizationSwitchError(409,"ORG_SWITCH_CURRENT","This organization is already active");
+    const userId=(me as {id?:unknown}|null)?.id;
+    if(typeof userId!=="string"||!userId)throw new OrganizationSwitchError(502,"ORG_SWITCH_IDENTITY_UNAVAILABLE","Current account identity is unavailable");
+    const secret=randomBytes(32).toString("hex"),requestId=randomBytes(16).toString("hex");
+    this.organizationAttempt={view:{requestId,state:"pending",target},secret,startedAt:Date.now(),version,userId};
+    const url=new URL(PLATFORM_PATHS.login,this.config.consoleBase);
+    url.searchParams.set("surface","native");url.searchParams.set("handle",createHash("sha256").update(secret).digest("hex"));
+    url.searchParams.set("tenantId",target.tenantId);url.searchParams.set("workspaceId",target.workspaceId);
+    return {requestId,authorizeUrl:url.toString()};
+  }
+
+  organizationSwitchStatus(requestId?:string):OrganizationSwitchView|null {
+    const attempt=this.organizationAttempt;
+    if(!attempt)return null;
+    if(requestId&&requestId!==attempt.view.requestId)throw new OrganizationSwitchError(404,"ORG_SWITCH_NOT_FOUND","Organization switch not found");
+    if(attempt.view.state==="pending"&&Date.now()-attempt.startedAt>=CLAIM_TIMEOUT_MS)attempt.view={...attempt.view,state:"expired"};
+    return structuredClone(attempt.view);
+  }
+
+  cancelOrganizationSwitch(requestId:string):OrganizationSwitchView|null {
+    const view=this.organizationSwitchStatus(requestId);
+    if(!view)throw new OrganizationSwitchError(404,"ORG_SWITCH_NOT_FOUND","Organization switch not found");
+    if(view.state==="pending")this.organizationAttempt!.view={...view,state:"cancelled"};
+    return this.organizationSwitchStatus(requestId);
+  }
+
+  async completeOrganizationSwitch(requestId:string):Promise<void> {
+    const attempt=this.organizationAttempt;
+    if(!attempt||attempt.view.requestId!==requestId)throw new OrganizationSwitchError(404,"ORG_SWITCH_NOT_FOUND","Organization switch not found");
+    const current=()=>{
+      if(this.organizationAttempt!==attempt||this.organizationSwitchStatus(requestId)?.state!=="pending")throw new OrganizationSwitchError(409,"ORG_SWITCH_CANCELLED","Organization switch is no longer pending");
+      this.requireSession(attempt.version);
+    };
+    try {
+      while(Date.now()-attempt.startedAt<CLAIM_TIMEOUT_MS){
+        current();
+        const response=await fetch(new URL(PLATFORM_PATHS.claim,this.config.consoleBase),{method:"POST",headers:{"content-type":"application/json"},
+          body:JSON.stringify({deviceSecret:attempt.secret,...(this.config.desktopDevice?{device:this.config.desktopDevice}:{})}),
+          signal:AbortSignal.timeout(12_000),redirect:"error"});
+        current();
+        if(response.status===404){await new Promise(resolve=>setTimeout(resolve,CLAIM_POLL_INTERVAL_MS));continue;}
+        if(!response.ok)throw new OrganizationSwitchError(502,"ORG_SWITCH_AUTH_FAILED","Organization authorization failed");
+        const candidate=await response.json() as Partial<PersistedSession>&{expiresInSec?:number};current();
+        if(typeof candidate.rpsid!=="string"||!candidate.rpsid||!Number.isFinite(candidate.expiresInSec)||candidate.expiresInSec!<=0)
+          throw new OrganizationSwitchError(502,"ORG_SWITCH_AUTH_FAILED","Invalid authorization response");
+        const read=async(path:string)=>{
+          const result=await fetch(new URL(path,this.config.consoleBase),{headers:{"x-vxture-session":candidate.rpsid!},signal:AbortSignal.timeout(12_000),redirect:"error"});
+          if(!result.ok)throw new OrganizationSwitchError(502,"ORG_SWITCH_IDENTITY_UNAVAILABLE","Candidate identity is unavailable");
+          return result.json();
+        };
+        const [me,scope,workspaces,spaces]=await Promise.all([read(PLATFORM_READS.me),read(PLATFORM_READS.tenantContext),read(PLATFORM_READS.myWorkspaces),read(PLATFORM_READS.switchableWorkspaces)]);
+        current();const target=attempt.view.target;
+        if(me?.id!==attempt.userId||me?.accountStatus==="deleting"||scope?.mode!=="tenant"||scope?.id?.toLowerCase()!==target.tenantId||
+          scope?.workspace?.toLowerCase()!==target.workspaceId||!switchableOrganizationOptions(workspaces,scope,spaces).some(row=>row.tenantId===target.tenantId&&row.workspaceId===target.workspaceId&&row.current))
+          throw new OrganizationSwitchError(409,"ORG_SWITCH_SCOPE_MISMATCH","Authorized account or workspace does not match the requested organization");
+        const saved={rpsid:candidate.rpsid,expiresAt:Date.now()+candidate.expiresInSec!*1000};
+        // Persist before changing any in-memory identity. A failed write leaves the old session usable.
+        this.persist(saved);this.rpsidValue=saved.rpsid;this.expiresAt=saved.expiresAt;this.sessionVersion++;this.readCache.clear();
+        attempt.view={...attempt.view,state:"completed"};return;
+      }
+      attempt.view={...attempt.view,state:"expired"};
+    } catch(error) {
+      if(this.organizationAttempt===attempt&&attempt.view.state==="pending")attempt.view={...attempt.view,state:"failed",errorCode:error instanceof OrganizationSwitchError?error.code:"ORG_SWITCH_FAILED"};
+      throw error;
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -388,6 +506,8 @@ export class PlatformSession {
   }
 
   beginLogin(opts: BeginLoginOptions = {}): string {
+    if (this.signedIn()) throw new DesktopDevicesError(409, "ALREADY_SIGNED_IN", "Sign out before starting another desktop login");
+    this.desktopLogin = undefined;
     const deviceSecret = randomBytes(32).toString("hex");
     const handle = createHash("sha256").update(deviceSecret).digest("hex");
     this.pending = { deviceSecret, startedAt: Date.now() };
@@ -405,36 +525,78 @@ export class PlatformSession {
    *
    * @throws {NotSignedInError} 没有进行中的登录，或用户没在超时内完成
    */
-  async completeLogin(): Promise<void> {
+  completeLogin(releaseDeviceId?: string): Promise<void> {
     const pending = this.pending;
-    if (!pending) throw new NotSignedInError("no login in progress");
+    if (!pending) return Promise.reject(new NotSignedInError("no login in progress"));
+    if (this.claimRun?.pending === pending) return this.claimRun.promise;
+    const promise = this.claimLogin(pending, releaseDeviceId).catch(cause => {
+      if (this.pending === pending) {
+        this.pending = undefined;
+        this.desktopLogin = { state: "failed" };
+      }
+      throw cause;
+    }).finally(() => {
+      if (this.claimRun?.pending === pending) this.claimRun = undefined;
+    });
+    this.claimRun = { pending, promise };
+    return promise;
+  }
+
+  private async claimLogin(pending: NonNullable<PlatformSession["pending"]>, releaseDeviceId?: string): Promise<void> {
+    const current = () => {
+      if (this.pending !== pending) throw new NotSignedInError("login superseded or cancelled");
+    };
 
     const deadline = pending.startedAt + CLAIM_TIMEOUT_MS;
     const url = new URL(PLATFORM_PATHS.claim, this.config.consoleBase);
 
     while (Date.now() < deadline) {
+      current();
       const res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ deviceSecret: pending.deviceSecret }),
+        body: JSON.stringify({ deviceSecret: pending.deviceSecret,
+          ...(this.config.desktopDevice ? { device: this.config.desktopDevice } : {}),
+          ...(releaseDeviceId ? { releaseDeviceId } : {}) }),
+        signal: AbortSignal.timeout(12_000),
       }).catch(() => undefined);
+      current();
+      // A replacement is a mutation: never silently repeat it after an ambiguous
+      // network response. Restarting sign-in can discover the authoritative result.
+      if (releaseDeviceId && (!res || res.status === 404)) {
+        throw new DesktopDevicesError(502, "DESKTOP_RELEASE_UNCONFIRMED", "Device replacement could not be confirmed; restart sign-in");
+      }
 
       if (res?.ok) {
         const body = (await res.json()) as {
           rpsid: string;
           expiresInSec: number;
         };
+        current();
+        if (typeof body.rpsid !== "string" || !body.rpsid || !Number.isFinite(body.expiresInSec) || body.expiresInSec <= 0) {
+          throw new NotSignedInError("invalid claim response");
+        }
+        this.readCache.clear();
+        this.sessionVersion++;
         this.rpsidValue = body.rpsid;
         this.expiresAt = Date.now() + body.expiresInSec * 1000;
         this.pending = undefined;
+        this.desktopLogin = undefined;
         this.persist();
         return;
+      }
+      if (res?.status === 409) {
+        const body = await res.json() as Record<string, unknown>;
+        current();
+        if (body["code"] === "DESKTOP_DEVICE_LIMIT") {
+          this.desktopLogin = { state: "device_limit", ...desktopDeviceList(body) };
+          return;
+        }
       }
       /* 404 = 还没登录完，继续等。其余状态码（400 参数错、5xx）**不重试**：
          重试一个已经判定为错的请求只是把同一个错误重复 200 次，而真实症状
          （比如 secret 太短）会被埋在轮询日志里看不见。 */
       if (res && res.status !== 404) {
-        this.pending = undefined;
         /*
          * 401 要单独说。claim 是**公开**端点——它就是用来拿会话的，不可能要求
          * 先有会话。所以它回 401 不表示「凭据错了」，只表示这个请求根本没打到
@@ -453,7 +615,9 @@ export class PlatformSession {
       }
       await new Promise((r) => setTimeout(r, CLAIM_POLL_INTERVAL_MS));
     }
+    current();
     this.pending = undefined;
+    this.desktopLogin = { state: "timed_out" };
     throw new NotSignedInError("login timed out");
   }
 
@@ -483,9 +647,14 @@ export class PlatformSession {
    * 不该由桌面端缓存一份。缓存一份的代价是它会过期而没人知道，
    * 而「显示的是三天前的名字」这种缺陷不报错。
    */
-  status(): { signedIn: boolean; expiresAt: number | null } {
+  status(): { signedIn: boolean; expiresAt: number | null; desktopLogin?: DesktopLoginState } {
+    if (this.desktopLogin?.state === "device_limit" && this.pending && Date.now() >= this.pending.startedAt + CLAIM_TIMEOUT_MS) {
+      this.pending = undefined;
+      this.desktopLogin = { state: "timed_out" };
+    }
     const live = this.rpsid() !== undefined;
-    return { signedIn: live, expiresAt: live ? this.expiresAt : null };
+    return { signedIn: live, expiresAt: live ? this.expiresAt : null,
+      ...(!live && this.desktopLogin ? { desktopLogin: structuredClone(this.desktopLogin) } : {}) };
   }
 
   signedIn(): boolean {
@@ -499,6 +668,7 @@ export class PlatformSession {
    * 这也是「设备远程吊销」在客户端的落点——服务端删了那一行，下一次调用就掉线。
    */
   async fetch(path: string, init?: RequestInit): Promise<Response> {
+    const version = this.sessionVersion;
     const rpsid = this.rpsid();
     if (!rpsid) throw new NotSignedInError();
     const res = await fetch(new URL(path, this.config.consoleBase), {
@@ -508,6 +678,15 @@ export class PlatformSession {
         "x-vxture-session": rpsid,
       },
     });
+    this.requireSession(version);
+    if (res.status === 403) {
+      const body = await res.clone().json().catch(() => undefined);
+      this.requireSession(version);
+      if (body?.code === "ACCOUNT_DELETING") {
+        this.readCache.delete(PLATFORM_READS.me);
+        throw new PlatformReadError(path, 403, "ACCOUNT_DELETING");
+      }
+    }
     if (res.status === 401) {
       // **一次 401 不算数**（2026-09-18，真机上实测到的 bug）。
       //
@@ -519,6 +698,7 @@ export class PlatformSession {
       // 多问一句 —— 向**身份那条最权威的读**再确认一次；它也说不认了，才真登出。
       // 一次额外的请求，只发生在这条很少走的路上。
       const confirmed = await this.confirmRejected(rpsid);
+      this.requireSession(version);
       if (!confirmed) {
         this.config.log?.(
           `[ruyin] platform: ${path} 回了 401，但 ${PLATFORM_READS.me} 仍认这条会话 —— 不登出（把 401 当成那一个接口的事）`,
@@ -555,8 +735,37 @@ export class PlatformSession {
    * 只读、遵 `Cache-Control`（缺省 45 秒）、**只在内存里、不落盘**。那一段与换不换
    * 凭据无关，是 product_220 §3 的要求。
    */
-  async subscribedProducts(): Promise<unknown> {
-    return this.cachedGet(PLATFORM_READS.subscribedProducts);
+  async subscribedProducts(fresh = false): Promise<unknown> {
+    const version=this.sessionVersion,rows=await this.cachedGet(PLATFORM_READS.subscribedProducts, fresh);
+    if(!Array.isArray(rows)||!this.config.websiteBase)return rows;
+    this.productDisplay??=new ProductDisplayMetadata(this.config.websiteBase,this.config.consoleBase);
+    const enriched=await this.productDisplay.enrich(rows);this.requireSession(version);return enriched;
+  }
+
+  /** 平台公开产品目录，仅返回展示信息，不代表当前账号拥有该产品。 */
+  async productCatalog(){
+    if(!this.config.websiteBase)throw new PlatformReadError("/api/products/catalog",503);
+    this.productDisplay??=new ProductDisplayMetadata(this.config.websiteBase,this.config.consoleBase);
+    try{return await this.productDisplay.catalog();}catch{throw new PlatformReadError("/api/products/catalog",502);}
+  }
+
+  /** Tenant acquisition candidates; Console excludes previous subscriptions. */
+  async recommendedProducts(){
+    const version=this.sessionVersion;
+    const rows:unknown=await this.cachedGet(PLATFORM_READS.recommendedProducts,true);
+    if(!Array.isArray(rows))throw new PlatformReadError(PLATFORM_READS.recommendedProducts,502);
+    const catalog=await this.productCatalog(),byCode=new Map(catalog.map(row=>[row.productCode,row]));
+    this.requireSession(version);
+    return rows.flatMap(row=>{
+      const meta=row&&typeof row.productCode==="string"?byCode.get(row.productCode):undefined;
+      if(!meta)return [];
+      return [{...meta,
+        ...(typeof row.productName==="string"?{productName:row.productName}:{}),
+        ...(typeof row.description==="string"?{description:row.description.slice(0,10000)}:{}),
+        ...(typeof row.iconUrl==="string"?{iconUrl:row.iconUrl}:{}),
+        ...(typeof row.iconVersion==="string"?{iconVersion:row.iconVersion}:{}),
+      }];
+    });
   }
 
   /** 本工作区的权益概览（档位 / 状态 / 限额）。 */
@@ -587,13 +796,29 @@ export class PlatformSession {
    * 桌面这边不再叠一层内存缓存——反正只在租户菜单打开时才问一次。
    */
   async orgLogo(): Promise<{ data: Buffer; contentType: string } | null> {
+    const version = this.sessionVersion;
     const res = await this.fetch(PLATFORM_READS.orgLogo);
     if (res.status === 404) return null;
     if (!res.ok) throw new PlatformReadError(PLATFORM_READS.orgLogo, res.status);
+    const data = Buffer.from(await res.arrayBuffer());
+    this.requireSession(version);
     return {
-      data: Buffer.from(await res.arrayBuffer()),
+      data,
       contentType: res.headers.get("content-type") ?? "application/octet-stream",
     };
+  }
+
+  async productIcon(code:string,version:string):Promise<{data:Buffer;contentType:string}|null>{
+    const sessionVersion=this.sessionVersion;
+    const path=`/api/applications/${encodeURIComponent(code)}/icon?v=${encodeURIComponent(version)}`;
+    const response=await this.fetch(path,{signal:AbortSignal.timeout(12_000),redirect:"error"});
+    if(response.status===404)return null;
+    if(!response.ok)throw new PlatformReadError(path,response.status);
+    const contentType=response.headers.get("content-type")?.split(";")[0]?.trim()??"";
+    if(!["image/png","image/jpeg","image/webp"].includes(contentType)||Number(response.headers.get("content-length")??0)>1024*1024)
+      throw new PlatformReadError(path,502);
+    const data=Buffer.from(await response.arrayBuffer());this.requireSession(sessionVersion);if(data.length>1024*1024)throw new PlatformReadError(path,502);
+    return {data,contentType};
   }
 
   // --------------------------------------------------------------------------
@@ -611,22 +836,23 @@ export class PlatformSession {
    * 这种缺陷不报错，所以不落盘。
    */
   async identity(): Promise<SessionIdentity> {
+    const version = this.sessionVersion;
     if (!this.signedIn()) return {};
     const read = (path: string) => this.cachedGet(path).catch(() => undefined);
-    const [me, tenantContext, myWorkspaces] = await Promise.all([
+    const [me, tenantContext, myWorkspaces, organization] = await Promise.all([
       read(PLATFORM_READS.me),
       read(PLATFORM_READS.tenantContext),
       read(PLATFORM_READS.myWorkspaces),
+      read(PLATFORM_READS.organization),
     ]);
-    if (!this.signedIn()) return {};
-    return projectIdentity(me, tenantContext, myWorkspaces);
+    if (!this.signedIn() || this.sessionVersion !== version) return {};
+    return projectIdentity(me, tenantContext, myWorkspaces, organization);
   }
 
   /**
    * 项目归属用的工作区 id（ADR-015），拿不到就是 undefined——**没有兜底**。
    *
-   * 这是当前租户的默认工作区：桌面会话目前切不了工作区（平台的切换入口只认
-   * 浏览器 cookie），订阅读取取的也是它，所以数据归属与订阅判定落在同一个工作区上。
+   * 来自已验证桌面会话的当前工作区；切换成功后身份读缓存同步失效。
    */
   async activeWorkspaceId(): Promise<string | undefined> {
     return (await this.identity()).workspace?.id;
@@ -638,19 +864,67 @@ export class PlatformSession {
    * 缓存键就是路径——这些端点**不带参数**（工作区来自会话）。旧实现要把
    * workspace 与 product 列表拼进键里，那是因为工作区靠调用方声明；现在不必了。
    */
-  private async cachedGet(path: string): Promise<unknown> {
+  private async cachedGet(path: string, fresh = false): Promise<unknown> {
+    const version = this.sessionVersion;
+    this.requireSession(version);
     const hit = this.readCache.get(path);
-    if (hit && Date.now() < hit.expiresAt) return hit.body;
+    if (!fresh && hit && Date.now() < hit.expiresAt) return hit.body;
 
     const res = await this.fetch(path);
     if (!res.ok) throw new PlatformReadError(path, res.status);
     const body = (await res.json()) as unknown;
+    this.requireSession(version);
     const maxAge = /max-age=(\d+)/.exec(res.headers.get("cache-control") ?? "")?.[1];
-    this.readCache.set(path, {
-      body,
-      expiresAt: Date.now() + (maxAge ? Number(maxAge) : 45) * 1000,
-    });
+    if (path !== PLATFORM_READS.me || (body as { accountStatus?: string } | null)?.accountStatus !== "deleting") {
+      this.readCache.set(path, {
+        body,
+        expiresAt: Date.now() + (maxAge ? Number(maxAge) : 45) * 1000,
+      });
+    }
     return body;
+  }
+
+  private requireSession(version: number): void {
+    if (!this.signedIn() || this.sessionVersion !== version) throw new NotSignedInError("desktop session changed");
+  }
+
+  /** Unsupported platform versions do not acquire an invented local device limit. */
+  async desktopDevices(): Promise<DesktopDevicesView> {
+    const version = this.sessionVersion;
+    const res = await this.fetch(PLATFORM_READS.desktopDevices, { signal: AbortSignal.timeout(12_000) });
+    if (res.status === 404 || res.status === 501) return { supported: false };
+    if (!res.ok) throw new PlatformReadError(PLATFORM_READS.desktopDevices, res.status);
+    const view = desktopDeviceList(await res.json());
+    this.requireSession(version);
+    return { supported: true, ...view };
+  }
+
+  /** Called only after explicit user selection. Never chooses an eviction victim. */
+  async releaseDesktopDevice(deviceId: string): Promise<void> {
+    if (!validDesktopDeviceId(deviceId)) throw new DesktopDevicesError(400, "DESKTOP_DEVICE_INVALID", "Invalid desktop device ID");
+    if (!this.signedIn()) {
+      if (!this.pending || this.desktopLogin?.state !== "device_limit" ||
+          !this.desktopLogin.devices.some(d => d.id === deviceId && !d.current)) {
+        throw new DesktopDevicesError(409, "DESKTOP_LOGIN_CHANGED", "Refresh desktop login before choosing a device");
+      }
+      if (Date.now() >= this.pending.startedAt + CLAIM_TIMEOUT_MS) {
+        this.pending = undefined;
+        this.desktopLogin = { state: "timed_out" };
+        throw new DesktopDevicesError(409, "DESKTOP_LOGIN_EXPIRED", "Desktop login expired; sign in again");
+      }
+      await this.completeLogin(deviceId);
+      return;
+    }
+    const version = this.sessionVersion;
+    const view = await this.desktopDevices();
+    this.requireSession(version);
+    if (!view.supported) throw new DesktopDevicesError(503, "DESKTOP_DEVICES_UNAVAILABLE", "Desktop device management is not available on this platform yet");
+    const device = view.devices.find(d => d.id === deviceId);
+    if (!device || device.current) throw new DesktopDevicesError(409, "DESKTOP_DEVICE_NOT_RELEASABLE", "Choose another desktop device; use Sign out for this device");
+    const res = await this.fetch(`${PLATFORM_READS.desktopDevices}/${encodeURIComponent(deviceId)}`, {
+      method: "DELETE", signal: AbortSignal.timeout(12_000),
+    });
+    if (!res.ok) throw new PlatformReadError(PLATFORM_READS.desktopDevices, res.status);
   }
 
   // --------------------------------------------------------------------------
@@ -672,17 +946,15 @@ export class PlatformSession {
     const rpsid = this.rpsid();
     this.signOutLocal();
     if (!rpsid) return;
-    /* 通知服务端销毁那条会话。收不掉也不该让登出失败——本地已经清了，
-       服务端那份到 TTL 自己会走。
-
-       **如实说：今天这一下销毁不了服务端会话。** console-bff 的 `/auth/logout`
-       只从 cookie 读 rpsid，不认 `X-Vxture-Session`（oidc-auth.router.ts），而平台
-       还没有给头部会话的登出端点——已向平台提出。留着这一下，是为了平台补上
-       之后这里不必再改调用点；在那之前，本机清掉就是全部。 */
-    await fetch(new URL(PLATFORM_PATHS.logout, this.config.consoleBase), {
+    const result = await fetch(new URL(PLATFORM_PATHS.logout, this.config.consoleBase), {
       method: "POST",
       headers: { "x-vxture-session": rpsid },
+      redirect: "error",
+      signal: AbortSignal.timeout(5000),
     }).catch(() => undefined);
+    if (result?.status !== 204) {
+      this.config.log?.(`[ruyin] platform: native logout failed (${result ? `HTTP ${result.status}` : "network error"})`);
+    }
   }
 
   /**
@@ -698,6 +970,7 @@ export class PlatformSession {
     try {
       const res = await fetch(new URL(PLATFORM_READS.me, this.config.consoleBase), {
         headers: { "x-vxture-session": rpsid },
+        signal: AbortSignal.timeout(12_000),
       });
       return res.status === 401;
     } catch {
@@ -706,11 +979,14 @@ export class PlatformSession {
   }
 
   private signOutLocal(): void {
+    this.organizationAttempt=undefined;
+    this.sessionVersion++;
     this.rpsidValue = undefined;
     this.expiresAt = 0;
     /* 清缓存：换账号后还留着上一个人的权益就是串号，而它不报错。 */
     this.readCache.clear();
     this.pending = undefined;
+    this.desktopLogin = undefined;
     rmSync(this.sessionPath, { force: true });
   }
 }

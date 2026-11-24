@@ -20,10 +20,11 @@
  * 而不是继续用 `ShellBrand` 再想办法拦它的默认导航。
  */
 
-import { useEffect, useState } from "react";
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@vxture/design-system";
+import { useEffect, useRef, useState } from "react";
+import { Button, Dialog, DialogClose, DialogContent, DialogTitle, DialogTrigger } from "@vxture/design-system";
 import type { Api, SessionInfo, SystemInfo } from "./api";
 import { BrandInfoBlock } from "./brand-info";
+import {useT} from "./i18n";
 
 export function BrandInfoTrigger({
   api,
@@ -33,6 +34,7 @@ export function BrandInfoTrigger({
   session?: SessionInfo | undefined;
 }) {
   const [open, setOpen] = useState(false);
+  const closeButton=useRef<HTMLButtonElement>(null),t=useT();
   const [system, setSystem] = useState<SystemInfo | null>(null);
 
   useEffect(() => {
@@ -53,17 +55,18 @@ export function BrandInfoTrigger({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <button type="button" className="vx-brand-lockup app-brand app-brand-trigger" aria-label="RUYIN">
-          <img className="vx-brand-mark" src="/logo.svg" alt="" aria-hidden width={24} height={24} draggable={false} />
+          <span className="app-header-mark"><img className="vx-brand-mark" src="/logo.svg" alt="" aria-hidden width={18} height={18} draggable={false} /></span>
           <span className="vx-brand-name">RUYIN</span>
           <span className="vx-brand-local-name">Intelligent Workbench</span>
         </button>
       </DialogTrigger>
-      <DialogContent className="brand-info-dialog">
+      <DialogContent className="brand-info-dialog" onOpenAutoFocus={event=>{event.preventDefault();closeButton.current?.focus();}}>
         {/* BrandInfoBlock 自己画出「RUYIN」这个可见标题，这里只补一个屏幕
             阅读器用的无障碍标题（Radix 的 DialogContent 要求一个
             DialogTitle 后代，没有会在控制台报错）——视觉上不重复一遍。 */}
         <DialogTitle className="sr-only">RUYIN · Intelligent Workbench</DialogTitle>
         <BrandInfoBlock system={system} session={session ?? null} />
+        <div className="brand-info-close"><DialogClose asChild><Button ref={closeButton} variant="outline">{t("common.close")}</Button></DialogClose></div>
       </DialogContent>
     </Dialog>
   );

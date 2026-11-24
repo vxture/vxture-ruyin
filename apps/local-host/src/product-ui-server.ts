@@ -134,6 +134,7 @@ function securityHeaders(workspaceOrigin: string): Record<string, string> {
     "content-security-policy": [
       "default-src 'self'",
       "script-src 'self'",
+      "worker-src 'self'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self'",

@@ -1,4 +1,6 @@
-﻿/**
+import {ProjectLibrary} from './project-library';
+import {PRODUCT_REVIEW_EVENT} from './product-navigation';
+/**
  * 项目面板 —— 运行时自持的那几个控制面（概览 / 上下文 / 任务 / 审计，见
  * docs/40-implementation/10-product-integration-guide.md section 6.3）。
  *
@@ -6,8 +8,8 @@
  * 见 workbench.tsx）—— 页面里再放一根，屏幕上就并排站着两根。这个文件只按
  * 传进来的 `tab` 渲染对应的分区。
  *
- * 未决确认钉在分区之上：人的决定压过导航（50-harness section 6）。摘要带在
- * 最顶上，把散在四个分区里的事实并成一行。
+ * 确认权归宿主：业务页通过独立确认面板处理待办，不把运行时卡片铺在正文上方。
+ * 配置页面保留运行详情；移动呈现位置不替人批准任何操作。
  *
  * 呈现全部走 DS：SectionHeader、StatusBadge、Table 族。
  */
@@ -15,6 +17,12 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
   EmptyState,
   Input,
   NativeSelect,
@@ -58,7 +66,7 @@ import { useT, type MessageKey, type TFn } from "./i18n";
 // sidebar can know the tab list without pulling in this file's DS-heavy
 // ProjectPanel - see that file's header comment (TD-011②).
 export { PROJECT_TABS, type TabId } from "./workspace-tabs";
-import type { TabId } from "./workspace-tabs";
+import { PROJECT_TABS, type TabId } from "./workspace-tabs";
 
 /**
  * 审计时间的短形式：`MM-DD HH:mm:ss`。
@@ -159,6 +167,8 @@ export function ProjectPanel({
   const [chainOk, setChainOk] = useState<boolean | null>(null);
   /** 产品界面提出、等人确认的推进（ADR-022 片四）。 */
   const [stateRequest, setStateRequest] = useState<StateRequest | null>(null);
+  const [batchJobs,setBatchJobs]=useState<Awaited<ReturnType<Api["backgroundJobs"]>>>([]);
+  const [reviewRequest,setReviewRequest]=useState<{taskInstanceId:string;serial:number}|null>(null);
   /**
    * 两种错误分开存，因为它们的寿命不一样。
    *
@@ -172,7 +182,7 @@ export function ProjectPanel({
 
   const refresh = useCallback(async () => {
     try {
-      const [v, ti, g, b, a, sr] = await Promise.all([
+      const [v, ti, g, b, a, sr, jobs] = await Promise.all([
         api.workspace(id),
         api.taskInstances(id),
         api.grants(id),
@@ -180,6 +190,7 @@ export function ProjectPanel({
         api.audit(id),
         // 问不到就当没有：这张卡是附加的，不该因为它把整个项目面板拖成错误。
         api.stateRequest(id).then((r) => r.pending, () => null),
+        api.backgroundJobs?.(id).catch(()=>[])??Promise.resolve([]),
       ]);
       setView(v);
       setInstances(ti);
@@ -187,6 +198,7 @@ export function ProjectPanel({
       setBindings(b);
       setAudit(a);
       setStateRequest(sr);
+      setBatchJobs(jobs);
       setChainOk(await verifyChain(id, a));
       setPollError(null);
     } catch (e) {
@@ -229,10 +241,35 @@ export function ProjectPanel({
   );
 
   const pending = useMemo(
-    () => instances.filter((t) => t.state === "waiting_human"),
-    [instances],
+    () => instances.filter(task => {
+      if (task.state !== "waiting_human") return false;
+      const checkpoint = pendingCheckpoint(task);
+      if (checkpoint?.kind !== "context_confirm") return true;
+      // Only the host's exact task/checkpoint pair can consolidate this prompt.
+      // No ownership is guessed from a product/task label or a shared context type.
+      return !batchJobs.some(job => job.approvable && ["running", "waiting", "paused"].includes(job.state) &&
+        (job.contextConfirmations ?? []).some(pair => pair.taskInstanceId === task.id && pair.checkpointId === checkpoint.id));
+    }),
+    [instances, batchJobs],
   );
-  useEffect(() => onPending?.(pending.length), [onPending, pending.length]);
+  const confirmationCount = pending.length + batchJobs.filter(needsBatchApproval).length + (stateRequest ? 1 : 0);
+  useEffect(() => onPending?.(confirmationCount), [onPending, confirmationCount]);
+  useEffect(() => {
+    let active = true;
+    const receive = (event: Event) => {
+      const detail = (event as CustomEvent<{projectId:string;taskInstanceId:string}>).detail;
+      if (detail.projectId !== id) return;
+      void api.taskInstances(id).then(items => {
+        if (!active) return;
+        const task = items.find(item => item.id === detail.taskInstanceId && item.state === "waiting_human" && pendingCheckpoint(item)?.kind === "verification_review");
+        if (!task) {setActionError(t("ws.actions.reviewUnavailable"));return;}
+        setInstances(items);
+        setReviewRequest(previous => ({taskInstanceId:task.id,serial:(previous?.serial ?? 0)+1}));
+      }).catch(() => {if (active) setActionError(t("ws.actions.reviewUnavailable"));});
+    };
+    window.addEventListener(PRODUCT_REVIEW_EVENT,receive);
+    return () => {active=false;window.removeEventListener(PRODUCT_REVIEW_EVENT,receive);};
+  },[api,id,t]);
 
   // 首次加载失败时 view 永远是 null——错误盒子在下面 view 非空的分支里，
   // 之前这条路一直卡在"加载中……"，错误说了也白说（`error` 一直有值，用户
@@ -244,19 +281,21 @@ export function ProjectPanel({
       <p className="text-body-md text-muted-foreground">{t("ws.loading")}</p>
     );
   }
+  const confirmations = <>
+    {stateRequest && <StateRequestCard
+      productName={view.product.name} request={stateRequest} current={view.businessState}
+      onDecide={approve => void guard(() => api.decideStateRequest(id, stateRequest.to, approve))}
+    />}
+    <BatchContextApproval jobs={batchJobs} onApprove={j => void guard(() => api.approveJobContext(id, j.id, j.requestHash))}/>
+    {[...pending].sort((a,b)=>Number(b.id===reviewRequest?.taskInstanceId)-Number(a.id===reviewRequest?.taskInstanceId)).map(instance => <CheckpointCard key={instance.id} instance={instance} taskName={view.tasks.find(task=>task.id===instance.taskId)?.name} businessAdoption={instance.id===reviewRequest?.taskInstanceId}
+      onDecide={approve => void guard(() => api.decide(id, instance.id, approve))}/>) }
+  </>;
   return (
     <div className="flex flex-col gap-lg">
       {/* 项目名与产品名已经在标题栏和侧栏里常驻，这里不再重复一遍 —— 重复的
           身份信息不提供任何东西，只占掉首屏。留下的是**只有这里才说得清**的
           那部分：现在处在哪个业务阶段，以及这个项目的标识。 */}
-      <ProjectSummary
-        view={view}
-        instances={instances}
-        grants={grants}
-        bindings={bindings}
-        audit={audit}
-        chainOk={chainOk}
-      />
+      {chainOk === false && <strong className="error-box">{t("ws.integrityWarning")}</strong>}
       {error && <div className="error-box">{error}</div>}
 
       {/* 归属为空 = attribution 之前写下的记录。这不是一种受支持的状态，所以
@@ -310,25 +349,17 @@ export function ProjectPanel({
         </div>
       )}
 
-      {/* 产品提出的推进：与任务确认同一个位置、同一种分量 —— 人的决定压过导航，也压过
-          产品界面（它就钉在产品界面那一格的上方）。 */}
-      {stateRequest && (
-        <StateRequestCard
-          productName={view.product.name}
-          request={stateRequest}
-          current={view.businessState}
-          onDecide={(approve) => void guard(() => api.decideStateRequest(id, stateRequest.to, approve))}
-        />
+      {tab === "product"
+        ? <ProjectActionPanel count={confirmationCount} error={actionError} openRequest={reviewRequest}>{confirmations}</ProjectActionPanel>
+        : confirmations}
+
+      {tab !== "product" && (
+        <section className="project-settings-header"><h1 className="project-settings-title">{t('flow.settings')}</h1><nav aria-label={t('flow.settings')} className="project-config-nav">
+          {PROJECT_TABS.map(item => <a key={item.id} href={'#ws/'+id+'/'+item.id} aria-current={tab === item.id ? 'page' : undefined}>{t(item.labelKey)}</a>)}
+        </nav></section>
       )}
-
-      {pending.map((t) => (
-        <CheckpointCard
-          key={t.id}
-          instance={t}
-          onDecide={(approve) => void guard(() => api.decide(id, t.id, approve))}
-        />
-      ))}
-
+      {tab === "overview" && <ProjectLibrary api={api} projectId={id} productId={view.meta.productId} archived={!!view.meta.archivedAt}/> }
+      {tab === "overview" && <ProjectSummary view={view} instances={instances} grants={grants} bindings={bindings} audit={audit} chainOk={chainOk}/>}
       {tab === "overview" && (
         <OverviewTab
           api={api}
@@ -339,8 +370,7 @@ export function ProjectPanel({
           onArchive={() => void guard(() => api.archiveProject(id))}
         />
       )}
-      {/* 产品自己的界面（ADR-023；owner 2026-09-11 定位置：侧栏单独一格）。未决确认
-          与项目摘要在上面，钉在所有分区之上 —— 产品界面盖不住它们。 */}
+      {/* 产品占完整画布；确认面板由宿主在 iframe 外管理，产品不能自行批准或隐藏待办。 */}
       {tab === "product" && (
         <ProductTab
           api={api}
@@ -373,6 +403,7 @@ export function ProjectPanel({
         <TasksTab
           view={view}
           instances={instances}
+          businessUi={!!surface?.available}
           onLaunch={(task, inputs) =>
             void guard(() => api.startTask(id, task, inputs))
           }
@@ -382,6 +413,29 @@ export function ProjectPanel({
       {tab === "audit" && <AuditTab audit={audit} chainOk={chainOk} />}
     </div>
   );
+}
+
+/** Runtime-owned controls stay available without displacing the business canvas. */
+function ProjectActionPanel({count, error, openRequest, children}: {count: number; error: string | null; openRequest: object | null; children: ReactNode}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  useEffect(()=>{if(openRequest)setOpen(true);},[openRequest]);
+  if (!count && !open) return null;
+  return <Dialog open={open} onOpenChange={setOpen}>
+    <DialogTrigger asChild><Button className="project-actions-trigger">
+      {t("ws.actions.open", {count})}
+    </Button></DialogTrigger>
+    <DialogContent className="project-actions-dialog">
+      <DialogHeader>
+        <DialogTitle>{t("ws.actions.title")}</DialogTitle>
+        <DialogDescription>{t("ws.actions.description")}</DialogDescription>
+      </DialogHeader>
+      <div className="project-actions-body">
+        {error && <p role="alert" className="error-box">{error}</p>}
+        {count ? children : <p role="status">{t("ws.actions.empty")}</p>}
+      </div>
+    </DialogContent>
+  </Dialog>;
 }
 
 /**
@@ -509,7 +563,7 @@ function OverviewTab({
       {/* map 的参数原先叫 `t`，会盖住翻译函数；改叫 `run`（一次任务执行）。 */}
       {recent.map((run) => (
         <div key={run.id} className="card">
-          <b>{run.taskId}</b>{" "}
+          <b>{view.tasks.find(task=>task.id===run.taskId)?.name || run.taskId}</b>{" "}
           <StatusBadge tone={stateTone(run.state)}>
             {taskStateLabel(t, run.state)}
           </StatusBadge>
@@ -1246,13 +1300,28 @@ function BindingCard({
 
 /* ---------------- Tasks ---------------- */
 
+function needsBatchApproval(job: Awaited<ReturnType<Api["backgroundJobs"]>>[number]) {
+  return job.approvable && !job.approved && ["running", "waiting", "paused"].includes(job.state);
+}
+
+function BatchContextApproval({jobs,onApprove}:{jobs:Awaited<ReturnType<Api["backgroundJobs"]>>;onApprove:(job:Awaited<ReturnType<Api["backgroundJobs"]>>[number])=>void}) {
+  const t=useT();
+  return <>{jobs.filter(needsBatchApproval).map(j=><section className="card" key={j.id}>
+    <h2>{t("ws.batchApproval.title")}</h2><p>{j.label}</p><p>{t("ws.batchApproval.description",{count:j.steps,kb:Math.ceil(j.bytes/1024)})}</p>
+    <p className="text-body-sm text-muted-foreground">{t("ws.batchApproval.scope")}</p>
+    <Button onClick={()=>onApprove(j)}>{t("ws.batchApproval.approve")}</Button>
+  </section>)}</>;
+}
+
 function TasksTab({
   view,
   instances,
+  businessUi=false,
   onLaunch,
 }: {
   view: ProjectView;
   instances: TaskInstance[];
+  businessUi?: boolean;
   onLaunch: (task: string, inputs?: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -1260,8 +1329,8 @@ function TasksTab({
     <>
       {/* 智能在这里：业务契约声明的 AI 任务（Harness 执行 + 人工检查点），
           不是壳级助手（20-specs/10 §1.3 定位）。 */}
-      <SectionHeader level={2} title={t("ws.taskDefs.title")} icon="sparkles" />
-      {view.tasks.map((t) => (
+      {businessUi ? <p>{t("ws.taskDefs.businessFlow")}</p> : <SectionHeader level={2} title={t("ws.taskDefs.title")} icon="sparkles" />}
+      {!businessUi && view.tasks.map((t) => (
         <TaskLauncher key={t.id} def={t} onLaunch={(inputs) => onLaunch(t.id, inputs)} />
       ))}
       <SectionHeader level={2} title={t("ws.instances.title")} icon="list-checks" />
@@ -1269,7 +1338,7 @@ function TasksTab({
         <EmptyState icon="circle-dashed" title={t("ws.instances.empty")} />
       )}
       {[...instances].reverse().map((t) => (
-        <InstanceCard key={t.id} instance={t} />
+        <InstanceCard key={t.id} instance={t} taskName={view.tasks.find(task=>task.id===t.taskId)?.name} />
       ))}
     </>
   );
@@ -1290,7 +1359,7 @@ function TaskLauncher({
   const blocked = def.unrunnable.length > 0;
   return (
     <div className="card">
-      <div style={{ fontWeight: 600 }}>{def.id}</div>
+      <div style={{ fontWeight: 600 }}>{def.name || def.id}</div>
       <div className="text-body-sm text-muted-foreground">
         {t("ws.taskDef.inputs", {
           objective: def.objective,
@@ -1337,16 +1406,16 @@ function TaskLauncher({
   );
 }
 
-function InstanceCard({ instance }: { instance: TaskInstance }) {
+function InstanceCard({ instance,taskName }: { instance: TaskInstance;taskName?:string }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   return (
     <div className="card clickable" onClick={() => setOpen(!open)}>
       <div className="row" style={{ justifyContent: "space-between", margin: 0 }}>
         <span>
-          <b>{instance.taskId}</b>{" "}
+          <b>{taskName || instance.taskId}</b>{" "}
           <StatusBadge tone={stateTone(instance.state)}>
-            {instance.state}
+            {taskName && TASK_STATE_KEY[instance.state] ? t(TASK_STATE_KEY[instance.state]!) : instance.state}
           </StatusBadge>{" "}
           {/* 排队是**宿主此刻的调度情况**，不是任务状态，所以它是状态徽标旁边
               另一枚，而不是把状态改写成「排队中」—— 那个任务的状态确实还是
@@ -1367,6 +1436,7 @@ function InstanceCard({ instance }: { instance: TaskInstance }) {
       {instance.error && <div className="error-box">{instance.error}</div>}
       {open && (
         <div style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
+          {taskName && <code>{instance.taskId}</code>}
           {instance.verification.length > 0 && (
             <Table className="mb-sm">
               <TableHeader>
@@ -1463,9 +1533,13 @@ function StateRequestCard({
 
 function CheckpointCard({
   instance,
+  taskName,
+  businessAdoption=false,
   onDecide,
 }: {
   instance: TaskInstance;
+  taskName?: string;
+  businessAdoption?: boolean;
   onDecide: (approve: boolean) => void;
 }) {
   const t = useT();
@@ -1476,10 +1550,10 @@ function CheckpointCard({
       icon="shield-warning"
       title={
         kind === "context_confirm"
-          ? t("ws.confirm.contextTitle", { task: instance.taskId })
+          ? t("ws.confirm.contextTitle", { task: taskName || instance.taskId })
           : kind === "tool_ask"
-            ? t("ws.confirm.toolTitle", { task: instance.taskId })
-            : t("ws.confirm.reviewTitle", { task: instance.taskId })
+            ? t("ws.confirm.toolTitle", { task: taskName || instance.taskId })
+            : t("ws.confirm.reviewTitle", { task: taskName || instance.taskId })
       }
       /* 上下文那一档要说清用户在批准什么：资料作为「材料」送出去做推理，而其中
          任何看起来像指示的文字都不会被当作指示执行。 */
@@ -1488,11 +1562,11 @@ function CheckpointCard({
           ? t("ws.confirm.contextDesc")
           : kind === "tool_ask"
             ? t("ws.confirm.toolDesc")
-            : t("ws.confirm.reviewDesc")
+            : t(businessAdoption ? "ws.confirm.adoptDesc" : "ws.confirm.reviewDesc")
       }
       action={
         <div className="flex items-center gap-xs">
-          <Button onClick={() => onDecide(true)}>{t("ws.confirm.approve")}</Button>
+          <Button onClick={() => onDecide(true)}>{t(businessAdoption && kind === "verification_review" ? "ws.confirm.adopt" : "ws.confirm.approve")}</Button>
           <Button
             variant="destructive"
             confirmExempt={t("ws.confirm.exempt")}
@@ -1503,6 +1577,10 @@ function CheckpointCard({
         </div>
       }
     >
+      {taskName && <p className="text-body-sm">{t(kind === "context_confirm" ? "ws.confirm.materialCount" : "ws.confirm.checkCount",{count:kind === "context_confirm" ? (instance.contextSet?.length ?? 0) : instance.verification.length})}</p>}
+      <details open={!taskName}>
+      <summary>{t("ws.confirm.execution")}</summary>
+      {taskName && <code>{instance.taskId}</code>}
       {kind === "context_confirm" ? (
         <Table>
           <TableBody>
@@ -1534,8 +1612,31 @@ function CheckpointCard({
           </TableBody>
         </Table>
       )}
+      </details>
+      {kind === "verification_review" && Object.keys(instance.capabilityOutputs).length > 0 && (
+        <details className="mt-sm" open={!!taskName}>
+          <summary>{t("ws.confirm.preview")}</summary>
+          {Object.entries(instance.capabilityOutputs).map(([capability, content]) => (
+            <section key={capability}>
+              {!taskName && <p className="text-body-sm text-muted-foreground">{capability}</p>}
+              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-body-sm">{reviewText(content)}</pre>
+            </section>
+          ))}
+        </details>
+      )}
     </PanelCard>
   );
+}
+
+function reviewText(content: string): string {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (parsed && typeof parsed === "object" && "markdown" in parsed && typeof parsed.markdown === "string") return parsed.markdown;
+    if (parsed && typeof parsed === "object" && "chapters" in parsed && Array.isArray(parsed.chapters)) {
+      return parsed.chapters.map((chapter,index)=>`${index+1}. ${typeof chapter?.title === "string" ? chapter.title : ""}\n${typeof chapter?.purpose === "string" ? chapter.purpose : ""}`).join("\n\n");
+    }
+  } catch { /* Plain text is already a reviewable result. */ }
+  return content;
 }
 
 /* ---------------- Audit ---------------- */

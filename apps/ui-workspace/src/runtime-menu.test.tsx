@@ -47,6 +47,11 @@ async function open(): Promise<void> {
 
 afterEach(() => vi.restoreAllMocks());
 
+test('runtime remains ready when optional version and workspace names are absent',async()=>{
+ render(<RuntimeMenu api={fakeApi(()=>Promise.resolve(systemInfo()))} health={{ok:true}} session={{...signedIn(),workspace:undefined}}/>);
+ await open();expect(await screen.findByText('已就绪')).toBeInTheDocument();expect(screen.getByText('已连接')).toBeInTheDocument();
+});
+
 /** 徽标保持短：只是版本，详情在下拉里 —— 省出来的地方不该又被一串运行信息占回去。 */
 test("RuntimeMenu: 徽标只写运行环境与版本；详情要点开才看得到", async () => {
   render(

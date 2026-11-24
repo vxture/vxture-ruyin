@@ -46,14 +46,26 @@
 
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { hostname, tmpdir } from "node:os";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import test from "node:test";
 
 const MAIN = fileURLToPath(new URL("./main.js", import.meta.url));
 const PRODUCTS = resolve(fileURLToPath(new URL("../../../products", import.meta.url)));
+
+test("production daemon with no development fixture path has no built-in business agents", async () => {
+  const daemon=await startDaemon({RUYIN_PRODUCTS_DIR:""});
+  try {
+    const response=await daemon.get("/products");
+    assert.equal(response.status,200);assert.deepEqual(await response.json(),{items:[]});
+    const system=await (await daemon.get("/system")).json() as {productsDir:string};
+    assert.equal(system.productsDir,"");
+  } finally {await daemon.stop();}
+});
 
 /** 要一个真的空闲端口：写死一个数字会在并行跑测试时偶发地撞车。 */
 /* freePort() 删了 —— 它是一个 TOCTOU 竞态：先绑 0 号拿到号、关掉、再把号交给
@@ -82,10 +94,11 @@ interface Daemon {
  * `RUYIN_LOCATION_FILE` 也指到临时位置：不指的话它会读到这台机器上真实的指针
  * 文件，然后**用开发者自己的数据目录**跑测试 —— 那是能把人的数据搬走的那条路。
  */
-async function startDaemon(env: NodeJS.ProcessEnv = {}): Promise<Daemon> {
+async function startDaemon(env: NodeJS.ProcessEnv = {}, executable = process.execPath, prepare?: (dataDir: string) => void): Promise<Daemon> {
   const dataDir = mkdtempSync(join(tmpdir(), "ruyin-wiring-"));
   const locationFile = join(tmpdir(), `ruyin-wiring-loc-${process.pid}-${Date.now()}.json`);
   const token = "wiring-test-token";
+  prepare?.(dataDir);
   let out = "";
 
   // 子进程**不参与**覆盖率：头注释说 main.js 不在分母里，那是因为被 kill 掉的子进程
@@ -96,7 +109,8 @@ async function startDaemon(env: NodeJS.ProcessEnv = {}): Promise<Daemon> {
   // **删键没用，要给空串**：Node 的 child_process 会把父进程的 NODE_V8_COVERAGE 主动
   // 补给任何 env 里没有这个键的子进程（实测：delete 之后子进程照样拿到目录）；键在而
   // 值为空，它就不补，而空值也不会启用覆盖率。两种退出方式于是一视同仁。
-  const child: ChildProcess = spawn(process.execPath, [MAIN], {
+  const child: ChildProcess = spawn(executable, [MAIN], {
+    windowsHide: true,
     env: {
       ...process.env,
       NODE_V8_COVERAGE: "",
@@ -160,6 +174,28 @@ async function startDaemon(env: NodeJS.ProcessEnv = {}): Promise<Daemon> {
   };
 }
 
+void test("desktop claim uses this computer's OS-defined name and existing installation identity", async () => {
+  let received!: (body: {device:{id:string;name:string;platform:string}}) => void;
+  const claimed = new Promise<{device:{id:string;name:string;platform:string}}>(resolve => { received = resolve; });
+  const platform = createServer(async (req,res) => {
+    if(req.url === "/auth/native/claim") {
+      const chunks:Buffer[]=[]; for await(const chunk of req)chunks.push(Buffer.from(chunk));
+      received(JSON.parse(Buffer.concat(chunks).toString()));
+      res.writeHead(200,{"content-type":"application/json"}).end(JSON.stringify({rpsid:"synthetic-os-name",expiresInSec:3600}));
+    } else res.writeHead(404).end();
+  });
+  await new Promise<void>(resolve => platform.listen(0,"127.0.0.1",resolve));
+  let d: Daemon | undefined;
+  try {
+    d=await startDaemon({RUYIN_CONSOLE_API_BASE:`http://127.0.0.1:${(platform.address() as AddressInfo).port}`});
+    assert.equal((await d.post("/auth/login",{})).status,200);
+    const body=await claimed;
+    const system=await(await d.get("/system")).json() as {instanceId:string};
+    assert.deepEqual(body.device,{id:system.instanceId,name:hostname(),platform:process.platform});
+    assert.ok(body.device.name.length>0);
+  } finally {await d?.stop();platform.closeAllConnections();await new Promise<void>(resolve=>platform.close(()=>resolve()));}
+});
+
 void test("装配线：起得来、答得了 /health，且没有静默失败", async () => {
   const d = await startDaemon();
   try {
@@ -173,11 +209,59 @@ void test("装配线：起得来、答得了 /health，且没有静默失败", a
   }
 });
 
+test("slow connector preparation does not delay loopback readiness or admit tasks before tools are ready",async()=>{
+  const started=Date.now();
+  const d=await startDaemon({},process.execPath,dataDir=>{
+    writeFileSync(join(dataDir,"connectors.json"),JSON.stringify({items:[{
+      id:"slow",source:"lan",installedAt:new Date().toISOString(),state:"active",transport:"stdio",
+      command:process.execPath,args:[fileURLToPath(new URL("./fake-mcp-server.js",import.meta.url)),"--slow-init","18000"],
+    }]}));
+  });
+  try{
+    assert.ok(Date.now()-started<15000,"the shell health deadline must not depend on connector initialization");
+    assert.equal((await d.get("/health")).status,200);
+    assert.equal((await (await d.get("/system")).json()).startupState,"initializing");
+    const rejected=await d.post("/projects/prj_pending/tasks",{task:"anything"});
+    assert.equal(rejected.status,503);assert.equal((await rejected.json()).code,"RUNTIME_INITIALIZING");
+    assert.equal((await d.get("/projects")).status,200);
+    await waitFor(d,/connectors initialized/,25000);
+    assert.equal((await (await d.get("/system")).json()).startupState,"ready");
+    const connectors=await (await d.get("/connectors")).json();
+    assert.equal(connectors.items[0].health.ok,true);assert.ok(connectors.items[0].tools.length>0);
+    assert.notEqual((await d.post("/projects/prj_pending/tasks",{task:"anything"})).status,503);
+  }finally{await d.stop();}
+});
+
+void test("offline startup restores a skill interrupted between publication renames", async () => {
+  const data = mkdtempSync(join(tmpdir(), "ruyin-offline-recovery-"));
+  const product = "bidproposal", name = "recovered-style";
+  const root = join(data, "skills", "distributed", product);
+  const backup = join(root, `.ruyin-previous-${name}`);
+  mkdirSync(backup, { recursive: true });
+  writeFileSync(join(backup, "SKILL.md"), `---\nname: ${name}\ndescription: Offline recovered instructions\n---\n# Prior complete version\n`);
+  writeFileSync(join(backup, ".ruyin-skill.json"), JSON.stringify({ name, version: "1.0.0" }));
+  let d: Daemon | undefined;
+  try {
+    d = await startDaemon({ RUYIN_DATA_DIR: data });
+    const response = await d.get("/skills");
+    assert.equal(response.status, 200);
+    const body = await response.json() as { items: Array<{ name: string; layer: string }> };
+    assert.ok(body.items.some(item => item.name === name && item.layer === "distributed"));
+    assert.equal(existsSync(backup), false);
+    assert.match(readFileSync(join(root, name, "SKILL.md"), "utf8"), /Prior complete version/);
+    assert.match(d.log(), /capability surface: unavailable/);
+    assert.match(d.log(), /skill recovery bidproposal: restored=1, pending=0/);
+  } finally { await d?.stop(); rmSync(data, { recursive: true, force: true }); }
+});
+
 void test("装配线：**没接能力面就说没接** —— 「没接上」绝不能看起来像「在工作」", async () => {
   const d = await startDaemon();
   try {
-    assert.match(d.log(), /capability surface: NOT configured/);
-    assert.match(d.log(), /mock output/, "要说清后果，不只说没配");
+    assert.match(d.log(), /capability surface: unavailable/);
+    assert.match(d.log(), /generation requires a configured model service/);
+    assert.doesNotMatch(d.log(), /tasks will return mock output/);
+    const system=await (await d.get("/system")).json() as {capabilitySurface:string};
+    assert.equal(system.capabilitySurface,"unavailable");
   } finally {
     await d.stop();
   }
@@ -311,17 +395,23 @@ void test("装配线：上下文预算读到了（**日志断言，弱于上面�
  * 目录改回来的东西 —— 而改目录的界面正在它里面。所以必须**既警告、又起来**。
  */
 void test("装配线：数据目录在系统位置时，警告了但照样起得来", async () => {
-  // execPath 的上一级就是「应用自己的安装目录」那条规则要拒的地方。
-  const inAppDir = join(resolve(process.execPath, ".."), `ruyin-wiring-probe-${Date.now()}`);
-  const d = await startDaemon({ RUYIN_DATA_DIR: inAppDir });
+  // Model a writable installation without writing into the real Node install.
+  // The executable bytes/ABI are unchanged; the runtime sees its real execPath.
+  const installFixture = mkdtempSync(join(tmpdir(), "ruyin-wiring-install-"));
+  const executable = join(installFixture, basename(process.execPath));
+  const inAppDir = join(installFixture, "data");
+  copyFileSync(process.execPath, executable);
+  let d: Daemon | undefined;
   try {
+    d = await startDaemon({ RUYIN_DATA_DIR: inAppDir }, executable);
     assert.match(d.log(), /数据目录在一个不该放数据的位置/);
     assert.match(d.log(), /卸载会把数据一起删掉/);
     // **而且它起来了** —— 这半条和上半条一样重要。
     assert.equal((await d.get("/health")).status, 200);
   } finally {
-    await d.stop();
-    rmSync(inAppDir, { recursive: true, force: true });
+    await d?.stop();
+    if (resolve(installFixture, "..") !== resolve(tmpdir())) throw new Error("Unexpected installation fixture");
+    rmSync(installFixture, { recursive: true, force: true });
   }
 });
 
@@ -407,7 +497,10 @@ void test("装配线：RUYIN_SMOKE=1 时界面自检真的跑，且排在 PDF �
     );
     // 另外两条如实说「没有可试的」，而不是去起任何服务器。
     assert.match(log, /tools self-check: no vendored node server to try/);
-    assert.match(log, /uvx self-check: python runtime not installed/);
+    // 这一轮的 RUYIN_TOOLS_DIR 是个空目录 —— 没有随包的 uvx 服务器可试，就如实说没有。
+    // **不是**「Python 没装」：运行环境随安装包走（TD-042 ②，2026-09-19），这两句话
+    // 在真机上意味着完全不同的两件事，冒烟里也不许混着说。
+    assert.match(log, /uvx self-check: no seeded uvx server to try/);
   } finally {
     await d?.stop();
     rmSync(dist, { recursive: true, force: true });

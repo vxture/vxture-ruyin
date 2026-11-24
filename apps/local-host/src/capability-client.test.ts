@@ -271,3 +271,41 @@ test("resolver: 技能目录随请求发出；没有技能时不发这个字段"
     },
   );
 });
+
+test("resolver preserves opaque continuation and tool-call text across the wire", async () => {
+  const reasoning = { vendor: { signature: "opaque", blocks: ["keep", 3] } };
+  const reply = { kind: "tool_calls", content: "Read first", reasoning,
+    calls: [{ id: "c1", tool: "read_file", arguments: { path: "synthetic.md" } }] };
+  await withServer((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(reply)); }, async (base, seen) => {
+    const client = new CapabilityClient({ baseUrl: base });
+    assert.deepEqual(await client.turn(request()), reply);
+    await client.turn({ ...request(), messages: [{ role: "assistant", content: "Read first", reasoning,
+      toolCalls: reply.calls }, { role: "tool", callId: "c1", content: "source" }] });
+    const body = JSON.parse(seen.body!);
+    assert.deepEqual(body.messages[0].reasoning, reasoning);
+    assert.deepEqual(body.messages[0].toolCalls, reply.calls);
+  });
+});
+
+test("resolver honours explicit retryability, including a quota refusal wrapped in HTTP 503", async () => {
+  for (const [status, retryable] of [[503, false], [429, false], [501, true]] as const) {
+    await withServer((_req, res) => { res.writeHead(status); res.end(JSON.stringify({ code: "TEST", retryable, error: "provider decision" })); }, async base => {
+      await assert.rejects(new CapabilityClient({ baseUrl: base }).turn(request()), err => {
+        assert.equal(err instanceof TransientError, retryable); return true;
+      });
+    });
+  }
+});
+
+test("resolver refuses malformed calls and continuation rather than executing or dropping them", async () => {
+  const call = { id: "c", tool: "read_file", arguments: {} };
+  for (const reply of [
+    { kind: "tool_calls", calls: [] }, { kind: "tool_calls", calls: [call, call] },
+    { kind: "tool_calls", calls: [{ ...call, arguments: [] }] },
+    { kind: "tool_calls", calls: [call], content: 2 }, { kind: "content", content: "x", reasoning: [] },
+  ]) {
+    await withServer((_req, res) => { res.writeHead(200); res.end(JSON.stringify(reply)); }, async base => {
+      await assert.rejects(new CapabilityClient({ baseUrl: base }).turn(request()), /unreadable/);
+    });
+  }
+});

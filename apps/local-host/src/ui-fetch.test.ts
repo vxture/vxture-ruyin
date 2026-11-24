@@ -210,6 +210,12 @@ test("ui-fetch: 包根没有 index.html → invalid_bundle", async () => {
   assertNothingStored(storeDir);
 });
 
+test('downloaded agent UI cannot install native files even with a matching pinned digest',async()=>{
+ const zip=bundle([{name:'index.html',data:Buffer.from('<main>Agent</main>')},{name:'assets/helper.node',data:Buffer.from('native runtime')}]),storeDir=store();
+ const outcome=unavailable(await fetchUiBundle(contract(digest(zip)),{baseUrl:BASE,storeDir,fetchImpl:serve(zip)}));
+ assert.equal(outcome.reason,'invalid_bundle');assert.match(outcome.detail,/native executables/);assertNothingStored(storeDir);
+});
+
 /**
  * 解压炸弹：下载只有几十 KB，解开是 17 MiB 的一个条目 —— 界面包的单条目上限
  * （16 MiB）比产品包（64 MiB）紧，就是为了这种包。

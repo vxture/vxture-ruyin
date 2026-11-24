@@ -107,7 +107,7 @@ export interface ToolRegistrySources {
   supportsBuiltin: (id: string) => boolean;
   /** 技能登记册在不在（不在 = 两个技能工具也不在）。 */
   hasSkills: () => boolean;
-  connectors?: () => Promise<
+  connectors?: (localOnly?: boolean) => Promise<
     Array<{ id: string; source: string; state: string; health: { ok: boolean; detail?: string }; tools: string[]; bundled?: { blocked?: string } }>
   >;
   /** 预置的 MCP 服务器定义（tools/index.json）；缺省 = 没有预置工具层。 */
@@ -121,7 +121,7 @@ export interface ToolRegistrySources {
 export class ToolRegistryView {
   constructor(private readonly sources: ToolRegistrySources) {}
 
-  async list(): Promise<ToolView[]> {
+  async list(localOnly = false): Promise<ToolView[]> {
     const out: ToolView[] = [];
     for (const id of BUILTIN_TOOL_IDS) {
       const ok = this.sources.supportsBuiltin(id);
@@ -149,7 +149,7 @@ export class ToolRegistryView {
         ...(skills ? {} : { detailCode: "no-skill-registry" as ToolDetailCode }),
       });
     }
-    const connectors = (await this.sources.connectors?.()) ?? [];
+    const connectors = (await this.sources.connectors?.(localOnly)) ?? [];
     for (const c of connectors) {
       if (c.source === "bundled") continue; // 预置服务器按 mcp-server 列，见下
       const running = c.state === "active" && c.health.ok;

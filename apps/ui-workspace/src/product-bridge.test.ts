@@ -520,3 +520,18 @@ void test("ProductBridge 事件: 没打开 events 时不连事件流", async () 
   await flush();
   expect(fetchImpl).not.toHaveBeenCalled();
 });
+
+void test('library frame forwards only with a separate scoped credential and endpoint prefix', async () => {
+  const source = fakeSource();
+  const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ items: [] }));
+  bridge({
+    source, fetchImpl, endpointPrefix: '/library-bridge',
+    getBridgeToken: vi.fn().mockResolvedValue({ token: 'library-only', expiresAt: Date.now() + 600000 }),
+  });
+  post(source, { ns: 'ruyin.bridge', kind: 'request', id: 'library-list', method: 'GET', path: '/items' });
+  await flush();
+  expect(fetchImpl).toHaveBeenCalledWith('/library-bridge/items', expect.objectContaining({
+    headers: expect.objectContaining({ authorization: 'Bearer library-only' }),
+  }));
+  expect(outboxOf(source)[0]).toMatchObject({ kind: 'response', id: 'library-list' });
+});

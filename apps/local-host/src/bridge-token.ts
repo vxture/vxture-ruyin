@@ -87,6 +87,8 @@ export class BridgeTokens {
     return n;
   }
 
+  revokeAll():void { this.issued.clear(); }
+
   /** 当前还活着的张数 —— 只给用例与诊断用。 */
   size(now: number = Date.now()): number {
     this.sweep(now);

@@ -138,7 +138,7 @@ function pnpmLayout(repo, { stale = true } = {}) {
   // 直连依赖是软链——真实 pnpm 就是这个形状，也是 realpath 那一步要走的路。
   const link = join(repo.root, "apps/ui-workspace/node_modules/@vxture/design-system");
   mkdirSync(dirname(link), { recursive: true });
-  symlinkSync(join(repo.root, dsHome, "design-system"), link, "dir");
+  symlinkSync(join(repo.root, dsHome, "design-system"), link, process.platform === "win32" ? "junction" : "dir");
   return repo;
 }
 

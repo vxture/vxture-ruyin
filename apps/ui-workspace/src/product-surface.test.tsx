@@ -12,10 +12,10 @@
  */
 
 import { afterEach, expect, test, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Api } from "./api";
-import { PRODUCT_SANDBOX, ProductSurface, ProductTab, sameOrigin } from "./product-surface";
+import { PRODUCT_SANDBOX, ProductLibrarySurface, ProductSurface, ProductTab, productFrameEntry, sameOrigin } from "./product-surface";
 import type { SurfaceInfo } from "./product-surface-info";
 
 const SHA = "a".repeat(64);
@@ -41,16 +41,16 @@ afterEach(() => vi.restoreAllMocks());
  * 能把整个工作台导走，`allow-popups-to-escape-sandbox` 能甩掉沙箱，`allow-modals`
  * 能用原生弹框冒充工作台的确认框。少了 `allow-same-origin`，片二的桥静默失效。
  */
-test("PRODUCT_SANDBOX: 恰好这三项，一项不多一项不少", () => {
+test("PRODUCT_SANDBOX: scoped document downloads without popups or top navigation", () => {
   expect(PRODUCT_SANDBOX.split(/\s+/).sort()).toEqual(
-    ["allow-forms", "allow-same-origin", "allow-scripts"].sort(),
+    ["allow-forms", "allow-same-origin", "allow-scripts", "allow-downloads"].sort(),
   );
 });
 
 test("ProductSurface: 有界面时装一个 iframe，src 是守护进程给的入口（按摘要），sandbox 照常量给", () => {
   render(<ProductSurface api={fakeApi()} projectId="prj_1" surface={surface()} />);
   const frame = screen.getByTitle("产品界面") as HTMLIFrameElement;
-  expect(frame.getAttribute("src")).toBe(ENTRY);
+  expect(frame.getAttribute("src")).toBe(productFrameEntry(ENTRY, window.location.origin));
   expect(frame.getAttribute("sandbox")).toBe(PRODUCT_SANDBOX);
   expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
 });
@@ -155,7 +155,7 @@ test("ProductTab: 回答还没到时说加载中，不先装任何东西", () =>
 
 test("ProductTab: 可用 → 装产品界面", () => {
   renderTab(surface());
-  expect(screen.getByTitle("产品界面")).toHaveAttribute("src", ENTRY);
+  expect(screen.getByTitle("产品界面")).toHaveAttribute("src", productFrameEntry(ENTRY, window.location.origin));
 });
 
 /** 侧栏本不列这一格；直接敲地址进来的，如实说没有，并指向 Runtime 的各分区。 */
@@ -196,4 +196,84 @@ test("ProductTab: 项目已归档 → 说清产品界面不再装入，不说成
   renderTab({ productId: "bidproposal", available: false, reason: "archived" });
   expect(screen.getByText(/项目已归档，产品界面不再载入/)).toBeInTheDocument();
   expect(screen.queryByText(/这个产品没有自己的界面/)).not.toBeInTheDocument();
+});
+
+test("product frame includes only explicit parent origin and preserves the pinned asset URL", () => {
+  const url = new URL(productFrameEntry(ENTRY + "?theme=dark", "http://127.0.0.1:7420"));
+  expect(url.pathname).toBe("/" + SHA + "/");
+  expect(url.searchParams.get("hostOrigin")).toBe("http://127.0.0.1:7420");
+  expect(url.searchParams.get("theme")).toBe("dark");
+});
+import { productNavigation } from './product-navigation';
+test('product navigation validates bounded internal identifiers and unique labels',()=>{
+ expect(productNavigation([{id:'requirements',label:'Requirements'}])).toEqual([{id:'requirements',label:'Requirements'}]);
+ for(const items of [[{id:'https://bad',label:'x'}],[{id:'x',label:'x'},{id:'x',label:'y'}],[{id:'x',label:''}],Array.from({length:13},(_,i)=>({id:'s'+i,label:'x'}))])expect(productNavigation(items)).toBeNull();
+});
+test('workflow metadata rejects malformed timestamps and invalid completion ordering',()=>{
+ const row={id:'analysis',label:'Analysis',state:'complete',startedAt:'2026-11-19T01:00:00Z',completedAt:'2026-11-19T01:05:00Z'};
+ expect(productNavigation([row])).toEqual([row]);
+ for(const patch of [{state:'admin'},{startedAt:'yesterday'},{completedAt:'2026-11-18T01:00:00Z'},{state:'active'},{startedAt:undefined}])expect(productNavigation([{...row,...patch}])).toBeNull();
+});
+test('navigation metadata requires the mounted frame source and origin',()=>{
+ const spy=vi.fn();window.addEventListener('ruyin-product-navigation',spy);
+ const {container,unmount}=render(<ProductSurface api={fakeApi()} projectId="prj_1" surface={surface()} />);
+ const source=container.querySelector('iframe')!.contentWindow!;
+ const data={ns:'ruyin.navigation',kind:'register',items:[{id:'requirements',label:'Requirements'}]};
+ window.dispatchEvent(new MessageEvent('message',{source:window,origin:ORIGIN,data}));
+ window.dispatchEvent(new MessageEvent('message',{source,origin:'http://foreign.localhost',data}));
+ expect(spy).not.toHaveBeenCalled();
+ window.dispatchEvent(new MessageEvent('message',{source,origin:ORIGIN,data}));
+ expect(spy).toHaveBeenCalledTimes(1);
+ expect((spy.mock.calls[0]![0] as CustomEvent).detail.projectId).toBe('prj_1');
+ unmount();window.removeEventListener('ruyin-product-navigation',spy);
+});
+test('same pinned frame restores the current stage when the bridge effect reattaches',()=>{
+ const {container,rerender}=render(<ProductSurface api={fakeApi()} projectId="prj_1" surface={surface()}/>),source=container.querySelector('iframe')!.contentWindow!,post=vi.spyOn(source,'postMessage');
+ window.location.hash='#ws/prj_1/product/planning';window.dispatchEvent(new MessageEvent('message',{source,origin:ORIGIN,data:{ns:'ruyin.navigation',kind:'register',items:[{id:'requirements',label:'Requirements'},{id:'planning',label:'Planning'}]}}));expect(post).toHaveBeenLastCalledWith({ns:'ruyin.navigation',kind:'navigate',section:'planning'},ORIGIN);post.mockClear();
+ rerender(<ProductSurface api={fakeApi()} projectId="prj_1" surface={surface()}/>);expect(post).toHaveBeenLastCalledWith({ns:'ruyin.navigation',kind:'navigate',section:'planning'},ORIGIN);post.mockClear();window.location.hash='#ws/prj_1/product/requirements';window.dispatchEvent(new HashChangeEvent('hashchange'));expect(post).toHaveBeenLastCalledWith({ns:'ruyin.navigation',kind:'navigate',section:'requirements'},ORIGIN);post.mockClear();
+ rerender(<ProductSurface api={fakeApi()} projectId="prj_2" surface={surface()}/>);window.dispatchEvent(new HashChangeEvent('hashchange'));expect(post).not.toHaveBeenCalled();
+});
+
+test('library surface waits for metadata, uses only library credentials, and ignores project navigation',async()=>{
+ const api=fakeApi({librarySurface:vi.fn().mockResolvedValue(surface()),libraryToken:vi.fn().mockResolvedValue({token:'library-only',expiresAt:Date.now()+60000})});
+ const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify({items:[]})));
+ vi.stubGlobal('fetch',fetchMock);
+ const {unmount}=render(<ProductLibrarySurface api={api} productId="bidproposal"/>);
+ expect(screen.queryByTitle('产品界面')).not.toBeInTheDocument();
+ const frame=await screen.findByTitle('产品界面') as HTMLIFrameElement,source=frame.contentWindow!;
+ // Flush passive bridge attachment before sending an iframe request.
+ await act(async()=>{});
+ window.dispatchEvent(new MessageEvent('message',{source,origin:ORIGIN,data:{ns:'ruyin.bridge',kind:'request',id:'l1',method:'GET',path:'/resources'}}));
+ await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith('/library-bridge/resources',expect.objectContaining({headers:expect.objectContaining({authorization:'Bearer library-only'})})));
+ expect(api.libraryToken).toHaveBeenCalledWith('bidproposal');expect(api.bridgeToken).not.toHaveBeenCalled();
+ expect(fetchMock.mock.calls.some(([path])=>String(path).endsWith('/events'))).toBe(false);
+ unmount();vi.unstubAllGlobals();
+});
+
+test('library metadata refusal is visible and an undeclared library does not mount a frame',async()=>{
+ const {unmount}=render(<ProductLibrarySurface api={fakeApi({librarySurface:vi.fn().mockRejectedValue(Error('Library offline'))})} productId="bidproposal"/>);
+ expect(await screen.findByRole('alert')).toHaveTextContent('Library offline');unmount();
+ render(<ProductLibrarySurface api={fakeApi({librarySurface:vi.fn().mockResolvedValue({productId:'bidproposal',available:false})})} productId="bidproposal"/>);
+ expect(await screen.findByText(/产品尚未接入此板块|not connected resource data/)).toBeTruthy();
+ expect(screen.queryByTitle('产品界面')).toBeNull();
+});
+
+test('navigation rejects malformed registrations and falls back to the first internal stage',()=>{
+ const {container}=render(<ProductSurface api={fakeApi()} projectId="prj_1" surface={surface()}/>),source=container.querySelector('iframe')!.contentWindow!,post=vi.spyOn(source,'postMessage');
+ window.location.hash='#ws/prj_1/product/unknown';
+ for(const items of [[null],['bad'],[{id:'analysis',label:'Analysis',startedAt:42}]]){
+  expect(productNavigation(items)).toBeNull();
+  window.dispatchEvent(new MessageEvent('message',{source,origin:ORIGIN,data:{ns:'ruyin.navigation',kind:'register',items}}));
+ }
+ expect(post).not.toHaveBeenCalled();
+ window.dispatchEvent(new MessageEvent('message',{source,origin:ORIGIN,data:{ns:'ruyin.navigation',kind:'register',items:[{id:'analysis',label:'Analysis'}]}}));
+ expect(post).toHaveBeenLastCalledWith({ns:'ruyin.navigation',kind:'navigate',section:'analysis'},ORIGIN);
+});
+test('product review requests only open a host surface for bounded IDs from the mounted origin',()=>{
+ const spy=vi.fn();window.addEventListener('ruyin-product-review',spy);
+ const {container,unmount}=render(<ProductSurface api={fakeApi()} projectId="prj_1" surface={surface()}/>),source=container.querySelector('iframe')!.contentWindow!;
+ const data={ns:'ruyin.review',kind:'request',taskInstanceId:'task_1'};
+ for(const event of [{source:window,origin:ORIGIN,data},{source,origin:'http://foreign.localhost',data},{source,origin:ORIGIN,data:{...data,kind:'approve'}},...[undefined,42,'','x'.repeat(81),'../foreign'].map(taskInstanceId=>({source,origin:ORIGIN,data:{...data,taskInstanceId}}))])window.dispatchEvent(new MessageEvent('message',event));
+ expect(spy).not.toHaveBeenCalled();window.dispatchEvent(new MessageEvent('message',{source,origin:ORIGIN,data}));expect(spy).toHaveBeenCalledTimes(1);expect((spy.mock.calls[0]![0] as CustomEvent).detail).toEqual({projectId:'prj_1',taskInstanceId:'task_1'});
+ unmount();window.dispatchEvent(new MessageEvent('message',{source,origin:ORIGIN,data}));expect(spy).toHaveBeenCalledTimes(1);window.removeEventListener('ruyin-product-review',spy);
 });

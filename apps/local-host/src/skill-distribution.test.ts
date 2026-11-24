@@ -5,20 +5,32 @@
  */
 
 import { strict as assert } from "node:assert";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { pruneVerdict, refreshDistributedSkills, relativeOf } from "./skill-distribution.js";
+import { pruneVerdict, refreshDistributedSkills, relativeOf, recoverDistributedSkills, verifiedSkillCapability } from "./skill-distribution.js";
 
 function skillMd(name: string, description: string): string {
   return `---\nname: ${name}\ndescription: ${description}\n---\n# ${name}\n`;
 }
 
+interface SuppliedSkill {
+  content: string;
+  resources?: Array<{ uri: string; mimeType?: string; text?: string }>;
+  contentDigest?: string;
+  version?: string;
+  capabilityId?: string;
+  deliveryIntegrity?: "verified" | "unverified";
+  deliveryDigest?: string;
+  deliveryDigestFormat?: string;
+}
+
 interface Surface {
   configured: boolean;
-  catalogue: Array<{ name: string; description: string; version?: string }>;
-  docs: Record<string, { content: string; resources?: Array<{ uri: string; text?: string }>; contentDigest?: string; version?: string }>;
+  catalogue: Array<{ name: string; description: string; version?: string; capabilityId?: string }>;
+  docs: Record<string, SuppliedSkill>;
   calls: string[];
   fail?: boolean;
 }
@@ -193,4 +205,194 @@ test("refresh: 能力面返回一份空目录时，本地那份不会被删掉",
   assert.equal(existsSync(join(dir, "tender-style", "SKILL.md")), true);
   assert.equal(existsSync(join(dir, "excel-workflow", "SKILL.md")), true);
   rmSync(dir, { recursive: true, force: true });
+});
+
+function verifiedSurface(): Surface {
+  const s = surface();
+  s.catalogue = [{ name: "tender-style", description: "Synthetic style", capabilityId: "vxture.tender-style", version: "stable" }];
+  const doc: SuppliedSkill = { content: skillMd("tender-style", "Verified style"), capabilityId: "vxture.tender-style", version: "1.0.0",
+    contentDigest: "registered-contract-digest", deliveryIntegrity: "verified", deliveryDigestFormat: "skill-package-v1",
+    resources: [{ uri: "skill://vxture.tender-style/1.0.0/references/tone.md", mimeType: "text/markdown", text: "# Verified tone" },
+      { uri: "skill://vxture.tender-style/1.0.0/scripts/build.py", text: "print('never executed')" }] };
+  doc.deliveryDigest = deliveryDigest(doc);
+  s.docs = { "tender-style": doc };
+  return s;
+}
+
+function deliveryDigest(doc: SuppliedSkill): string {
+  const prefix = `skill://${doc.capabilityId}/${doc.version}/`;
+  return createHash("sha256").update(JSON.stringify({ content: doc.content, resources: (doc.resources ?? []).map(r => ({
+    mimeType: r.mimeType, path: r.uri.slice(prefix.length), text: r.text,
+  })) })).digest("hex");
+}
+
+test("verified supply is independently checked and installed as data; stable is never cached as a concrete version", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-verified-"));
+  try {
+    const s = verifiedSurface();
+    assert.deepEqual((await refreshDistributedSkills(cfg(s), "bidproposal", dir)).fetched, ["tender-style"]);
+    const skill = join(dir, "tender-style");
+    const receipt = JSON.parse(readFileSync(join(skill, ".ruyin-skill.json"), "utf8")) as { deliveryIntegrity: string; deliveryDigest: string };
+    assert.equal(receipt.deliveryIntegrity, "verified"); assert.equal(receipt.deliveryDigest, s.docs["tender-style"]!.deliveryDigest);
+    assert.equal(existsSync(join(skill, "scripts")), false);
+    assert.equal(verifiedSkillCapability(skill, "tender-style"), undefined, "script-dependent deliveries are not locally runnable");
+    s.calls = [];
+    assert.deepEqual((await refreshDistributedSkills(cfg(s), "bidproposal", dir)).unchanged, ["tender-style"]);
+    assert.equal(s.calls.length, 2, "stable must be checked rather than treated as an immutable pin");
+    s.docs["tender-style"]!.resources![0]!.text = "# New package bytes";
+    s.docs["tender-style"]!.deliveryDigest = deliveryDigest(s.docs["tender-style"]!);
+    assert.deepEqual((await refreshDistributedSkills(cfg(s), "bidproposal", dir)).fetched, ["tender-style"], "contract digest is not the delivery digest");
+    assert.equal(readFileSync(join(skill, "references/tone.md"), "utf8"), "# New package bytes");
+    s.docs["tender-style"]!.resources!.pop();
+    s.docs["tender-style"]!.deliveryDigest = deliveryDigest(s.docs["tender-style"]!);
+    await refreshDistributedSkills(cfg(s), "bidproposal", dir);
+    assert.equal(verifiedSkillCapability(skill, "tender-style"), "vxture.tender-style");
+    assert.equal(verifiedSkillCapability(skill, "another-name"), undefined);
+    assert.equal(verifiedSkillCapability(join(dir, "missing"), "tender-style"), undefined);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("tampered or mismatched verified deliveries preserve the installed bytes and receipt", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-integrity-"));
+  try {
+    const s = verifiedSurface(); await refreshDistributedSkills(cfg(s), "bidproposal", dir);
+    const before = readFileSync(join(dir, "tender-style/.ruyin-skill.json"), "utf8");
+    const original = structuredClone(s.docs["tender-style"]!);
+    for (const mutation of ["text", "resource", "capability", "uri", "version", "missing-digest", "format", "duplicate", "path", "missing-text"] as const) {
+      const doc = structuredClone(original);
+      if (mutation === "text") doc.content += "Changed";
+      if (mutation === "resource") doc.resources![0]!.text = "Tampered";
+      if (mutation === "capability") doc.capabilityId = "other.tender-style";
+      if (mutation === "uri") doc.resources![0]!.uri = "skill://other.tender-style/1.0.0/references/tone.md";
+      if (mutation === "version") doc.version = "2.0.0";
+      if (mutation === "missing-digest") delete doc.deliveryDigest;
+      if (mutation === "format") doc.deliveryDigestFormat = "unknown";
+      if (mutation === "duplicate") doc.resources!.push(doc.resources![0]!);
+      if (mutation === "path") doc.resources![0]!.uri = "skill://vxture.tender-style/1.0.0/references/../tone.md";
+      if (mutation === "missing-text") delete doc.resources![0]!.text;
+      s.docs["tender-style"] = doc;
+      const result = await refreshDistributedSkills(cfg(s), "bidproposal", dir);
+      assert.equal(result.failed.length, 1, mutation); assert.deepEqual(result.fetched, [], mutation);
+      assert.equal(readFileSync(join(dir, "tender-style/.ruyin-skill.json"), "utf8"), before, mutation);
+      assert.equal(readFileSync(join(dir, "tender-style/references/tone.md"), "utf8"), "# Verified tone", mutation);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a failed resource write preserves the old installation; a successful replacement removes old resources", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-staged-"));
+  try {
+    const s = surface(); await refreshDistributedSkills(cfg(s), "bidproposal", dir);
+    const old = readFileSync(join(dir, "tender-style/SKILL.md"), "utf8");
+    s.catalogue[0]!.version = "1.1.0";
+    s.docs["tender-style"] = { content: skillMd("tender-style", "Replacement"), version: "1.1.0", resources: [
+      { uri: "references/clash.md", text: "First" }, { uri: "references/clash.md/child.md", text: "Not a directory" },
+    ] };
+    const failed = await refreshDistributedSkills(cfg(s), "bidproposal", dir);
+    assert.equal(failed.failed.length, 1); assert.match(failed.failed[0]!.reason, /previous installation retained/);
+    assert.equal(readFileSync(join(dir, "tender-style/SKILL.md"), "utf8"), old);
+    assert.equal(readFileSync(join(dir, "tender-style/references/tone.md"), "utf8"), "# Tone\nFormal.");
+    assert.equal(readdirSync(dir).some(n => n.startsWith(".ruyin-stage-")), false);
+    s.docs["tender-style"]!.resources = [{ uri: "references/new.md", text: "Replacement reference" }];
+    assert.deepEqual((await refreshDistributedSkills(cfg(s), "bidproposal", dir)).fetched, ["tender-style"]);
+    assert.equal(existsSync(join(dir, "tender-style/references/tone.md")), false);
+    assert.equal(readFileSync(join(dir, "tender-style/references/new.md"), "utf8"), "Replacement reference");
+    assert.equal(readdirSync(dir).some(n => n.startsWith(".ruyin-stage-")), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("incomplete, invalid or duplicate catalogs cannot prune installed supply", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-catalog-"));
+  try {
+    const s = surface(); await refreshDistributedSkills(cfg(s), "bidproposal", dir);
+    for (const body of [null, {}, { skills: [] , status: { configured: true, complete: false } },
+      { skills: [{ name: "../bad" }] }, { skills: [s.catalogue[0], s.catalogue[0]] }]) {
+      const result = await refreshDistributedSkills({ ...cfg(s), fetchImpl: async () => Response.json(body) }, "bidproposal", dir);
+      assert.equal(result.status, "unreachable"); assert.deepEqual(result.removed, []);
+      assert.equal(existsSync(join(dir, "tender-style/SKILL.md")), true);
+      assert.equal(existsSync(join(dir, "excel-workflow/SKILL.md")), true);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("overlapping refreshes serialize for one directory without mixing callers or losing the newer result", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-refresh-order-"));
+  const first = verifiedSurface(), second = verifiedSurface();
+  second.docs["tender-style"]!.content = skillMd("tender-style", "Second caller result");
+  second.docs["tender-style"]!.deliveryDigest = deliveryDigest(second.docs["tender-style"]!);
+  const seen: string[] = [];
+  let release!: () => void, entered!: () => void;
+  const enteredFirst = new Promise<void>(done => { entered = done; });
+  const wait = new Promise<void>(done => { release = done; });
+  const fetchFor = (s: Surface, identity: string, block: boolean): typeof fetch => async (input, init) => {
+    const value = new Headers(init?.headers).get("authorization"); assert.equal(value, `Bearer ${identity}`);
+    seen.push(identity);
+    if (block && String(input).endsWith("/skills")) { entered(); await wait; }
+    return fakeFetch(s)(input, init);
+  };
+  try {
+    const a = refreshDistributedSkills({ ...cfg(first), token: async () => "first", fetchImpl: fetchFor(first, "first", true) }, "bidproposal", dir);
+    await enteredFirst;
+    const b = refreshDistributedSkills({ ...cfg(second), token: async () => "second", fetchImpl: fetchFor(second, "second", false) }, "bidproposal", join(dir, "."));
+    await new Promise<void>(done => setImmediate(done));
+    assert.deepEqual(seen, ["first"]);
+    release();
+    assert.deepEqual((await a).fetched, ["tender-style"]);
+    assert.deepEqual((await b).fetched, ["tender-style"]);
+    assert.deepEqual(seen, ["first", "first", "second", "second"]);
+    assert.match(readFileSync(join(dir, "tender-style/SKILL.md"), "utf8"), /Second caller result/);
+  } finally { release(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("interrupted publication restores the valid previous installation before any network request", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-recover-"));
+  try {
+    const s = verifiedSurface(); await refreshDistributedSkills(cfg(s), "bidproposal", dir);
+    const installed = join(dir, "tender-style"), backup = join(dir, ".ruyin-previous-tender-style");
+    renameSync(installed, backup);
+    const stage = join(dir, ".ruyin-stage-aborted"); mkdirSync(stage); writeFileSync(join(stage, "SKILL.md"), "Partial new content");
+    let asked = false;
+    const result = await refreshDistributedSkills({ baseUrl: "https://synthetic.test", fetchImpl: async () => {
+      asked = true; assert.equal(existsSync(join(installed, "SKILL.md")), true); throw Error("offline");
+    } }, "bidproposal", dir);
+    assert.equal(asked, true); assert.equal(result.status, "unreachable");
+    assert.equal(existsSync(backup), false);
+    assert.match(readFileSync(join(installed, "SKILL.md"), "utf8"), /Verified style/);
+    assert.equal(existsSync(stage), true, "anonymous staging data is not a completed installation");
+    assert.deepEqual(recoverDistributedSkills(dir), { restored: [], pending: [] });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("recovery discards a completed old backup only when the installed version is valid", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-recover-old-"));
+  try {
+    const s = verifiedSurface(); await refreshDistributedSkills(cfg(s), "bidproposal", dir);
+    const installed = join(dir, "tender-style"), backup = join(dir, ".ruyin-previous-tender-style");
+    mkdirSync(backup);writeFileSync(join(backup, "SKILL.md"), skillMd("tender-style", "Old complete version"));
+    writeFileSync(join(backup, ".ruyin-skill.json"), JSON.stringify({ name: "tender-style" }));
+    assert.deepEqual(recoverDistributedSkills(dir), { restored: [], pending: [] });
+    assert.equal(existsSync(backup), false);assert.match(readFileSync(join(installed, "SKILL.md"), "utf8"), /Verified style/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("invalid, conflicting or linked recovery targets are retained and block destructive refresh", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ruyin-recover-refusal-"));
+  const outside = mkdtempSync(join(tmpdir(), "ruyin-recover-outside-"));
+  try {
+    const backup = join(dir, ".ruyin-previous-tender-style");mkdirSync(backup);
+    writeFileSync(join(backup, "SKILL.md"), skillMd("tender-style", "Old complete version"));
+    writeFileSync(join(backup, ".ruyin-skill.json"), JSON.stringify({ name: "mismatch" }));
+    assert.deepEqual(recoverDistributedSkills(dir).pending, ["tender-style"]);
+    writeFileSync(join(backup, ".ruyin-skill.json"), JSON.stringify({ name: "tender-style" }));
+    mkdirSync(join(dir, "tender-style"));writeFileSync(join(dir, "tender-style/SKILL.md"), "Partial invalid installation");
+    assert.deepEqual(recoverDistributedSkills(dir).pending, ["tender-style"]);
+    let reads = 0;
+    const result = await refreshDistributedSkills({ baseUrl: "https://synthetic.test", fetchImpl: async () => { reads++; return Response.json({ skills: [] }); } }, "bidproposal", dir);
+    assert.equal(result.status, "unreachable");assert.equal(reads, 0);assert.equal(existsSync(backup), true);
+    const linkedRoot = join(dir, "linked");symlinkSync(outside, linkedRoot, "junction");
+    assert.deepEqual(recoverDistributedSkills(linkedRoot).pending, ["directory"]);
+    const linkedBackup = join(dir, ".ruyin-previous-linked");symlinkSync(outside, linkedBackup, "junction");
+    assert.ok(recoverDistributedSkills(dir).pending.includes("linked"));assert.deepEqual(readdirSync(outside), []);
+    assert.deepEqual(recoverDistributedSkills(join(dir, "missing")), { restored: [], pending: [] });
+  } finally { rmSync(dir, { recursive: true, force: true });rmSync(outside, { recursive: true, force: true }); }
 });

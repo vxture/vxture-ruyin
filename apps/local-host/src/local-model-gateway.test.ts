@@ -62,6 +62,16 @@ const contentReply = (content: string) => ({
 });
 
 describe("LocalModelGateway", () => {
+  it("keeps the timeout active while waiting for the response body",async()=>{
+    globalThis.fetch=(async(_url:any,init:any)=>({ok:true,status:200,json:()=>new Promise((_resolve,reject)=>init.signal.addEventListener('abort',()=>reject(Error('body deadline')),{once:true}))})) as typeof fetch;
+    await assert.rejects(()=>new LocalModelGateway({...CONFIG,timeoutMs:20}).turn(req()),e=>e instanceof LocalModelError&&e.retryable);
+  });
+  it("rejects truncated or filtered generation and verification even when partial JSON looks valid",async()=>{
+    for(const capability of ["draft","verify:batch_structure_review"])for(const reason of ["length","content_filter"]){
+      stubFetch({choices:[{finish_reason:reason,message:{content:'{"passed":true}'}}]});
+      await assert.rejects(()=>new LocalModelGateway(CONFIG).turn(req({capability})),/incomplete/);
+    }
+  });
   it("回内容就是 content 回合", async () => {
     stubFetch(contentReply("初稿如下……"));
     const turn = await new LocalModelGateway(CONFIG).turn(req());
@@ -156,6 +166,38 @@ describe("LocalModelGateway", () => {
 
   describe("验证回合", () => {
     const vreq = () => req({ capability: "verify:r1", tools: [] });
+
+    it("reviews generator turns as complete labelled data without replaying a thinking session", async () => {
+      const { seen } = stubFetch(contentReply("Unable to verify"));
+      const messages: CapabilityTurnRequest["messages"] = [
+        { role: "user", content: "Start" },
+        { role: "assistant", content: "", toolCalls: [{ id: "c1", tool: "read_file", arguments: { path: "source" } }] },
+        { role: "tool", callId: "c1", content: "Backup daily", isError: false },
+        { role: "assistant", content: "Draft: backup monthly" },
+      ];
+      await new LocalModelGateway(CONFIG).turn(req({ capability: "verify:source_consistency", messages }));
+      const body = seen[0]!.body;
+      assert.deepEqual(body.messages.map((m: any) => m.role), ["system", "user"]);
+      assert.deepEqual(JSON.parse(body.messages[1].content), messages);
+      assert.match(body.messages[0].content, /source_consistency/);
+      assert.match(body.messages[0].content, /untrusted evidence/);
+      assert.equal(body.model, CONFIG.model);
+      assert.equal(body.thinking, undefined);
+    });
+
+    it("negotiates only an explicit unsupported tool_choice response without disabling thinking", async () => {
+      const bodies: any[] = [];
+      globalThis.fetch = (async (_url: any, init: any) => {
+        const body = JSON.parse(init.body); bodies.push(body);
+        if (body.tool_choice) return new Response(JSON.stringify({error:{message:"Thinking mode does not support this tool_choice"}}), {status:400});
+        return new Response(JSON.stringify({choices:[{message:{tool_calls:[{id:"v",function:{name:"report_verdict",arguments:'{"passed":true}'}}]}}]}), {status:200});
+      }) as typeof fetch;
+      const gateway = new LocalModelGateway(CONFIG);
+      assert.deepEqual(await gateway.turn(vreq()), {kind:"verdict",passed:true});
+      assert.equal(bodies.length,2);assert.equal(bodies[0].tool_choice,"required");assert.equal(bodies[1].tool_choice,undefined);
+      assert.equal(bodies[1].model,CONFIG.model);assert.equal(bodies[1].thinking,undefined);assert.deepEqual(bodies[0].messages,bodies[1].messages);
+      await gateway.turn(vreq());assert.equal(bodies.length,3);assert.equal(bodies[2].tool_choice,undefined);
+    });
 
     it("只提供 report_verdict 一个函数，并要求必须调它", async () => {
       const { seen } = stubFetch({

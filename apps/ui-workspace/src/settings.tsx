@@ -58,29 +58,26 @@ import {
   type ComponentState,
   type UpdateCheck,
   type EnvProbeRow,
-  type PythonRuntimeStatus,
-  type PythonRuntimeState,
-  type PythonStepCode,
-  type PythonFailureCode,
   type ToolView,
   type CapabilityRouting,
   type CapabilityCatalogPage,
-  type CatalogItem,
-  type CatalogSourceStatus,
   type DataDirCheck,
   type HardwareInfo,
   type SessionInfo,
   type SystemInfo,
   type PrivateModelView,
 } from "./api";
-import { consoleAppBaseOf } from "./platform-base";
+import { accountsUrl } from "./platform-base";
+import { DesktopDevicesSection } from "./desktop-devices";
+import {RecoverySettings,DiagnosticsSettings} from "./recovery-settings";
+import { CapabilityLibrary } from "./capability-library";
+import { readCapabilityInventory } from "./capability-inventory";
 // SectionId/SETTINGS_SECTIONS live in their own module (settings-sections.ts)
 // so the sidebar can know the section list without pulling in this file's
 // DS-heavy SettingsView - see that file's header comment (TD-011②).
 export { SETTINGS_SECTIONS, type SectionId } from "./settings-sections";
 import { resolveSection, type SectionId } from "./settings-sections";
 import { NoticeBar } from "./notice-bar";
-import { groupCapabilities } from "./capability-groups";
 import { useHostChrome } from "./host-chrome";
 
 import { BrandInfoBlock } from "./brand-info";
@@ -366,6 +363,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
  */
 function AccountSection({ session, api }: { session: SessionInfo | null; api: Api }) {
   const t = useT();
+  const locale = useLocale();
   if (!session?.signedIn) {
     return (
       <>
@@ -381,9 +379,7 @@ function AccountSection({ session, api }: { session: SessionInfo | null; api: Ap
     );
   }
   const p = session.profile;
-  // 「个人信息」页落在 console-bff 本体上，不是官网 consoleBase（owner 2026-09-16
-  // audit：与「用户中心」「配额用量」同一类错，见 user.tsx 的 consoleAppBase 说明）。
-  const profileUrl = `${consoleAppBaseOf(session)}/profile`;
+  const profileUrl = accountsUrl(session, locale);
   const name = p?.name ?? p?.email ?? t("user.defaultName");
   const verified = (ok?: boolean) =>
     ok === undefined ? undefined : ok ? (
@@ -458,6 +454,7 @@ function AccountSection({ session, api }: { session: SessionInfo | null; api: Ap
           </span>
         </div>
       </SettingsBlock>
+      <DesktopDevicesSection api={api} />
       <PreferencesBlock api={api} />
     </>
   );
@@ -582,6 +579,7 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
   };
   return (
     <>
+      <WindowCloseSetting api={api}/>
       <SettingsBlock
         icon="folder-open"
         title={t("set.storage.title")}
@@ -633,6 +631,8 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
         />
       </SettingsBlock>
 
+      <SettingsBlock icon="folder-open" title={t("recovery.title")}><RecoverySettings api={api}/></SettingsBlock>
+      <SettingsBlock icon="info" title={t("diagnostics.title")}><DiagnosticsSettings api={api}/></SettingsBlock>
       <SettingsBlock
         icon="lock"
         title={t("set.crypto.title")}
@@ -727,6 +727,35 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
   );
 }
 
+/** A host-owned preference: one value shared by desktop and browser settings. */
+function WindowCloseSetting({api}:{api:Api}){
+  const t=useT();
+  const [action,setAction]=useState<"background"|"exit"|null>(null);
+  const [loading,setLoading]=useState(true),[saving,setSaving]=useState(false),[error,setError]=useState(false);
+  const generation=useRef(0);
+  const load=async()=>{
+    const request=++generation.current;setLoading(true);setError(false);
+    try{const value=await api.windowClose();if(request===generation.current)setAction(value.action);}
+    catch{if(request===generation.current)setError(true);}
+    finally{if(request===generation.current)setLoading(false);}
+  };
+  useEffect(()=>{void load();return()=>{generation.current++;};},[api]);
+  const save=async(next:"background"|"exit")=>{
+    const request=++generation.current;setSaving(true);setError(false);
+    try{const value=await api.setWindowClose(next);if(request===generation.current)setAction(value.action);}
+    catch{if(request===generation.current)setError(true);}
+    finally{if(request===generation.current)setSaving(false);}
+  };
+  return <SettingsBlock icon="desktop" title={t("set.window.title")}>
+    <Row label={t("set.window.close")}><NativeSelect aria-label={t("set.window.close")} value={action??""} disabled={loading||saving||action===null} onChange={e=>void save(e.target.value as "background"|"exit")}>
+      {action===null&&<option value="">{t(loading?"set.window.loading":"set.window.unavailable")}</option>}
+      <option value="background">{t("set.window.background")}</option><option value="exit">{t("set.window.exit")}</option>
+    </NativeSelect></Row>
+    <p className="set-note">{t("set.window.note")}</p>
+    {error&&<p className="set-note flex items-center gap-sm" role="alert">{t(action===null?"set.window.loadFailed":"set.window.saveFailed")}{action===null&&<Button variant="outline" size="sm" onClick={()=>void load()}>{t("set.window.retry")}</Button>}</p>}
+  </SettingsBlock>;
+}
+
 /* ---------------- 连接器 ---------------- */
 
 /**
@@ -739,6 +768,7 @@ function SystemSection({ system, api }: { system: SystemInfo | null; api: Api })
 function ConnectorsSection({ api }: { api: Api }) {
   const t = useT();
   const [items, setItems] = useState<ConnectorView[] | null>(null);
+  const [managedTools,setManagedTools]=useState<ToolView[]>([]);
   const [unavailable, setUnavailable] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
@@ -758,6 +788,8 @@ function ConnectorsSection({ api }: { api: Api }) {
         setFailed(String((e as Error).message));
       }
     }
+    try {setManagedTools((await api.tools()).items);}catch{/* Legacy hosts still show their connector cards. */}
+
   };
   useEffect(() => {
     void reload();
@@ -794,6 +826,7 @@ function ConnectorsSection({ api }: { api: Api }) {
   };
 
   return (
+    <>
     <SettingsBlock
       icon="plugs-connected"
       title={t("set.conn.title")}
@@ -812,7 +845,7 @@ function ConnectorsSection({ api }: { api: Api }) {
         <p className="set-note">{unavailable}</p>
       ) : items === null ? (
         <p className="set-note">…</p>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && managedTools.every(tool=>tool.kind!=="mcp-server") ? (
         <p className="set-note">{t("set.conn.none")}</p>
       ) : (
         /* 每个连接器一张卡（owner 2026-09-16，原来共用「一行就是一行」的
@@ -826,14 +859,30 @@ function ConnectorsSection({ api }: { api: Api }) {
             <ConnectorCard
               key={c.id}
               c={c}
+              api={api} onRefresh={reload} managedTool={managedTools.find(tool=>tool.id===c.id && tool.kind==="mcp-server")}
               onEnable={() => void enable(c.id)}
               onStop={() => void stop(c.id)}
               onRemove={() => void remove(c.id)}
             />
           ))}
+          {managedTools.filter(tool=>tool.kind==="mcp-server"&&!items.some(c=>c.id===tool.id)).map(tool=>
+            <li className="connector-card" key={tool.id}>
+              <details>
+                <summary className="capability-provider-summary">
+                  <Icon name="plugs-connected" size="md"/>
+                  <code className="row-main">{tool.id}</code>
+                  <StatusBadge tone={TOOL_STATUS[tool.status].tone}>{t(TOOL_STATUS[tool.status].key)}</StatusBadge>
+                </summary>
+                <ul className="row-list" aria-label={t("set.tools.groupAria",{group:t("inventory.localCopies")})}>
+                  <LocalToolRow api={api} tool={tool} onRefresh={reload}/>
+                </ul>
+              </details>
+            </li>)}
         </ul>
       )}
     </SettingsBlock>
+    <CloudConnectorListing api={api}/>
+    </>
   );
 }
 
@@ -846,21 +895,45 @@ function ConnectorsSection({ api }: { api: Api }) {
  * 工具都没暴露的，箭头直接禁用——给一个点开什么都没有的箭头，比不给箭头
  * 更糟。
  */
+function CloudConnectorListing({api}:{api:Api}){
+  const t=useT(),locale=useLocale();
+  const [page,setPage]=useState<CapabilityCatalogPage|null>(null),[failed,setFailed]=useState(false),[busy,setBusy]=useState(false);
+  const generation=useRef(0);
+  const load=async(refresh=false)=>{
+    const request=++generation.current;setBusy(true);setFailed(false);
+    try{if(refresh)await api.refreshCapabilityCatalog("manual");const result=await readCapabilityInventory(api,"connector");
+      if(request===generation.current)setPage(result);
+    }catch{if(request===generation.current)setFailed(true);}
+    finally{if(request===generation.current)setBusy(false);}
+  };
+  useEffect(()=>{setPage(null);void load();return()=>{generation.current++;};},[api]);
+  return <SettingsBlock icon="cloud" title={t("inventory.cloudConnectors")} desc={t("inventory.cloudConnectorsNote")}
+    collapsible defaultOpen={false} count={page?.items.filter(row=>row.primitiveType==="connector").length}
+    aside={<Button size="sm" variant="outline" disabled={busy} onClick={()=>void load(true)}>{t(busy?"set.refreshing":"set.refresh")}</Button>}>
+    {busy&&<p className="set-note">{t("inventory.loading")}</p>}
+    {(failed||page?.source.state==="unavailable"||page?.source.state==="never")&&<p className="set-note">{t("inventory.cloudUnavailable")}</p>}
+    {page?.source.state==="stale"&&<p className="set-note">{t("inventory.cloudStale")}</p>}
+    <ul className="row-list" aria-label={t("inventory.cloudConnectors")}>{page?.items.filter(row=>row.primitiveType==="connector").map(row=>
+      <li key={row.capabilityId} className="row-item"><span className="row-main">{row.displayName?.[locale]??row.title}</span><code>{row.capabilityId}</code><span>{row.summary}</span></li>)}</ul>
+  </SettingsBlock>;
+}
+
 function ConnectorCard({
-  c,
+  c, api, managedTool, onRefresh,
   onEnable,
   onStop,
   onRemove,
 }: {
   c: ConnectorView;
+  api: Api; managedTool?: ToolView; onRefresh:()=>Promise<void>;
   onEnable: () => void;
   onStop: () => void;
   onRemove: () => void;
 }) {
   const t = useT();
   const running = c.state === "active";
-  const expandable = running && c.tools.length > 0;
-  const [open, setOpen] = useState(expandable);
+  const expandable = running && c.tools.length > 0 || !!managedTool;
+  const [open, setOpen] = useState(running && c.tools.length > 0);
   const toggle = () => setOpen((v) => !v);
 
   const head = (
@@ -910,14 +983,14 @@ function ConnectorCard({
                 : t("set.conn.stopped")}
               </StatusBadge>
             )}
-            {c.state === "stashed" && (
+            {c.state === "stashed" && !managedTool && (
               <Button variant="outline" size="sm" onClick={onEnable}>
                 {t("set.conn.enable")}
                 </Button>
             )}
             {/* 预置的随安装包来，卸不掉，只能停用；用户装的才有「卸载」。 */}
             {c.source === "bundled" ? (
-              c.state === "active" && (
+              c.state === "active" && !managedTool && (
                 <Button variant="ghost" size="sm" onClick={onStop}>
                   {t("set.conn.disable")}
                   </Button>
@@ -945,6 +1018,7 @@ function ConnectorCard({
       </div>
       {expandable && open && (
         <div className="connector-card-tools">
+          {running && c.tools.length>0 && <>
           <span className="connector-card-tools-label">{t("set.conn.toolsLabel")}</span>
           {/* 概要说清「这份清单是干嘛的」，不是重复标题（owner 2026-09-16：
               「暴露的工具」不够人话）。≤30 字，独占一行、撑满容器宽度。 */}
@@ -956,6 +1030,11 @@ function ConnectorCard({
               </code>
             ))}
           </div>
+          </>}
+          {managedTool&&<ul className="row-list" aria-label={t("set.tools.groupAria",{group:t("inventory.localCopies")})}>
+            <LocalToolRow api={api} tool={managedTool} onRefresh={onRefresh}/>
+          </ul>}
+
         </div>
       )}
     </li>
@@ -1382,7 +1461,7 @@ function DatabaseSection() {
   return (
     <div className="card">
       <EmptyState
-        icon="table"
+        icon="database"
         title={t("set.db.title")}
         description={t("set.db.desc")}
       />
@@ -1805,23 +1884,24 @@ function mb(n: number): string {
 }
 
 /**
- * 「工具」块顶上那句常驻事实。数的是**能不能起**，不是清单上有多少条 ——
- * 「预置 10 个」而其中 7 个在干净机器上起不来，是上一版清单犯过的错。
+ * 「技能」块顶上那句（owner 2026-09-19：这一层也要说清有几条用不上、缺什么）。
+ *
+ * 技能不需要运行环境 —— 它们是写给智能体看的指令，读得懂就用得上。真正用不上的
+ * 只有两种：**带脚本的**（TD-005：OS 级执行沙箱就位之前，脚本一律不在本机跑），
+ * 和**被更近一层同名技能盖住的**（那一条生效，这一条不生效）。两种都没有时这半
+ * 句话不出现。
  */
-function bundledSummary(tools: ToolView[], t: TFn): string {
-  const servers = tools.filter((t) => t.kind === "mcp-server");
-  const bundled = servers.filter((t) => t.launchable && !t.component);
-  // `launchable` 只说「有启动规格」，不说「此刻起得来」——差一个环境变量、差一个
-  // 外部程序的也在里面。把它们算进「不下载就能起」，就是上一版「预置 10 个」那个
-  // 错的小一号版本：数字对不上用户点下去看到的东西。
-  const blocked = bundled.filter((t) => t.status !== "available" && t.status !== "registered").length;
-  const needs = servers.filter((t) => t.component && t.component.state !== "acquired").length;
-  return (
-    t("set.cap.bundledSummary", { n: bundled.length }) +
-    (blocked > 0 ? t("set.cap.bundledBlocked", { n: blocked }) : "") +
-    (needs > 0 ? t("set.cap.bundledNeeds", { n: needs }) : t("set.cap.bundledEnd"))
-  );
+function skillsSummary(items: SkillView[], t: TFn): string {
+  const scripted = items.filter((x) => x.hasScripts).length;
+  const shadowed = items.filter((x) => x.shadowedBy).length;
+  const parts: string[] = [];
+  if (scripted > 0) parts.push(t("set.skills.blockedScripts", { n: scripted }));
+  if (shadowed > 0) parts.push(t("set.skills.blockedShadowed", { n: shadowed }));
+  const base = t("set.skills.desc");
+  if (parts.length === 0) return base;
+  return base + t("set.skills.blocked", { n: scripted + shadowed, reasons: parts.join(t("common.listSep")) });
 }
+
 /** 三档路由的名字，按语言给（守护进程只给 `mode`）。 */
 const ROUTE_MODE_KEY: Record<CapabilityRouting["current"]["mode"], MessageKey> = {
   local_only: "set.cap.route.localOnly",
@@ -1852,83 +1932,12 @@ const TOOL_DETAIL_KEY: Record<string, MessageKey> = {
   blocked: "set.tools.detail.blocked",
 };
 
-/** 正在做哪一步（守护进程只给码）。 */
-const PYTHON_STEP_KEY: Record<PythonStepCode, MessageKey> = {
-  "acquire-uv": "set.python.step.acquireUv",
-  "install-python": "set.python.step.installPython",
-  "warm-cache": "set.python.step.warmCache",
-  "verify-offline": "set.python.step.verifyOffline",
-};
-
 /**
- * 没装成是因为什么。**「没下载成功」与「试跑没通过」不能是同一句话** —— 前者
- * 再点一次多半就好了，后者再点一百次也是同一个结果。守护进程那句原文（uv 自己
- * 说的话）一个字都不上屏。
+ * 随包的运行环境。**名字是专名，不翻译**（与 Runos / Runtime 同一条口径）；顺序固定，
+ * 免得两次进来看到的排列不一样。
  */
-/** 徽章上那两三个字。 */
-const PYTHON_STATE_KEY: Record<PythonRuntimeState, MessageKey> = {
-  "not-acquired": "set.python.badge.notInstalled",
-  "not-provisioned": "set.python.badge.partial",
-  stale: "set.python.badge.stale",
-  provisioning: "set.python.badge.installing",
-  ready: "set.python.badge.ready",
-  failed: "set.python.badge.failed",
-};
-
-const PYTHON_TONE: Record<PythonRuntimeState, "success" | "warning" | "danger" | "neutral"> = {
-  "not-acquired": "neutral",
-  "not-provisioned": "warning",
-  stale: "warning",
-  provisioning: "neutral",
-  ready: "success",
-  failed: "danger",
-};
-
-/** 按钮上那两个字。**「安装」与「重新安装」不是同一句话** —— 装过的人要知道他没记错。 */
-const PYTHON_ACTION_KEY: Record<PythonRuntimeState, MessageKey> = {
-  "not-acquired": "set.python.install",
-  "not-provisioned": "set.python.resume",
-  stale: "set.python.reinstall",
-  provisioning: "set.python.install",
-  ready: "set.python.reinstall",
-  failed: "set.python.retry",
-};
-
-const PYTHON_FAIL_KEY: Record<PythonFailureCode, MessageKey> = {
-  "no-config": "set.python.fail.noConfig",
-  "uv-missing": "set.python.fail.download",
-  "acquire-failed": "set.python.fail.download",
-  "install-python-failed": "set.python.fail.installPython",
-  "warm-failed": "set.python.fail.warm",
-  "verify-failed": "set.python.fail.verify",
-  cancelled: "set.python.fail.cancelled",
-};
-
-/**
- * Python 那一行说什么。每种状态各说各的 —— 装好了报版本，没装报要下多少，
- * 装到一半报卡在哪，没装成报是哪一种没装成（**不是守护进程那句原文**）。
- */
-function pythonLine(t: TFn, python: PythonRuntimeStatus): string {
-  if (python.state === "provisioning") return t(PYTHON_STEP_KEY[python.stepCode ?? "acquire-uv"]);
-  if (python.state === "failed") return t(PYTHON_FAIL_KEY[python.code ?? "acquire-failed"]);
-  if (python.state === "ready") {
-    return `${t("set.python.ready", { uv: python.uvVersion ?? "", python: python.pythonVersion ?? "" })} · ${t(
-      "set.python.readyPackages",
-      { count: python.packages.length },
-    )}`;
-  }
-  if (python.state === "not-provisioned") return t("set.python.notProvisioned");
-  if (python.state === "stale") return t("set.python.stale");
-  const p = python.payload;
-  // 载荷读不出来（这一版清单里没有它）时不编一个体积：**宁可少说一句**。
-  if (!p) return t("set.python.badge.notInstalled");
-  return t("set.python.notAcquired", {
-    download: mb(p.downloadBytes),
-    disk: mb(p.diskBytes),
-    license: p.license,
-    origin: p.origin,
-  });
-}
+const RUNTIME_ROWS = ["node", "python"] as const;
+const RUNTIME_NAMES: Record<(typeof RUNTIME_ROWS)[number], string> = { node: "Node.js", python: "Python" };
 
 /**
  * 环境检查之后，那一行说什么。**查过才说** —— 没查过回 undefined，界面照旧显示
@@ -1957,7 +1966,7 @@ function envLine(t: TFn, rows: EnvProbeRow[] | null, id: string): string | undef
 function toolDetail(t: TFn, tool: ToolView): string | undefined {
   if (!tool.detailCode) return undefined;
   const key = TOOL_DETAIL_KEY[tool.detailCode];
-  return key ? t(key, tool.detailVars ?? {}) : undefined;
+  return key ? t(key, tool.detailVars ?? {}) : t("set.tools.detail.unknown");
 }
 
 const TOOL_KIND_KEY: Record<ToolView["kind"], MessageKey> = {
@@ -1966,239 +1975,10 @@ const TOOL_KIND_KEY: Record<ToolView["kind"], MessageKey> = {
   "mcp-server": "set.cap.kind.mcpServer",
 };
 
-/**
- * 板块标题行里的紧凑筛选（owner 2026-09-15）：原先技能板块内容区里那个全宽的
- * `<select>` 太长，改成一个小按钮 + 下拉，挪到标题行、贴着刷新按钮、右对齐。
- * 工具板块与云端能力清单的筛选同一个组件，只是各自的维度不同。
- *
- * 单选（不是多选复选框）：三处筛选各自只有一个维度，谁选中了在按钮上直接看得
- * 见，不需要「多选之后拼一句摘要」那一层。
- */
-function FilterMenu<T extends string>({
-  ariaLabel,
-  options,
-  value,
-  onChange,
-}: {
-  ariaLabel: string;
-  options: Array<{ value: T; label: string }>;
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  const current = options.find((o) => o.value === value)?.label ?? ariaLabel;
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="cap-filter-trigger" aria-label={ariaLabel}>
-          {current}
-          <Icon name="caret-up-down" size="xs" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {options.map((o) => (
-          <DropdownMenuItem key={o.value} onSelect={() => onChange(o.value)}>
-            {o.value === value && <Icon name="check" size="xs" />}
-            {o.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-/** 筛选项带的是**目录键**，词在渲染时按语言取（下面三组同理）。 */
-const LAYER_FILTER_OPTIONS: Array<{ value: "all" | SkillLayer; labelKey: MessageKey }> = [
-  { value: "all", labelKey: "set.cap.filter.allSources" },
-  { value: "bundled", labelKey: LAYER_KEY.bundled },
-  { value: "distributed", labelKey: LAYER_KEY.distributed },
-  { value: "user", labelKey: LAYER_KEY.user },
-  { value: "project", labelKey: LAYER_KEY.project },
-];
-
-type ToolKindFilter = "all" | ToolView["kind"];
-const TOOL_KIND_FILTER_OPTIONS: Array<{ value: ToolKindFilter; labelKey: MessageKey }> = [
-  { value: "all", labelKey: "set.cap.filter.allKinds" },
-  { value: "builtin", labelKey: TOOL_KIND_KEY.builtin },
-  { value: "connector", labelKey: TOOL_KIND_KEY.connector },
-  { value: "mcp-server", labelKey: TOOL_KIND_KEY["mcp-server"] },
-];
-
-/**
- * Runos 清单（ADR-020 §6.2，RY-204）的筛选。资产（asset）Runos 目前登记即拒，不给它
- * 一个永远是空的按钮。
- */
-type CatalogFilter = "all" | "skill" | "connector" | "executor";
-const CATALOG_FILTERS: { value: CatalogFilter; labelKey: MessageKey }[] = [
-  { value: "all", labelKey: "set.cap.filter.all" },
-  { value: "skill", labelKey: "set.cap.filter.skill" },
-  { value: "connector", labelKey: "set.cap.filter.connector" },
-  { value: "executor", labelKey: "set.cap.filter.executor" },
-];
-
-function catalogTime(iso: string | undefined, locale: Locale): string {
-  // 时间的写法**跟着语言走**：中文是 2026/9/17 19:40:00，英文是 9/17/2026, 19:40:00。
-  return iso ? new Date(iso).toLocaleString(locale, { hour12: false }) : "—";
-}
-
-/** 四种状态各说各的（RY-204 §状态）：拿不到就说拿不到，旧的就说是旧的。 */
-function catalogStateLine(source: CatalogSourceStatus, t: TFn, locale: Locale): string {
-  switch (source.state) {
-    case "unavailable":
-      // 守护进程的原因本来就是这半句（带着 issue 号）：拼成一句说，不再在下面重复一遍
-      // （owner 2026-09-15 真机看到两遍，RY-001 #23）。
-      return t("set.cap.catalog.noEndpoint", {
-        reason: source.reason ?? t("set.cap.catalog.noEndpointDefault"),
-      });
-    case "never":
-      return t("set.cap.catalog.neverFetched");
-    case "synced":
-      return t("set.cap.catalog.fresh", {
-        total: source.total ?? 0,
-        at: catalogTime(source.fetchedAt, locale),
-      });
-    case "stale":
-      return t("set.cap.catalog.stale", { at: catalogTime(source.fetchedAt, locale) });
-  }
-}
-
-function catalogDiffLine(source: CatalogSourceStatus, t: TFn): string | null {
-  const d = source.diff;
-  if (source.state !== "synced" || !d || d.added + d.removed + d.changed === 0) return null;
-  return t("set.cap.catalog.diff", {
-    added: d.added,
-    removed: d.removed,
-    changed: d.changed,
-  });
-}
-
-/** D4：只按守护进程核对出来的事实标；技能没有就是「本机无」，其余在 Runos 远端跑。 */
-function catalogLocalLabel(item: CatalogItem, t: TFn): string {
-  if (item.local.runnable) return t("set.cap.local.runnable");
-  return t(item.primitiveType === "skill" ? "set.cap.local.none" : "set.cap.local.cloudOnly");
-}
-
-function SkillsSection({ api }: { api: Api }) {
-  const t = useT();
-  const locale = useLocale();
-  const [listing, setListing] = useState<SkillListing | null>(null);
-  const [tools, setTools] = useState<ToolView[] | null>(null);
-  // Python 半边（TD-042 ②）：null = 这一版不带它，整块不显示。
-  const [python, setPython] = useState<PythonRuntimeStatus | null>(null);
-  /** 能力调用路径（ADR-025）。null = 没问到 —— 那时不显示那一行，不猜一个档位。 */
-  const [routing, setRouting] = useState<CapabilityRouting | null>(null);
-  const [unavailable, setUnavailable] = useState<string | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [layer, setLayer] = useState<"all" | SkillLayer>("all");
-  const [toolKind, setToolKind] = useState<ToolKindFilter>("all");
-  /** Runos 清单。null = 这套装配没有清单（503）或读不到 —— 那时整块不显示，不猜。 */
-  const [catalog, setCatalog] = useState<CapabilityCatalogPage | null>(null);
-  const [catalogType, setCatalogType] = useState<CatalogFilter>("all");
-  const [catalogQ, setCatalogQ] = useState("");
-  const [catalogBusy, setCatalogBusy] = useState(false);
-  const [catalogFailed, setCatalogFailed] = useState<string | null>(null);
-
-  const loadCatalog = async (more = false) => {
-    const cursor = more ? catalog?.nextCursor : undefined;
-    try {
-      const page = await api.capabilityCatalog({
-        ...(catalogType === "all" ? {} : { type: catalogType }),
-        ...(catalogQ.trim() ? { q: catalogQ.trim() } : {}),
-        ...(cursor ? { cursor } : {}),
-      });
-      setCatalog((prev) => (more && prev ? { ...page, items: [...prev.items, ...page.items] } : page));
-    } catch (e) {
-      // 翻页失败：已经列出来的留着，说一句；首次就读不到：整块不显示。
-      if (more) setCatalogFailed(String((e as Error).message));
-      else setCatalog(null);
-    }
-  };
-  useEffect(() => {
-    void loadCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, catalogType, catalogQ]);
-
-  const refreshCatalog = async () => {
-    setCatalogBusy(true);
-    setCatalogFailed(null);
-    let message: string | null = null;
-    try {
-      await api.refreshCapabilityCatalog("manual");
-    } catch (e) {
-      message = String((e as Error).message);
-    }
-    await loadCatalog();
-    setCatalogBusy(false);
-    // 重读之后再放这句话，同 acquire 那一处：先设会被重读抹掉。
-    if (message) setCatalogFailed(message);
-  };
-
-  const reload = async () => {
-    try {
-      setListing(await api.skills());
-      setUnavailable(null);
-      setFailed(null);
-    } catch (e) {
-      // 503 = 这套装配没有技能登记册。这是一个事实，不是错误，单独说。
-      if (e instanceof ApiError && e.status === 503) {
-        setListing({ items: [], layers: [], scannedAt: "" });
-        setUnavailable(describeError(t, e));
-      } else {
-        setFailed(String((e as Error).message));
-      }
-    }
-    try {
-      setTools((await api.tools()).items);
-    } catch {
-      setTools([]);
-    }
-    try {
-      setRouting(await api.capabilityRouting());
-    } catch {
-      setRouting(null);
-    }
-    await reloadPython();
-  };
-  /** Python 半边此刻的样子。503 = 这一版不带它 —— 那就整块不显示。 */
-  const reloadPython = async () => {
-    try {
-      setPython(await api.pythonRuntime());
-    } catch {
-      setPython(null);
-    }
-  };
-  useEffect(() => {
-    void reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api]);
-
-  const refresh = async () => {
-    setBusy(true);
-    setFailed(null);
-    try {
-      await api.refreshSkills();
-      await reload();
-    } catch (e) {
-      setFailed(String((e as Error).message));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const toggle = async (s: SkillView) => {
-    setFailed(null);
-    try {
-      await api.setSkillEnabled({ name: s.name, layer: s.layer, source: s.source }, !s.enabled);
-      await reload();
-    } catch (e) {
-      setFailed(String((e as Error).message));
-    }
-  };
-
-  const items = (listing?.items ?? []).filter((s) => layer === "all" || s.layer === layer);
-  const layerSummary = (listing?.layers ?? [])
-    .map((l) => `${t(LAYER_KEY[l.layer])} ${l.count}`)
-    .join(" · ");
-  const toolItems = (tools ?? []).filter((t) => toolKind === "all" || t.kind === toolKind);
+export function LocalToolRow({api,tool,onRefresh}:{api:Api;tool:ToolView;onRefresh:()=>Promise<void>}) {
+  const t=useT();
+  const [failed,setFailed]=useState<string|null>(null);
+  const reload=onRefresh;
   // 预置的 MCP 服务器：启动 = 真起进程、握手、列工具；起不了的原因照原样转达。
   const [starting, setStarting] = useState<string | null>(null);
   const launch = async (t: ToolView, on: boolean) => {
@@ -2254,310 +2034,9 @@ function SkillsSection({ api }: { api: Api }) {
     if (!picked.path) return;
     await acquire(componentId, picked.path);
   };
-  /**
-   * 装 Python 半边。守护进程那一头**不等它装完就回**（要几分钟），所以这里也不等：
-   * 点完就重问一次，之后靠下面那个轮询跟着走。
-   */
-  const provisionPython = async () => {
-    setFailed(null);
-    let message: string | null = null;
-    try {
-      setPython(await api.provisionPython());
-    } catch (e) {
-      message = String((e as Error).message);
-    }
-    if (message) setFailed(message);
-  };
-  const cancelPython = async () => {
-    try {
-      await api.cancelPython();
-    } catch {
-      // 取消本来就可能已经晚了一步；下一次轮询会说出它真正的样子。
-    }
-    await reloadPython();
-  };
-  const removePython = async () => {
-    let message: string | null = null;
-    try {
-      await api.removePython();
-    } catch (e) {
-      message = String((e as Error).message);
-    }
-    await reloadPython();
-    await reload();
-    // **在 reload 之后再放这句话**（同 acquire 那一处）：reload 成功会清掉 failed，
-    // 先设就会被它抹掉 —— 一次失败的移除于是变得无声无息。
-    if (message) setFailed(message);
-  };
-  /**
-   * 装的时候**盯着它**：这一块的进度不走事件（守护进程只发「有东西变了」，而这里
-   * 变的是步骤名），所以装的过程中每两秒问一次。装完就停 —— 一个永远在轮询的
-   * 设置页，在用不到 Python 的机器上是纯粹的浪费。
-   */
-  useEffect(() => {
-    if (python?.state !== "provisioning") return;
-    const timer = setInterval(() => void reloadPython(), 2000);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [python?.state]);
 
-  const skillGroups = groupCapabilities(items, (s) => ({ name: s.name, description: s.description }));
-  // 分组看的是关键词，而那半句话现在是按语言给的 —— 用它分组会让**分组随语言
-  // 漂**。只按 id 分（关键词表本来就是按 id 与工具名建的）。
-  // 需要 Python 的那几项能力。**装好之后也要算得上** —— 那时它们报的是 running /
-  // launchable（带 runtime=uvx），而不是 needs-python；只认后者的话，装完计数就归零，
-  // 「有几项在等它」这句话会在装好的那一刻变成假的。
-  /*
-   * 环境检查（任务 52）。**按需**，不在挂载时自动跑：每一条都要真起一次子进程问版本，
-   * 而这一屏很多人只是路过。null = 还没查过，界面照旧显示「装没装」那一路。
-   */
-  const [envRows, setEnvRows] = useState<EnvProbeRow[] | null>(null);
-  const [envBusy, setEnvBusy] = useState(false);
-  const checkEnv = async () => {
-    setEnvBusy(true);
-    try {
-      setEnvRows((await api.environments()).items);
-    } catch {
-      // 这套装配不提供（503）或守护进程没应：什么都不显示，比显示一个假答案强。
-      setEnvRows(null);
-    } finally {
-      setEnvBusy(false);
-    }
-  };
-  const needsPython = (tool: ToolView) =>
-    tool.detailCode === "needs-python" || tool.detailVars?.["runtime"] === "uvx";
-  const pythonNeeded = (tools ?? []).filter(needsPython).length;
-  const toolGroups = groupCapabilities(toolItems, (tool) => ({ id: tool.id, name: tool.id }));
 
   return (
-    <>
-      {/*
-        这一屏顶上的一句事实。原来两行讲的是「本机这份能力不是本机自己攒的，它与
-        云端两处同出一份登记册；这里显示的是本机此刻真正装着的那一份」——话没错，
-        但绕（owner 2026-09-15：啰嗦晦涩，改成一句）。收成一句后就不再逐字断言
-        「同一份登记册」这个精确说法了；不写「实时同步」的顾虑仍然成立（下面这句
-        「同步」指的是能力供给的来源，不是「此刻逐条相同」），所以只说到「同步」
-        为止，不展开成「登记册」那层技术说法。
-
-        调用路径（ADR-025）原来单独占一整句，owner 2026-09-15 再收：两条信息挤成
-        一条，路径信息收成标签贴在句尾 —— 图标改用第二条的盾牌（这一屏在说「谁
-        在把关」，盾牌比云朵更贴）。叫 Runos 好理解，但本机跑的不是云端 Runos
-        服务：名字出现的地方，说明必须一起出现（同一条 owner 决定），所以标签
-        文字仍是「Runos（兼容 Runos 协议的本地能力面）」整段，不拆开。 */}
-      <p className="cap-sync">
-        <Icon name="shield-check" size="sm" aria-hidden />
-        <span>
-          {t("set.cap.syncLine")}
-        </span>
-        {routing && (
-          <span className="cap-sync-tags">
-            <StatusBadge tone="neutral">{t(ROUTE_MODE_KEY[routing.current.mode])}</StatusBadge>
-            {/* 名字是专名，说明按语言给 —— 两者必须同时出现（owner 2026-09-15）。 */}
-            <StatusBadge tone="neutral">
-              {t("set.cap.planeTag", { name: routing.name, note: t("set.cap.planeNote") })}
-            </StatusBadge>
-            {!routing.cloudOpen && (
-              <StatusBadge tone="warning">{t("set.cap.cloudClosed")}</StatusBadge>
-            )}
-          </span>
-        )}
-      </p>
-      {/*
-        运行环境（owner 2026-09-18 第 4 条）。**常态显示**，不是只在缺的时候冒出来 ——
-        目的是让用户自己判断值不值得装：Node.js 随应用装好、直接可用；Python 要装，
-        而旁边就写着有多少项能力在等它。等他点到某个工具起不来才发现，那是最差的顺序。
-
-        位置在第一行说明之下、技能与工具之上：它是那两块的前提。
-      */}
-      {(python?.component || pythonNeeded > 0) && (
-        <SettingsBlock icon="terminal" title={t("set.env.title")} desc={t("set.env.desc")}>
-          {/* Node.js 随安装包走：这一行永远是「已装好」，写出来是为了让「运行环境」
-              这一块有个参照 —— 只列缺的那一个，用户不知道齐了是什么样。 */}
-          {/*
-            「检查」是这一块唯一的动作按钮（owner 2026-09-19）：**它回答的是另一个问题**。
-            徽标说的是「我们记得装过没有」（一份回执），而用户想知道的是「此刻这台机器上
-            到底有没有、是哪个版本」—— owner 原话：「我不能确认最终是不是成功还是失败」。
-            两者可以不一致：回执没了、目录被杀毒清了、或者他自己早装了个更新的。
-          */}
-          <div className="env-row">
-            <span className="env-name">Node.js</span>
-            <StatusBadge tone="success">{t("set.env.installed")}</StatusBadge>
-            <span className="env-note">{envLine(t, envRows, "node") ?? t("set.env.nodeNote")}</span>
-          </div>
-          {python && python.component && (
-            <>
-              <div className="env-row">
-                <span className="env-name">Python</span>
-                <StatusBadge tone={PYTHON_TONE[python.state]}>{t(PYTHON_STATE_KEY[python.state])}</StatusBadge>
-                {/* 体积、许可证、来源主机在按钮左边 —— 点之前就看得见要下多少。
-                    检查过之后，这一行换成**现场探到的版本** —— 那才是用户要的答案。 */}
-                <span className="env-note">{envLine(t, envRows, "python") ?? pythonLine(t, python)}</span>
-                {/* 按钮靠右（owner 第 4.4 条）：一行里「说明」与「动作」分站两头，
-                    扫一眼就知道哪边是要点的。 */}
-                <span className="env-actions">
-                  {python.state === "provisioning" ? (
-                    <Button variant="ghost" size="sm" onClick={() => void cancelPython()}>
-                      {t("set.cancel")}
-                    </Button>
-                  ) : (
-                    <>
-                      <Button variant="outline" size="sm" onClick={() => void provisionPython()}>
-                        {t(PYTHON_ACTION_KEY[python.state])}
-                      </Button>
-                      {(python.state === "ready" || python.state === "stale") && (
-                        <Button variant="ghost" size="sm" onClick={() => void removePython()}>
-                          {t("set.python.remove")}
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </span>
-              </div>
-              <div className="env-row">
-            <span className="env-note">{t("set.env.checkNote")}</span>
-            <span className="env-actions">
-              <Button variant="outline" size="sm" disabled={envBusy} onClick={() => void checkEnv()}>
-                {t(envBusy ? "set.env.checking" : "set.env.check")}
-              </Button>
-            </span>
-          </div>
-          {/* 有多少项能力在等它 —— 这句话是用户判断「值不值得装」的依据。 */}
-              {pythonNeeded > 0 && (
-                <p className="set-note">{t("set.env.waiting", { count: pythonNeeded })}</p>
-              )}
-              {/* 安装会再取 Python 本身与依赖：按流量计费的网络上这句话是有用的。 */}
-              {python.state !== "ready" && python.state !== "provisioning" && (
-                <p className="set-note">{t("set.python.alsoFetches")}</p>
-              )}
-            </>
-          )}
-        </SettingsBlock>
-      )}
-      <SettingsBlock
-        icon="sparkles"
-        collapsible
-        count={items.length}
-        title={t("set.skills.title")}
-        desc={t("set.skills.desc")}
-        aside={
-          unavailable ? undefined : (
-            // 筛选紧挨着刷新按钮、一起右对齐（owner 2026-09-15）：原来这个筛选是
-            // 内容区里一个全宽的 <select>，挪到标题行、压缩到按钮宽度。
-            <>
-              <FilterMenu
-                ariaLabel={t("set.skills.filterAria")}
-                options={LAYER_FILTER_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
-                value={layer}
-                onChange={setLayer}
-              />
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}>
-                {t(busy ? "set.refreshing" : "set.refresh")}
-              </Button>
-            </>
-          )
-        }
-      >
-        {failed && <div className="update-line update-line--warn">{failed}</div>}
-        {unavailable ? (
-          <p className="set-note">{unavailable}</p>
-        ) : listing === null ? (
-          <p className="set-note">…</p>
-        ) : (
-          <>
-            <p className="set-note">{layerSummary || t("set.skills.none")}</p>
-            {items.length === 0 ? (
-              <p className="set-note">
-                {listing.items.length === 0
-                  ? t("set.skills.emptyAll")
-                  : t("set.skills.emptyLayer")}
-              </p>
-            ) : (
-              <Accordion type="multiple" className="cap-groups">
-                {skillGroups.map(({ group, items: rows }) => (
-                  <AccordionItem key={group.id} value={group.id} className="cap-group">
-                    <AccordionTrigger className="cap-group-head">
-                      <span className="cap-group-label">{group.label}</span>
-                      <span className="cap-group-count">{rows.length}</span>
-                      <span className="cap-group-desc">{group.desc}</span>
-                    </AccordionTrigger>
-                    <AccordionContent>
-                      <ul className="row-list" aria-label={t("set.skills.groupAria", { group: group.label })}>
-                {rows.map((s) => (
-                  <li key={`${s.layer}:${s.source}:${s.name}`} className="row-item">
-                    <code className="row-main" title={`${s.dir}\n${s.description}`}>
-                      {s.name}
-                    </code>
-                    <span className="row-tag">{t(LAYER_KEY[s.layer])}</span>
-                    <span className="text-body-sm text-muted-foreground">
-                      {s.source}
-                      {s.version ? ` · v${s.version}` : ""}
-                      {s.license ? ` · ${s.license}` : ""}
-                      {s.tier ? ` · ${tierLabel(t, s.tier)}` : ""}
-                    </span>
-                    {/* 脚本本地不跑（TD-005）：标出来，而不是悄悄跳过。 */}
-                    {s.hasScripts && <StatusBadge tone="neutral">{t("set.skills.hasScripts")}</StatusBadge>}
-                    {s.shadowedBy ? (
-                      <StatusBadge tone="neutral">
-                        {t("set.skills.shadowed", { layer: t(LAYER_KEY[s.shadowedBy]) })}
-                      </StatusBadge>
-                    ) : (
-                      <StatusBadge tone={s.enabled ? "success" : "neutral"}>
-                        {t(s.enabled ? "set.skills.enabled" : "set.skills.disabled")}
-                      </StatusBadge>
-                    )}
-                    <Button variant="ghost" size="sm" onClick={() => void toggle(s)}>
-                      {t(s.enabled ? "set.skills.disabled" : "set.skills.enabled")}
-                    </Button>
-                  </li>
-                ))}
-                      </ul>
-                    </AccordionContent>
-                  </AccordionItem>
-                ))}
-              </Accordion>
-            )}
-          </>
-        )}
-      </SettingsBlock>
-      <SettingsBlock
-        icon="plugs-connected"
-        collapsible
-        count={tools?.length ?? 0}
-        title={t("set.tools.title")}
-        desc={t("set.tools.desc")}
-        aside={
-          tools && tools.length > 0 ? (
-            <FilterMenu
-              ariaLabel={t("set.tools.filterAria")}
-              options={TOOL_KIND_FILTER_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
-              value={toolKind}
-              onChange={setToolKind}
-            />
-          ) : undefined
-        }
-      >
-        {tools === null ? (
-          <p className="set-note">…</p>
-        ) : tools.length === 0 ? (
-          <p className="set-note">{t("set.tools.none")}</p>
-        ) : (
-          <>
-            {/* 常驻的一句事实：随包的与要获取的各多少（按登记册全量算，不随筛选变——
-                这是「这台机器总共有多少」，不是「筛出来看见几个」）。用户不必点开
-                每一行去数。 */}
-            <p className="set-note">{bundledSummary(tools, t)}</p>
-            {toolItems.length === 0 && <p className="set-note">{t("set.tools.emptyKind")}</p>}
-            <Accordion type="multiple" className="cap-groups">
-              {toolGroups.map(({ group, items: rows }) => (
-                <AccordionItem key={group.id} value={group.id} className="cap-group">
-                  <AccordionTrigger className="cap-group-head">
-                    <span className="cap-group-label">{group.label}</span>
-                    <span className="cap-group-count">{rows.length}</span>
-                    <span className="cap-group-desc">{group.desc}</span>
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <ul className="row-list" aria-label={t("set.tools.groupAria", { group: group.label })}>
-              {rows.map((tool) => (
                 <li key={`${tool.kind}:${tool.id}`} className="row-item">
                   <code className="row-main" title={toolDetail(t, tool) ?? ""}>
                     {tool.id}
@@ -2599,14 +2078,6 @@ function SkillsSection({ api }: { api: Api }) {
                       {tool.component.reason ? ` —— ${tool.component.reason}` : ""}
                     </span>
                   )}
-                  {/* 这一行要不要 Python、这台机器上有没有（owner 2026-09-18 第 4.3 条）。
-                      放在状态徽标之前：它是「能不能起」的前提，不是起没起的结果。 */}
-                  {needsPython(tool) && (
-                    <StatusBadge tone={python?.state === "ready" ? "success" : "danger"}>
-                      <Icon name={python?.state === "ready" ? "check" : "prohibit"} size="xs" />
-                      Python
-                    </StatusBadge>
-                  )}
                   <StatusBadge tone={TOOL_STATUS[tool.status].tone}>
                     {t(TOOL_STATUS[tool.status].key)}
                   </StatusBadge>
@@ -2647,92 +2118,178 @@ function SkillsSection({ api }: { api: Api }) {
                         : t(tool.status === "available" ? "set.tools.stop" : "set.tools.start")}
                     </Button>
                   )}
+                {failed && <p className="update-line update-line--warn" role="alert">{failed}</p>}
                 </li>
-              ))}
-                    </ul>
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
-          </>
+  );
+}
+
+function SkillsSection({ api }: { api: Api }) {
+  const t = useT();
+  const [listing, setListing] = useState<SkillListing | null>(null);
+  const [tools, setTools] = useState<ToolView[] | null>(null);
+  /** 能力调用路径（ADR-025）。null = 没问到 —— 那时不显示那一行，不猜一个档位。 */
+  const [routing, setRouting] = useState<CapabilityRouting | null>(null);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [toolsFailed, setToolsFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const reload = async () => {
+    try {
+      setListing(await api.skills());
+      setUnavailable(null);
+      setFailed(null);
+    } catch (e) {
+      // 503 = 这套装配没有技能登记册。这是一个事实，不是错误，单独说。
+      if (e instanceof ApiError && e.status === 503) {
+        setListing({ items: [], layers: [], scannedAt: "" });
+        setUnavailable(describeError(t, e));
+      } else {
+        setListing(previous=>previous??{items:[],layers:[],scannedAt:""});
+        setFailed(String((e as Error).message));
+      }
+    }
+    try {
+      setTools((await api.tools()).items);
+      setToolsFailed(false);
+    } catch {
+      setTools(previous=>previous??[]);
+      setToolsFailed(true);
+    }
+    try {
+      setRouting(await api.capabilityRouting());
+    } catch {
+      setRouting(null);
+    }
+  };
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api]);
+
+  const refresh = async () => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      await api.refreshSkills();
+      await reload();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggle = async (s: SkillView) => {
+    setFailed(null);
+    try {
+      await api.setSkillEnabled({ name: s.name, layer: s.layer, source: s.source }, !s.enabled);
+      await reload();
+    } catch (e) {
+      setFailed(String((e as Error).message));
+    }
+  };
+
+  const [envRows, setEnvRows] = useState<EnvProbeRow[] | null>(null);
+  const [envBusy, setEnvBusy] = useState(false);
+  const checkEnv = async () => {
+    setEnvBusy(true);
+    try {
+      setEnvRows((await api.environments()).items);
+    } catch {
+      // 这套装配不提供（503）或守护进程没应：什么都不显示，比显示一个假答案强。
+      setEnvRows(null);
+    } finally {
+      setEnvBusy(false);
+    }
+  };
+
+  return (
+    <>
+      {/*
+        这一屏顶上的一句事实。原来两行讲的是「本机这份能力不是本机自己攒的，它与
+        云端两处同出一份登记册；这里显示的是本机此刻真正装着的那一份」——话没错，
+        但绕（owner 2026-09-15：啰嗦晦涩，改成一句）。收成一句后就不再逐字断言
+        「同一份登记册」这个精确说法了；不写「实时同步」的顾虑仍然成立（下面这句
+        「同步」指的是能力供给的来源，不是「此刻逐条相同」），所以只说到「同步」
+        为止，不展开成「登记册」那层技术说法。
+
+        调用路径（ADR-025）原来单独占一整句，owner 2026-09-15 再收：两条信息挤成
+        一条，路径信息收成标签贴在句尾 —— 图标改用第二条的盾牌（这一屏在说「谁
+        在把关」，盾牌比云朵更贴）。叫 Runos 好理解，但本机跑的不是云端 Runos
+        服务：名字出现的地方，说明必须一起出现（同一条 owner 决定），所以标签
+        文字仍是「Runos（兼容 Runos 协议的本地能力面）」整段，不拆开。 */}
+
+      {/*
+        运行环境（owner 2026-09-18 第 4 条起，2026-09-19 改口径）。
+
+        **装完就该都在。** owner 2026-09-19 定：差异只在能力启用与否，不该有「装完
+        也起不来」的能力 —— 安装包大一些可以接受。所以这一块不再有「安装」按钮：
+        Node.js 与 Python 都随安装包走，这里只回答「它们此刻在不在、是哪个版本」。
+
+        「检查」是这一块唯一的动作：徽标说的是「应该有」，按钮回答的是「**此刻真有**」。
+        两者可以不一致 —— 目录被杀毒清了、或者用户自己装了个更新的（那一份也报出来）。
+      */}
+      <SettingsBlock icon="terminal" collapsible defaultOpen={false} title={t("set.env.title")} desc={t("set.env.desc")}>
+      <p className="cap-sync">
+        <Icon name="shield-check" size="sm" aria-hidden />
+        <span>
+          {t("set.cap.syncLine")}
+        </span>
+        {routing && (
+          <span className="cap-sync-tags">
+            <StatusBadge tone="neutral">{t(ROUTE_MODE_KEY[routing.current.mode])}</StatusBadge>
+            {/* 名字是专名，说明按语言给 —— 两者必须同时出现（owner 2026-09-15）。 */}
+            <StatusBadge tone="neutral">
+              {t("set.cap.planeTag", { name: routing.name, note: t("set.cap.planeNote") })}
+            </StatusBadge>
+            {!routing.cloudOpen && (
+              <StatusBadge tone="warning">{t("set.cap.cloudClosed")}</StatusBadge>
+            )}
+          </span>
         )}
+      </p>
+        {RUNTIME_ROWS.map((id) => (
+          <div className="env-row" key={id}>
+            <span className="env-name">{RUNTIME_NAMES[id]}</span>
+            <StatusBadge tone="success">{t("set.env.installed")}</StatusBadge>
+            <span className="env-note">{envLine(t, envRows, id) ?? t("set.env.bundledNote")}</span>
+          </div>
+        ))}
+        <div className="env-row">
+          <span className="env-note">{t("set.env.checkNote")}</span>
+          <span className="env-actions">
+            <Button variant="outline" size="sm" disabled={envBusy} onClick={() => void checkEnv()}>
+              {t(envBusy ? "set.env.checking" : "set.env.check")}
+            </Button>
+          </span>
+        </div>
+        <details><summary>{t("inventory.builtinTools")}</summary><ul className="row-list" aria-label={t("set.tools.groupAria",{group:t("inventory.builtinTools")})}>
+          {(tools??[]).filter(tool=>tool.kind==="builtin").map(tool=><LocalToolRow key={tool.id} api={api} tool={tool} onRefresh={reload}/>)}
+        </ul></details>
+
       </SettingsBlock>
-      {catalog && (
-        /* Runos 清单（ADR-020 §6.2，RY-204 D2）：平台目录的投影，与上面「本机装着的」
-           两块不是一回事 —— 所以它自己一块，且第一句话就说它不是安装。 */
-        <SettingsBlock
-          icon="cloud"
-          collapsible
-          {...(catalog.source.total === undefined ? {} : { count: catalog.source.total })}
-          title={t("set.catalog.title")}
-          desc={t("set.catalog.desc")}
-          aside={
-            <>
-              {/* 筛选与工具板块同一个组件（owner 2026-09-15：「多维度筛选下拉」）。
-                  一条都没有时不给一个永远筛不出东西的按钮。 */}
-              {(catalog.source.total ?? 0) > 0 && (
-                <FilterMenu
-                  ariaLabel={t("set.catalog.filterAria")}
-                  options={CATALOG_FILTERS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
-                  value={catalogType}
-                  onChange={setCatalogType}
-                />
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={catalogBusy || catalog.source.state === "unavailable"}
-                onClick={() => void refreshCatalog()}
-              >
-                {t(catalogBusy ? "set.refreshing" : "set.refresh")}
-              </Button>
-            </>
-          }
-        >
-          {catalogFailed && <div className="update-line update-line--warn">{catalogFailed}</div>}
-          <p className="set-note">{catalogStateLine(catalog.source, t, locale)}</p>
-          {(catalog.source.state === "never" || catalog.source.state === "stale") && catalog.source.reason && (
-            <p className="set-note text-muted-foreground">{catalog.source.reason}</p>
-          )}
-          {catalogDiffLine(catalog.source, t) && (
-            <p className="set-note">{catalogDiffLine(catalog.source, t)}</p>
-          )}
-          {(catalog.source.total ?? 0) > 0 && (
-            <>
-              <div className="row-item">
-                <Input
-                  id="catalog-search"
-                  aria-label={t("set.catalog.searchAria")}
-                  value={catalogQ}
-                  onChange={(e) => setCatalogQ(e.target.value)}
-                  placeholder={t("set.catalog.searchPlaceholder")}
-                />
-              </div>
-              {catalog.items.length === 0 ? (
-                <p className="set-note">{t("set.catalog.noMatch")}</p>
-              ) : (
-                <ul className="row-list" aria-label={t("set.catalog.listAria")}>
-                  {catalog.items.map((c) => (
-                    <li key={c.capabilityId} className="row-item">
-                      <span className="row-main" title={c.summary}>
-                        {c.displayName?.["zh-CN"] ?? c.title}
-                      </span>
-                      <code className="text-body-sm text-muted-foreground">{c.capabilityId}</code>
-                      {c.category && <span className="row-tag">{c.category}</span>}
-                      <StatusBadge tone={c.local.runnable ? "success" : "neutral"}>{catalogLocalLabel(c, t)}</StatusBadge>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {catalog.nextCursor && (
-                <Button variant="ghost" size="sm" onClick={() => void loadCatalog(true)}>
-                  {t("set.catalog.more")}
-                </Button>
-              )}
-            </>
-          )}
-        </SettingsBlock>
-      )}
+      <CapabilityLibrary api={api} listing={listing} busy={busy} onRefresh={refresh}
+        errors={<>{failed && <div className="update-line update-line--warn">{failed}</div>}{unavailable && <p className="set-note">{unavailable}</p>}{toolsFailed&&<p className="set-note" role="status">{t("inventory.toolsUnavailable")}</p>}</>}
+        localSummary={<>
+          <p className="set-note">{skillsSummary(listing?.items ?? [],t)}</p>
+          <p className="set-note">{(listing?.layers ?? []).map(l=>t(LAYER_KEY[l.layer])+" "+l.count).join(" · ")}</p>
+
+        </>}
+        renderSkillAction={s=><Button variant="outline" size="sm" onClick={()=>void toggle(s)}>{t(s.enabled?"set.skills.disabled":"set.skills.enabled")}</Button>}
+        renderSkill={s=>(
+          <li key={JSON.stringify([s.layer,s.source,s.name])} className="capability-skill-copy">
+            <dl className="capability-meta-grid">
+              <div><dt>{t("inventory.skillId")}</dt><dd><code>{s.name}</code></dd></div>
+              <div><dt>{t("inventory.layer")}</dt><dd>{t(LAYER_KEY[s.layer])} · {s.source}</dd></div>
+              {s.version&&<div><dt>{t("inventory.version")}</dt><dd>v{s.version}</dd></div>}
+              {s.license&&<div><dt>{t("inventory.license")}</dt><dd>{s.license}</dd></div>}
+              {s.tier&&<div><dt>{t("inventory.defaultPolicy")}</dt><dd>{tierLabel(t,s.tier)}</dd></div>}
+              {s.hasScripts&&<div><dt>{t("inventory.condition")}</dt><dd>{t("set.skills.hasScripts")}</dd></div>}
+              {s.shadowedBy&&<div><dt>{t("inventory.condition")}</dt><dd>{t("set.skills.shadowed",{layer:t(LAYER_KEY[s.shadowedBy])})}</dd></div>}
+            </dl>
+          </li>
+        )}
+
+      />
     </>
   );
 }
@@ -2785,7 +2342,7 @@ function ModelsSection({ api, system }: { api: Api; system: SystemInfo | null })
   return (
     <>
     <SettingsBlock
-      icon="cpu"
+      icon="sparkles"
       title={t("set.models.title")}
       // 一句话说完（owner 2026-09-15：原句太长，标题行放不下会回行）。「本机不配置、
       // 不调用模型」这句边界不丢——挪到下面正文里单独一行，不挤在标题行的说明里。
@@ -2912,7 +2469,7 @@ function PrivateModelBlock({ api, system }: { api: Api; system: SystemInfo | nul
 
   return (
     <SettingsBlock
-      icon="cpu"
+      icon="sparkles"
       title={t("set.private.title")}
       desc={t("set.private.desc")}
     >

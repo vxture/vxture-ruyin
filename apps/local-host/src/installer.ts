@@ -11,9 +11,8 @@
  *   <dataDir>/products/<productId>/<version>/…
  * active 版本记录在 registry 的状态文件里，回滚 = 切回旧版本目录。
  *
- * 签名（§18.2）：Runtime 只信任经 Vxture Registry 副署的包。当前尚无 Registry
- * 根证书可内置，因此**不假装验过**：requireSignature 为真时一律拒绝安装未经
- * 验证的包；开发模式显式放行并在结果里标记 unsigned，由调用方留痕。
+ * 签名（§18.2）：Runtime 使用宿主信任材料验证发布者与 Registry 副署。
+ * 开发模式仅允许没有签名条目的包，并在结果里标记 unsigned。
  */
 
 import { createHash } from "node:crypto";
@@ -39,6 +38,9 @@ import {
   verifyIntegrity,
   type PackageContents,
 } from "./pkg.js";
+import { validateUiBundle, uiBundleDir, hasUiBundle } from "./ui-fetch.js";
+import { verifiedPublisher, type PackageTrust } from "./package-signature.js";
+import { assertAgentPayload } from "./agent-payload.js";
 
 export interface InstallOptions {
   /** 产品库根目录，通常 <dataDir>/products。 */
@@ -50,7 +52,10 @@ export interface InstallOptions {
    * 才允许安装无签名包，且结果里 signed=false，调用方必须留痕。
    */
   requireSignature: boolean;
+  trust?: PackageTrust;
 }
+
+type PreflightOptions = Pick<InstallOptions, "runtimeVersion" | "requireSignature" | "trust">;
 
 export interface InstallResult {
   productId: string;
@@ -61,7 +66,22 @@ export interface InstallResult {
   contract: RuyinContract;
 }
 
-export class InstallError extends Error {}
+export type InstallErrorCode =
+  | "INVALID_CONTAINER"
+  | "INTEGRITY_FAILED"
+  | "SIGNATURE_UNVERIFIED"
+  | "INVALID_CONTRACT"
+  | "RUNTIME_INCOMPATIBLE"
+  | "INVALID_IDENTITY"
+  | "ALREADY_INSTALLED"
+  | "INVALID_UI_BUNDLE"
+  | "INVALID_AGENT_PAYLOAD";
+
+export class InstallError extends Error {
+  constructor(message: string, readonly code?: InstallErrorCode) {
+    super(message);
+  }
+}
 
 /** x.y.z 比较；返回 <0 / 0 / >0。非法段按 0 处理，长度不同按缺位补 0。 */
 export function compareVersions(a: string, b: string): number {
@@ -78,20 +98,8 @@ export function compareVersions(a: string, b: string): number {
 /** 目录名安全：产品 id 与版本都会进路径，必须先约束再拼接。 */
 function assertPathSegment(kind: string, value: string): void {
   if (!/^[A-Za-z0-9._-]{1,128}$/.test(value) || value === "." || value === "..") {
-    throw new InstallError(`illegal ${kind} for filesystem use: ${value}`);
+    throw new InstallError(`illegal ${kind} for filesystem use: ${value}`, "INVALID_IDENTITY");
   }
-}
-
-/**
- * 签名验证（§18.2）。信任锚 = 内置的 Vxture Registry 根证书；当前未内置，
- * 因此这里只能如实回答"无法验证"。有了根证书后在此实现平台副署 + 发布者签名
- * 的双签验证，其余管线不变。
- */
-function verifySignature(contents: PackageContents): boolean {
-  const sig = contents.get(SIGNATURE_ENTRY);
-  if (!sig || sig.length === 0) return false;
-  // 尚无可用信任锚：有签名也不能声称验过。TD 见 60-operations/10-tech-debt.md。
-  return false;
 }
 
 /** 把包内容写入目标目录；路径在写入前再次限定在目标目录内（纵深防御）。 */
@@ -107,29 +115,35 @@ function materialize(contents: PackageContents, dir: string): void {
   }
 }
 
-/**
- * 安装一个 .ruyinpkg。先全量验证再落盘；同一版本已存在时不覆盖（§18.4），
- * 由调用方决定是激活既有版本还是先卸载。
- */
-export function installPackage(
+function inspectPackage(
   buf: Buffer,
-  opts: InstallOptions,
-): InstallResult {
+  opts: PreflightOptions,
+): PackagePreflight & { contents: PackageContents } {
   let contents: PackageContents;
   try {
     contents = readPackage(buf);
+  } catch (cause) {
+    if (cause instanceof PackageError) throw new InstallError(cause.message, "INVALID_CONTAINER");
+    throw cause;
+  }
+  try {
     verifyIntegrity(contents);
   } catch (cause) {
-    if (cause instanceof PackageError) throw new InstallError(cause.message);
+    if (cause instanceof PackageError) throw new InstallError(cause.message, "INTEGRITY_FAILED");
     throw cause;
   }
 
-  const signed = verifySignature(contents);
-  if (!signed && opts.requireSignature) {
+  const publisher = verifiedPublisher(contents, opts.trust);
+  const signed = publisher !== undefined;
+  if (!signed && (opts.requireSignature || contents.has(SIGNATURE_ENTRY))) {
     throw new InstallError(
       "package is not countersigned by the Vxture Registry; refusing to install",
+      "SIGNATURE_UNVERIFIED",
     );
   }
+
+  try { assertAgentPayload(contents); }
+  catch (cause) { throw new InstallError(String(cause), "INVALID_AGENT_PAYLOAD"); }
 
   const manifestRaw = contents.get(MANIFEST_ENTRY)!;
   let parsed: unknown;
@@ -138,6 +152,7 @@ export function installPackage(
   } catch (cause) {
     throw new InstallError(
       `manifest parse error: ${cause instanceof Error ? cause.message : String(cause)}`,
+      "INVALID_CONTRACT",
     );
   }
   const validation = validateContract(parsed);
@@ -145,15 +160,20 @@ export function installPackage(
     const first = validation.errors[0];
     throw new InstallError(
       `contract invalid (${validation.errors.length} error(s)); first: ${first?.rule} ${first?.path}: ${first?.message}`,
+      "INVALID_CONTRACT",
     );
   }
   const contract = parsed as RuyinContract;
+  if (signed && contract.product.publisher !== publisher) {
+    throw new InstallError("Manifest publisher does not match the verified signer", "SIGNATURE_UNVERIFIED");
+  }
 
   // L3：runtime.minimum 兼容性（§18.4）。装不上要在落盘前说清楚。
   const minimum = contract.product.runtime?.minimum;
   if (minimum && compareVersions(opts.runtimeVersion, minimum) < 0) {
     throw new InstallError(
       `product requires runtime >= ${minimum}, current runtime is ${opts.runtimeVersion}`,
+      "RUNTIME_INCOMPATIBLE",
     );
   }
 
@@ -161,10 +181,32 @@ export function installPackage(
   const version = contract.product.version;
   assertPathSegment("product id", productId);
   assertPathSegment("version", version);
+  const embeddedUi = contents.get("ui.zip");
+  if (embeddedUi) {
+    if (!contract.product.ui) throw new InstallError("embedded ui.zip requires product.ui.sha256", "INVALID_UI_BUNDLE");
+    try { validateUiBundle(embeddedUi, contract.product.ui.sha256); }
+    catch (cause) { throw new InstallError(String(cause), "INVALID_UI_BUNDLE"); }
+  }
+  return { productId, version, signed, contract, contents };
+}
 
+export type PackagePreflight = Omit<InstallResult, "dir">;
+
+/** Validate the package without writing files or consulting the installed-product store. */
+export function preflightPackage(
+  buf: Buffer,
+  opts: PreflightOptions,
+): PackagePreflight {
+  const { productId, version, signed, contract } = inspectPackage(buf, opts);
+  return { productId, version, signed, contract };
+}
+
+/** Revalidate the supplied bytes at installation time before writing anything. */
+export function installPackage(buf: Buffer, opts: InstallOptions): InstallResult {
+  const { productId, version, signed, contract, contents } = inspectPackage(buf, opts);
   const dir = join(opts.storeDir, productId, version);
   if (existsSync(dir)) {
-    throw new InstallError(`${productId}@${version} is already installed`);
+    throw new InstallError(`${productId}@${version} is already installed`, "ALREADY_INSTALLED");
   }
 
   // 先写到临时目录，成功后整体改名，避免半个产品留在库里。
@@ -177,6 +219,17 @@ export function installPackage(
   try {
     materialize(contents, staging);
     mkdirSync(dirname(dir), { recursive: true });
+    const embeddedUi = contents.get("ui.zip");
+    if (embeddedUi && contract.product.ui && !hasUiBundle(opts.storeDir, productId, contract.product.ui.sha256)) {
+      const uiDir = uiBundleDir(opts.storeDir, productId, contract.product.ui.sha256);
+      const uiStaging = uiDir + ".staging-" + process.pid;
+      try {
+        rmSync(uiStaging, { recursive: true, force: true });
+        materialize(validateUiBundle(embeddedUi, contract.product.ui.sha256), uiStaging);
+        mkdirSync(dirname(uiDir), { recursive: true });
+        renameSync(uiStaging, uiDir);
+      } finally { rmSync(uiStaging, { recursive: true, force: true }); }
+    }
     renameSync(staging, dir); // 同盘 rename 为原子操作
 
   } catch (cause) {

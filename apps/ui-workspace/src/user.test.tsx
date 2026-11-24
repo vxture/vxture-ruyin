@@ -60,6 +60,37 @@ async function openPopover(): Promise<void> {
   await user.click(screen.getByRole("button", { name: /账户 ·/ }));
 }
 
+test("organization completion returns Home and refreshes scope without using sign-out",async()=>{
+ const current={tenantId:"personal",tenantName:"个人组织",tenantType:"personal" as const,workspaceId:"w1",workspaceName:"个人工作区",current:true};
+ const target={...current,tenantId:"team",tenantName:"合成团队",tenantType:"organization" as const,workspaceId:"w2",workspaceName:"团队工作区",current:false};
+ const onSessionChanged=vi.fn(),onSignedOut=vi.fn(),api=fakeApi({session:vi.fn().mockResolvedValue(session({signedIn:true,profile:{sub:"u",name:"演示"},org:{id:"personal",name:"个人组织"}})),
+  organizations:vi.fn().mockResolvedValue({items:[current,target]}),organizationSwitchStatus:vi.fn().mockResolvedValueOnce(null).mockResolvedValue({requestId:"request",state:"completed",target}),
+  switchOrganization:vi.fn().mockResolvedValue({requestId:"request",authorizeUrl:"https://console.test/auth/login"})});
+ render(<UserSlot api={api} productIds={[]} onOpenSettings={vi.fn()} onSignedOut={onSignedOut} onSessionChanged={onSessionChanged}/>);
+ await screen.findByText("演示");await openPopover();await userEvent.click(screen.getByRole("button",{name:"组织切换"}));
+ await userEvent.click(await screen.findByRole("button",{name:"团队工作区"}));
+ await vi.waitFor(()=>expect(onSessionChanged).toHaveBeenCalledTimes(1));expect(onSignedOut).not.toHaveBeenCalled();expect(window.location.hash).toBe("#home");
+});
+
+for (const type of ["personal", "organization"] as const) {
+ test(`avatar heading includes ${type} scope; organization switching stays in the account action group`, async()=>{
+  const api=fakeApi({session:vi.fn().mockResolvedValue(session({signedIn:true,profile:{sub:"u",name:"演示",email:"test@example.com"},org:{id:"tenant",name:"组织完整名称",type},workspace:{id:"workspace",name:"投标业务工作区"}}))});
+  render(<UserSlot api={api} productIds={[]} onOpenSettings={vi.fn()} onSignedOut={vi.fn()}/>);
+  await screen.findByText("演示");await openPopover();
+  const heading=screen.getByText("演示",{selector:".user-panel-head p"}).closest(".user-panel-head");
+  const personLine=screen.getByText("演示",{selector:".user-panel-head p"}).parentElement;
+  expect(personLine).toHaveTextContent(type==="personal"?"个人租户":"组织租户");
+  if(type==="personal"){
+   expect(heading).toHaveTextContent("个人租户");expect(screen.queryByText("组织完整名称")).toBeNull();
+  }else{
+   expect(heading).toHaveTextContent("组织完整名称");expect(heading).toHaveTextContent("组织");expect(screen.getAllByText("组织完整名称")).toHaveLength(1);
+  }
+  const control=screen.getByRole("button",{name:"组织切换"}),account=screen.getByRole("link",{name:/用户中心/});
+  expect(account.parentElement).toContainElement(control);expect(control).not.toHaveAttribute("href");
+  expect(control).not.toHaveAttribute("target");expect(control).not.toHaveTextContent("组织完整名称");
+ });
+}
+
 beforeEach(() => {
   globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
   vi.stubGlobal("open", vi.fn().mockReturnValue({ opener: null }));
@@ -302,20 +333,14 @@ void test("UserSlot: clicking the settings row calls onOpenSettings", async () =
   expect(onOpenSettings).toHaveBeenCalledTimes(1);
 });
 
-/**
- * 「用户中心」「配额用量」两行（owner 2026-09-16，同日现场纠错一次）：落在
- * `consoleAppBase`（console-bff 本体）上，**不是** `consoleBase`（官网深链
- * 落点，两者是不同的主机）——第一版误用了 consoleBase，两条链接都拼去了
- * vxture.com。未登录 / daemon 未接通 `PlatformSession` 时没有这个字段，落到
- * 与 daemon 侧同一个缺省 `https://console.vxture.com`。
- */
-void test("UserSlot: 「用户中心」「配额用量」两行跟着 consoleAppBase 拼地址，不是 consoleBase", async () => {
+void test("UserSlot: 用户中心打开 Accounts，配额用量打开 Console", async () => {
   const api = fakeApi({
     session: vi.fn().mockResolvedValue(
       session({
         signedIn: true,
         consoleBase: "https://vxture.com",
         consoleAppBase: "https://console.staging.vxture.com",
+        accountsBase: "https://accounts.staging.vxture.com",
       }),
     ),
   });
@@ -324,12 +349,16 @@ void test("UserSlot: 「用户中心」「配额用量」两行跟着 consoleApp
   expect(await screen.findByText("用户中心")).toBeInTheDocument();
   expect(screen.getByText("用户中心").closest("a")).toHaveAttribute(
     "href",
-    "https://console.staging.vxture.com/profile",
+    "https://accounts.staging.vxture.com/account?vx_locale=zh-CN",
   );
   expect(screen.getByText("配额用量").closest("a")).toHaveAttribute(
     "href",
     "https://console.staging.vxture.com/quotas",
   );
+  const account=screen.getByRole("link",{name:/用户中心/});
+  const admin=screen.getByRole("link",{name:/组织管理/});
+  expect(admin).toHaveAttribute("href","https://console.staging.vxture.com/tenant-settings");
+  expect(screen.getAllByRole("link").indexOf(admin)).toBe(screen.getAllByRole("link").indexOf(account)+1);
 });
 
 /** 缺 consoleAppBase 时落到与 daemon 侧一致的缺省，不是空字符串或 consoleBase。 */
@@ -342,7 +371,7 @@ void test("UserSlot: 没有 consoleAppBase 时「用户中心」落到 https://c
   expect(await screen.findByText("用户中心")).toBeInTheDocument();
   expect(screen.getByText("用户中心").closest("a")).toHaveAttribute(
     "href",
-    "https://console.vxture.com/profile",
+    "https://accounts.vxture.com/account?vx_locale=zh-CN",
   );
 });
 

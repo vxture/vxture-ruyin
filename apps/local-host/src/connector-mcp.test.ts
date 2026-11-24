@@ -23,6 +23,16 @@ function bindingFor(root: string, type = "enterprise_capability"): Binding {
   return { type, source: "lan", connector: "crm", root };
 }
 
+test("client: a closed child input rejects RPCs without an unhandled EPIPE", async () => {
+  const script = 'process.stdin.once("data",b=>{const q=JSON.parse(b.toString().trim());process.stdin.destroy();process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:q.id,result:{protocolVersion:"2024-11-05"}})+"\\n");setTimeout(()=>process.exit(0),250);});';
+  const client=new McpStdioClient({command:process.execPath,args:["-e",script]},{timeoutMs:3000});
+  try {
+    await client.start();
+    await assert.rejects(client.ping(),/server exited/);
+    assert.equal(client.running,false);
+  } finally {await client.stop();}
+});
+
 test("client: initialize handshake, ping, paginated resources/list, read text and blob", async () => {
   const client = new McpStdioClient(spec("--pages", "3"), { timeoutMs: 5000 });
   const info = await client.start();

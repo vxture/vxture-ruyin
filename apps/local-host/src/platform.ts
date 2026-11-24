@@ -98,7 +98,7 @@ export interface SessionSummary {
     roles?: string[];
     picture?: string;
   };
-  org?: { id?: string; name?: string; type?: string };
+  org?: { id?: string; name?: string; shortName?: string; type?: string };
   workspace?: { id?: string; name?: string };
   issuer: string;
   consoleBase: string;

@@ -1,10 +1,10 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 /**
  * Runtime daemon entry point (dev mode).
  *
  * Env:
  *   RUYIN_DATA_DIR      data root (default: ~/.ruyin/dev)
- *   RUYIN_PRODUCTS_DIR  unpacked products dir (default: ./products)
+ *   RUYIN_PRODUCTS_DIR  explicit development fixtures only (unset = none)
  *   RUYIN_PORT          listen port on 127.0.0.1 (default: 7420)
  *   RUYIN_TOKEN         session token override (default: random per launch)
  *   RUYIN_UI_DIR        built Workspace UI dir (default: sibling
@@ -14,6 +14,7 @@
  *   RUYIN_SMOKE=1       run the smoke self-checks after listen (ui -> tools ->
  *                       uvx -> pdf; pdf last, the shell exits on its marker)
  *   RUYIN_ACCOUNTS_ISSUER    OIDC issuer (default https://accounts.vxture.com)
+ *   RUYIN_ACCOUNTS_BASE      account management links (default https://accounts.vxture.com)
  *   RUYIN_OIDC_CLIENT_ID     public client id (default ruyin; beta: ruyin-beta)
  *   RUYIN_PLATFORM_API_BASE  旧 C2 基址（tailnet-only，用户设备够不着）——
  *                            登录改走平台会话之后已不再需要，留着只为回滚
@@ -38,8 +39,8 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir, hostname } from "node:os";
 import type { AddressInfo } from "node:net";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,11 +53,11 @@ import { resolveCodeSigning } from "./build-info.js";
 import { getHardwareInfo } from "./hardware-info.js";
 import { createProductUiServer, productUiPortFor } from "./product-ui-server.js";
 import { SqliteStoragePort } from "./storage.js";
-import { MockAIGateway, nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
+import { nodeClock, nodeCrypto, nodeId } from "./host-ports.js";
 import { InstanceIdentity } from "./instance-identity.js";
+import { acquireRuntimeOwnership } from "./runtime-ownership.js";
 import { PrivateModelStore } from "./private-model.js";
 import {
-  LocalModelGateway,
   type LocalModelConfig,
 } from "./local-model-gateway.js";
 import {
@@ -65,6 +66,8 @@ import {
   type SubscriptionFacts,
 } from "./product-registry.js";
 import { createLocalApi, upgradeProjects } from "./server.js";
+import {localSourceReader} from "./document-reader.js";
+import { parsePackageTrust } from "./package-signature.js";
 import { TaskRunner } from "./task-runner.js";
 import { contextBudgetFromEnv } from "./context-budget-config.js";
 import { resourceLimitsFromEnv } from "./resource-limits.js";
@@ -77,13 +80,14 @@ import { ConnectorRegistry } from "./connector-registry.js";
 import { FtsRanker, reindexBinding, searchContext } from "./fts.js";
 import { shellPdfRenderer } from "./pdf.js";
 import { LocalToolExecutor } from "./tool-executor.js";
-import { CapabilityClient } from "./capability-client.js";
+import { RuntimeGateway } from "./runtime-gateway.js";
 import { SkillRegistry } from "./skill-registry.js";
-import { refreshDistributedSkills } from "./skill-distribution.js";
+import { refreshDistributedSkills, recoverDistributedSkills, verifiedSkillCapability } from "./skill-distribution.js";
 import { ToolRegistryView } from "./tool-registry.js";
 import { ComponentStore, readComponentSpecs } from "./component-store.js";
-import { PythonRuntime } from "./python-runtime.js";
 import { readUpdateChannel, writeUpdateChannel } from "./update-channel.js";
+import { readWindowClose, writeWindowClose } from "./window-close.js";
+import {MaintenanceService,applyPendingMaintenance} from "./maintenance.js";
 import { probeEnvironments } from "./env-probe.js";
 import { auditListeners, describeAudit } from "./listener-audit.js";
 import { BundledToolServers } from "./tool-servers.js";
@@ -94,7 +98,7 @@ import { KeyManager } from "./keys.js";
 import { PlatformService, platformConfigFromEnv } from "./platform.js";
 import { PlatformSession } from "./platform-session.js";
 import { loadRoutingPolicy } from "./capability-routing.js";
-import { CapabilityCatalog, platformCatalogSource } from "./capability-catalog.js";
+import { CapabilityCatalog, platformCatalogSource, DEFAULT_RUNOS_CATALOG_PATH, CatalogChangedError } from "./capability-catalog.js";
 import { FolderPick } from "./folder-pick.js";
 import {
   startMigrationServer,
@@ -109,7 +113,7 @@ import {
   writeLocation,
 } from "./data-location.js";
 
-const VERSION = "0.2.0-beta.1";
+const VERSION = "0.2.1-beta.1";
 
 /**
  * 指针文件：**数据目录搬到哪儿了，权威在这里**（TD-039）。它必须待在一个不会
@@ -128,6 +132,16 @@ const preferredDataDir = resolve(
  * 字节都不搬（owner 2026-09-05）。
  */
 const legacyDataDir = process.env["RUYIN_LEGACY_DATA_DIR"];
+// Serialize pointer resolution before it can write or schedule migration.
+await acquireRuntimeOwnership([locationFile]);
+await applyPendingMaintenance(locationFile);
+const initialLocation = readLocation(locationFile);
+await acquireRuntimeOwnership([
+  preferredDataDir,
+  ...(legacyDataDir ? [legacyDataDir] : []),
+  ...(initialLocation.dataDir ? [initialLocation.dataDir] : []),
+  ...(initialLocation.pending ? [initialLocation.pending] : []),
+]);
 const resolved = resolveDataDir(locationFile, preferredDataDir, legacyDataDir);
 if (resolved.pinnedLegacy) {
   console.log(`[ruyin] data dir pinned to the existing location: ${resolved.dataDir}`);
@@ -163,9 +177,9 @@ const moved = await (async () => {
     // 出来时分不清是服务没起来、还是壳没问。
     console.log(`[ruyin] migration progress endpoint listening on ${port}`);
   } catch (cause) {
-    // 端口被占（比如有人手工起了一个守护进程）：搬家照做，只是没有进度可报 ——
-    // 不能因为「报不了进度」就不搬，那会把用户卡在一个待搬状态里。
-    console.error(`[ruyin] migration progress endpoint unavailable: ${String(cause)}`);
+    // An older runtime may not implement ownership locks. Fail before moving
+    // anything when its port is occupied; preserve the pending migration.
+    throw new Error("Migration cannot start while its runtime port is unavailable", { cause });
   }
   try {
     // 顺手把进度写进日志（每秒最多一条）：搬 GB 级数据要几分钟，那段时间里
@@ -196,10 +210,10 @@ if (moved.movedNow && moved.outcome.status === "moved") {
   // 如实播报并从原目录启动：一次失败的搬家不该换来一个空应用。
   console.error(`[ruyin] data dir move FAILED: ${moved.outcome.reason ?? ""}`);
 }
-const productsDir = resolve(process.env["RUYIN_PRODUCTS_DIR"] ?? "products");
+const productsDir = process.env["RUYIN_PRODUCTS_DIR"] ? resolve(process.env["RUYIN_PRODUCTS_DIR"]) : undefined;
 
 // Capability provider base (ADR-009: the business product''s own cloud service
-// holds the credentials for Atlas). Unset = mock, and the daemon says so -
+// holds the credentials for Atlas). Unset requires a configured private model -
 // "not wired up" must never look like "working".
 const capabilityBase = process.env["RUYIN_CAPABILITY_BASE"] ?? "";
 
@@ -316,20 +330,6 @@ const bundledTools = new BundledToolServers({
   components: componentStore,
   log: (line) => console.error(line),
 });
-/**
- * Python 半边（TD-042 ②）：uv 与 CPython **不随安装包**（owner 2026-09-17 定性
- * 「安装包小一些，租户按照需求，安装必要环境」）。这里只构造它 —— 读盘、算状态，
- * **一个字节都不取**；真的装发生在用户点下那一次（`POST /python-runtime/provision`）。
- */
-const pythonRuntime = new PythonRuntime({
-  dataDir,
-  components: componentStore,
-  config: () => bundledTools.pythonConfig(),
-  seeds: () => bundledTools.pythonSeeds(),
-  onChanged: () => events.publish({ kind: "component" }),
-  log: (line) => console.error(line),
-});
-bundledTools.setPython(pythonRuntime);
 const resourceLimits = resourceLimitsFromEnv();
 
 const connectorRegistry = new ConnectorRegistry(dataDir, connectors, {
@@ -390,27 +390,22 @@ async function refreshAllDistributed(): Promise<unknown[]> {
 
 const contextBudget = contextBudgetFromEnv();
 
+const gateway = new RuntimeGateway({
+  capabilityBase,
+  token: () => platform.bearerToken(),
+  localModel: () => privateModel.effective(),
+});
 const runtime = new ProjectRuntime({
+  projectDocuments: {get: (pid, productId, id) => storage.openHostStore(pid)?.getProductDocument(productId,id)},
   storage,
   clock: nodeClock,
   id: nodeId,
   crypto: nodeCrypto,
   /* 三选一，优先级有理由：
        ① 配了能力面 → 走它（既有行为不变）。
-       ② 否则配了直连本地模型 → 走它。**推理上下文一个字节都不出本机** ——
-          RY-100 §07 那个「不出域的唯一例外」在这一路被关掉。
-       ③ 都没有 → MockAIGateway，并且启动时明说。「没接上」绝不能看起来像
-          「在工作」。 */
-  gateway: capabilityBase
-    ? new CapabilityClient({
-        baseUrl: capabilityBase,
-        // Late binding: `platform` is constructed below, and the gateway is
-        // only called once a task runs - long after startup.
-        token: () => platform.bearerToken(),
-      })
-    : privateModel.effective()
-      ? new LocalModelGateway(privateModel.effective()!)
-      : new MockAIGateway(),
+       ② 否则配了私有模型 → 走指定端点，不切换到云端。
+       ③ 都没有 → 明确失败，不产生示例成果。 */
+  gateway,
   connectors,
   ranker: new FtsRanker(storage),
   tools: toolExecutor,
@@ -429,6 +424,12 @@ const uiDir =
 
 // 受管产品资产：已装 + 启用态 + 订阅可用性（30-contract-schema §18）。
 const registry = new ProductRegistry(productsDir, dataDir);
+// Recovery is local and runs even when no capability service/network is configured.
+for (const product of registry.installed()) {
+  const recovery = recoverDistributedSkills(join(skillRegistry.distributedDir, product.id));
+  if (recovery.restored.length || recovery.pending.length) console.error(`[ruyin] skill recovery ${product.id}: restored=${recovery.restored.length}, pending=${recovery.pending.length}`);
+}
+skillRegistry.refresh();
 for (const failure of registry.failures) {
   console.error(`[ruyin] product failed contract validation: ${failure.path}`);
   for (const e of failure.errors) {
@@ -458,6 +459,8 @@ const platformSession = new PlatformSession(
      */
     consoleBase:
       process.env["RUYIN_CONSOLE_API_BASE"] ?? "https://console.vxture.com",
+    websiteBase: process.env["RUYIN_WEBSITE_BASE"] ?? platform.config.consoleBase,
+    desktopDevice: { id: instance.jkt, name: hostname().slice(0, 120), platform: process.platform },
     // 登出是用户能感知到的最粗暴的一件事，它不该是无声的（任务 50）。
     log: (line) => console.error(line),
   },
@@ -482,22 +485,29 @@ console.log(
 );
 
 /*
- * Runos 能力清单（ADR-020 §6.3，RY-204）。平台源是唯一正式源；平台还没给端点地址
- * （vxture-platform#339），所以缺省不配 —— 状态恒为 unavailable，界面如实说。平台给了地址
- * 之后写进默认值；在那之前可经 RUYIN_RUNOS_CATALOG_PATH 先接上验证。
+ * Runos metadata uses the existing Console session-scoped catalog.
+ * A deployment override remains available; this does not enable execution.
  */
 const capabilityCatalog = new CapabilityCatalog(
   dataDir,
   platformCatalogSource({
-    path: process.env["RUYIN_RUNOS_CATALOG_PATH"],
+    path: process.env["RUYIN_RUNOS_CATALOG_PATH"] ?? DEFAULT_RUNOS_CATALOG_PATH,
     signedIn: () => platformSession.signedIn(),
     read: async (path) => {
       const res = await platformSession.fetch(path);
-      if (!res.ok) throw new Error(`${path} failed: HTTP ${res.status}`);
+      if (!res.ok) {
+        if(res.status===409&&(await res.json().catch(()=>undefined))?.code==="CAPABILITY_CATALOG_CHANGED")throw new CatalogChangedError("Catalog changed; restarting synchronization");
+        throw new Error(`${path} failed: HTTP ${res.status}`);
+      }
       const etag = res.headers.get("etag");
       return { body: (await res.json()) as unknown, ...(etag ? { etag } : {}) };
     },
   }),
+  Date.now,
+  {
+    session:()=>platformSession.rpsid(),
+    resolve:async()=>{const identity=await platformSession.identity();return identity.profile?.sub&&identity.org?.id&&identity.workspace?.id?JSON.stringify([identity.profile.sub,identity.org.id,identity.workspace.id]):undefined;},
+  },
 );
 // 带着恢复出来的会话启动，按「焦点回来」对待：6 小时内取过就不重取。sync 不抛。
 if (platformSession.signedIn()) void capabilityCatalog.sync("focus");
@@ -577,7 +587,15 @@ const productUiRoot = registry.storeDir;
  */
 const productUi = { root: productUiRoot, port: 0 };
 
+let startupState: "initializing" | "ready" | "failed" = "initializing";
+let finishStartup!: () => void;
+let failStartup!: (cause: unknown) => void;
+const startupReady = new Promise<void>((resolve, reject) => { finishStartup = resolve; failStartup = reject; });
+
 const server = createLocalApi({
+  maintenance:new MaintenanceService(locationFile,dataDir),
+  startupReady,
+  windowClose:{get:()=>readWindowClose(dataDir),set:action=>writeWindowClose(dataDir,action)},
   productUi,
   runtime,
   registry,
@@ -585,6 +603,13 @@ const server = createLocalApi({
   token,
   version: VERSION,
   files: fileArea,
+  libraryStorage:storage,
+  sourceReader: localSourceReader(bundledTools.bundledRuntimePaths().pythonExe,join(dirname(bundledToolsDir),"document-reader","reader.py")),
+  documents: {
+    list: (projectId,productId,prefix) => storage.openHostStore(projectId)?.listProductDocuments(productId,prefix) ?? [],
+    get: (projectId, productId, id) => storage.openHostStore(projectId)?.getProductDocument(productId, id),
+    put: (projectId, productId, id, markdown, revision) => storage.openHostStore(projectId)?.putProductDocument(productId, id, markdown, revision),
+  },
   // 本机固件信息（关于页）。用无参调用 —— 生产路径永远接真探针,缓存在
   // hardware-info.ts 那一层,不在这里重复。
   hardwareInfo: () => getHardwareInfo(),
@@ -594,7 +619,9 @@ const server = createLocalApi({
   // 的状态也标不出任何一条，等对照表有条目时再接上 servers。
   capabilityCatalog: {
     catalog: capabilityCatalog,
-    localFacts: () => ({ skills: skillRegistry.list().items }),
+    localFacts: () => ({ skills: skillRegistry.list().items.map(s => ({ ...s,
+      ...(s.layer === "distributed" ? { verifiedCapabilityId: verifiedSkillCapability(s.dir, s.name) } : {}),
+    })) }),
   },
   reindex: (projectId, binding) => {
     // 按绑定记的连接器取，不再钉死 local-fs（ADR-005 接缝 ②）。
@@ -608,7 +635,7 @@ const server = createLocalApi({
   tools: new ToolRegistryView({
     supportsBuiltin: (id) => toolExecutor.supports(id),
     hasSkills: () => true,
-    connectors: () => connectorRegistry.list(),
+    connectors: (localOnly) => connectorRegistry.list(localOnly),
     bundledServers: () => bundledTools.list(),
     // 起不了时说清是哪一种起不了：「未获取」与「未随包」「需要 uv」是三件事。
     planFor: (id) => bundledTools.plan(id),
@@ -630,20 +657,18 @@ const server = createLocalApi({
     },
   }),
   components: componentStore,
-  python: pythonRuntime,
   // 现场探一遍运行环境（任务 52）：随包 / 装好的那一份，以及本机 PATH 上已有的。
-  probeEnvironments: () =>
-    probeEnvironments({
-      nodeExe: bundledTools.bundledNodeExe(),
-      uvExe: pythonRuntime.uvExe(),
-      pythonExe: pythonRuntime.interpreter(),
-    }),
+  probeEnvironments: () => probeEnvironments(bundledTools.bundledRuntimePaths()),
   ...(capabilityBase ? { refreshDistributedSkills: refreshAllDistributed } : {}),
   uiDir,
   platform,
   platformSession,
+  ...(process.env["RUYIN_ACCOUNTS_BASE"] ? { accountsBase: process.env["RUYIN_ACCOUNTS_BASE"] } : {}),
   // 开发模式放行未签名包（RUYIN_ALLOW_UNSIGNED_PACKAGES=1）；缺省要求副署。
   requireSignedPackages: process.env["RUYIN_ALLOW_UNSIGNED_PACKAGES"] !== "1",
+  ...(process.env["RUYIN_PACKAGE_TRUST_FILE"] ? {
+    packageTrust: parsePackageTrust(readFileSync(process.env["RUYIN_PACKAGE_TRUST_FILE"], "utf8")),
+  } : {}),
   events,
   writeArtifact: (path, bytes, grants) =>
     toolExecutor.writeArtifact(path, bytes, grants),
@@ -727,11 +752,12 @@ const server = createLocalApi({
     writeLocation(locationFile, { ...readLocation(locationFile), language });
   },
   systemInfo: {
+    get startupState() { return startupState; },
     version: VERSION,
     platform: process.platform,
     arch: process.arch,
     dataDir,
-    productsDir,
+    productsDir: productsDir ?? "",
     keyProtection: keys.protection,
     /* 公钥指纹。**只给指纹，不给公钥、更不给私钥** —— 指纹足够回答「是哪一台」，
        而那正是这个字段今天唯一的用处（RY-001 §07 #38）。 */
@@ -739,11 +765,7 @@ const server = createLocalApi({
     get capabilitySurface() {
       /* getter 而不是定值：私有模型可以在运行中被配上，而 /system 每次都该说当下
          的事实。此前它是启动那一刻的快照，用户填完地址仍看到 "mock"。 */
-      return capabilityBase
-        ? ("configured" as const)
-        : privateModel.effective()
-          ? ("local_model" as const)
-          : ("mock" as const);
+      return gateway.surface;
     },
     /* 界面要能把「没开通」与「开通了但没配」分开说（RY-001 §07 #36）：
        前者是商业状态，后者是一句「去设置里填地址」。今天公网订阅版恒为
@@ -825,8 +847,8 @@ setInterval(() => void syncEntitlements().catch(() => {}), 5 * 60_000).unref();
 // Pick up tasks a previous process died holding (50-harness §8.3). Failing
 // this sweep must not stop the daemon: an un-recovered task is a stuck task,
 // a daemon that will not start is every task stuck.
-void tasks
-  .recoverAll()
+void startupReady
+  .then(() => tasks.recoverAll())
   .then((picked) => {
     if (picked > 0) console.log(`[ruyin] resumed ${picked} interrupted task(s)`);
   })
@@ -933,10 +955,6 @@ function listenerAudit(): void {
 }
 
 async function uvxSelfCheck(): Promise<void> {
-  if (!pythonRuntime.isReady()) {
-    console.log(`[ruyin] uvx self-check: python runtime not installed (${pythonRuntime.status().state})`);
-    return;
-  }
   const candidate = bundledTools
     .launchable()
     .find((s) => s.launch?.runtime === "uvx" && !(s.launch.requiresEnv?.length) && !s.launch.requiresBin);
@@ -951,9 +969,6 @@ async function uvxSelfCheck(): Promise<void> {
   if (!probe.ok) throw new Error(`${candidate.id}: ${probe.detail ?? "did not come up"}`);
   console.log(`[ruyin] uvx self-check: ok (${candidate.id}, ${probe.tools.length} tool(s))`);
 }
-
-// 装好的进程外连接器先起来再开门：起不来的照样登记（健康为 false），只记日志。
-await connectorRegistry.load();
 
 // 产品分发层：开门后对一次，不阻塞启动；拉不到就用本地那份（离线可用）。
 if (capabilityBase) {
@@ -982,6 +997,17 @@ if (capabilityBase) {
 }
 
 server.listen(port, "127.0.0.1", () => {
+  // The UI is usable while optional processes prepare; execution waits for them.
+  const started = Date.now();
+  void connectorRegistry.load().then(() => {
+    startupState = "ready";
+    console.log(`[ruyin] connectors initialized (${Date.now() - started} ms)`);
+    finishStartup();
+  }).catch((cause) => {
+    startupState = "failed";
+    console.error("[ruyin] connector initialization failed:", cause);
+    failStartup(cause);
+  });
   // 产品界面服务器与守护进程**分开监听**：它是另一个 origin，这正是它存在的理由。
   //
   // **放在守护进程绑上之后才起**：CSP 的 frame-ancestors 要写工作台的**真实** origin，
@@ -1020,14 +1046,13 @@ server.listen(port, "127.0.0.1", () => {
   // 『在工作』」—— **而在这一行加上之前，守护进程一个字都没说过**。注释承诺了一
   // 个不存在的保障，这比没有注释更糟：它让人以为这道口子被看住了。
   //
-  // 没接能力面时跑任务，`MockAIGateway` 回的是字面量 `[mock:...]` 文本，而它会
-  // 一路走到用户面前当成工作成果。至少要在启动时说清楚用的是哪一条。
+  // Missing configuration fails generation without producing placeholder content.
   console.log(
     capabilityBase
       ? `[ruyin] capability surface: ${capabilityBase}`
       : privateModel.effective()
         ? `[ruyin] capability surface: private model ${privateModel.effective()!.model} @ ${privateModel.effective()!.baseUrl} (不经 Atlas，不计量)`
-        : "[ruyin] capability surface: NOT configured - tasks will return mock output",
+        : "[ruyin] capability surface: unavailable - generation requires a configured model service",
   );
   // **这一行是给打包链看的，不只是给人看的。**
   //
@@ -1091,6 +1116,7 @@ server.listen(port, "127.0.0.1", () => {
     // 后者是 0。
     void (async () => {
       try {
+        await startupReady;
         await uiSelfCheck(`http://127.0.0.1:${workspacePort}`);
         await toolsSelfCheck();
         listenerAudit();

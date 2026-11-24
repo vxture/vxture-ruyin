@@ -44,9 +44,13 @@ const { MockAIGateway, nodeClock, nodeCrypto, nodeId } = await import(
 );
 const { ProductRegistry } = await import(`${ROOT}/apps/local-host/dist/product-registry.js`);
 const { createLocalApi } = await import(`${ROOT}/apps/local-host/dist/server.js`);
+const {localSourceReader}=await import(`${ROOT}/apps/local-host/dist/document-reader.js`);
 const { createProductUiServer, productUiPortFor } = await import(
   `${ROOT}/apps/local-host/dist/product-ui-server.js`
 );
+const { installPackage, preflightPackage } = await import(`${ROOT}/apps/local-host/dist/installer.js`);
+const { readPackage } = await import(`${ROOT}/apps/local-host/dist/pkg.js`);
+const { acquireRuntimeOwnership } = await import(`${ROOT}/apps/local-host/dist/runtime-ownership.js`);
 const { fetchUiBundle } = await import(`${ROOT}/apps/local-host/dist/ui-fetch.js`);
 // 只用它把测试包打成 zip —— 运行时从不写包，这段只在观察台与测试里出现。
 const { makeTestZip } = await import(`${ROOT}/apps/local-host/dist/pkg-testkit.js`);
@@ -76,7 +80,25 @@ const { readFileSync } = await import("node:fs");
 const PORT = Number(process.env.PORT ?? 17470);
 const TOKEN = "uiharness";
 const repo = repoRoot.replaceAll("\\", "/").replace(/\/$/, "");
-const dataDir = mkdtempSync(join(tmpdir(), "ruyin-uiharness-"));
+// An explicit isolated directory enables daemon restart/persistence acceptance.
+const dataDir = process.env.RUYIN_HARNESS_DATA_DIR
+  ? resolve(process.env.RUYIN_HARNESS_DATA_DIR)
+  : mkdtempSync(join(tmpdir(), "ruyin-uiharness-"));
+await acquireRuntimeOwnership([dataDir]);
+const existingContainers = ["projects", "libraries"].flatMap(kind => {
+  const root = join(dataDir, kind);
+  return existsSync(root) ? readdirSync(root, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && existsSync(join(root, entry.name, "project.db")))
+    .map(entry => join(root, entry.name)) : [];
+});
+if (existingContainers.length) {
+  if (!["master.key.dpapi", "master.key"].some(name => existsSync(join(dataDir, "runtime", name)))) {
+    throw new Error("[uiharness] existing encrypted data has no master key; restore its original keys from backup. No new keys were created.");
+  }
+  const missingKeys = existingContainers.filter(dir => !existsSync(join(dir, "key.enc")));
+  if (missingKeys.length) throw new Error(`[uiharness] ${missingKeys.length} encrypted container(s) have no key.enc; restore their original keys from backup. No new keys were created.`);
+}
+mkdirSync(dataDir, { recursive: true });
 // 产品界面服务器（ADR-022 片三 a）：端口照守护进程的规矩 +1。**根是产品库**，与装机
 // 态同一处（ADR-023）：测试包不再直接放进某个目录，而是**真的走一遍取回管线**落到
 // 这里（见下面 fetchUiBundle 那一段）—— 观察台走不到的路就是没人验过的路（TD-054 /
@@ -96,6 +118,11 @@ writeFileSync(
 );
 
 const storage = new SqliteStoragePort(dataDir, await KeyManager.open(dataDir));
+// Fail before exposing a healthy UI when this runtime cannot open encrypted data.
+try { storage.selfCheck(); }
+catch (error) {
+  throw new Error(`SQLite startup check failed on Node ${process.versions.node} (ABI ${process.versions.modules}). Run scripts/native/sqlite-node-binding.mjs with the same supported Node executable before launching the harness. ${error.message}`, { cause: error });
+}
 // 观察台允许装未签名连接器（它本来就只用桩数据、只在本机）。要试的话，dist 里有
 // 一个假的 MCP 服务器：命令 node，参数 apps/local-host/dist/fake-mcp-server.js。
 const connectorLookup = new Map([["local-fs", new LocalFsConnector()]]);
@@ -148,9 +175,17 @@ const skillRegistry = new SkillRegistry({
  */
 const capabilityBase = process.env.RUYIN_CAPABILITY_BASE ?? "";
 const contextBudget = contextBudgetFromEnv();
-const gateway = capabilityBase
+let probeGateway;
+if (process.env.RUYIN_HARNESS_MODEL_KEY_FILE) {
+  // Opt-in synthetic-data development probe; never ship a key in the product UI.
+  const keys = [...new Set(readFileSync(process.env.RUYIN_HARNESS_MODEL_KEY_FILE, "utf8").match(/sk-[A-Za-z0-9_-]{16,}/g) ?? [])];
+  if (keys.length !== 1) throw new Error("Expected exactly one probe credential");
+  const { LocalModelGateway } = await import(`${ROOT}/apps/local-host/dist/local-model-gateway.js`);
+  probeGateway = new LocalModelGateway({baseUrl: "https://api.deepseek.com", model: "deepseek-flash", apiKey: keys[0], timeoutMs: 240000});
+}
+const gateway = probeGateway ?? (capabilityBase
   ? new CapabilityClient({ baseUrl: capabilityBase })
-  : new MockAIGateway();
+  : new MockAIGateway());
 
 const runtime = new ProjectRuntime({
   storage,
@@ -159,6 +194,7 @@ const runtime = new ProjectRuntime({
   crypto: nodeCrypto,
   gateway,
   connectors: connectorLookup,
+  projectDocuments: {get: (pid, productId, id) => storage.openHostStore(pid)?.getProductDocument(productId,id)},
   ranker: new FtsRanker(storage),
   tools: executor,
   skills: skillRegistry,
@@ -181,7 +217,26 @@ const uiZip = makeTestZip(
 const bidWithUi = structuredClone(bid);
 bidWithUi.contract = "0.2";
 bidWithUi.product.ui = { sha256: createHash("sha256").update(uiZip).digest("hex") };
-const landed = await fetchUiBundle(bidWithUi, {
+let landed;
+if (process.env.RUYIN_V0_PACKAGE) {
+  const bytes = readFileSync(process.env.RUYIN_V0_PACKAGE);
+  const options = { storeDir: PRODUCT_STORE, runtimeVersion: "0.2.0", requireSignature: false };
+  const checked = preflightPackage(bytes, options);
+  const installedDir = join(PRODUCT_STORE, checked.productId, checked.version);
+  let installed;
+  if (existsSync(installedDir)) {
+    // Restart reuses only the exact package already installed; never overwrite it.
+    for (const [name, expected] of readPackage(bytes)) {
+      if (!readFileSync(join(installedDir, name)).equals(expected)) {
+        throw new Error(`[uiharness] installed package differs: ${checked.productId}@${checked.version}/${name}`);
+      }
+    }
+    installed = checked;
+    console.log(`[uiharness] reusing verified package: ${checked.productId}@${checked.version}`);
+  } else installed = installPackage(bytes, options);
+  Object.assign(bidWithUi, installed.contract);
+  landed = { status: "present", sha256: installed.contract.product.ui.sha256 };
+} else landed = await fetchUiBundle(bidWithUi, {
   baseUrl: "http://observatory.invalid",
   storeDir: PRODUCT_STORE,
   fetchImpl: async () => new Response(uiZip),
@@ -193,45 +248,61 @@ if (landed.status !== "fetched" && landed.status !== "present") {
 console.log(`[uiharness] product ui landed via fetchUiBundle: ${landed.sha256.slice(0, 12)}…`);
 
 const names = ["某储能电站 EPC 投标", "城市轨道信号系统投标", "数据中心机电总包投标"];
-let first;
-for (const name of names) {
+const existingProjects = await storage.listProjectIds();
+let first = existingProjects[0];
+for (const name of existingProjects.length ? [] : names) {
   const meta = await runtime.createProject(bidWithUi, name, "wsp_demo");
   first ??= meta.id;
   await runtime.addGrant(meta.id, work, "readwrite");
 }
+if (!existingProjects.length) {
 const binding = await runtime.setBinding(first, {
   type: "tender_document",
   root: join(work, "招标"),
 });
 await reindexBinding(storage, first, binding, new LocalFsConnector(), resourceLimits.limits);
+}
 // 跑一个任务，好让项目面板上有真实内容（会停在人工检查点）。
-const harness = await runtime.createHarness(first);
-const created = await harness.startTask("analyze_tender");
-await harness.advance(created.id);
+if (!existingProjects.length && process.env.RUYIN_HARNESS_EMPTY !== "1") {
+  const harness = await runtime.createHarness(first);
+  const created = await harness.startTask("analyze_tender");
+  await harness.advance(created.id);
+}
 
-// 登录态是**可变的**，不是一个常量 true。
-//
-// 原来这里写死了 signedIn: true，也没有 beginLogin / logout —— 于是观察台上
-// 「退出登录」按下去打到 `/auth/logout`，那一路 `deps.platform.logout()` 是
-// undefined，直接 500。换句话说：**观察台从来走不了退出这条路**，而退出恰恰
-// 是 2026-09-10 出问题的那条路（退出只退了侧栏那一格，工作台原地不动）。
-// 又一次「一条从没被走过的路径，坏了和好了长得一模一样」。
-//
-// 现在给它一个真的开关。登录这一端也是桩：真流程要过系统浏览器 + 平台
-// 授权码，观察台上没有那两样，所以 beginLogin 直接把开关拨回已登录并回一个
-// about:blank —— 界面那边本来就是「开个窗口，然后轮询 session 等它翻」，
-// 轮询照旧生效。**这是观察台专用的桩，不是产品行为**。
+// 隔离会话桩：Accounts 认证，Console 提供业务上下文；不登录真实账号。
 let signedIn = true;
+const identity = {
+  profile: { sub: "u_demo", name: "演示用户", email: "demo@example.invalid" },
+  org: { id: "org_demo", name: "Vxture" },
+  workspace: { id: "wsp_demo", name: "演示工作区" },
+};
+const platformSession = {
+  baseUrl: "https://console.vxture.com",
+  signedIn: () => signedIn,
+  status: () => ({ signedIn, ...(signedIn ? { expiresAt: Date.now() + 3600_000 } : {}) }),
+  identity: async () => identity,
+  activeWorkspaceId: async () => identity.workspace.id,
+  beginLogin: () => "about:blank",
+  completeLogin: async () => { signedIn = true; },
+  logout: async () => { signedIn = false; },
+  subscribedProducts: async () => [],
+  entitlements: async () => [],
+  quotaUsage: async () => ({}),
+  orgLogo: async () => null,
+  atlasModels: async () => [],
+};
 const platform = {
   session: () =>
     signedIn
       ? {
           signedIn: true,
-          profile: { sub: "u_demo", name: "郭彦豪", email: "yanhaoguo@gmail.com" },
+          issuer: "https://accounts.vxture.com",
+          consoleBase: "https://vxture.com",
+          ...identity,
           org: { id: "org_demo", name: "Vxture" },
           workspace: { id: "wsp_demo", name: "演示工作区" },
         }
-      : { signedIn: false, issuer: "(stub)", consoleBase: "https://vxture.com", entitlementsConfigured: false },
+      : { signedIn: false, issuer: "https://accounts.vxture.com", consoleBase: "https://vxture.com", entitlementsConfigured: false },
   beginLogin: async () => {
     signedIn = true;
     return "about:blank";
@@ -257,7 +328,10 @@ const server = createLocalApi({
   registry,
   tasks: new TaskRunner(runtime, new Set(), events),
   token: TOKEN,
-  version: "0.1.0-uiharness",
+  version: "0.2.0-uiharness",
+  libraryStorage:storage,
+  sourceReader:localSourceReader(process.env.RUYIN_HARNESS_PYTHON_EXE||bundledTools.bundledRuntimePaths().pythonExe,join(repoRoot,"resources","document-reader","reader.py")),
+  requireSignedPackages: process.env.RUYIN_HARNESS_UNSIGNED !== "1",
   events,
   // 更新检查指向哪个 feed：不设就是真渠道（在开发机上多半是 unreachable）。
   // 设成本地一份 latest.yml，就能把「有新版本」那一路真的看一遍。
@@ -268,8 +342,14 @@ const server = createLocalApi({
   supportsTool: (t) => executor.supports(t),
   uiDir: `${repo}/apps/ui-workspace/dist`,
   platform,
+  platformSession,
   // 项目文件区（TD-041）。观察台接的是**真的**存储与加密 —— 这一段的价值全在
   // 「磁盘上到底存了什么」，接个桩就只能看见界面画得对不对。
+  documents: {
+    list: (pid, productId, prefix) => storage.openHostStore(pid)?.listProductDocuments(productId,prefix) ?? [],
+    get: (pid, productId, id) => storage.openHostStore(pid)?.getProductDocument(productId, id),
+    put: (pid, productId, id, markdown, revision) => storage.openHostStore(pid)?.putProductDocument(productId, id, markdown, revision),
+  },
   files: {
     list: (pid) => storage.openHostStore(pid)?.listFiles() ?? [],
     get: (pid, fileId) => storage.openHostStore(pid)?.getFile(fileId),

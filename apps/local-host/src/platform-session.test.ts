@@ -62,6 +62,7 @@ function stubFetch(
       ok: step.status >= 200 && step.status < 300,
       status: step.status,
       json: async () => step.body ?? {},
+      clone: () => ({ json: async () => step.body ?? {} }),
       /* 真 Response 有 headers；`cachedGet` 要读 Cache-Control 定 TTL。
          桩缺了它，失败的是桩不是实现——第一版就漏了这个。 */
       headers: { get: () => null } as unknown as Headers,
@@ -279,7 +280,21 @@ describe("platform-session", () => {
 
     assert.equal(s.signedIn(), false);
     assert.equal(existsSync(join(dir, "platform", "session.bin")), false);
-    assert.match(f.calls.at(-1)!.url, /\/auth\/logout$/);
+    assert.match(f.calls.at(-1)!.url, /\/auth\/native\/logout$/);
+  });
+
+  it("distinguishes pending account deletion from an invalid session", async () => {
+    const f = stubFetch([
+      { status: 200, body: { rpsid: "session", expiresInSec: 3600 } },
+      { status: 403, body: { code: "ACCOUNT_DELETING" } },
+    ]);
+    restores.push(f.restore);
+    const s = new PlatformSession(CONFIG, fakeKeys(), makeDir());
+    s.beginLogin();
+    await s.completeLogin();
+    await assert.rejects(s.subscribedProducts(), { status: 403, code: "ACCOUNT_DELETING" });
+    assert.equal(s.signedIn(), true);
+    assert.equal(f.calls.length, 2);
   });
 
   it("status() 给 UI 的东西里没有 rpsid——这是 browser-zero-token 的底线", async () => {
@@ -386,7 +401,7 @@ describe("platform-session", () => {
    * 这一条钉的是一次会串数据的错：`TenantContext.workspace` 解不出时是字面量
    * "default"。若把它当工作区 id，所有租户的项目都归到同一个 "default" 下。
    */
-  it("projectIdentity：工作区 id 只认 /api/me/workspaces 的真实 id，占位值一律不算", () => {
+  it("projectIdentity：旧上下文占位值回退到租户列表的真实 id，占位值一律不算", () => {
     const ctx = { id: "t1", name: "T", mode: "tenant", workspace: "default", workspaceName: "默认工作区" };
     // 没有工作区列表：有名字、没有 id —— 宁可建不了项目，也不归到占位值下
     assert.deepEqual(projectIdentity(undefined, ctx, undefined).workspace, { name: "默认工作区" });
@@ -419,7 +434,17 @@ describe("platform-session", () => {
     });
   });
 
-  it("identity() 并发读三条；某一条失败只让那一块缺席，未登录直接空", async () => {
+  it("projectIdentity keeps the verified active workspace instead of replacing it with the tenant default",()=>{
+    const selected="55555555-5555-4555-8555-555555555555",defaultId="44444444-4444-4444-8444-444444444444";
+    const context={mode:"tenant",id:"t1",workspace:selected,workspaceName:"投标工作区"};
+    const rows=[{tenantId:"t1",workspaceId:defaultId,workspaceName:"默认工作区",isCurrent:true}];
+    assert.deepEqual(projectIdentity(null,context,rows).workspace,{id:selected,name:"投标工作区"});
+    assert.deepEqual(projectIdentity(null,{...context,workspaceName:undefined},rows).workspace,{id:selected});
+    assert.deepEqual(projectIdentity(null,{...context,workspaceName:undefined},[{...rows[0],workspaceId:selected,workspaceName:"匹配名称"}]).workspace,{id:selected,name:"匹配名称"});
+    assert.deepEqual(projectIdentity(null,context,undefined).workspace,{id:selected,name:"投标工作区"});
+  });
+
+  it("identity() independently reads account, context, workspaces and organization profile", async () => {
     const notSignedIn = new PlatformSession(CONFIG, fakeKeys(), makeDir());
     assert.deepEqual(await notSignedIn.identity(), {});
     assert.equal(await notSignedIn.activeWorkspaceId(), undefined);
@@ -450,6 +475,7 @@ describe("platform-session", () => {
     await s.completeLogin();
     /* 租户上下文那条 500：没有租户，工作区也就无从对上 —— 但名字照样在。 */
     assert.deepEqual(await s.identity(), { profile: { sub: "u1", name: "张三" } });
+    assert.ok(calls.includes("/api/me/organization"));
     assert.equal(await s.activeWorkspaceId(), undefined);
 
     replies["/api/tenant-context"] = { status: 200, body: { id: "t1", mode: "tenant", name: "T" } };

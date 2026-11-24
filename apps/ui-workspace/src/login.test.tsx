@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { LocaleProvider } from "./locale-provider";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SessionGate } from "./login";
 import { Api, type SessionInfo } from "./api";
@@ -22,10 +22,12 @@ vi.mock("./host-chrome", () => ({
   useHostChrome: () => hostChrome,
 }));
 vi.mock("./workbench", () => ({
-  Workbench: (props: { onSignedOut: () => void }) => (
+  Workbench: (props: { onSignedOut: () => void;onSessionChanged:()=>void }) => (
     <div data-testid="workbench-stub">
       workbench
       <button onClick={() => props.onSignedOut()}>workbench-stub-sign-out</button>
+      <button onClick={()=>props.onSessionChanged()}>workbench-stub-scope-change</button>
+      <input aria-label="scope-local-state" defaultValue="fresh"/>
     </div>
   ),
 }));
@@ -61,6 +63,73 @@ function fakeApi(overrides: Partial<Api> = {}): Api {
   } as unknown as Api;
 }
 
+const limitedLogin = signedOut({desktopLogin:{state:"device_limit",limit:3,devices:[
+  {id:"old_pc",name:"Office PC",platform:"win32",lastActiveAt:"2026-11-20T04:00:00Z",current:false},
+]}});
+
+test("device limit replaces the login button, explicit release continues the same approved login",async()=>{
+  const session=vi.fn().mockResolvedValueOnce(limitedLogin).mockResolvedValue(signedIn());
+  const releaseDesktopDevice=vi.fn().mockResolvedValue({ok:true});
+  render(<SessionGate api={fakeApi({session,releaseDesktopDevice})}/>);
+  await screen.findByText("选择要释放的设备");
+  expect(screen.queryByText("登录 Vxture 账号")).not.toBeInTheDocument();expect(releaseDesktopDevice).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("radio",{name:/Office PC/}));fireEvent.click(screen.getByRole("button",{name:"释放并在此登录"}));
+  expect(releaseDesktopDevice).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button",{name:"确认释放并继续"}));
+  expect(await screen.findByTestId("workbench-stub")).toBeInTheDocument();expect(releaseDesktopDevice).toHaveBeenCalledExactlyOnceWith("old_pc");
+});
+
+test("pending device login can be cancelled without releasing any device",async()=>{
+  const logout=vi.fn().mockResolvedValue({ok:true});const session=vi.fn().mockResolvedValueOnce(limitedLogin).mockResolvedValue(signedOut());
+  render(<SessionGate api={fakeApi({session,logout})}/>);fireEvent.click(await screen.findByRole("button",{name:"取消登录"}));
+  expect(await screen.findByText("登录 Vxture 账号")).toBeInTheDocument();expect(logout).toHaveBeenCalledTimes(1);
+});
+
+test("refresh outage preserves an already signed-in workbench",async()=>{
+  const session=vi.fn().mockResolvedValueOnce(signedIn()).mockRejectedValue(Error("offline"));
+  render(<SessionGate api={fakeApi({session})}/>);await screen.findByTestId("workbench-stub");fireEvent.focus(window);
+  await waitFor(()=>expect(session).toHaveBeenCalledTimes(2));expect(screen.getByTestId("workbench-stub")).toBeInTheDocument();
+});
+
+test("a committed organization switch remounts scoped views without a signed-out screen",async()=>{
+ const session=vi.fn().mockResolvedValueOnce(signedIn({org:{id:"old"},workspace:{id:"w1"}}))
+  .mockResolvedValue(signedIn({org:{id:"new"},workspace:{id:"w2"}}));
+ render(<SessionGate api={fakeApi({session})}/>);await screen.findByTestId("workbench-stub");
+ fireEvent.change(screen.getByLabelText("scope-local-state"),{target:{value:"old scope"}});
+ fireEvent.click(screen.getByRole("button",{name:"workbench-stub-scope-change"}));
+ await waitFor(()=>expect(screen.getByLabelText("scope-local-state")).toHaveValue("fresh"));
+ expect(screen.queryByText("登录 Vxture 账号")).toBeNull();expect(session).toHaveBeenCalledTimes(2);
+});
+
+test("failed and expired login states offer a clear retry",async()=>{
+  const api=fakeApi({session:vi.fn().mockResolvedValue(signedOut({desktopLogin:{state:"timed_out"}})),login:vi.fn().mockRejectedValue(Error("offline"))});
+  render(<SessionGate api={api}/>);expect(await screen.findByRole("alert")).toHaveTextContent("已过期");
+  fireEvent.click(screen.getByText("登录 Vxture 账号"));await waitFor(()=>expect(api.login).toHaveBeenCalled());
+});
+
+test("device-limit sign-in has no redundant restart action and cancellation errors stay visible",async()=>{
+  const api=fakeApi({session:vi.fn().mockResolvedValue(limitedLogin),logout:vi.fn().mockRejectedValue(Error("offline"))});
+  render(<SessionGate api={api}/>);fireEvent.click(await screen.findByRole("button",{name:"取消登录"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("登录暂未完成");
+  expect(screen.queryByRole("button",{name:"重新发起登录"})).not.toBeInTheDocument();
+  expect(api.login).not.toHaveBeenCalled();
+});
+
+test("polling stops when the approved desktop login reaches its device limit",async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true});
+  try {
+    const session=vi.fn().mockResolvedValueOnce(signedOut()).mockResolvedValue(limitedLogin);
+    render(<SessionGate api={fakeApi({session})}/>);fireEvent.click(await screen.findByText("登录 Vxture 账号"));
+    await vi.advanceTimersByTimeAsync(2100);await screen.findByText("选择要释放的设备");
+    const calls=session.mock.calls.length;await vi.advanceTimersByTimeAsync(5000);expect(session).toHaveBeenCalledTimes(calls);
+  } finally {vi.useRealTimers();}
+});
+
+test("failed host login status displays a retry without exposing provider details",async()=>{
+  render(<SessionGate api={fakeApi({session:vi.fn().mockResolvedValue(signedOut({desktopLogin:{state:"failed"}}))})}/>);
+  expect(await screen.findByRole("alert")).toHaveTextContent("登录暂未完成");
+});
+
 beforeEach(() => {
   hostChrome = "browser";
   vi.stubGlobal("open", vi.fn().mockReturnValue({ opener: null }));
@@ -71,10 +140,40 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test('returning from external login refreshes the gate without a second login attempt',async()=>{
+ const api=fakeApi({session:vi.fn().mockResolvedValueOnce(signedOut()).mockResolvedValue(signedIn())});
+ render(<SessionGate api={api}/>);await screen.findByText('登录 Vxture 账号');
+ fireEvent.focus(window);
+ expect(await screen.findByTestId('workbench-stub')).toBeTruthy();expect(api.login).not.toHaveBeenCalled();
+});
+
 void test("SessionGate: shows a loading splash before the first session() resolves", () => {
   const api = fakeApi({ session: vi.fn((): Promise<SessionInfo> => new Promise(() => {})) }); // never resolves
   render(<SessionGate api={api} />);
   expect(screen.getByText("正在连接运行时…")).toBeInTheDocument();
+});
+
+void test("SessionGate: pending deletion shows recovery, then refresh restores the workbench", async () => {
+  const session = vi.fn().mockResolvedValueOnce(signedIn({
+    accountStatus: "deleting",
+    accountsBase: "https://accounts.staging.vxture.com",
+  })).mockResolvedValue(signedIn());
+  render(<SessionGate api={fakeApi({ session })} />);
+  expect(await screen.findByRole("link", { name: "前往账号中心" })).toHaveAttribute(
+    "href", "https://accounts.staging.vxture.com/account?section=deletion&vx_locale=zh-CN",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "刷新账号状态" }));
+  await screen.findByTestId("workbench-stub");
+});
+
+void test("SessionGate: pending deletion can sign out even when remote logout fails", async () => {
+  const session = vi.fn().mockResolvedValueOnce(signedIn({ accountStatus: "deleting" }))
+    .mockResolvedValue(signedOut());
+  const logout = vi.fn().mockRejectedValue(new Error("remote logout unavailable"));
+  render(<SessionGate api={fakeApi({ session, logout })} />);
+  fireEvent.click(await screen.findByRole("button", { name: "退出登录" }));
+  expect(await screen.findByText("登录 Vxture 账号")).toBeInTheDocument();
+  expect(logout).toHaveBeenCalledTimes(1);
 });
 
 void test("SessionGate: signed out shows the login screen", async () => {

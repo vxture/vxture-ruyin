@@ -1,3 +1,7 @@
+import {ProductLibrarySurface} from './product-surface';
+import { ProductHome } from "./product-home";
+import { ProjectWorkflowNav } from "./project-workflow-nav";
+import { PRODUCT_NAV_EVENT, type ProductNavItem } from './product-navigation';
 ﻿/**
  * 工作台 —— 建在 DS shell 之上的宿主外壳。视图按状态路由（守护进程只发一个
  * 页面，没有 URL router），无边框标题栏按宿主（Electron / 浏览器）适配。
@@ -5,12 +9,12 @@
  * **chrome 有三态，规则只有一条：谁的导航就放在谁的侧栏里。**
  *
  *   工作台  如影 RUYIN            总览 / 项目
- *   产品    ← ｜ 产品名 · 项目名   产品的分区 + 同产品其他项目
+ *   产品    ← ｜ 产品名            产品首页 / 项目清单
+ *   项目    ← ｜ 产品名 · 项目名   当前项目流程 / 项目配置
  *   设置    ← ｜ 设置             设置的分区
  *
- * 参照 macOS：应用名在菜单栏，文档名在标题栏，宿主退到一侧。进了产品就是进了
- * 另一套框架，所以那条 32px 的页内 tab 横条与设置页内那根竖直导航都不该存在
- * —— 它们本来就是各自应用的导航。
+ * 产品和项目沿用 RUYIN 的共享外壳。项目内只展示当前业务流程，返回项目清单
+ * 后才能选择其他项目。
  *
  * 产品名取自契约的 product.name：运行时展示的是产品声明过的事实，不是自己编的
  * 表达（ADR-011 的判据）。
@@ -47,7 +51,6 @@ import { useT } from "./i18n";
 import { declaresUi, useProductSurface } from "./product-surface-info";
 import { SETTINGS_SECTIONS, resolveSection, type SectionId } from "./settings-sections";
 import { NoticeBar } from "./notice-bar";
-import { DEMO_RECENT } from "./catalog";
 import { UserSlot } from "./user";
 import { HeaderSearch } from "./header-search";
 import { RuntimeMenu } from "./runtime-menu";
@@ -63,6 +66,7 @@ import { UpdateToast, useUpdateCheck } from "./update-check";
 const HomePage = lazy(() =>
   import("./home").then((m) => ({ default: m.HomePage })),
 );
+const AgentManagementPage=lazy(()=>import("./agent-install-manager").then(module=>({default:module.AgentManagementPage})));
 const SettingsView = lazy(() =>
   import("./settings").then((m) => ({ default: m.SettingsView })),
 );
@@ -72,6 +76,10 @@ const ProjectPanel = lazy(() =>
 
 type View =
   | { kind: "home" }
+  | { kind: "agents" }
+  | { kind: "projects"; productId: string }
+  | { kind: "productHome"; productId: string }
+  | { kind: "library"; productId:string }
   | { kind: "settings"; section: SectionId }
   /** `tab` 缺省 = 还没决定进哪一格：有产品界面进它，没有进概览（见下面的解析）。 */
   | { kind: "workspace"; id: string; tab: TabId | undefined };
@@ -91,6 +99,7 @@ const viewHref = (v: View): string =>
     ? v.tab
       ? `#ws/${v.id}/${v.tab}`
       : `#ws/${v.id}`
+    : v.kind === "library" ? `#library/${v.productId}` : v.kind === "productHome" ? `#product/${v.productId}` : v.kind === "projects" ? `#projects/${v.productId}`
     : v.kind === "settings"
       ? `#settings/${v.section}`
       : `#${v.kind}`;
@@ -120,9 +129,10 @@ const RECENT_LIMIT = 8;
  * 「这一轮不是」就通知：首次挂载时还没读到会话也是 undefined，跟真掉线是
  * 两回事；接不上（`catch`）同样不算掉线，网络抖一下不该把人踢回登录页。
  */
-function useWorkspaceSession(api: Api, onSignedOut: () => void): SessionInfo | undefined {
+function useWorkspaceSession(api: Api, onSignedOut: () => void, onSessionChanged:()=>void): SessionInfo | undefined {
   const [session, setSession] = useState<SessionInfo | undefined>();
   const wasSignedIn = useRef(false);
+  const scopeRef=useRef<string|undefined>(undefined),changedRef=useRef(onSessionChanged);changedRef.current=onSessionChanged;
   // ref 装最新回调：`onSignedOut` 这个 prop 在调用方往往是每次渲染都新建的
   // 内联函数（`() => void refresh()`），放进依赖数组会让这个 effect 跟着每次
   // 渲染重挂，30s 轮询被反复打断。
@@ -135,6 +145,9 @@ function useWorkspaceSession(api: Api, onSignedOut: () => void): SessionInfo | u
         const s = await api.session();
         if (!alive) return;
         if (s.signedIn) {
+          const scope=JSON.stringify([s.profile?.sub,s.org?.id,s.workspace?.id]);
+          if(scopeRef.current&&scopeRef.current!==scope)changedRef.current();
+          scopeRef.current=scope;
           wasSignedIn.current = true;
           setSession(s);
           return;
@@ -186,17 +199,27 @@ function useRuntimeHealth() {
 export function Workbench({
   api,
   onSignedOut,
+  onSessionChanged=onSignedOut,
 }: {
   api: Api;
   /** 用户在侧栏底部退出登录后调用；工作台自己不决定去留，交给会话闸门重读。 */
   onSignedOut: () => void;
+  onSessionChanged?:()=>void;
 }) {
   const t = useT();
   const [products, setProducts] = useState<ProductInfo[]>([]);
   const [workspaces, setWorkspaces] = useState<ProjectMeta[]>([]);
+  const [projectsState, setProjectsState] = useState<"loading" | "failed" | "ready">("loading");
+  const sidebarRequest = useRef(0);
   /** 其他工作区里还有几个项目。只报数量——让人知道数据还在，不泄露名字。 */
   const [elsewhere, setElsewhere] = useState(0);
   const [view, setView] = useState<View>({ kind: "home" });
+  const [productNavigation, setProductNavigation] = useState<{projectId: string; items: ProductNavItem[]} | null>(null);
+  useEffect(() => {
+    const receive = (event: Event) => setProductNavigation((event as CustomEvent<{projectId:string;items:ProductNavItem[]}>).detail);
+    window.addEventListener(PRODUCT_NAV_EVENT, receive);
+    return () => window.removeEventListener(PRODUCT_NAV_EVENT, receive);
+  }, []);
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -233,16 +256,26 @@ export function Workbench({
   }, [view, surface, hasProductUi]);
 
   const refreshSidebar = useCallback(async () => {
+    const request = ++sidebarRequest.current;
+    setProjectsState("loading");
     try {
-      setProducts(await api.products());
+      const installed = await api.products();
+      if (request !== sidebarRequest.current) return;
+      setProducts(installed.filter(product => product.supply !== "builtin"));
       const list = await api.projects();
+      if (request !== sidebarRequest.current) return;
       setWorkspaces(list.items);
       setElsewhere(list.elsewhere);
+      setProjectsState("ready");
       setError(null);
-    } catch (e) {
-      setError(String((e as Error).message));
+    } catch {
+      if (request !== sidebarRequest.current) return;
+      setProjectsState("failed");
+      setWorkspaces([]);
+      setElsewhere(0);
+      setError(t("ph.listLoadFailed"));
     }
-  }, [api]);
+  }, [api, t]);
 
   useEffect(() => {
     void refreshSidebar();
@@ -290,7 +323,11 @@ export function Workbench({
    * （`window.location.hash = ...`）、以及启动时地址栏里本来就有的那一段。
    */
   const viewOf = useCallback((href: string): View | null => {
+    if (/^#library\/[a-z][a-z0-9_-]{0,31}$/.test(href)) return {kind:'library',productId:href.slice(9)};
+    if (/^#product\/[a-z][a-z0-9_-]{0,31}$/.test(href)) return { kind: 'productHome', productId: href.slice(9) };
+    if (/^#projects\/[a-z][a-z0-9_-]{0,31}$/.test(href)) return { kind: 'projects', productId: href.slice(10) };
     if (href === "#home" || href === "" || href === "#") return { kind: "home" };
+    if (href === "#agents") return {kind:"agents"};
     if (href.startsWith("#settings")) {
       // resolveSection 认得侧栏之外的地址（添加连接器）与已经搬走的旧地址。
       return { kind: "settings", section: resolveSection(href.slice(10)) };
@@ -371,9 +408,13 @@ export function Workbench({
     products.find((p) => p.id === openProjectMeta?.productId)?.name ??
     openProjectMeta?.productId;
   const [projectPending, setProjectPending] = useState(0);
+  useEffect(() => {
+    if (!openProjectMeta?.workspaceId || openProjectMeta.archivedAt) return;
+    try { localStorage.setItem(`ruyin-last-project:${openProjectMeta.workspaceId}:${openProjectMeta.productId}`, openProjectMeta.id); } catch { /* Optional navigation memory. */ }
+  }, [openProjectMeta]);
   /** 首页卡片的选中态（owner 定的联动）：选中 → 侧栏「最近工作」只留该智能体的项目。 */
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
-  const session = useWorkspaceSession(api, onSignedOut);
+  const session = useWorkspaceSession(api, onSignedOut,onSessionChanged);
   const workspaceName = session?.workspace?.name;
 
   // 滚动条平时隐藏，滚动时才现身（owner 定）：捕获阶段监听任何滚动，给根元素
@@ -398,7 +439,7 @@ export function Workbench({
     const list: ShellNavSection[] = [
       {
         title: t("nav.home"),
-        items: [{ href: "#home", label: t("nav.home"), icon: "home" }],
+        items: [{ href: "#home", label: t("nav.home"), icon: "home" },{href:"#agents",label:t("nav.agents"),icon:"package"}],
       },
     ];
     // 归档的项目不进「最近工作」—— 那一栏回答的是「我刚才在做什么」；它们另起一组。
@@ -425,23 +466,6 @@ export function Workbench({
           label: w.name,
           subLabel:
             products.find((p) => p.id === w.productId)?.name ?? w.productId,
-          icon: "cube" as const,
-        })),
-      });
-    } else {
-      // 一个真项目都没有时才放样例，好让这一栏的样子看得见。真数据一到就整组
-      // 消失 —— 真假混排用户没法分辨（catalog.ts 的 DEMO_RECENT 有完整约束）。
-      list.push({
-        title: t("nav.recent"),
-        dividerBefore: true,
-        // href 必须**逐条唯一**：侧栏拿 href 当 key，三条都写 `#home` 会撞成
-        // 重复 key，React 就不保证增删的对应关系了 —— 真项目到位、这一组本该
-        // 整体消失时，会有一条样例留在屏幕上，那正是这组数据最不能出的错。
-        // `#sample/N` 不匹配 navigate() 的任何一支，点了什么也不发生。
-        items: DEMO_RECENT.map((d, i) => ({
-          href: `#sample/${i}`,
-          label: d.project,
-          subLabel: t("nav.sample", { product: d.product }),
           icon: "cube" as const,
         })),
       });
@@ -540,15 +564,18 @@ export function Workbench({
          * 产品名取自契约的 product.name —— 运行时展示的是产品声明过的事实，
          * 不是自己编的表达（ADR-011 的判据）。 */
         <span className="no-drag flex items-center gap-xs min-w-0">
-          {view.kind !== "home" ? (
+          {view.kind !== "home" && view.kind !== "agents" ? (
             <>
               <ShellIconButton
+                className="app-header-mark app-header-back"
                 icon="arrow-left"
-                label={t("chrome.back")}
-                onClick={() => navigate("#home")}
+                label={view.kind === 'workspace' ? t('nav.backProjects') : t("chrome.back")}
+                onClick={() => navigate(view.kind === 'workspace' && openProjectMeta ? '#projects/'+openProjectMeta.productId : '#home')}
               />
               <span className="app-ident min-w-0">
-                {view.kind === "settings" ? (
+                {view.kind === "projects" || view.kind === "productHome" || view.kind === "library" ? (
+                  <span className="app-ident-product">{products.find(p => p.id === view.productId)?.name ?? t('nav.projectList')}</span>
+                ) : view.kind === "settings" ? (
                   <span className="app-ident-product">{t("chrome.settings")}</span>
                 ) : (
                   <>
@@ -559,9 +586,7 @@ export function Workbench({
                     {openProjectMeta?.name !== openProductName && (
                       <>
                         <span className="app-ident-sep">·</span>
-                        <span className="app-ident-doc">
-                          {openProjectMeta?.name ?? t("chrome.project")}
-                        </span>
+                        <span className="app-ident-doc">{openProjectMeta?.name ?? t("chrome.project")}</span>
                       </>
                     )}
                   </>
@@ -635,9 +660,11 @@ export function Workbench({
    * 原本那条 32px 的横 tab 条就此消失 —— 它本来就是产品的导航，属于源列表。 */
   const productSections: ShellNavSection[] = useMemo(() => {
     if (view.kind !== "workspace") return [];
-    const siblings = workspaces.filter(
-      (w) => w.productId === openProjectMeta?.productId && w.id !== view.id && !w.archivedAt,
-    );
+    const businessNav = productNavigation?.projectId === view.id ? productNavigation.items : null;
+    if (businessNav && hasProductUi) return [
+      { title: t('nav.workflow'), items: businessNav.map(item => ({href: '#ws/'+view.id+'/product/'+item.id, label: item.label, icon: PRODUCT_TAB_ICON})) },
+      { title: '', dividerBefore: true, items: [{href:'#ws/'+view.id+'/overview',label:projectPending > 0 ? t('nav.tabWithCount', {label:t('nav.projectTools'),count:projectPending}) : t('nav.projectTools'),icon:'settings'}] },
+    ];
     const list: ShellNavSection[] = [
       {
         /* 这一组不写标题（owner 2026-09-04：左上角三个名字扎堆）。原来写的是
@@ -650,32 +677,12 @@ export function Workbench({
           ...(hasProductUi
             ? [{ href: `#ws/${view.id}/product`, label: openProductName ?? t("tabs.product"), icon: PRODUCT_TAB_ICON }]
             : []),
-          ...PROJECT_TABS.map((tab) => ({
-            href: `#ws/${view.id}/${tab.id}`,
-            // 未决数挂在「任务」上：徽章跟着它要指向的东西走，才省得下那条
-            // 32px 的横条。
-            label:
-              tab.id === "tasks" && projectPending > 0
-                ? t("nav.tabWithCount", { label: t(tab.labelKey), count: projectPending })
-                : t(tab.labelKey),
-            icon: TAB_ICON[tab.id],
-          })),
+          { href: '#ws/'+view.id+'/overview', label: projectPending > 0 ? t('nav.tabWithCount', {label:t('nav.projectTools'),count:projectPending}) : t('nav.projectTools'), icon: 'settings' },
         ],
       },
     ];
-    if (siblings.length > 0) {
-      list.push({
-        title: t("nav.siblings"),
-        dividerBefore: true,
-        items: siblings.map((w) => ({
-          href: `#ws/${w.id}`,
-          label: w.name,
-          icon: "cube" as const,
-        })),
-      });
-    }
     return list;
-  }, [view, workspaces, openProjectMeta, projectPending, hasProductUi, openProductName, t]);
+  }, [view, workspaces, openProjectMeta, projectPending, hasProductUi, openProductName, t, productNavigation]);
 
   /** 设置的分区。和产品态同一套道理：它是设置自己的导航，所以它在侧栏 ——
    *  页面里再放一根竖直导航，屏幕上就并排站着两根。 */
@@ -697,14 +704,19 @@ export function Workbench({
   const sidebar = (
     <div
       className={`app-sidebar h-full${
-        view.kind === "home"
+        view.kind === "home" || view.kind === "agents"
           ? " app-sidebar--home"
           : view.kind === "workspace"
             ? " app-sidebar--ws"
             : " app-sidebar--set"
       }`}
     >
-    <ShellSidebarNav
+    {view.kind === "workspace" && hasProductUi && productNavigation?.projectId === view.id ? <ProjectWorkflowNav
+      items={productNavigation.items} projectId={view.id}
+      activeId={view.tab === "product" ? window.location.hash.split('/')[3] || productNavigation.items[0]?.id || "" : "configuration"}
+      collapsed={collapsed} onToggle={()=>setCollapsed(!collapsed)} onNavigate={navigate}
+      footer={<UserSlot api={api} productIds={products.map(p=>p.id)} collapsed={collapsed} onOpenSettings={()=>navigate('#settings/account')} onSignedOut={onSignedOut} onSessionChanged={onSessionChanged}/>}
+    /> : <ShellSidebarNav
       /* 侧栏不写标题（owner 2026-09-04：首页去掉之后，产品态和设置态也照同一
          条来）。进了产品，左上角原本挤着三个名字：标题栏的产品名、标题栏的项目
          名、侧栏这一行的产品名 —— 同一个身份在两条带子上各写一遍。身份归标题栏，
@@ -716,11 +728,11 @@ export function Workbench({
           ? productSections
           : view.kind === "settings"
             ? settingsSections
-            : sections
+            : view.kind === "productHome" || view.kind === "projects" || view.kind === "library" ? [{title:"",items:[{href:"#product/"+view.productId,label:t("nav.home"),icon:"home"},{href:"#projects/"+view.productId,label:t("ph.projects"),icon:"folder-open"},{href:"#library/"+view.productId,label:t("library.title"),icon:"folder-open"}]}] : sections
       }
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed(!collapsed)}
-      isActive={(href) => href === viewHref(view)}
+      isActive={(href) => view.kind === 'workspace' && view.tab !== 'product' ? href === '#ws/'+view.id+'/overview' : href === (view.kind === 'workspace' && view.tab === 'product' && window.location.hash.split('/')[3] ? window.location.hash : viewHref(view))}
       storageKeyPrefix="ruyin-workbench"
       linkComponent={NavLink}
       labels={{
@@ -744,10 +756,11 @@ export function Workbench({
             collapsed={collapsed}
             onOpenSettings={() => navigate("#settings/account")}
             onSignedOut={onSignedOut}
+            onSessionChanged={onSessionChanged}
           />
         </>
       }
-    />
+    />}
     </div>
   );
 
@@ -767,7 +780,13 @@ export function Workbench({
               <p className="text-body-md text-muted-foreground">{t("chrome.loading")}</p>
             }
           >
-            {view.kind === "settings" ? (
+            {view.kind === "agents"?<AgentManagementPage api={api} onChanged={refreshSidebar}/> : view.kind === "projects" || view.kind === "productHome" || view.kind === "library" ? (
+              view.kind === "library" ? <ProductLibrarySurface key={view.productId} api={api} productId={view.productId}/> : products.find(p => p.id === view.productId) ? <ProductHome
+                key={view.productId + view.kind} api={api} product={products.find(p => p.id === view.productId)!}
+                projects={workspaces} projectsState={projectsState} catalog={view.kind === 'projects'}
+                onCatalog={() => navigate('#projects/'+view.productId)} onLibrary={()=>navigate('#library/'+view.productId)}
+                onOpen={id => navigate('#ws/'+id)} onCreated={openProject} onRefresh={refreshSidebar}
+              /> : <p>{t('ph.unavailable')}</p>            ) : view.kind === "settings" ? (
               <SettingsView api={api} section={view.section} updateCheck={updateCheck} />
             ) : view.kind === "workspace" ? (
               view.tab === undefined ? (
@@ -789,8 +808,10 @@ export function Workbench({
                 api={api}
                 products={products}
                 workspaces={workspaces}
+                projectsReady={projectsState === "ready"}
                 health={health}
                 onOpen={(id) => navigate(`#ws/${id}`)}
+                onEnterProduct={id => navigate('#product/'+id)}
                 onCreated={openProject}
                 onRefresh={refreshSidebar}
                 onError={setError}
