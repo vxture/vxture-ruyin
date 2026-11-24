@@ -91,6 +91,24 @@ test("durable host request keys recover an existing task after reopening the har
  assert.equal(recovered.id,created.id);assert.equal((await runtime.listTaskInstances(project.id)).length,1);
 });
 
+test("host request keys cannot alias another task and remain project scoped", async () => {
+  const runtime = new ProjectRuntime(makePorts());
+  const project = await runtime.createProject(bidContract, "first", "wsp_test");
+  const harness = await runtime.createHarness(project.id);
+  const first = await harness.startTask("analyze_tender", undefined, { requestKey: "job:shared" });
+  const otherTask = (bidContract as RuyinContract).tasks.find(task => task.id !== "analyze_tender")!;
+  await assert.rejects(
+    harness.startTask(otherTask.id, undefined, { requestKey: "job:shared" }),
+    /request key belongs to a different task/,
+  );
+  const another = await runtime.createProject(bidContract, "second", "wsp_test");
+  const independent = await (await runtime.createHarness(another.id)).startTask(
+    "analyze_tender", undefined, { requestKey: "job:shared" },
+  );
+  assert.notEqual(independent.id, first.id);
+  assert.equal((await runtime.listTaskInstances(project.id)).length, 1);
+});
+
 /**
  * startTask + advance. Recording an instance is fast, running it is not, so
  * the API is two-step: the host answers its request, then drives the task.
@@ -2542,3 +2560,21 @@ test("project documents keep product scope and fail if revised after context app
 test("project document budget and unavailable ports fail before inference",async()=>{for(const size of [0,100]){const ports=makePorts();ports.contextBudgetBytes=10;if(size)ports.projectDocuments={get:()=>({markdown:'x'.repeat(size),revision:1})};const c=structuredClone(bidContract) as RuyinContract;const type=c.context.types.find(t=>t.id==='tender_document')!;type.sources=['project'];type.project_document='doc';const runtime=new ProjectRuntime(ports);const p=await runtime.createProject(c,'budget','wsp_test');const h=await runtime.createHarness(p.id);let task=await h.startTask('analyze_tender');task=await h.advance(task.id);assert.equal(task.state,'failed');assert.equal(task.contextSet,undefined);}});
 
 test("project document reaches gateway only after consent with declared source",async()=>{const ports=makePorts();let facts:unknown;ports.projectDocuments={get:()=>({markdown:'exact snapshot',revision:3})};const original=ports.gateway;ports.gateway={turn:async(request)=>{facts=request.context;return original.turn(request);}};const c=structuredClone(bidContract) as RuyinContract;const type=c.context.types.find(t=>t.id==='tender_document')!;type.sources=['project'];type.project_document='doc';type.sensitivity='high';const runtime=new ProjectRuntime(ports);const p=await runtime.createProject(c,'doc','wsp_test');const h=await runtime.createHarness(p.id);let task=await h.startTask('analyze_tender');task=await h.advance(task.id);assert.equal(facts,undefined);await h.decideCheckpoint(task.id,{choice:'approve'});task=await h.advance(task.id);assert.ok(JSON.stringify(facts).includes('exact snapshot'));assert.ok(JSON.stringify(facts).includes('project-document'));});
+
+test("a project document exceeding the UTF-8 byte ceiling never reaches inference", async () => {
+  const ports = makePorts();
+  let calls = 0;
+  ports.contextBudgetBytes = 1024 * 1024;
+  ports.projectDocuments = { get: () => ({ markdown: "\u4e2d".repeat(87382), revision: 1 }) };
+  ports.gateway = { turn: async () => { calls++; return { kind: "content", content: "unexpected" }; } };
+  const contract = structuredClone(bidContract) as RuyinContract;
+  const context = contract.context.types.find(type => type.id === "tender_document")!;
+  context.sources = ["project"];
+  context.project_document = "oversized_snapshot";
+  const runtime = new ProjectRuntime(ports);
+  const project = await runtime.createProject(contract, "size limit", "wsp_test");
+  const harness = await runtime.createHarness(project.id);
+  const task = await harness.startTask("analyze_tender");
+  assert.equal((await harness.advance(task.id)).state, "failed");
+  assert.equal(calls, 0);
+});

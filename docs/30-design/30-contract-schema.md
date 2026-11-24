@@ -220,6 +220,12 @@ context:
 
 `sources` 枚举：`cloud | local | lan | private | external | project`
 
+**`project_document`（可选，2026-11-25 收敛原交付实现）。** 指向宿主保存的本产品项目文档 ID，格式为 `^[A-Za-z0-9_-]{1,80}$`；必须同时声明 `sources` 包含 `project`（R5）。缺省仍走既有连接器或任务成果选择，不改变旧契约。
+
+任务声明使用该类型时，宿主经 `RuntimePorts.projectDocuments.get(projectId, productId, id)` 提供 Markdown 与修订号。内核把该份文档作为必要输入，固定修订后仍走原资料传输确认；原文不可用、超过单份 256 KiB 或任务总预算时，在推理前失败，不悄悄丢弃上下文。读取前复核修订号，修改后须重新发起任务。该字段不是文件路径、跨项目查找或新的平台接口。
+
+更改、添加或删除某个既有类型的 `project_document` 绑定视为不兼容变化，由 `compareContracts` 阻止项目静默升级。
+
 要点：
 
 - `sources` 只声明**允许的来源种类**；实际绑定（哪个文件夹、哪个知识库）是 Workspace 级运行时配置，不在契约中（04 文档 §3）
@@ -312,6 +318,7 @@ tools:
 ```yaml
 tasks:
   - id: generate_proposal
+    name: 编写方案              # 可选。展示名称，1-80 字符；任务身份仍为 id
     objective: 基于招标需求与企业能力生成技术方案
     input_types:                # ⊆ context.types[].id（R8）
       - tender_document

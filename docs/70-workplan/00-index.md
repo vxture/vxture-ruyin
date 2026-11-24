@@ -8,3 +8,5 @@
 
 - [P23.2–P25 交付准备](180-delivery-readiness.md)
 - [P26 平台衔接准备](190-platform-readiness.md)
+本地登记例外下的 [B6.4 共享运行依赖收敛](210-bid-shared-runtime.md)
+从固定原桌面交付基线提取必要公开包；不改平台、生产或 Store。

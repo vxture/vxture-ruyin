@@ -38,6 +38,29 @@ test('optional business task names are bounded and old contracts remain valid',(
  assert.equal(validateContract(base).ok,true);
 });
 
+test("project document bindings are bounded project sources and incompatible when changed", () => {
+  const previous = structuredClone(base);
+  const context = previous.context.types[0]!;
+  context.sources = ["project"];
+  context.project_document = "confirmed_requirements";
+  assert.equal(validateContract(previous).ok, true);
+  for (const id of ["", "../private", "x".repeat(81)]) {
+    const invalid = structuredClone(previous);
+    invalid.context.types[0]!.project_document = id;
+    assert.equal(validateContract(invalid).ok, false);
+  }
+  const external = structuredClone(previous);
+  external.context.types[0]!.sources = ["cloud"];
+  assert.ok(rules(validateContract(external)).includes("R5"));
+  for (const replacement of ["other_snapshot", undefined]) {
+    const next = structuredClone(previous);
+    next.context.types[0]!.project_document = replacement;
+    assert.ok(compareContracts(previous, next).breaks.some(
+      item => item.path === `context.types.${context.id}.project_document`,
+    ));
+  }
+});
+
 function tool(c: RuyinContract, id: string) {
   const found = c.tools.find((t) => t.id === id);
   assert.ok(found, `fixture tool ${id} missing`);

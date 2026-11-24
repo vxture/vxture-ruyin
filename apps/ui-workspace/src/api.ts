@@ -251,6 +251,7 @@ export interface ProjectView {
 }
 
 export interface ContextItemMeta {
+  /** Revision of a declared product document selected for this task. */
   documentRevision?: number;
   id: string;
   type: string;
