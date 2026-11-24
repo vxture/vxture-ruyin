@@ -94,3 +94,15 @@ The broader script suite on this Windows host ran 180 cases: 177 passed, two
 existing CSS-token fixture tests failed at filesystem symlink creation with
 `EPERM`, and one case was skipped. Do not weaken those assertions or alter OS
 policy to hide the host limitation; the unchanged suite must pass in Linux CI.
+
+## Required audit repair
+
+The first PR CI exposed existing main-lockfile advisories in Electron,
+systeminformation, Vite/Vitest, brace-expansion, fast-uri, glob, ip-address,
+minimatch, source-map-js and Undici. The original delivery baseline already
+contains their verified dependency updates. Replay only the security dependency
+fields in the three app manifests (retain application versions), existing
+bounded overrides in `pnpm-workspace.yaml`, and the corresponding lockfile.
+Regenerate `apps/ui-workspace/src/third-party-list.ts` with the existing script.
+Do not add audit exceptions, change required checks or copy installer/Store code.
+Rebuild and rerun the affected workspace suites and exact CI audit before merge.
