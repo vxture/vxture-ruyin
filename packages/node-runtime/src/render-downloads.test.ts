@@ -14,3 +14,8 @@ test('attachment names preserve Unicode without header/path injection',()=>{
  assert.ok(filename.startsWith('\u6807\u4e66'));assert.doesNotMatch(filename,/[\r\n"/\\]/);assert.doesNotMatch(header,/[\r\n]/);assert.match(header,/^attachment; filename="deliverable.pdf"; filename\*=UTF-8''%/);
  assert.equal(renderFilename('... ','md'),'deliverable.md');
 });
+
+test('download filenames bound untrusted library titles before linear suffix normalization',()=>{
+ assert.equal(renderFilename('x'+' '.repeat(100000),'pdf'),'x.pdf');
+ assert.equal(renderFilename('.'.repeat(100000),'pdf'),'deliverable.pdf');
+});
