@@ -113,3 +113,14 @@ serve the asserted read. In `apps/local-host/src/connector-mcp-http.test.ts`,
 explicitly await the fake server's existing close method (which also closes
 connections), then assert the same unavailable result and clean up in finally.
 No connector implementation, refusal assertion or coverage threshold changes.
+
+## Public build API follow-up
+
+Bid's current build still locates `packProduct` and `writeZip` through a RUYIN
+checkout path. Before publishing the first compatible 0.2.0 package, add the
+explicit `@vxture/ruyin-cli` library entry in `packages/cli/src/index.ts` and
+`packages/cli/package.json`, exporting these existing build functions without
+changing their implementation or binary entry. Verify a packed-archive consumer
+can build the real Bid product through this public entry. Bid can then pin the
+published package and remove the cross-repository build argument. No product
+SDK, local-host API or runtime presentation package is introduced here.
